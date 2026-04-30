@@ -38,6 +38,10 @@ services:
       BUILD_SOURCE: workspace
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: stability-test-main
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
+      ONEX_RUNTIME_CAPABILITIES: market.skill-proof,workflow.orchestration,runtime.main
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       KAFKA_INSTANCE_ID: stability-test-main
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
@@ -51,6 +55,8 @@ services:
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
+      - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
+      - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-effects
@@ -59,6 +65,10 @@ services:
       BUILD_SOURCE: workspace
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: stability-test-effects
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
+      ONEX_RUNTIME_CAPABILITIES: effects.consumer,market.skill-proof,runtime.effects
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
       KAFKA_INSTANCE_ID: stability-test-effects
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
@@ -72,6 +82,8 @@ services:
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
+      - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
+      - "com.omninode.runtime.id=stability-test-effects"
   runtime-worker:
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-worker
@@ -80,6 +92,10 @@ services:
       BUILD_SOURCE: workspace
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: stability-test-worker
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker
+      ONEX_RUNTIME_CAPABILITIES: workflow.dispatch,contract.update,runtime.worker
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
       KAFKA_INSTANCE_ID: stability-test-worker
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
@@ -91,6 +107,8 @@ services:
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
+      - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"
+      - "com.omninode.runtime.id=stability-test-worker"
 volumes:
   postgres_data:
     name: omnibase-infra-stability-test-postgres-data

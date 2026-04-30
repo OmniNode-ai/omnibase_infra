@@ -94,6 +94,37 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert "container_name: omninode-stability-test-runtime-effects" in rendered_config
     assert "container_name: omninode-stability-test-runtime-worker" in rendered_config
     assert "ONEX_ENVIRONMENT: stability-test" in rendered_config
+    assert "ONEX_BOX_ID: omninode-pc" in rendered_config
+    assert (
+        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main"
+        in rendered_config
+    )
+    assert (
+        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects"
+        in rendered_config
+    )
+    assert (
+        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker"
+        in rendered_config
+    )
+    assert "ONEX_RUNTIME_ID: stability-test-main" in rendered_config
+    assert "ONEX_RUNTIME_ID: stability-test-effects" in rendered_config
+    assert "ONEX_RUNTIME_ID: stability-test-worker" in rendered_config
     assert "ONEX_GROUP_ID: onex-stability-test-runtime-main" in rendered_config
     assert "KAFKA_INSTANCE_ID: stability-test-main" in rendered_config
+    assert (
+        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/main"
+        in rendered_config
+    )
+    assert (
+        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/effects"
+        in rendered_config
+    )
+    assert (
+        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/worker"
+        in rendered_config
+    )
+    assert "com.omninode.runtime.id: stability-test-main" in rendered_config
+    assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
+    assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
     assert "image: runtime:stability-test-workspace" in rendered_config
