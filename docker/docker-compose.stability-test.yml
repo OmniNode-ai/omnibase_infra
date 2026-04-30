@@ -76,10 +76,9 @@ services:
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
-    volumes:
+    volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
-      - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=stability-test"
@@ -103,10 +102,9 @@ services:
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
     ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
-    volumes:
+    volumes: !override
       - effects_logs:/app/logs
       - effects_data:/app/data
-      - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=stability-test"
@@ -128,10 +126,9 @@ services:
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
       KAFKA_INSTANCE_ID: stability-test-worker
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
-    volumes:
+    volumes: !override
       - worker_logs:/app/logs
       - stability_test_worker_data:/app/data
-      - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=stability-test"

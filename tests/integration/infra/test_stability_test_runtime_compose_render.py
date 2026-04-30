@@ -104,6 +104,12 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     main_ports = services["omninode-runtime"]["ports"]
     effects_ports = services["runtime-effects"]["ports"]
     networks = rendered["networks"]
+    runtime_service_volumes = {
+        service_name: {
+            volume["target"] for volume in services[service_name].get("volumes", [])
+        }
+        for service_name in REQUIRED_RUNTIME_SERVICES
+    }
 
     assert "container_name: omninode-stability-test-runtime" in rendered_config
     assert "container_name: omninode-stability-test-runtime-effects" in rendered_config
@@ -165,6 +171,9 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert {port["published"] for port in effects_ports} == {"18086"}
     assert 'published: "8085"' not in rendered_config
     assert 'published: "8086"' not in rendered_config
+    for service_name, volume_targets in runtime_service_volumes.items():
+        assert "/app/contracts" not in volume_targets, service_name
+        assert "/app/skills" in volume_targets, service_name
     assert networks["omnibase-infra-network"]["name"] == (
         "omnibase-infra-stability-test-network"
     )
