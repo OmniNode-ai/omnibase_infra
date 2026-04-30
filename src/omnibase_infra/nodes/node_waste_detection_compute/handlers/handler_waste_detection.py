@@ -174,7 +174,7 @@ class HandlerWasteDetection:
             sanitized_error = sanitize_error_message(exc)
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.POSTGRES,
+                transport_type=EnumInfraTransportType.DATABASE,
                 operation="project_findings",
                 original_error_type=type(exc).__name__,
             )
@@ -183,7 +183,7 @@ class HandlerWasteDetection:
                 extra={
                     "correlation_id": str(context.correlation_id),
                     "operation": "project_findings",
-                    "transport_type": EnumInfraTransportType.POSTGRES.value,
+                    "transport_type": EnumInfraTransportType.DATABASE.value,
                     "execute_attr": execute_attr,
                     "sql_reference": "UPSERT_WASTE_FINDING_SQL",
                     "error_message": sanitized_error,

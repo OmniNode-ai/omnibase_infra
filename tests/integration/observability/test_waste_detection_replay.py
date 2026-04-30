@@ -162,7 +162,7 @@ async def test_project_findings_wraps_execute_errors_with_sanitized_context() ->
 
     err = exc_info.value
     assert err.model.correlation_id == correlation_id
-    assert err.model.context["transport_type"] == EnumInfraTransportType.POSTGRES
+    assert err.model.context["transport_type"] == EnumInfraTransportType.DATABASE
     assert err.model.context["operation"] == "project_findings"
     assert err.model.context["original_error_type"] == "RuntimeError"
     assert "secret" not in err.model.message
