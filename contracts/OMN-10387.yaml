@@ -1,0 +1,36 @@
+# OMN-10387 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical OCC evidence lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for dispatch outcome savings subscription.
+schema_version: "1.0.0"
+ticket_id: "OMN-10387"
+title: "Register dispatch outcome savings subscription"
+summary: "Register the omniintelligence dispatch-outcome-evaluated topic and include it in the savings estimation consumer defaults."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "topics"
+evidence_requirements:
+  - kind: "tests"
+    description: "Savings estimator config and registry coverage pass for dispatch outcome subscription"
+    command: "uv run pytest tests/integration/observability/test_savings_estimation_e2e.py tests/unit/observability/test_savings_estimation_config.py tests/unit/topics/test_service_topic_registry.py -q"
+  - kind: "manual"
+    description: "Post-merge deploy smoke confirms the savings estimator default subscription resolves in the deployed runtime container"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.services.observability.savings_estimation.config import ConfigSavingsEstimation; from omnibase_infra.topics import topic_keys; from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry; reg=ServiceTopicRegistry.from_defaults(); topic=reg.resolve(topic_keys.DISPATCH_OUTCOME_EVALUATED); cfg=ConfigSavingsEstimation(); assert topic in cfg.consumed_topics; print('deploy smoke ok', topic)\""
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Savings estimator config and registry coverage pass for dispatch outcome subscription"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/observability/test_savings_estimation_e2e.py tests/unit/observability/test_savings_estimation_config.py tests/unit/topics/test_service_topic_registry.py -q"
+  - id: "dod-002"
+    description: "Post-merge deploy smoke plan for dispatch outcome savings subscription"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.services.observability.savings_estimation.config import ConfigSavingsEstimation; from omnibase_infra.topics import topic_keys; from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry; reg=ServiceTopicRegistry.from_defaults(); topic=reg.resolve(topic_keys.DISPATCH_OUTCOME_EVALUATED); cfg=ConfigSavingsEstimation(); assert topic in cfg.consumed_topics; print('deploy smoke ok', topic)\""

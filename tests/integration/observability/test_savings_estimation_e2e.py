@@ -34,12 +34,15 @@ from omnibase_infra.services.observability.savings_estimation.consumer import (
     ValidatorCatchSignal,
     _compute_validator_catch_savings,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
 
 TOPIC_LLM_CALL = "onex.evt.omniintelligence.llm-call-completed.v1"
+TOPIC_DISPATCH_OUTCOME = "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
 TOPIC_SESSION_OUTCOME = "onex.evt.omniclaude.session-outcome.v1"
 TOPIC_HOOK_INJECTION = "onex.evt.omniclaude.hook-context-injected.v1"
 TOPIC_VALIDATOR_CATCH = "onex.evt.omniclaude.validator-catch.v1"
@@ -107,6 +110,16 @@ REQUIRED_OUTPUT_FIELDS = {
 @pytest.mark.integration
 class TestSavingsEstimationE2E:
     """End-to-end integration tests for the full savings estimation pipeline."""
+
+    def test_default_config_subscribes_to_dispatch_outcome_topic(self) -> None:
+        """Default savings config consumes the omniintelligence dispatch outcome feed."""
+        registry = ServiceTopicRegistry.from_defaults()
+        config = _build_config()
+
+        assert registry.resolve(topic_keys.DISPATCH_OUTCOME_EVALUATED) == (
+            TOPIC_DISPATCH_OUTCOME
+        )
+        assert TOPIC_DISPATCH_OUTCOME in config.consumed_topics
 
     async def test_full_pipeline_produces_savings_event(self) -> None:
         """Ingest a realistic session's events and verify the output estimate."""
