@@ -16,7 +16,7 @@ name: omnibase-infra-stability-test
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
-    ports:
+    ports: !override
       - "${STABILITY_TEST_POSTGRES_EXTERNAL_PORT:-15436}:5432"
   redpanda:
     container_name: omnibase-infra-stability-test-redpanda
@@ -52,7 +52,7 @@ services:
       - "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644"
   valkey:
     container_name: omnibase-infra-stability-test-valkey
-    ports:
+    ports: !override
       - "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
   migration-gate:
     container_name: omnibase-infra-stability-test-migration-gate

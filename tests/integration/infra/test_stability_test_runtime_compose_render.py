@@ -36,6 +36,8 @@ COMPOSE_RENDER_ENV = {
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
     "REDPANDA_ADVERTISE_HOST": "localhost",
+    "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
+    "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
     "STABILITY_TEST_REDPANDA_EXTERNAL_PORT": "39092",
     "STABILITY_TEST_REDPANDA_PANDAPROXY_PORT": "28082",
@@ -96,7 +98,9 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     rendered_config = result.stdout
     rendered = yaml.safe_load(rendered_config)
     services = rendered["services"]
+    postgres_ports = services["postgres"]["ports"]
     redpanda_ports = services["redpanda"]["ports"]
+    valkey_ports = services["valkey"]["ports"]
     main_ports = services["omninode-runtime"]["ports"]
     effects_ports = services["runtime-effects"]["ports"]
     networks = rendered["networks"]
@@ -144,8 +148,14 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
     assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
     assert "image: runtime:stability-test-workspace" in rendered_config
+    assert {port["published"] for port in postgres_ports} == {"15436"}
+    assert {port["target"] for port in postgres_ports} == {5432}
     assert {port["published"] for port in redpanda_ports} == {"39092", "29644"}
     assert {port["target"] for port in redpanda_ports} == {19092, 9644}
+    assert {port["published"] for port in valkey_ports} == {"26379"}
+    assert {port["target"] for port in valkey_ports} == {6379}
+    assert 'published: "5436"' not in rendered_config
+    assert 'published: "16379"' not in rendered_config
     assert 'published: "19092"' not in rendered_config
     assert 'published: "9644"' not in rendered_config
     assert 'published: "18082"' not in rendered_config
