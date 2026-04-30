@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_waste_detection_compute"
+contract_name: "node_waste_detection_compute"
+node_name: "node_waste_detection_compute"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Session-windowed compute node that analyzes LLM call telemetry for cost waste and emits waste-detected events for projection into waste_findings.
+
+input_model:
+  name: "ModelWasteDetectionInput"
+  module: "omnibase_infra.nodes.node_waste_detection_compute.models"
+  description: "Session-windowed LLM call telemetry."
+output_model:
+  name: "ModelWasteFinding"
+  module: "omnibase_infra.nodes.node_waste_detection_compute.models"
+  description: "Deterministic waste finding."
+capabilities:
+  - name: "waste.detect"
+    description: "Detect LLM cost waste in a session window"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "waste.detect"
+      handler:
+        name: "HandlerWasteDetection"
+        module: "omnibase_infra.nodes.node_waste_detection_compute.handlers.handler_waste_detection"
+      description: "Run all waste analyzers over a session window"
+      input_model:
+        name: "ModelWasteDetectionInput"
+        module: "omnibase_infra.nodes.node_waste_detection_compute.models"
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omniintelligence.llm-call-completed.v1"
+  publish_topics:
+    - "onex.evt.omniintelligence.waste-detected.v1"
+topics:
+  consumes:
+    - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
+      description: "LLM call telemetry"
+      schema: "ModelLLMCallCompletedEvent"
+  produces:
+    - topic: "onex.evt.omniintelligence.waste-detected.v1"
+      description: "Detected waste findings"
+      schema: "ModelWasteDetectedEvent"
+metadata:
+  consumer_group_id: "local.omnibase_infra.node_waste_detection_compute.consume.v1"
+  description: "Detects tool failures, loops, retries, high output, model overkill, and low cache utilization."
+  related_tickets:
+    - "OMN-10341"

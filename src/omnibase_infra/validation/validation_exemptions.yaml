@@ -3028,6 +3028,49 @@ pattern_exemptions:
       - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
     ticket: OMN-10343
   # ==========================================================================
+  # Waste Detection Compute Node Exemptions (OMN-10341)
+  # ==========================================================================
+  # session_id is an opaque LLM session identifier from the source event stream.
+  # model_id is the LLM model name. rule_id is a deterministic analyzer rule key.
+  - file_pattern: 'model_waste_call\.py'
+    violation_pattern: "Field 'session_id' should use UUID type instead of str"
+    reason: >
+      session_id is an opaque source-session identifier from LLM telemetry, not a UUID. Migration 075 stores it as VARCHAR(255) for grouping and deduplication.
+
+    documentation:
+      - docker/migrations/forward/075_create_waste_findings.sql (session_id VARCHAR(255))
+    ticket: OMN-10341
+  - file_pattern: 'model_waste_call\.py'
+    violation_pattern: "Field 'model_id' should use UUID type instead of str"
+    reason: >
+      model_id is an LLM model identifier such as claude-opus-4-6 or qwen3-coder-30b, not a UUID.
+
+    ticket: OMN-10341
+  - file_pattern: 'model_waste_detection_input\.py'
+    violation_pattern: "Field 'session_id' should use UUID type instead of str"
+    reason: >
+      session_id is the source telemetry session key used to window calls before analysis, not a UUID.
+
+    documentation:
+      - docker/migrations/forward/075_create_waste_findings.sql (session_id VARCHAR(255))
+    ticket: OMN-10341
+  - file_pattern: 'model_waste_finding\.py'
+    violation_pattern: "Field 'session_id' should use UUID type instead of str"
+    reason: >
+      session_id is the opaque source telemetry session key persisted to waste_findings, not a UUID.
+
+    documentation:
+      - docker/migrations/forward/075_create_waste_findings.sql (session_id VARCHAR(255))
+    ticket: OMN-10341
+  - file_pattern: 'model_waste_finding\.py'
+    violation_pattern: "Field 'rule_id' should use UUID type instead of str"
+    reason: >
+      rule_id is a stable analyzer identifier such as agent_loop or low_cache, not a UUID.
+
+    documentation:
+      - docker/migrations/forward/075_create_waste_findings.sql (rule_id VARCHAR(64))
+    ticket: OMN-10341
+  # ==========================================================================
   # Contract Verification Models (OMN-7042)
   # ==========================================================================
   # contract_name is a canonical identifier string (e.g., "node_registration_orchestrator")
