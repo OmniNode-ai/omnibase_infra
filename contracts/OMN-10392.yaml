@@ -1,0 +1,52 @@
+# OMN-10392 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the kafka replay compute primitive.
+schema_version: "1.0.0"
+ticket_id: "OMN-10392"
+title: "Add kafka replay compute primitive"
+summary: "Add node_kafka_replay_compute with typed input/output/progress models, handler, contract registration, and focused replay tests."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused contract and isolated kafka replay tests pass for node_kafka_replay_compute."
+    command: "uv run pytest tests/unit/nodes/node_kafka_replay_compute/test_contract_loads.py tests/integration/nodes/node_kafka_replay_compute/test_replay_against_isolated_cluster.py -q"
+  - kind: "tests"
+    description: "Strict typing passes for kafka replay compute source."
+    command: "uv run mypy --strict src/omnibase_infra/nodes/node_kafka_replay_compute/"
+  - kind: "ci"
+    description: "Lint passes for kafka replay compute source, tests, and pyproject entry point registration."
+    command: "uv run ruff check pyproject.toml src/omnibase_infra/nodes/node_kafka_replay_compute tests/unit/nodes/node_kafka_replay_compute tests/integration/nodes/node_kafka_replay_compute"
+  - kind: "manual"
+    description: "Post-merge deploy validation imports the registered node and re-runs the focused replay suite against the deployed image or release checkout before claiming runtime completion."
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_kafka_replay_compute import NodeKafkaReplayCompute; print('deploy smoke ok', NodeKafkaReplayCompute.__name__)\" && uv run pytest tests/unit/nodes/node_kafka_replay_compute/test_contract_loads.py tests/integration/nodes/node_kafka_replay_compute/test_replay_against_isolated_cluster.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Focused kafka replay contract and isolated replay tests pass locally."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_kafka_replay_compute/test_contract_loads.py tests/integration/nodes/node_kafka_replay_compute/test_replay_against_isolated_cluster.py -q"
+  - id: "dod-002"
+    description: "Strict typing passes for kafka replay compute source."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run mypy --strict src/omnibase_infra/nodes/node_kafka_replay_compute/"
+  - id: "dod-003"
+    description: "Lint passes for kafka replay compute source, tests, and pyproject entry point registration."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run ruff check pyproject.toml src/omnibase_infra/nodes/node_kafka_replay_compute tests/unit/nodes/node_kafka_replay_compute tests/integration/nodes/node_kafka_replay_compute"
+  - id: "dod-deploy"
+    description: "deploy gate evidence: post-merge runtime validation is required before claiming live kafka replay compute availability; no pre-merge live deploy is claimed."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_kafka_replay_compute import NodeKafkaReplayCompute; print('deploy smoke ok', NodeKafkaReplayCompute.__name__)\" && uv run pytest tests/unit/nodes/node_kafka_replay_compute/test_contract_loads.py tests/integration/nodes/node_kafka_replay_compute/test_replay_against_isolated_cluster.py -q"
