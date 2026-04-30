@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILES = (
@@ -21,6 +21,72 @@ REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
     "runtime-worker",
+}
+EXPECTED_RENDERED_SERVICES = {
+    "postgres",
+    "redpanda",
+    "redpanda-partition-cap",
+    "valkey",
+    "forward-migration",
+    "intelligence-migration",
+    "migration-gate",
+    *REQUIRED_RUNTIME_SERVICES,
+}
+OUT_OF_LANE_SERVICES = {
+    "agent-actions-consumer",
+    "skill-lifecycle-consumer",
+    "context-audit-consumer",
+    "intelligence-api",
+    "omninode-contract-resolver",
+    "phoenix",
+    "autoheal",
+    "infisical",
+}
+EXPECTED_PUBLISHED_PORTS = {
+    "postgres": {"15436"},
+    "redpanda": {"39092", "29644"},
+    "valkey": {"26379"},
+    "omninode-runtime": {"18085"},
+    "runtime-effects": {"18086"},
+    "runtime-worker": set(),
+    "forward-migration": set(),
+    "intelligence-migration": set(),
+    "migration-gate": set(),
+    "redpanda-partition-cap": set(),
+}
+PRODUCTION_PUBLISHED_PORTS = {
+    "5436",
+    "19092",
+    "18082",
+    "18081",
+    "9644",
+    "16379",
+    "8880",
+    "8085",
+    "8086",
+    "8087",
+    "8053",
+    "8091",
+    "8092",
+    "8093",
+    "6006",
+}
+PRODUCTION_CONTAINER_NAMES = {
+    "omninode-runtime",
+    "omninode-runtime-effects",
+    "omnibase-infra-postgres",
+    "omnibase-infra-redpanda",
+    "omnibase-infra-valkey",
+    "omnibase-forward-migration",
+    "omnibase-infra-infisical",
+    "omninode-agent-actions-consumer",
+    "omninode-skill-lifecycle-consumer",
+    "omninode-context-audit-consumer",
+    "omnibase-intelligence-api",
+    "omnibase-intelligence-migration",
+    "omninode-contract-resolver",
+    "omnibase-infra-phoenix",
+    "omnibase-infra-autoheal",
 }
 COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
@@ -59,7 +125,44 @@ def _docker_compose_command(*args: str) -> list[str]:
 
 
 def _compose_render_env() -> dict[str, str]:
-    return {**os.environ, **COMPOSE_RENDER_ENV}
+    return {
+        "HOME": os.environ.get("HOME", ""),
+        "PATH": os.environ.get("PATH", ""),
+        "USER": os.environ.get("USER", ""),
+        **COMPOSE_RENDER_ENV,
+    }
+
+
+def _compose_config_json() -> dict:
+    result = subprocess.run(
+        _docker_compose_command("config", "--format", "json"),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+
+    rendered_config = json.loads(result.stdout)
+    assert isinstance(rendered_config, dict)
+    return rendered_config
+
+
+def _published_ports(service_config: dict) -> set[str]:
+    return {str(port["published"]) for port in service_config.get("ports", [])}
+
+
+def _label_value(service_config: dict, key: str) -> str | None:
+    labels = service_config.get("labels", {})
+    if isinstance(labels, dict):
+        value = labels.get(key)
+        return str(value) if value is not None else None
+    if isinstance(labels, list):
+        prefix = f"{key}="
+        for label in labels:
+            if isinstance(label, str) and label.startswith(prefix):
+                return label.removeprefix(prefix)
+    return None
 
 
 pytestmark = pytest.mark.skipif(
@@ -81,131 +184,144 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
     rendered_services = set(result.stdout.splitlines())
 
-    assert rendered_services >= REQUIRED_RUNTIME_SERVICES
+    assert rendered_services == EXPECTED_RENDERED_SERVICES
+    assert rendered_services.isdisjoint(OUT_OF_LANE_SERVICES)
 
 
 @pytest.mark.integration
 def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
-    result = subprocess.run(
-        _docker_compose_command("config"),
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        env=_compose_render_env(),
-        text=True,
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    assert services["omninode-runtime"]["container_name"] == (
+        "omninode-stability-test-runtime"
+    )
+    assert services["runtime-effects"]["container_name"] == (
+        "omninode-stability-test-runtime-effects"
+    )
+    assert services["runtime-worker"]["container_name"] == (
+        "omninode-stability-test-runtime-worker"
     )
 
-    rendered_config = result.stdout
-    rendered = yaml.safe_load(rendered_config)
-    services = rendered["services"]
-    main_depends_on = services["omninode-runtime"]["depends_on"]
-    partition_cap_depends_on = services["redpanda-partition-cap"]["depends_on"]
-    postgres_ports = services["postgres"]["ports"]
-    redpanda_ports = services["redpanda"]["ports"]
-    partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
-    valkey_ports = services["valkey"]["ports"]
-    main_ports = services["omninode-runtime"]["ports"]
-    effects_ports = services["runtime-effects"]["ports"]
-    networks = rendered["networks"]
-    runtime_service_volumes = {
-        service_name: {
-            volume["target"] for volume in services[service_name].get("volumes", [])
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment["BUILD_SOURCE"] == "workspace"
+        assert environment["EXPECTED_BUILD_SOURCE"] == "workspace"
+        assert environment["OMNIMEMORY_ENABLED"] == ""
+        assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
+        assert environment["ONEX_ENVIRONMENT"] == "stability-test"
+        assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
+        assert services[service_name]["image"] == "runtime:stability-test-workspace"
+        assert environment["ONEX_RUNTIME_ADDRESS"].startswith(
+            "runtime://omninode-pc/stability-test/"
+        )
+        assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
+        assert (
+            _label_value(
+                services[service_name],
+                "com.omninode.runtime.address",
+            )
+            == environment["ONEX_RUNTIME_ADDRESS"]
+        )
+        assert (
+            _label_value(
+                services[service_name],
+                "com.omninode.runtime.id",
+            )
+            == environment["ONEX_RUNTIME_ID"]
+        )
+
+    assert services["omninode-runtime"]["environment"]["ONEX_GROUP_ID"] == (
+        "onex-stability-test-runtime-main"
+    )
+    assert services["forward-migration"]["container_name"] == (
+        "omnibase-infra-stability-test-forward-migration"
+    )
+    assert services["intelligence-migration"]["container_name"] == (
+        "omnibase-infra-stability-test-intelligence-migration"
+    )
+    assert services["redpanda-partition-cap"]["container_name"] == (
+        "omnibase-infra-stability-test-redpanda-partition-cap"
+    )
+    assert (
+        services["omninode-runtime"]["depends_on"]["intelligence-migration"][
+            "condition"
+        ]
+        == "service_completed_successfully"
+    )
+    assert (
+        services["omninode-runtime"]["depends_on"]["redpanda-partition-cap"][
+            "condition"
+        ]
+        == "service_completed_successfully"
+    )
+    assert services["redpanda-partition-cap"]["depends_on"]["redpanda"][
+        "condition"
+    ] == ("service_healthy")
+
+
+@pytest.mark.integration
+def test_stability_lane_render_uses_workspace_build_source() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        build = services[service_name]["build"]
+        assert build["context"] == str(REPO_ROOT)
+        assert build["dockerfile"] == "docker/Dockerfile.runtime"
+        assert build["args"] == {
+            "BUILD_SOURCE": "workspace",
+            "EXPECTED_BUILD_SOURCE": "workspace",
         }
-        for service_name in REQUIRED_RUNTIME_SERVICES
-    }
 
-    assert "container_name: omninode-stability-test-runtime" in rendered_config
-    assert "container_name: omninode-stability-test-runtime-effects" in rendered_config
-    assert "container_name: omninode-stability-test-runtime-worker" in rendered_config
+
+@pytest.mark.integration
+def test_stability_lane_render_does_not_expose_production_ports_or_services() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    assert set(services) == EXPECTED_RENDERED_SERVICES
+    assert set(services).isdisjoint(OUT_OF_LANE_SERVICES)
+    assert rendered_config["networks"]["omnibase-infra-network"]["name"] == (
+        "omnibase-infra-stability-test-network"
+    )
+    assert rendered_config["networks"]["omnibase-infra-network"]["driver"] == "bridge"
+    assert rendered_config["networks"]["omnimemory-network"]["name"] == (
+        "omnibase-infra-stability-test-omnimemory-network"
+    )
+    assert rendered_config["networks"]["omnimemory-network"]["driver"] == "bridge"
     assert (
-        "container_name: omnibase-infra-stability-test-forward-migration"
-        in rendered_config
+        rendered_config["networks"]["omnimemory-network"].get("external", False)
+        is False
     )
-    assert (
-        "container_name: omnibase-infra-stability-test-intelligence-migration"
-        in rendered_config
-    )
-    assert (
-        "container_name: omnibase-infra-stability-test-redpanda-partition-cap"
-        in rendered_config
-    )
-    assert "container_name: omnibase-forward-migration" not in rendered_config
-    assert "container_name: omnibase-intelligence-migration" not in rendered_config
-    assert main_depends_on["intelligence-migration"]["condition"] == (
-        "service_completed_successfully"
-    )
-    assert main_depends_on["redpanda-partition-cap"]["condition"] == (
-        "service_completed_successfully"
-    )
-    assert partition_cap_depends_on["redpanda"]["condition"] == "service_healthy"
-    assert "ONEX_ENVIRONMENT: stability-test" in rendered_config
-    assert "ONEX_BOX_ID: omninode-pc" in rendered_config
-    assert (
-        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main"
-        in rendered_config
-    )
-    assert (
-        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects"
-        in rendered_config
-    )
-    assert (
-        "ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker"
-        in rendered_config
-    )
-    assert "ONEX_RUNTIME_ID: stability-test-main" in rendered_config
-    assert "ONEX_RUNTIME_ID: stability-test-effects" in rendered_config
-    assert "ONEX_RUNTIME_ID: stability-test-worker" in rendered_config
-    assert "ONEX_GROUP_ID: onex-stability-test-runtime-main" in rendered_config
-    assert "KAFKA_INSTANCE_ID: stability-test-main" in rendered_config
-    assert (
-        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/main"
-        in rendered_config
-    )
-    assert (
-        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/effects"
-        in rendered_config
-    )
-    assert (
-        "com.omninode.runtime.address: runtime://omninode-pc/stability-test/worker"
-        in rendered_config
-    )
-    assert "com.omninode.runtime.id: stability-test-main" in rendered_config
-    assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
-    assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
-    assert "image: runtime:stability-test-workspace" in rendered_config
-    assert {port["published"] for port in postgres_ports} == {"15436"}
-    assert {port["target"] for port in postgres_ports} == {5432}
-    assert {port["published"] for port in redpanda_ports} == {"39092", "29644"}
-    assert {port["target"] for port in redpanda_ports} == {19092, 9644}
-    assert {port["published"] for port in valkey_ports} == {"26379"}
-    assert {port["target"] for port in valkey_ports} == {6379}
-    assert 'published: "5436"' not in rendered_config
-    assert 'published: "16379"' not in rendered_config
-    assert 'published: "19092"' not in rendered_config
-    assert 'published: "9644"' not in rendered_config
-    assert 'published: "18082"' not in rendered_config
-    assert 'published: "18081"' not in rendered_config
-    assert "external://localhost:39092" in rendered_config
+
+    rendered_container_names = {
+        service_config["container_name"]
+        for service_config in services.values()
+        if "container_name" in service_config
+    }
+    assert rendered_container_names.isdisjoint(PRODUCTION_CONTAINER_NAMES)
+
+    for service_name, service_config in services.items():
+        published_ports = _published_ports(service_config)
+        assert published_ports == EXPECTED_PUBLISHED_PORTS[service_name]
+        assert published_ports.isdisjoint(PRODUCTION_PUBLISHED_PORTS)
+
+    redpanda_command = " ".join(services["redpanda"]["command"])
+    assert "localhost:39092" in redpanda_command
+    assert "localhost:19092" not in redpanda_command
+
+    partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
     assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
     assert "admin.hosts=redpanda:9644" in partition_cap_command
     assert "topic_partitions_per_shard" in partition_cap_command
     assert "7000" in partition_cap_command
     assert "topic_memory_per_partition" in partition_cap_command
     assert "1048576" in partition_cap_command
+
     for service_name in REQUIRED_RUNTIME_SERVICES:
-        assert services[service_name]["environment"]["OMNIMEMORY_ENABLED"] == ""
-        assert services[service_name]["environment"]["OMNIMEMORY_MEMGRAPH_HOST"] == ""
-    assert {port["published"] for port in main_ports} == {"18085"}
-    assert {port["published"] for port in effects_ports} == {"18086"}
-    assert 'published: "8085"' not in rendered_config
-    assert 'published: "8086"' not in rendered_config
-    for service_name, volume_targets in runtime_service_volumes.items():
+        volume_targets = {
+            volume["target"] for volume in services[service_name].get("volumes", [])
+        }
         assert "/app/contracts" not in volume_targets, service_name
         assert "/app/skills" in volume_targets, service_name
-    assert networks["omnibase-infra-network"]["name"] == (
-        "omnibase-infra-stability-test-network"
-    )
-    assert networks["omnimemory-network"]["name"] == (
-        "omnibase-infra-stability-test-omnimemory-network"
-    )
-    assert networks["omnimemory-network"].get("external", False) is False

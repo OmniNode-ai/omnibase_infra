@@ -12,7 +12,15 @@
 #
 # Starting this lane is intentionally outside this PR's proof scope and requires
 # explicit operator approval.
+#
+# Requires Docker Compose v2.24.4 or later for !override merge semantics.
 name: omnibase-infra-stability-test
+x-stability-runtime-build: &stability-runtime-build
+  context: ..
+  dockerfile: docker/Dockerfile.runtime
+  args:
+    BUILD_SOURCE: workspace
+    EXPECTED_BUILD_SOURCE: workspace
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -69,22 +77,29 @@ services:
     container_name: omnibase-infra-stability-test-valkey
     ports: !override
       - "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
+  infisical:
+    profiles: !override ["stability-test-disabled"]
+  forward-migration:
+    container_name: omnibase-infra-stability-test-forward-migration
+    restart: "no"
   migration-gate:
     container_name: omnibase-infra-stability-test-migration-gate
     restart: "no"
-  forward-migration:
-    container_name: omnibase-infra-stability-test-forward-migration
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
   omninode-runtime:
+    build: *stability-runtime-build
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime
     restart: "no"
     depends_on:
+      intelligence-migration:
+        condition: service_completed_successfully
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
       BUILD_SOURCE: workspace
+      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
@@ -111,11 +126,13 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
+    build: *stability-runtime-build
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-effects
     restart: "no"
     environment:
       BUILD_SOURCE: workspace
+      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
@@ -142,11 +159,13 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
       - "com.omninode.runtime.id=stability-test-effects"
   runtime-worker:
+    build: *stability-runtime-build
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-worker
     restart: "no"
     environment:
       BUILD_SOURCE: workspace
+      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
@@ -170,6 +189,20 @@ services:
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"
       - "com.omninode.runtime.id=stability-test-worker"
+  agent-actions-consumer:
+    profiles: !override ["stability-test-disabled"]
+  skill-lifecycle-consumer:
+    profiles: !override ["stability-test-disabled"]
+  context-audit-consumer:
+    profiles: !override ["stability-test-disabled"]
+  intelligence-api:
+    profiles: !override ["stability-test-disabled"]
+  omninode-contract-resolver:
+    profiles: !override ["stability-test-disabled"]
+  phoenix:
+    profiles: !override ["stability-test-disabled"]
+  autoheal:
+    profiles: !override ["stability-test-disabled"]
 volumes:
   postgres_data:
     name: omnibase-infra-stability-test-postgres-data
@@ -192,6 +225,8 @@ volumes:
 networks:
   omnibase-infra-network:
     name: omnibase-infra-stability-test-network
+    driver: bridge
   omnimemory-network:
     name: omnibase-infra-stability-test-omnimemory-network
+    driver: bridge
     external: false

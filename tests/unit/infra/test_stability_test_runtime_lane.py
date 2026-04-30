@@ -15,6 +15,16 @@ RUNBOOK_FILE = REPO_ROOT / "docs" / "runbooks" / "stability-test-runtime-lane.md
 
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 RUNTIME_ADDRESS_PREFIX = "runtime://omninode-pc/stability-test/"
+OUT_OF_LANE_SERVICES = {
+    "agent-actions-consumer",
+    "skill-lifecycle-consumer",
+    "context-audit-consumer",
+    "intelligence-api",
+    "omninode-contract-resolver",
+    "phoenix",
+    "autoheal",
+    "infisical",
+}
 PRODUCTION_CONTAINER_NAMES = {
     "omninode-runtime",
     "omninode-runtime-effects",
@@ -22,7 +32,15 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-redpanda",
     "omnibase-infra-valkey",
     "omnibase-forward-migration",
+    "omnibase-infra-infisical",
+    "omninode-agent-actions-consumer",
+    "omninode-skill-lifecycle-consumer",
+    "omninode-context-audit-consumer",
+    "omnibase-intelligence-api",
     "omnibase-intelligence-migration",
+    "omninode-contract-resolver",
+    "omnibase-infra-phoenix",
+    "omnibase-infra-autoheal",
 }
 PRODUCTION_NETWORK_NAMES = {
     "omnibase-infra-network",
@@ -45,12 +63,27 @@ PRODUCTION_VOLUME_NAMES = {
 }
 
 
+def _construct_compose_value(
+    loader: yaml.SafeLoader,
+    node: yaml.Node,
+) -> object:
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_scalar(node)
+
+
+class _TestSafeLoader(yaml.SafeLoader):
+    """Test-local YAML loader with Docker Compose tag support."""
+
+
+_TestSafeLoader.add_constructor("!override", _construct_compose_value)
+
+
 def _load_overlay() -> dict:
-    overlay_text = OVERLAY_FILE.read_text(encoding="utf-8").replace(
-        ": !override",
-        ":",
-    )
-    overlay = yaml.safe_load(overlay_text)
+    overlay_text = OVERLAY_FILE.read_text(encoding="utf-8")
+    overlay = yaml.load(overlay_text, Loader=_TestSafeLoader)  # noqa: S506
     assert isinstance(overlay, dict)
     return overlay
 
@@ -83,6 +116,10 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
         assert container_name not in PRODUCTION_CONTAINER_NAMES
         assert service["image"] == "runtime:stability-test-workspace"
         assert service["restart"] == "no"
+        assert service["build"]["args"] == {
+            "BUILD_SOURCE": "workspace",
+            "EXPECTED_BUILD_SOURCE": "workspace",
+        }
 
 
 @pytest.mark.unit
@@ -93,6 +130,7 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
     for service_name in RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
         assert environment["BUILD_SOURCE"] == "workspace"
+        assert environment["EXPECTED_BUILD_SOURCE"] == "workspace"
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
@@ -180,6 +218,12 @@ def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> Non
         ]
         == "service_completed_successfully"
     )
+    assert (
+        services["omninode-runtime"]["depends_on"]["intelligence-migration"][
+            "condition"
+        ]
+        == "service_completed_successfully"
+    )
 
 
 @pytest.mark.unit
@@ -243,7 +287,17 @@ def test_stability_lane_networks_do_not_reuse_production_names() -> None:
         assert concrete_name not in PRODUCTION_NETWORK_NAMES, network_name
         assert "stability-test" in concrete_name, network_name
 
+    assert networks["omnimemory-network"]["driver"] == "bridge"
     assert networks["omnimemory-network"]["external"] is False
+
+
+@pytest.mark.unit
+def test_stability_lane_disables_out_of_lane_inherited_services() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    for service_name in OUT_OF_LANE_SERVICES:
+        assert services[service_name]["profiles"] == ["stability-test-disabled"]
 
 
 @pytest.mark.unit
@@ -268,6 +322,8 @@ def test_stability_runbook_is_validation_only() -> None:
     assert "systemctl" not in runbook
     assert "does not deploy, restart, or change `.201`" in runbook
     assert "It does not run `docker compose up`." in runbook
+    assert "does not expose inherited production host ports" in runbook
+    assert "does not render inherited out-of-lane runtime services" in runbook
     assert "config" in runbook
     assert "--profile runtime" in runbook
     assert "BUILD_SOURCE=workspace" in runbook

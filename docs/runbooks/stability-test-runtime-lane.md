@@ -27,6 +27,10 @@ the two-phase runtime build plan into a concrete runtime lane:
   event-bus consumers can append a lane-specific instance discriminator.
 - Runtime state is mounted on stability-test volumes and uses
   `/app/data/.onex_state_stability_test`.
+- The overlay does not expose inherited production host ports in the rendered
+  stability-test config.
+- The overlay does not render inherited out-of-lane runtime services such as
+  observability consumers, contract resolver, Phoenix, autoheal, or Infisical.
 
 ## What Is Defined
 
@@ -51,6 +55,19 @@ the two-phase runtime build plan into a concrete runtime lane:
   - `onex-stability-test-runtime-effects`
   - `onex-stability-test-runtime-workers`
 - Runtime state root: `/app/data/.onex_state_stability_test`
+- Published host ports:
+  - Postgres: `15436`
+  - Redpanda Kafka: `39092`
+  - Redpanda admin: `29644`
+  - Valkey: `26379`
+  - Runtime main: `18085`
+  - Runtime effects: `18086`
+- Build args:
+  - `BUILD_SOURCE=workspace`
+  - `EXPECTED_BUILD_SOURCE=workspace`
+- Networks:
+  - `omnibase-infra-stability-test-network`
+  - `omnibase-infra-stability-test-omnimemory-network`
 
 ## Validation Only
 
@@ -63,6 +80,9 @@ docker compose \
   --profile runtime \
   config
 ```
+
+The overlay requires Docker Compose v2.24.4 or later because it uses Compose
+`!override` merge semantics to replace inherited port and profile lists.
 
 List the rendered services and confirm the stability-test runtime services are
 present:
