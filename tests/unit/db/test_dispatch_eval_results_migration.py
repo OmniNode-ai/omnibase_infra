@@ -61,8 +61,12 @@ def test_dispatch_eval_results_migration_declares_keys_checks_and_indexes() -> N
 
     expected_fragments = [
         "constraint pk_dispatch_eval_results primary key (task_id, dispatch_id)",
-        "constraint uq_dispatch_eval_results_task_dispatch unique (task_id, dispatch_id)",
         "check (verdict in ('pass', 'fail', 'error', 'skipped'))",
+        "check (quality_score is null or (quality_score >= 0 and quality_score <= 1))",
+        "check (token_cost >= 0)",
+        "check (dollars_cost >= 0)",
+        "check (jsonb_typeof(model_calls) = 'array')",
+        "check (eval_latency_ms >= 0)",
         "check (usage_source in ('measured', 'estimated', 'unknown'))",
         "(usage_source = 'estimated' and estimation_method is not null)",
         "(usage_source <> 'estimated' and estimation_method is null)",
@@ -74,6 +78,8 @@ def test_dispatch_eval_results_migration_declares_keys_checks_and_indexes() -> N
 
     for fragment in expected_fragments:
         assert fragment in sql
+
+    assert "unique (task_id, dispatch_id)" not in sql
 
 
 @pytest.mark.unit

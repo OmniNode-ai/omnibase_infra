@@ -26,8 +26,6 @@ CREATE TABLE IF NOT EXISTS dispatch_eval_results (
 
     CONSTRAINT pk_dispatch_eval_results
         PRIMARY KEY (task_id, dispatch_id),
-    CONSTRAINT uq_dispatch_eval_results_task_dispatch
-        UNIQUE (task_id, dispatch_id),
     CONSTRAINT chk_dispatch_eval_results_verdict
         CHECK (verdict IN ('PASS', 'FAIL', 'ERROR', 'SKIPPED')),
     CONSTRAINT chk_dispatch_eval_results_quality_score
