@@ -314,11 +314,13 @@ async def test_cost_by_repo_prefers_latest_projection_snapshot(app: Any) -> None
                 {
                     "repo_name": "omnibase_core",
                     "cost_usd": "0.750000",
+                    "total_tokens": 300,
                     "call_count": 1,
                 },
                 {
                     "repo_name": "unknown",
                     "cost_usd": "0.100000",
+                    "total_tokens": 50,
                     "call_count": 1,
                 },
             ],
@@ -334,13 +336,13 @@ async def test_cost_by_repo_prefers_latest_projection_snapshot(app: Any) -> None
             {
                 "name": "omnibase_core",
                 "total_cost_usd": "0.750000",
-                "total_tokens": 0,
+                "total_tokens": 300,
                 "call_count": 1,
             },
             {
                 "name": "unknown",
                 "total_cost_usd": "0.100000",
-                "total_tokens": 0,
+                "total_tokens": 50,
                 "call_count": 1,
             },
         ],

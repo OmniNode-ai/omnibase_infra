@@ -4,16 +4,19 @@
     {
       "repo_name": "omnibase_core",
       "cost_usd": "0.750000",
+      "total_tokens": 300,
       "call_count": 1
     },
     {
       "repo_name": "omnibase_infra",
       "cost_usd": "0.750000",
+      "total_tokens": 250,
       "call_count": 2
     },
     {
       "repo_name": "unknown",
       "cost_usd": "0.100000",
+      "total_tokens": 50,
       "call_count": 1
     }
   ],

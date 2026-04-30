@@ -16,13 +16,13 @@ description: >
   Computes repeatable model token-usage snapshots from LLM call metrics and publishes cost.token_usage snapshots for the cost API read path.
 
 input_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for token usage snapshot work."
+  name: "ModelCostTokenUsageSnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Token usage snapshot request/shape."
 output_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for the emitted token usage snapshot."
+  name: "ModelCostTokenUsageSnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Token usage snapshot emitted to the projection snapshot topic."
 capabilities:
   - name: "cost.token_usage.snapshot"
     description: "Compute and publish model token usage projection snapshots."
@@ -35,12 +35,12 @@ handler_routing:
         module: "omnibase_infra.nodes.node_projection_cost_token_usage.handlers.handler_projection_cost_token_usage"
       description: "Compute model token usage buckets for one time window."
       input_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-        description: "Event bus envelope for token usage snapshot work."
+        name: "ModelCostTokenUsageSnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
+        description: "Token usage snapshot shape."
       event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
+        name: "ModelCostTokenUsageSnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
 event_bus:
   version:
     major: 1

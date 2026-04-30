@@ -9,12 +9,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from omniintelligence.models.events import (
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.cost_projection_models import (
     ModelCostByRepoSnapshot,
     ModelCostByRepoSnapshotRow,
 )
-
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.services.cost_api.snapshot_cache import (
     TOPIC_COST_BY_REPO,
     store_latest_snapshot,
@@ -78,6 +77,7 @@ class HandlerProjectionCostByRepo:
                 SELECT
                     COALESCE(repo_name, 'unknown') AS repo_name,
                     COALESCE(SUM(estimated_cost_usd), 0)::numeric(14, 6) AS cost_usd,
+                    COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
                     COUNT(*)::bigint AS call_count
                 FROM llm_call_metrics
                 WHERE created_at >= $1::timestamptz - (
@@ -100,6 +100,7 @@ class HandlerProjectionCostByRepo:
                 ModelCostByRepoSnapshotRow(
                     repo_name=str(_row_get(row, "repo_name")),
                     cost_usd=_decimal(_row_get(row, "cost_usd")),
+                    total_tokens=_int(_row_get(row, "total_tokens")),
                     call_count=_int(_row_get(row, "call_count")),
                 )
                 for row in rows

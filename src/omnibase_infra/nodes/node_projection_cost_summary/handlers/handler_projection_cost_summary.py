@@ -9,9 +9,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from omniintelligence.models.events import ModelCostSummarySnapshot
-
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.cost_projection_models import ModelCostSummarySnapshot
 from omnibase_infra.services.cost_api.snapshot_cache import (
     TOPIC_COST_SUMMARY,
     store_latest_snapshot,
@@ -83,6 +82,7 @@ class HandlerProjectionCostSummary:
                 FROM llm_cost_aggregates
                 WHERE "window" = $1::cost_aggregation_window
                   AND aggregation_key LIKE 'session:%'
+                  AND aggregation_key NOT LIKE 'session:%;%'
                 """,
                 window,
             )

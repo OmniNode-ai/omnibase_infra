@@ -109,11 +109,15 @@ class FakeConnection:
                     {
                         "repo_name": repo,
                         "cost_usd": Decimal("0.000000"),
+                        "total_tokens": 0,
                         "call_count": 0,
                     },
                 )
                 bucket["cost_usd"] = _decimal(bucket["cost_usd"]) + _decimal(
                     row["estimated_cost_usd"]
+                )
+                bucket["total_tokens"] = int(bucket["total_tokens"]) + int(
+                    row["total_tokens"]
                 )
                 bucket["call_count"] = int(bucket["call_count"]) + 1
             return sorted(
@@ -241,6 +245,7 @@ async def test_cost_by_repo_replay_matches_golden_field_by_field() -> None:
         Decimal("0.750000"),
         Decimal("0.100000"),
     ]
+    assert [row.total_tokens for row in snapshot.rows] == [300, 250, 50]
     assert [row.call_count for row in snapshot.rows] == [1, 2, 1]
     assert publisher.published == [
         ("onex.snapshot.projection.cost.by_repo.v1", payload)
@@ -269,14 +274,6 @@ async def test_cost_token_usage_replay_matches_golden_field_by_field() -> None:
     assert [row.prompt_tokens for row in snapshot.rows] == [30, 180, 200]
     assert [row.completion_tokens for row in snapshot.rows] == [20, 70, 100]
     assert [row.total_tokens for row in snapshot.rows] == [50, 250, 300]
-    published_payload = {
-        **payload,
-        "rows": [
-            {**payload["rows"][0], "call_count": 1},
-            {**payload["rows"][1], "call_count": 2},
-            {**payload["rows"][2], "call_count": 1},
-        ],
-    }
     assert publisher.published == [
-        ("onex.snapshot.projection.cost.token_usage.v1", published_payload)
+        ("onex.snapshot.projection.cost.token_usage.v1", payload)
     ]

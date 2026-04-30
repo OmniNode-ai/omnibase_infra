@@ -16,13 +16,13 @@ description: >
   Computes repeatable cost summary snapshots from projection tables and publishes cost.summary snapshots for the cost API read path.
 
 input_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for cost summary snapshot work."
+  name: "ModelCostSummarySnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Cost summary snapshot request/shape."
 output_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for the emitted cost summary snapshot."
+  name: "ModelCostSummarySnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Cost summary snapshot emitted to the projection snapshot topic."
 capabilities:
   - name: "cost.summary.snapshot"
     description: "Compute and publish a cost summary projection snapshot."
@@ -35,12 +35,12 @@ handler_routing:
         module: "omnibase_infra.nodes.node_projection_cost_summary.handlers.handler_projection_cost_summary"
       description: "Compute cost totals and savings totals for one time window."
       input_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-        description: "Event bus envelope for cost summary snapshot work."
+        name: "ModelCostSummarySnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
+        description: "Cost summary snapshot shape."
       event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
+        name: "ModelCostSummarySnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
 event_bus:
   version:
     major: 1

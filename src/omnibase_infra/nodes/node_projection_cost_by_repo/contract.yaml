@@ -16,13 +16,13 @@ description: >
   Computes repeatable repository cost snapshots from LLM call metrics and publishes cost.by_repo snapshots for the cost API read path.
 
 input_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for repository cost snapshot work."
+  name: "ModelCostByRepoSnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Repository cost snapshot request/shape."
 output_model:
-  name: "ModelEventMessage"
-  module: "omnibase_infra.event_bus.models.model_event_message"
-  description: "Event bus envelope for the emitted repository cost snapshot."
+  name: "ModelCostByRepoSnapshot"
+  module: "omnibase_infra.nodes.cost_projection_models"
+  description: "Repository cost snapshot emitted to the projection snapshot topic."
 capabilities:
   - name: "cost.by_repo.snapshot"
     description: "Compute and publish repository-level cost projection snapshots."
@@ -35,12 +35,12 @@ handler_routing:
         module: "omnibase_infra.nodes.node_projection_cost_by_repo.handlers.handler_projection_cost_by_repo"
       description: "Compute repository cost totals for one time window."
       input_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
-        description: "Event bus envelope for repository cost snapshot work."
+        name: "ModelCostByRepoSnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
+        description: "Repository cost snapshot shape."
       event_model:
-        name: "ModelEventMessage"
-        module: "omnibase_infra.event_bus.models.model_event_message"
+        name: "ModelCostByRepoSnapshot"
+        module: "omnibase_infra.nodes.cost_projection_models"
 event_bus:
   version:
     major: 1

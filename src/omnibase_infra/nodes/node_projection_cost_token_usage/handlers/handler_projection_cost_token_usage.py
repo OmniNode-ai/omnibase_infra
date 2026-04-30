@@ -8,12 +8,11 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Protocol
 
-from omniintelligence.models.events import (
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.cost_projection_models import (
     ModelCostTokenUsageSnapshot,
     ModelCostTokenUsageSnapshotRow,
 )
-
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.services.cost_api.snapshot_cache import (
     TOPIC_COST_TOKEN_USAGE,
     store_latest_snapshot,
@@ -106,19 +105,17 @@ class HandlerProjectionCostTokenUsage:
             rows=[
                 ModelCostTokenUsageSnapshotRow(
                     bucket_timestamp=_datetime(_row_get(row, "bucket_timestamp")),
-                    model_id=str(_row_get(row, "model_id")),
+                    provider_model_key=str(_row_get(row, "model_id")),
                     prompt_tokens=_int(_row_get(row, "prompt_tokens")),
                     completion_tokens=_int(_row_get(row, "completion_tokens")),
                     total_tokens=_int(_row_get(row, "total_tokens")),
+                    call_count=_int(_row_get(row, "call_count")),
                 )
                 for row in rows
             ],
             snapshot_timestamp=timestamp,
         )
         payload = snapshot.model_dump(mode="json")
-        for payload_row, source_row in zip(payload["rows"], rows, strict=True):
-            if isinstance(payload_row, dict):
-                payload_row["call_count"] = _int(_row_get(source_row, "call_count"))
         store_latest_snapshot(TOPIC_COST_TOKEN_USAGE, window, payload)
         if publisher is not None:
             await publisher.publish(TOPIC_COST_TOKEN_USAGE, payload)

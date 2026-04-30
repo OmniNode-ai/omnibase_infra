@@ -219,7 +219,7 @@ async def fetch_cost_by_repo(
                 ModelCostBreakdownItem(
                     name=str(row.get("repo_name") or "unknown"),
                     total_cost_usd=_decimal(row.get("cost_usd")),
-                    total_tokens=0,
+                    total_tokens=_int(row.get("total_tokens")),
                     call_count=_int(row.get("call_count")),
                 )
                 for row in rows
