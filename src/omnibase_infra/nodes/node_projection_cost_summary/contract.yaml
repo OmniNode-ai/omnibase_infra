@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_projection_cost_summary"
+contract_name: "node_projection_cost_summary"
+node_name: "node_projection_cost_summary"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Computes repeatable cost summary snapshots from projection tables and publishes cost.summary snapshots for the cost API read path.
+
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: "Event bus envelope for cost summary snapshot work."
+output_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: "Event bus envelope for the emitted cost summary snapshot."
+capabilities:
+  - name: "cost.summary.snapshot"
+    description: "Compute and publish a cost summary projection snapshot."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "cost.summary.snapshot"
+      handler:
+        name: "HandlerProjectionCostSummary"
+        module: "omnibase_infra.nodes.node_projection_cost_summary.handlers.handler_projection_cost_summary"
+      description: "Compute cost totals and savings totals for one time window."
+      input_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+        description: "Event bus envelope for cost summary snapshot work."
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  publish_topics:
+    - "onex.snapshot.projection.cost.summary.v1"
+topics:
+  produces:
+    - topic: "onex.snapshot.projection.cost.summary.v1"
+      description: "Cost summary projection snapshots."
+      schema: "ModelCostSummarySnapshot"
+metadata:
+  related_tickets:
+    - "OMN-10342"
+  tags:
+    - cost
+    - projection
+    - snapshot
