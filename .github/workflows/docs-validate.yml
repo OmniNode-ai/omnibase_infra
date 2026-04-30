@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+name: docs-validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  call:
+    # @main is intentional — validate-docs.yml header states "Callers use @main"
+    uses: OmniNode-ai/omnibase_core/.github/workflows/validate-docs.yml@main
