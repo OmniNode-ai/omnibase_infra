@@ -37,6 +37,7 @@ def test_contract_loads_with_compute_shape() -> None:
     assert contract["name"] == "node_kafka_replay_compute"
     assert contract["node_type"] == "COMPUTE_GENERIC"
     assert contract["event_bus"] == {"subscribe_topics": [], "publish_topics": []}
+    assert contract["metadata"]["transport_type"] == "KAFKA"
 
     input_model = contract["input_model"]
     output_model = contract["output_model"]

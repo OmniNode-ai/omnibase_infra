@@ -7,13 +7,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Protocol
 
-from aiokafka import TopicPartition
-
 from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_kafka_message import (
     ProtocolKafkaMessage,
 )
 from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_offset_and_timestamp import (
     ProtocolOffsetAndTimestamp,
+)
+from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_topic_partition import (
+    ProtocolTopicPartition,
 )
 
 
@@ -27,24 +28,24 @@ class ProtocolKafkaReplayConsumer(Protocol):
     async def partitions_for_topic(self, topic: str) -> set[int] | None: ...
 
     async def beginning_offsets(
-        self, partitions: Iterable[TopicPartition]
-    ) -> Mapping[TopicPartition, int]: ...
+        self, partitions: Iterable[ProtocolTopicPartition]
+    ) -> Mapping[ProtocolTopicPartition, int]: ...
 
     async def end_offsets(
-        self, partitions: Iterable[TopicPartition]
-    ) -> Mapping[TopicPartition, int]: ...
+        self, partitions: Iterable[ProtocolTopicPartition]
+    ) -> Mapping[ProtocolTopicPartition, int]: ...
 
     async def offsets_for_times(
-        self, timestamps: Mapping[TopicPartition, int]
-    ) -> Mapping[TopicPartition, ProtocolOffsetAndTimestamp | None]: ...
+        self, timestamps: Mapping[ProtocolTopicPartition, int]
+    ) -> Mapping[ProtocolTopicPartition, ProtocolOffsetAndTimestamp | None]: ...
 
-    def assign(self, partitions: Iterable[TopicPartition]) -> None: ...
+    def assign(self, partitions: Iterable[ProtocolTopicPartition]) -> None: ...
 
-    def seek(self, partition: TopicPartition, offset: int) -> None: ...
+    def seek(self, partition: ProtocolTopicPartition, offset: int) -> None: ...
 
     async def getmany(
-        self, *partitions: TopicPartition, timeout_ms: int
-    ) -> Mapping[TopicPartition, Sequence[ProtocolKafkaMessage]]: ...
+        self, *partitions: ProtocolTopicPartition, timeout_ms: int
+    ) -> Mapping[ProtocolTopicPartition, Sequence[ProtocolKafkaMessage]]: ...
 
 
 __all__ = ["ProtocolKafkaReplayConsumer"]

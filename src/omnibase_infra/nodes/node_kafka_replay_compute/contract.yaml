@@ -38,6 +38,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay"
 metadata:
   description: "Typed Kafka replay primitive for deterministic proof workflows"
+  transport_type: "KAFKA"
   author: "OmniNode Team"
   created: "2026-04-30"
   tags:
