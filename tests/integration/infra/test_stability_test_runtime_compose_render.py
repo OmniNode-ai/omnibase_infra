@@ -124,4 +124,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         "com.omninode.runtime.address: runtime://omninode-pc/stability-test/worker"
         in rendered_config
     )
+    assert "com.omninode.runtime.id: stability-test-main" in rendered_config
+    assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
+    assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
     assert "image: runtime:stability-test-workspace" in rendered_config
