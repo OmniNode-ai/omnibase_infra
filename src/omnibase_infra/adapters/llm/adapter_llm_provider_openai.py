@@ -733,6 +733,11 @@ class AdapterLlmProviderOpenai:
         Bridges the structural mismatch between ProtocolLLMRequest.prompt
         (single string) and ModelLlmInferenceRequest's messages tuple.
 
+        ``request.timeout_seconds`` is propagated directly into the infra
+        request so that contract-owned endpoint timeouts (e.g. long-running
+        local model calls) reach the HTTP transport instead of falling back
+        to the inference request's 30-second default.
+
         Args:
             request: SPI-level request.
 
@@ -747,6 +752,7 @@ class AdapterLlmProviderOpenai:
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             api_key=self._api_key,
+            timeout_seconds=request.timeout_seconds,
         )
 
 
