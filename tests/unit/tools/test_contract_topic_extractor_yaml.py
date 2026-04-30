@@ -328,7 +328,9 @@ def test_extract_all_with_plural_skill_manifests_roots(
     svc_dir = svc_root / "services"
     svc_dir.mkdir()
     (svc_dir / "topics.yaml").write_text(
-        "topics:\n  - onex.evt.omnibase-infra.llm-endpoint-health.v1\n",
+        "topics:\n"
+        "  - onex.evt.omnibase-infra.llm-endpoint-health.v1\n"
+        "  - onex.evt.omnibase-infra.runtime-health-check.v1\n",
         encoding="utf-8",
     )
 
@@ -348,6 +350,7 @@ def test_extract_all_with_plural_skill_manifests_roots(
     assert "onex.evt.linear.snapshot.v1" in topics
     # Services topic
     assert "onex.evt.omnibase-infra.llm-endpoint-health.v1" in topics
+    assert "onex.evt.omnibase-infra.runtime-health-check.v1" in topics
 
 
 @pytest.mark.unit

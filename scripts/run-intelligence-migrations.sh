@@ -94,4 +94,35 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   APPLIED=$((APPLIED + 1))
 done
 
+# ---------------------------------------------------------------------------
+# 4. Provision omnibase_infra-owned cross-repo tables before fingerprint stamp
+# ---------------------------------------------------------------------------
+# PluginIntelligence uses omnibase_infra's idempotency store against the
+# omniintelligence database. The table must exist before the runtime entrypoint
+# stamps expected_schema_fingerprint; otherwise the plugin creates it lazily
+# during startup and immediately invalidates the stamped fingerprint.
+echo "[intelligence-migration] Ensuring cross-repo idempotency table exists..."
+
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence -v ON_ERROR_STOP=1 <<'EOSQL'
+CREATE TABLE IF NOT EXISTS idempotency_records (
+    id UUID PRIMARY KEY,
+    domain VARCHAR(255),
+    message_id UUID NOT NULL,
+    correlation_id UUID,
+    processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    UNIQUE (domain, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_processed_at
+    ON idempotency_records(processed_at);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_domain
+    ON idempotency_records(domain);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_correlation_id
+    ON idempotency_records(correlation_id)
+    WHERE correlation_id IS NOT NULL;
+EOSQL
+
+echo "[intelligence-migration] Cross-repo idempotency table ready."
 echo "[intelligence-migration] Complete: ${APPLIED} applied, ${SKIPPED} skipped."

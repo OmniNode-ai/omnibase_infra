@@ -325,6 +325,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnimemory.memory-updated.v1": "pre-migration; needs contract.yaml in omnimemory repo | owner: jonah | expiry: 2026-06-01",
     # --- omnibase-infra service-level topics (emitted by services, not nodes) ---
     "onex.evt.omnibase-infra.wiring-health-snapshot.v1": "emitted by WiringHealthChecker service; no contract.yaml node needed — service-level emission | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.runtime-health-check.v1": "emitted by ServiceRuntimeHealthMonitor; no contract.yaml node needed — service-level emission | owner: jonah | expiry: 2026-09-01",
     # --- platform/cross-cutting topics ---
     "onex.evt.omnibase-infra.circuit-breaker.v1": "new topic (OMN-5293); publisher-only, no node contract.yaml yet | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.runtime-error.v1": "new topic (OMN-5649); emitted by monitor_logs.py RuntimeErrorEmitter; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",

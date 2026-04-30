@@ -142,6 +142,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_ROW_COUNT_DIAGNOSTIC,
     SUFFIX_RUNNER_HEALTH_SNAPSHOT,
     SUFFIX_RUNTIME_ERROR,
+    SUFFIX_RUNTIME_HEALTH_CHECK,
     SUFFIX_RUNTIME_TICK,
     SUFFIX_SERVICE_HEARTBEAT,
     SUFFIX_TOPIC_CATALOG_CHANGED,
@@ -236,6 +237,7 @@ __all__: list[str] = [
     # Runtime health event pipeline (OMN-5529)
     "SUFFIX_CONSUMER_HEALTH",
     "SUFFIX_CONSUMER_RESTART_CMD",
+    "SUFFIX_RUNTIME_HEALTH_CHECK",
     "SUFFIX_RUNTIME_ERROR",
     # DLQ aggregation topic (OMN-6136)
     "SUFFIX_PLATFORM_DLQ_MESSAGE",

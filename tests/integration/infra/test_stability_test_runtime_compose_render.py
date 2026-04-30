@@ -98,8 +98,11 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     rendered_config = result.stdout
     rendered = yaml.safe_load(rendered_config)
     services = rendered["services"]
+    main_depends_on = services["omninode-runtime"]["depends_on"]
+    partition_cap_depends_on = services["redpanda-partition-cap"]["depends_on"]
     postgres_ports = services["postgres"]["ports"]
     redpanda_ports = services["redpanda"]["ports"]
+    partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
     valkey_ports = services["valkey"]["ports"]
     main_ports = services["omninode-runtime"]["ports"]
     effects_ports = services["runtime-effects"]["ports"]
@@ -118,7 +121,23 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         "container_name: omnibase-infra-stability-test-forward-migration"
         in rendered_config
     )
+    assert (
+        "container_name: omnibase-infra-stability-test-intelligence-migration"
+        in rendered_config
+    )
+    assert (
+        "container_name: omnibase-infra-stability-test-redpanda-partition-cap"
+        in rendered_config
+    )
     assert "container_name: omnibase-forward-migration" not in rendered_config
+    assert "container_name: omnibase-intelligence-migration" not in rendered_config
+    assert main_depends_on["intelligence-migration"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert main_depends_on["redpanda-partition-cap"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert partition_cap_depends_on["redpanda"]["condition"] == "service_healthy"
     assert "ONEX_ENVIRONMENT: stability-test" in rendered_config
     assert "ONEX_BOX_ID: omninode-pc" in rendered_config
     assert (
@@ -167,6 +186,15 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert 'published: "18082"' not in rendered_config
     assert 'published: "18081"' not in rendered_config
     assert "external://localhost:39092" in rendered_config
+    assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
+    assert "admin.hosts=redpanda:9644" in partition_cap_command
+    assert "topic_partitions_per_shard" in partition_cap_command
+    assert "7000" in partition_cap_command
+    assert "topic_memory_per_partition" in partition_cap_command
+    assert "1048576" in partition_cap_command
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        assert services[service_name]["environment"]["OMNIMEMORY_ENABLED"] == ""
+        assert services[service_name]["environment"]["OMNIMEMORY_MEMGRAPH_HOST"] == ""
     assert {port["published"] for port in main_ports} == {"18085"}
     assert {port["published"] for port in effects_ports} == {"18086"}
     assert 'published: "8085"' not in rendered_config
