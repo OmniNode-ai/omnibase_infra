@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
-from typing import cast
+from typing import Protocol, cast
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_agent_loop import (
@@ -40,7 +40,11 @@ Analyzer = Callable[
 ]
 
 
-ANALYZERS = (
+class AsyncExecuteProtocol(Protocol):
+    def __call__(self, *args: object) -> Awaitable[object]: ...
+
+
+ANALYZERS: tuple[Analyzer, ...] = (
     analyze_tool_failure_waste,
     analyze_agent_loop,
     analyze_retry_waste,
@@ -138,9 +142,7 @@ class HandlerWasteDetection:
     ) -> None:
         """Project findings into the waste_findings table with dedup upsert."""
         execute_attr = "execute"
-        run_statement = cast(
-            "Callable[..., Awaitable[object]]", getattr(connection, execute_attr)
-        )
+        run_statement = cast("AsyncExecuteProtocol", getattr(connection, execute_attr))
         for finding in findings:
             await run_statement(
                 UPSERT_WASTE_FINDING_SQL,
