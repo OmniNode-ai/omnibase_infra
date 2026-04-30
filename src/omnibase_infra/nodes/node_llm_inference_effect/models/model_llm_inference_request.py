@@ -20,6 +20,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.models.llm.model_llm_tool_choice import (
     ModelLlmToolChoice,
@@ -161,9 +162,9 @@ class ModelLlmInferenceRequest(BaseModel):
         le=32767,
         description="Configured GPU count for local-model compute evidence.",
     )
-    compute_usage_source: str | None = Field(
+    compute_usage_source: EnumUsageSource | None = Field(
         default=None,
-        description="Optional compute usage provenance: API, ESTIMATED, or MISSING.",
+        description="Optional compute usage provenance.",
     )
 
     @field_validator("base_url")
@@ -221,14 +222,6 @@ class ModelLlmInferenceRequest(BaseModel):
         ):
             raise ValueError(
                 "compute_usage_source requires gpu_type and gpu_count to be provided"
-            )
-        if self.compute_usage_source is not None and self.compute_usage_source not in {
-            "API",
-            "ESTIMATED",
-            "MISSING",
-        }:
-            raise ValueError(
-                "compute_usage_source must be one of API, ESTIMATED, or MISSING"
             )
         return self
 

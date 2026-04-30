@@ -72,6 +72,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -382,11 +383,12 @@ class HandlerLlmOpenaiCompatible:
 
             extensions: dict[str, JsonType] = {}
             if request.gpu_type is not None and request.gpu_count is not None:
-                compute_usage_source = request.compute_usage_source or (
-                    "API"
-                    if normalized.source is ContractEnumUsageSource.API
-                    else "ESTIMATED"
-                )
+                if request.compute_usage_source is not None:
+                    compute_usage_source = request.compute_usage_source.value
+                elif normalized.source is ContractEnumUsageSource.API:
+                    compute_usage_source = EnumUsageSource.MEASURED.value
+                else:
+                    compute_usage_source = EnumUsageSource.ESTIMATED.value
                 extensions.update(
                     {
                         "gpu_seconds": round(latency_ms / 1000.0, 3),

@@ -296,7 +296,7 @@ class TestMetricsEmission:
         assert payload["gpu_seconds"] >= 0
         assert payload["gpu_type"] == "rtx_5090"
         assert payload["gpu_count"] == 1
-        assert payload["compute_usage_source"] == "API"
+        assert payload["compute_usage_source"] == "measured"
 
 
 # ---------------------------------------------------------------------------

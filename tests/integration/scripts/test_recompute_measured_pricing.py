@@ -76,7 +76,7 @@ def _write_fixture(path: Path) -> None:
                 "prompt_tokens": 1000,
                 "completion_tokens": 0,
                 "estimated_cost_usd": 0.003,
-                "usage_source": "API",
+                "usage_source": "measured",
             }
         )
         rows.append(
@@ -85,7 +85,7 @@ def _write_fixture(path: Path) -> None:
                 "prompt_tokens": 0,
                 "completion_tokens": 1000,
                 "estimated_cost_usd": 0.015,
-                "usage_source": "API",
+                "usage_source": "measured",
             }
         )
     for _ in range(19):
@@ -95,7 +95,7 @@ def _write_fixture(path: Path) -> None:
                 "prompt_tokens": 1000,
                 "completion_tokens": 0,
                 "estimated_cost_usd": 0.004,
-                "usage_source": "API",
+                "usage_source": "measured",
             }
         )
     path.write_text(
