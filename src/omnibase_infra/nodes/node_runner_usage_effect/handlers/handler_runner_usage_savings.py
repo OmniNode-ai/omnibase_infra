@@ -4,9 +4,15 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from decimal import ROUND_HALF_UP, Decimal
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.pricing import ModelPricingTable
 from omnibase_infra.nodes.node_runner_usage_effect.models import (
     ModelRunnerSavingsEstimated,
@@ -15,6 +21,7 @@ from omnibase_infra.nodes.node_runner_usage_effect.models import (
 
 _USD_QUANT = Decimal("0.000001")
 _MINUTES_QUANT = Decimal("0.000001")
+_DEFAULT_EMITTED_KEY_LIMIT = 10_000
 
 
 def _quantize(value: Decimal) -> Decimal:
@@ -24,9 +31,27 @@ def _quantize(value: Decimal) -> Decimal:
 class HandlerRunnerUsageSavings:
     """Estimate avoided GitHub-hosted runner cost for self-hosted jobs."""
 
-    def __init__(self, pricing_table: ModelPricingTable | None = None) -> None:
+    def __init__(
+        self,
+        pricing_table: ModelPricingTable | None = None,
+        *,
+        emitted_key_limit: int = _DEFAULT_EMITTED_KEY_LIMIT,
+    ) -> None:
+        if emitted_key_limit < 1:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="configure_runner_usage_savings",
+                target_name="handler-runner-usage-savings",
+            )
+            raise ProtocolConfigurationError(
+                "emitted_key_limit must be greater than zero",
+                context=context,
+                parameter="emitted_key_limit",
+                value=emitted_key_limit,
+            )
         self._pricing_table = pricing_table or ModelPricingTable.from_yaml()
-        self._emitted_keys: set[tuple[str, str]] = set()
+        self._emitted_key_limit = emitted_key_limit
+        self._emitted_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
 
     @property
     def handler_id(self) -> str:
@@ -54,12 +79,20 @@ class HandlerRunnerUsageSavings:
         """Compute a runner savings event, deduped by workflow run and job."""
         key = usage_event.idempotency_key
         if key in self._emitted_keys:
+            self._emitted_keys.move_to_end(key)
             return None
 
         runner_cost = self._pricing_table.runner_cost
         if runner_cost is None:
-            raise ValueError(
-                "Pricing manifest missing runner_cost.github_hosted_per_minute_usd"
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="compute_runner_usage_savings",
+                target_name=self.handler_id,
+            )
+            raise ProtocolConfigurationError(
+                "Pricing manifest missing runner_cost.github_hosted_per_minute_usd",
+                context=context,
+                parameter="runner_cost.github_hosted_per_minute_usd",
             )
 
         runner_minutes = Decimal(str(usage_event.runner_minutes)).quantize(
@@ -86,8 +119,15 @@ class HandlerRunnerUsageSavings:
             workflow_name=usage_event.workflow_name,
             pricing_manifest_version=self._pricing_table.schema_version,
         )
-        self._emitted_keys.add(key)
+        self._remember_emitted_key(key)
         return estimate
+
+    def _remember_emitted_key(self, key: tuple[str, str]) -> None:
+        """Track emitted keys with bounded memory use."""
+        self._emitted_keys[key] = None
+        self._emitted_keys.move_to_end(key)
+        while len(self._emitted_keys) > self._emitted_key_limit:
+            self._emitted_keys.popitem(last=False)
 
     def replay(
         self,
