@@ -37,7 +37,8 @@
     ".ruff_cache/**",
     "build/**",
     "dist/**",
-    "htmlcov/**"
+    "htmlcov/**",
+    "omni_worktrees/**"
   ],
   "checkExternal": false
 }
