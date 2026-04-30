@@ -12,10 +12,10 @@ Introduced across  (transport),  (inference handler),  (embedding node),  (token
 
 1. [Overview: Two Nodes, Shared Transport](#overview-two-nodes-shared-transport)
 2. [Physical Server Topology](#physical-server-topology)
-3. [MixinLlmHttpTransport — The Shared Transport Layer](#mixinllmhttptransport-the-shared-transport-layer)
+3. [MixinLlmHttpTransport — The Shared Transport Layer](#mixinllmhttptransport--the-shared-transport-layer)
 4. [Security: CIDR Allowlist and HMAC Signing](#security-cidr-allowlist-and-hmac-signing)
-5. [HandlerLlmOpenaiCompatible — Inference Handler](#handlerllmopenaicompatible-inference-handler)
-6. [HandlerEmbeddingOpenaiCompatible — Embedding Handler](#handlerembeddingopenaicompatible-embedding-handler)
+5. [HandlerLlmOpenaiCompatible — Inference Handler](#handlerllmopenaicompatible--inference-handler)
+6. [HandlerEmbeddingOpenaiCompatible — Embedding Handler](#handlerembeddingopenaicompatible--embedding-handler)
 7. [LLM Cost Tracking](#llm-cost-tracking)
 8. [Error Handling and HTTP Status Mapping](#error-handling-and-http-status-mapping)
 9. [Retry and Circuit Breaker Behavior](#retry-and-circuit-breaker-behavior)

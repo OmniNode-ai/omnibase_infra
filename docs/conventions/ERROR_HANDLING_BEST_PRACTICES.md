@@ -9,11 +9,11 @@ Error handling standards for `omnibase_infra`. All infrastructure errors derive 
 ## Table of Contents
 
 1. [Error Hierarchy](#error-hierarchy)
-2. [ModelInfraErrorContext — Mandatory Usage](#modelinfraerrorcontext-mandatory-usage)
+2. [ModelInfraErrorContext — Mandatory Usage](#modelinfraerrorcontext--mandatory-usage)
 3. [Error Class Selection](#error-class-selection)
 4. [Error Sanitization Rules](#error-sanitization-rules)
 5. [Correlation ID Rules](#correlation-id-rules)
-6. [Chaining with `from e`](#chaining-with)
+6. [Chaining with `from e`](#chaining-with-from-e)
 7. [Common Mistakes](#common-mistakes)
 
 ---

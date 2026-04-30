@@ -358,9 +358,16 @@ def extract_headings_as_anchors(content: str) -> set[str]:
 
 
 def _heading_to_anchor(heading: str) -> str:
-    """Convert a heading to its GitHub-style anchor."""
-    # Remove inline code backticks
-    anchor = re.sub(r"`[^`]+`", "", heading)
+    """Convert a heading to its GitHub-style anchor.
+
+    GitHub's algorithm: strip backtick delimiters but keep code text, remove
+    images, remove link markup but keep text, lowercase, replace spaces with
+    hyphens, remove all non-alphanumeric/hyphen/underscore characters.
+    Consecutive hyphens are NOT collapsed — e.g., an em-dash surrounded by
+    spaces produces double-hyphens in the anchor.
+    """
+    # Strip backtick delimiters but keep code text (GitHub-compatible)
+    anchor = heading.replace("`", "")
     # Remove images
     anchor = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", anchor)
     # Remove links but keep text
@@ -369,10 +376,8 @@ def _heading_to_anchor(heading: str) -> str:
     anchor = anchor.lower()
     # Replace spaces with hyphens
     anchor = anchor.replace(" ", "-")
-    # Remove punctuation except hyphens and underscores
+    # Remove punctuation except hyphens and underscores (GitHub-compatible)
     anchor = re.sub(r"[^\w\-]", "", anchor)
-    # Remove consecutive hyphens
-    anchor = re.sub(r"-+", "-", anchor)
     # Strip leading/trailing hyphens
     anchor = anchor.strip("-")
     return anchor

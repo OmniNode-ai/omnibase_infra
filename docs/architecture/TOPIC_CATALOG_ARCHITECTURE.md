@@ -14,7 +14,7 @@ Introduced across  (models),  (ServiceTopicCatalog),  (warnings channel),  (quer
 2. [Component Inventory](#component-inventory)
 3. [Data Flow](#data-flow)
 4. [Consul KV Structure](#consul-kv-structure)
-5. [ServiceTopicCatalog — Design Details](#servicetopiccatalog-design-details)
+5. [ServiceTopicCatalog — Design Details](#servicetopiccatalog--design-details)
 6. [KV Precedence Rules](#kv-precedence-rules)
 7. [In-Process Cache](#in-process-cache)
 8. [Timeout Budget and Partial Results](#timeout-budget-and-partial-results)
