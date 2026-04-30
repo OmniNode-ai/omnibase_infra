@@ -92,6 +92,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     rendered_config = result.stdout
     rendered = yaml.safe_load(rendered_config)
     services = rendered["services"]
+    redpanda_ports = services["redpanda"]["ports"]
     main_ports = services["omninode-runtime"]["ports"]
     effects_ports = services["runtime-effects"]["ports"]
     networks = rendered["networks"]
@@ -139,6 +140,13 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
     assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
     assert "image: runtime:stability-test-workspace" in rendered_config
+    assert {port["published"] for port in redpanda_ports} == {"39092", "29644"}
+    assert {port["target"] for port in redpanda_ports} == {19092, 9644}
+    assert 'published: "19092"' not in rendered_config
+    assert 'published: "9644"' not in rendered_config
+    assert 'published: "18082"' not in rendered_config
+    assert 'published: "18081"' not in rendered_config
+    assert "external://localhost:39092" in rendered_config
     assert {port["published"] for port in main_ports} == {"18085"}
     assert {port["published"] for port in effects_ports} == {"18086"}
     assert 'published: "8085"' not in rendered_config

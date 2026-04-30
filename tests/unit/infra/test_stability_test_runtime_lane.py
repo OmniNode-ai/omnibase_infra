@@ -136,6 +136,10 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
 
+    assert services["redpanda"]["ports"] == [
+        "${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}:19092",
+        "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644",
+    ]
     assert services["omninode-runtime"]["ports"] == [
         "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
     ]
