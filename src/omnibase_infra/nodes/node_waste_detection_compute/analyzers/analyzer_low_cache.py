@@ -11,6 +11,7 @@ from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_utils 
     build_finding,
     cost_for_tokens,
     first_attribution,
+    sorted_calls,
 )
 from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
@@ -28,7 +29,7 @@ def analyze_low_cache(
     """Detect large prompt sessions with little cache reuse."""
     eligible = tuple(
         call
-        for call in calls
+        for call in sorted_calls(calls)
         if call.input_tokens >= MIN_INPUT_TOKENS and call.cache_read_tokens is not None
     )
     low_cache = tuple(
@@ -57,9 +58,9 @@ def analyze_low_cache(
         "total_cache_read_tokens": sum(
             call.cache_read_tokens or 0 for call in low_cache
         ),
-        "correlation_ids": [
+        "correlation_ids": sorted(
             call.correlation_id for call in low_cache if call.correlation_id
-        ],
+        ),
     }
     return (
         build_finding(

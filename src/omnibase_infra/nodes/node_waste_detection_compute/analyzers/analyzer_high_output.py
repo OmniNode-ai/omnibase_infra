@@ -11,6 +11,7 @@ from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_utils 
     build_finding,
     cost_for_tokens,
     first_attribution,
+    sorted_calls,
 )
 from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
@@ -28,7 +29,7 @@ def analyze_high_output(
     """Detect calls dominated by excessive completion tokens."""
     excessive = tuple(
         call
-        for call in calls
+        for call in sorted_calls(calls)
         if call.output_tokens >= OUTPUT_TOKEN_THRESHOLD
         or (
             call.total_tokens > 0
@@ -47,9 +48,9 @@ def analyze_high_output(
     evidence = {
         "call_count": len(excessive),
         "max_output_tokens": max(call.output_tokens for call in excessive),
-        "correlation_ids": [
+        "correlation_ids": sorted(
             call.correlation_id for call in excessive if call.correlation_id
-        ],
+        ),
     }
     return (
         build_finding(

@@ -10,6 +10,7 @@ from datetime import datetime
 from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_utils import (
     build_finding,
     first_attribution,
+    sorted_calls,
 )
 from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
@@ -27,7 +28,7 @@ def analyze_model_overkill(
     """Detect premium model use on small/simple work."""
     overkill = tuple(
         call
-        for call in calls
+        for call in sorted_calls(calls)
         if any(marker in call.model_id.lower() for marker in PREMIUM_MODEL_MARKERS)
         and (
             call.request_type.lower() in SIMPLE_REQUEST_TYPES
@@ -45,9 +46,9 @@ def analyze_model_overkill(
         "call_count": len(overkill),
         "models": sorted({call.model_id for call in overkill}),
         "request_types": sorted({call.request_type for call in overkill}),
-        "correlation_ids": [
+        "correlation_ids": sorted(
             call.correlation_id for call in overkill if call.correlation_id
-        ],
+        ),
     }
     return (
         build_finding(

@@ -68,7 +68,7 @@ def first_attribution(calls: Iterable[ModelWasteCall]) -> tuple[str | None, str 
 
 def cost_for_tokens(call: ModelWasteCall, tokens: int) -> float:
     """Allocate call cost proportionally to token count."""
-    if call.total_tokens <= 0:
+    if tokens <= 0 or call.total_tokens <= 0:
         return 0.0
     return call.cost_usd * min(tokens, call.total_tokens) / call.total_tokens
 

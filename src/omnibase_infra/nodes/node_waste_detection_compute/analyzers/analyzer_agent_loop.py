@@ -36,10 +36,16 @@ def analyze_agent_loop(
         if len(group) < MIN_REPEATS:
             continue
         for index in range(len(group) - MIN_REPEATS + 1):
-            window = group[index : index + MIN_REPEATS]
-            elapsed = (window[-1].emitted_at - window[0].emitted_at).total_seconds()
-            if elapsed > WINDOW_SECONDS:
+            start_call = group[index]
+            window = [
+                call
+                for call in group[index:]
+                if (call.emitted_at - start_call.emitted_at).total_seconds()
+                <= WINDOW_SECONDS
+            ]
+            if len(window) < MIN_REPEATS:
                 continue
+            elapsed = (window[-1].emitted_at - start_call.emitted_at).total_seconds()
             repeated = window[1:]
             waste_tokens = sum(call.total_tokens for call in repeated)
             waste_cost_usd = sum(call.cost_usd for call in repeated)
@@ -56,7 +62,7 @@ def analyze_agent_loop(
                 build_finding(
                     session_id=window[0].session_id,
                     rule_id=RULE_ID,
-                    severity="HIGH" if len(group) >= 5 else "MEDIUM",
+                    severity="HIGH" if len(window) >= 5 else "MEDIUM",
                     waste_tokens=waste_tokens,
                     waste_cost_usd=waste_cost_usd,
                     evidence=evidence,
