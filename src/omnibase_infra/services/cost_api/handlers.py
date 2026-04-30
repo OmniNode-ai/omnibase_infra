@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
+from typing import TYPE_CHECKING, Protocol
 
 from omnibase_infra.services.cost_api.models import (
     AggregationWindow,
@@ -34,7 +34,9 @@ if TYPE_CHECKING:
 class RowLookup(Protocol):
     """Minimal row interface shared by asyncpg.Record and test rows."""
 
-    def __getitem__(self, key: str) -> object: ...
+    def __getitem__(self, key: str) -> object:
+        """Return the row value for a string key."""
+        raise NotImplementedError
 
 
 def _decimal(value: object, default: str = "0.000000") -> Decimal:
@@ -52,7 +54,7 @@ def _int(value: object) -> int:
         return value
     if isinstance(value, str | bytes | bytearray):
         return int(value)
-    return int(cast("SupportsInt", value))
+    return int(value)  # type: ignore[call-overload]
 
 
 def _row_get(row: RowLookup | None, key: str, default: object = None) -> object:
@@ -69,7 +71,7 @@ async def fetch_cost_summary(
     *,
     window: AggregationWindow,
 ) -> ModelCostSummary:
-    """Fetch totals from canonical session aggregate rows."""
+    """Fetch totals from canonical session aggregate rows or projection snapshots."""
     snapshot = get_latest_snapshot(TOPIC_COST_SUMMARY, window)
     if snapshot is not None:
         return ModelCostSummary(
@@ -268,7 +270,7 @@ async def fetch_token_usage(
     *,
     window: AggregationWindow,
 ) -> ModelTokenUsage:
-    """Fetch token totals from canonical session aggregate rows."""
+    """Fetch token totals from canonical session aggregate rows or projection snapshots."""
     snapshot = get_latest_snapshot(TOPIC_COST_TOKEN_USAGE, window)
     if snapshot is not None:
         raw_rows = snapshot.get("rows")
