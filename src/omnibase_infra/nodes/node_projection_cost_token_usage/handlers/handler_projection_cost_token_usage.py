@@ -13,6 +13,7 @@ from omniintelligence.models.events import (
     ModelCostTokenUsageSnapshotRow,
 )
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.services.cost_api.snapshot_cache import (
     TOPIC_COST_TOKEN_USAGE,
     store_latest_snapshot,
@@ -20,7 +21,8 @@ from omnibase_infra.services.cost_api.snapshot_cache import (
 
 
 class SnapshotPublisher(Protocol):
-    async def publish(self, topic: str, payload: dict[str, object]) -> object: ...
+    async def publish(self, topic: str, payload: dict[str, object]) -> object:
+        raise NotImplementedError
 
 
 def _int(value: object) -> int:
@@ -54,6 +56,14 @@ def _datetime(value: object) -> datetime:
 class HandlerProjectionCostTokenUsage:
     """Compute and publish model/time-bucket token snapshots."""
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.PROJECTION_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
+
     async def emit_snapshot(
         self,
         pool: object,
@@ -73,7 +83,8 @@ class HandlerProjectionCostTokenUsage:
                     model_id,
                     COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
-                    COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens
+                    COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
+                    COUNT(*)::bigint AS call_count
                 FROM llm_call_metrics
                 WHERE created_at >= $1::timestamptz - (
                     CASE $2
@@ -105,6 +116,9 @@ class HandlerProjectionCostTokenUsage:
             snapshot_timestamp=timestamp,
         )
         payload = snapshot.model_dump(mode="json")
+        for payload_row, source_row in zip(payload["rows"], rows, strict=True):
+            if isinstance(payload_row, dict):
+                payload_row["call_count"] = _int(_row_get(source_row, "call_count"))
         store_latest_snapshot(TOPIC_COST_TOKEN_USAGE, window, payload)
         if publisher is not None:
             await publisher.publish(TOPIC_COST_TOKEN_USAGE, payload)

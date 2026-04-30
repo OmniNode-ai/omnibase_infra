@@ -14,10 +14,10 @@ interfaces_touched:
 evidence_requirements:
   - kind: "tests"
     description: "Cost snapshot replay emitters and API snapshot fallback tests pass"
-    command: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10342/omniintelligence/src:$PYTHONPATH uv run pytest tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py -q"
+    command: "PYTHONPATH=${OMNIINTELLIGENCE_SRC:-../omniintelligence/src}:$PYTHONPATH uv run pytest tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py -q"
   - kind: "tests"
     description: "Touched cost snapshot paths pass ruff"
-    command: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10342/omniintelligence/src:$PYTHONPATH uv run ruff check src/omnibase_infra/nodes/node_projection_cost_summary src/omnibase_infra/nodes/node_projection_cost_by_repo src/omnibase_infra/nodes/node_projection_cost_token_usage src/omnibase_infra/services/cost_api/handlers.py src/omnibase_infra/services/cost_api/snapshot_cache.py tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py"
+    command: "PYTHONPATH=${OMNIINTELLIGENCE_SRC:-../omniintelligence/src}:$PYTHONPATH uv run ruff check src/omnibase_infra/nodes/node_projection_cost_summary src/omnibase_infra/nodes/node_projection_cost_by_repo src/omnibase_infra/nodes/node_projection_cost_token_usage src/omnibase_infra/services/cost_api/handlers.py src/omnibase_infra/services/cost_api/snapshot_cache.py tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py"
   - kind: "manual"
     description: "Post-merge deploy smoke confirms cost snapshot handlers import in the deployed runtime container"
     command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_projection_cost_summary.handlers.handler_projection_cost_summary import HandlerProjectionCostSummary; from omnibase_infra.nodes.node_projection_cost_by_repo.handlers.handler_projection_cost_by_repo import HandlerProjectionCostByRepo; from omnibase_infra.nodes.node_projection_cost_token_usage.handlers.handler_projection_cost_token_usage import HandlerProjectionCostTokenUsage; print('deploy smoke ok', HandlerProjectionCostSummary.__name__, HandlerProjectionCostByRepo.__name__, HandlerProjectionCostTokenUsage.__name__)\""
@@ -31,13 +31,13 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10342/omniintelligence/src:$PYTHONPATH uv run pytest tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py -q"
+        check_value: "PYTHONPATH=${OMNIINTELLIGENCE_SRC:-../omniintelligence/src}:$PYTHONPATH uv run pytest tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py -q"
   - id: "dod-002"
     description: "Touched cost snapshot paths pass ruff"
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10342/omniintelligence/src:$PYTHONPATH uv run ruff check src/omnibase_infra/nodes/node_projection_cost_summary src/omnibase_infra/nodes/node_projection_cost_by_repo src/omnibase_infra/nodes/node_projection_cost_token_usage src/omnibase_infra/services/cost_api/handlers.py src/omnibase_infra/services/cost_api/snapshot_cache.py tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py"
+        check_value: "PYTHONPATH=${OMNIINTELLIGENCE_SRC:-../omniintelligence/src}:$PYTHONPATH uv run ruff check src/omnibase_infra/nodes/node_projection_cost_summary src/omnibase_infra/nodes/node_projection_cost_by_repo src/omnibase_infra/nodes/node_projection_cost_token_usage src/omnibase_infra/services/cost_api/handlers.py src/omnibase_infra/services/cost_api/snapshot_cache.py tests/integration/nodes/test_node_projection_cost_snapshots.py tests/integration/api/test_cost_api_routes.py"
   - id: "dod-003"
     description: "Post-merge deploy smoke plan for cost snapshot handlers"
     source: "manual"

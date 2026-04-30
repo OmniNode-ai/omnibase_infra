@@ -32,6 +32,7 @@ def test_074_savings_estimates_forward_declares_projection_contract() -> None:
     assert "CONSTRAINT unique_savings_estimate_event" in sql
     assert "idx_savings_estimates_event_ts" in sql
     assert "idx_savings_estimates_session" in sql
+    assert "idx_savings_estimates_model_local" in sql
 
 
 @pytest.mark.integration

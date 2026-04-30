@@ -278,7 +278,9 @@ async def fetch_token_usage(
         total_tokens = sum(
             _int(row.get("total_tokens")) for row in rows if isinstance(row, dict)
         )
-        call_count = len([row for row in rows if isinstance(row, dict)])
+        call_count = sum(
+            _int(row.get("call_count")) for row in rows if isinstance(row, dict)
+        )
         average = (
             Decimal(total_tokens) / Decimal(call_count)
             if call_count

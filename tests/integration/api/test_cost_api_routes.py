@@ -360,6 +360,7 @@ async def test_token_usage_prefers_latest_projection_snapshot(app: Any) -> None:
                     "prompt_tokens": 100,
                     "completion_tokens": 50,
                     "total_tokens": 150,
+                    "call_count": 2,
                 },
                 {
                     "bucket_timestamp": "2026-04-29T11:00:00Z",
@@ -367,6 +368,7 @@ async def test_token_usage_prefers_latest_projection_snapshot(app: Any) -> None:
                     "prompt_tokens": 200,
                     "completion_tokens": 100,
                     "total_tokens": 300,
+                    "call_count": 1,
                 },
             ],
             "snapshot_timestamp": "2026-04-29T12:00:00Z",
@@ -378,8 +380,8 @@ async def test_token_usage_prefers_latest_projection_snapshot(app: Any) -> None:
     assert body == {
         "window": "24h",
         "total_tokens": 450,
-        "call_count": 2,
-        "average_tokens_per_call": "225.000000",
+        "call_count": 3,
+        "average_tokens_per_call": "150.000000",
     }
 
 

@@ -23,7 +23,7 @@ from omnibase_infra.nodes.node_projection_cost_token_usage.handlers.handler_proj
 )
 from omnibase_infra.services.cost_api.snapshot_cache import clear_latest_snapshots
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 SNAPSHOT_TS = datetime(2026, 4, 29, 12, 0, tzinfo=UTC)
 FIXTURE_DIR = Path("tests/fixtures/cost_observability")
@@ -134,6 +134,7 @@ class FakeConnection:
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0,
+                    "call_count": 0,
                 },
             )
             bucket["prompt_tokens"] = int(bucket["prompt_tokens"]) + int(
@@ -145,6 +146,7 @@ class FakeConnection:
             bucket["total_tokens"] = int(bucket["total_tokens"]) + int(
                 row["total_tokens"]
             )
+            bucket["call_count"] = int(bucket["call_count"]) + 1
         return sorted(
             grouped_tokens.values(),
             key=lambda row: (row["bucket_timestamp"], str(row["model_id"])),
@@ -267,6 +269,14 @@ async def test_cost_token_usage_replay_matches_golden_field_by_field() -> None:
     assert [row.prompt_tokens for row in snapshot.rows] == [30, 180, 200]
     assert [row.completion_tokens for row in snapshot.rows] == [20, 70, 100]
     assert [row.total_tokens for row in snapshot.rows] == [50, 250, 300]
+    published_payload = {
+        **payload,
+        "rows": [
+            {**payload["rows"][0], "call_count": 1},
+            {**payload["rows"][1], "call_count": 2},
+            {**payload["rows"][2], "call_count": 1},
+        ],
+    }
     assert publisher.published == [
-        ("onex.snapshot.projection.cost.token_usage.v1", payload)
+        ("onex.snapshot.projection.cost.token_usage.v1", published_payload)
     ]

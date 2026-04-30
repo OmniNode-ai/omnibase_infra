@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Final
 
 SnapshotPayload = Mapping[str, object]
@@ -18,7 +19,7 @@ _LATEST: dict[tuple[str, str], dict[str, object]] = {}
 
 def store_latest_snapshot(topic: str, window: str, payload: SnapshotPayload) -> None:
     """Store the latest snapshot for an API route fallback boundary."""
-    _LATEST[(topic, window)] = dict(payload)
+    _LATEST[(topic, window)] = deepcopy(dict(payload))
 
 
 def get_latest_snapshot(topic: str, window: str) -> dict[str, object] | None:
@@ -26,7 +27,7 @@ def get_latest_snapshot(topic: str, window: str) -> dict[str, object] | None:
     payload = _LATEST.get((topic, window))
     if payload is None:
         return None
-    return dict(payload)
+    return deepcopy(payload)
 
 
 def clear_latest_snapshots() -> None:

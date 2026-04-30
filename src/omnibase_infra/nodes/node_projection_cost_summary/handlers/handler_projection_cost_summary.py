@@ -11,6 +11,7 @@ from typing import Protocol
 
 from omniintelligence.models.events import ModelCostSummarySnapshot
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.services.cost_api.snapshot_cache import (
     TOPIC_COST_SUMMARY,
     store_latest_snapshot,
@@ -20,7 +21,8 @@ WINDOWS: tuple[str, ...] = ("24h", "7d", "30d")
 
 
 class SnapshotPublisher(Protocol):
-    async def publish(self, topic: str, payload: dict[str, object]) -> object: ...
+    async def publish(self, topic: str, payload: dict[str, object]) -> object:
+        raise NotImplementedError
 
 
 def _decimal(value: object) -> Decimal:
@@ -52,6 +54,14 @@ def _row_get(row: Mapping[str, object] | None, key: str) -> object:
 
 class HandlerProjectionCostSummary:
     """Compute and publish cost summary snapshots from projection tables."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.PROJECTION_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
     async def emit_snapshot(
         self,
