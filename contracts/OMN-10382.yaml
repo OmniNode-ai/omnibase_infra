@@ -1,0 +1,45 @@
+# OMN-10382 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the usage_source enum migration.
+schema_version: "1.0.0"
+ticket_id: "OMN-10382"
+title: "Migrate LLM usage_source vocabulary to EnumUsageSource"
+summary: "Migrate infra LLM compute usage evidence from legacy API/ESTIMATED/MISSING literals to the shared EnumUsageSource vocabulary."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused migration, GPU measurement, metrics publisher, writer, and recompute pricing tests pass."
+    command: "uv run pytest tests/integration/test_llm_gpu_usage_evidence_integration.py tests/integration/scripts/test_recompute_measured_pricing.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - kind: "ci"
+    description: "Touched infra usage source paths pass ruff."
+    command: "uv run ruff check scripts/recompute_measured_pricing.py src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_inference_request.py src/omnibase_infra/services/observability/llm_cost_aggregation/writer_postgres.py tests/integration/scripts/test_recompute_measured_pricing.py tests/integration/test_llm_gpu_usage_evidence_integration.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py"
+  - kind: "manual"
+    description: "Post-merge runtime validation confirms emitted LLM metric events and aggregate rows use shared EnumUsageSource values."
+    command: "deploy: query llm-call-completed events and llm_cost_aggregates rows for MEASURED, ESTIMATED, and MISSING usage_source values after runtime rollout"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Focused migration, GPU measurement, metrics publisher, writer, and recompute pricing tests pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_llm_gpu_usage_evidence_integration.py tests/integration/scripts/test_recompute_measured_pricing.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - id: "dod-002"
+    description: "Touched infra usage source paths pass ruff."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run ruff check scripts/recompute_measured_pricing.py src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_inference_request.py src/omnibase_infra/services/observability/llm_cost_aggregation/writer_postgres.py tests/integration/scripts/test_recompute_measured_pricing.py tests/integration/test_llm_gpu_usage_evidence_integration.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py"
+  - id: "dod-deploy"
+    description: "deploy gate evidence: pre-merge live deploy is not claimed; runtime validation remains post-merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: query llm-call-completed events and llm_cost_aggregates rows for MEASURED, ESTIMATED, and MISSING usage_source values after runtime rollout"

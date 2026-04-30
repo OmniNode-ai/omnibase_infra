@@ -22,6 +22,8 @@ DEFAULT_ENV_FILE = Path.home() / ".omnibase" / ".env"
 LOW_CONFIDENCE = "LOW_CONFIDENCE"
 MEASURED = "MEASURED"
 MEASURED_SOURCE = "API_REPORTED_COST_ROLLING_7D"
+MEASURED_USAGE_SOURCE = "measured"
+LEGACY_API_USAGE_SOURCE = "API"
 FALLBACK_SOURCE = "FALLBACK_PROVIDER_DOCUMENTATION"
 LOCAL_SOURCE = "LOCAL_ZERO_API_COST_POLICY"
 MANIFEST_HEADER = (
@@ -73,9 +75,13 @@ def _sample_from_mapping(data: dict[str, object]) -> PricingSample | None:
         "completion_tokens",
         data.get("output_tokens", 0),
     )
-    usage_source = data.get("usage_source", "API")
+    usage_source = data.get("usage_source", LEGACY_API_USAGE_SOURCE)
 
-    if not isinstance(model_id, str) or usage_source != "API" or cost is None:
+    if (
+        not isinstance(model_id, str)
+        or usage_source not in {MEASURED_USAGE_SOURCE, LEGACY_API_USAGE_SOURCE}
+        or cost is None
+    ):
         return None
 
     prompt = int(cast("int | float | str", prompt_tokens or 0))
@@ -123,7 +129,7 @@ async def fetch_db_samples(database_url: str) -> list[PricingSample]:
             estimated_cost_usd
         FROM llm_call_metrics
         WHERE created_at >= NOW() - INTERVAL '7 days'
-          AND usage_source = 'API'
+          AND usage_source::text IN ('measured', 'API')
           AND estimated_cost_usd IS NOT NULL
           AND COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0) > 0
         ORDER BY model_id, created_at
@@ -242,7 +248,7 @@ def update_manifest(
             "sample_window_days": 7,
             "sample_count": int(entry["sample_count"]),
             "min_samples": min_samples,
-            "query": "llm_call_metrics usage_source=API created_at>=now-7d",
+            "query": "llm_call_metrics usage_source=measured created_at>=now-7d",
             "authoritative": entry["confidence"] == MEASURED,
         }
 
