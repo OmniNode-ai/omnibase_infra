@@ -72,6 +72,7 @@ class TestModelPricingTableFromDict:
         assert "claude-opus-4-6" in table.models
         assert "gpt-4o" in table.models
         assert "qwen2.5-coder-14b" in table.models
+        assert table.compute_cost == {}
 
     def test_from_dict_missing_schema_version(self) -> None:
         """Missing schema_version should raise ValueError."""
@@ -87,6 +88,33 @@ class TestModelPricingTableFromDict:
             }
         )
         assert len(table.models) == 0
+
+    def test_from_dict_accepts_compute_cost_section(
+        self, sample_manifest_data: dict
+    ) -> None:
+        """Compute cost entries are parsed as manifest policy."""
+        sample_manifest_data["compute_cost"] = {
+            "rtx_5090": {
+                "electricity_per_hour": 0.12,
+                "amortization_per_hour": 0.28,
+            },
+        }
+
+        table = ModelPricingTable.from_dict(sample_manifest_data)
+
+        assert table.compute_cost["rtx_5090"].total_per_hour == 0.40
+        assert table.estimate_compute_cost("rtx_5090", 7200, 1) == 0.8
+
+    def test_from_dict_rejects_invalid_compute_cost_section(self) -> None:
+        """Non-mapping compute cost section is rejected."""
+        with pytest.raises(ValueError, match=r"compute_cost.*mapping"):
+            ModelPricingTable.from_dict(
+                {
+                    "schema_version": "1.0.0",
+                    "models": {},
+                    "compute_cost": ["rtx_5090"],
+                }
+            )
 
     def test_from_dict_no_models_key(self) -> None:
         """Missing models key defaults to empty dict."""

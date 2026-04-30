@@ -149,6 +149,22 @@ class ModelLlmInferenceRequest(BaseModel):
         le=600.0,
         description="HTTP request timeout in seconds.",
     )
+    gpu_type: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Configured GPU type for local-model compute evidence.",
+    )
+    gpu_count: int | None = Field(
+        default=None,
+        ge=1,
+        le=32767,
+        description="Configured GPU count for local-model compute evidence.",
+    )
+    compute_usage_source: str | None = Field(
+        default=None,
+        description="Optional compute usage provenance: API, ESTIMATED, or MISSING.",
+    )
 
     @field_validator("base_url")
     @classmethod
@@ -198,6 +214,22 @@ class ModelLlmInferenceRequest(BaseModel):
             and self.prompt is None
         ):
             raise ValueError("COMPLETION requires a non-None prompt")
+        if (self.gpu_type is None) != (self.gpu_count is None):
+            raise ValueError("gpu_type and gpu_count must be provided together")
+        if self.compute_usage_source is not None and (
+            self.gpu_type is None or self.gpu_count is None
+        ):
+            raise ValueError(
+                "compute_usage_source requires gpu_type and gpu_count to be provided"
+            )
+        if self.compute_usage_source is not None and self.compute_usage_source not in {
+            "API",
+            "ESTIMATED",
+            "MISSING",
+        }:
+            raise ValueError(
+                "compute_usage_source must be one of API, ESTIMATED, or MISSING"
+            )
         return self
 
 

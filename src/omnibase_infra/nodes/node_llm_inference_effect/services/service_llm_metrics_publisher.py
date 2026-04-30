@@ -257,6 +257,16 @@ class ServiceLlmMetricsPublisher:
 
         try:
             payload = json.loads(metrics.model_dump_json())
+            extensions = payload.get("extensions")
+            if isinstance(extensions, dict):
+                for key in (
+                    "gpu_seconds",
+                    "gpu_type",
+                    "gpu_count",
+                    "compute_usage_source",
+                ):
+                    if key in extensions:
+                        payload[key] = extensions[key]
             await self._publisher(
                 self._topic_llm_call,
                 payload,
@@ -292,6 +302,16 @@ class ServiceLlmMetricsPublisher:
                 "success": True,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
+            metric_extensions = metrics.extensions
+            if isinstance(metric_extensions, dict):
+                for key in (
+                    "gpu_seconds",
+                    "gpu_type",
+                    "gpu_count",
+                    "compute_usage_source",
+                ):
+                    if key in metric_extensions:
+                        infra_payload[key] = metric_extensions[key]
             await self._publisher(
                 self._topic_llm_call_infra,
                 infra_payload,

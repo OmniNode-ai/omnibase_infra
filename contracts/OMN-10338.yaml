@@ -1,0 +1,34 @@
+# OMN-10338 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for GPU usage evidence on LLM metrics.
+schema_version: "1.0.0"
+ticket_id: "OMN-10338"
+title: "Add GPU usage evidence to LLM metrics"
+summary: "Emit GPU type, count, measured seconds, and compute usage source for local-model LLM calls."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused migration, pricing, handler, publisher, writer, and integration proofs pass locally."
+    command: "uv run pytest tests/integration/test_llm_gpu_usage_evidence_integration.py tests/unit/db/test_migration_073.py tests/unit/models/pricing/test_model_pricing_table.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - kind: "manual"
+    description: "Post-merge runtime validation is required before claiming live runtime GPU metric emission."
+    command: "deploy: query llm-call-completed events for gpu_seconds, gpu_type, gpu_count, and compute_usage_source after runtime rollout"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Focused GPU usage evidence test suite passes locally."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_llm_gpu_usage_evidence_integration.py tests/unit/db/test_migration_073.py tests/unit/models/pricing/test_model_pricing_table.py tests/unit/nodes/node_llm_inference_effect/handlers/test_gpu_measurement.py tests/unit/nodes/node_llm_inference_effect/services/test_service_llm_metrics_publisher.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - id: "dod-deploy"
+    description: "deploy gate evidence: pre-merge live deploy is not claimed; runtime validation remains post-merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: query llm-call-completed events for gpu_seconds, gpu_type, gpu_count, and compute_usage_source after runtime rollout"
