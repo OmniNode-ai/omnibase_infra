@@ -248,7 +248,7 @@ def update_manifest(
             "sample_window_days": 7,
             "sample_count": int(entry["sample_count"]),
             "min_samples": min_samples,
-            "query": "llm_call_metrics usage_source=measured created_at>=now-7d",
+            "query": "llm_call_metrics usage_source in (measured, API) created_at>=now-7d",
             "authoritative": entry["confidence"] == MEASURED,
         }
 
