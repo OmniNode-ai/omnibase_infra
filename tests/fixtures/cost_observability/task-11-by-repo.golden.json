@@ -1,0 +1,24 @@
+{
+  "window": "24h",
+  "rows": [
+    {
+      "repo_name": "omnibase_core",
+      "cost_usd": "0.750000",
+      "total_tokens": 300,
+      "call_count": 1
+    },
+    {
+      "repo_name": "omnibase_infra",
+      "cost_usd": "0.750000",
+      "total_tokens": 250,
+      "call_count": 2
+    },
+    {
+      "repo_name": "unknown",
+      "cost_usd": "0.100000",
+      "total_tokens": 50,
+      "call_count": 1
+    }
+  ],
+  "snapshot_timestamp": "2026-04-29T12:00:00Z"
+}

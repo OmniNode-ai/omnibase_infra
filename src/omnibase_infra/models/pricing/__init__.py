@@ -15,10 +15,14 @@ from omnibase_infra.models.pricing.model_compute_cost_entry import ModelComputeC
 from omnibase_infra.models.pricing.model_cost_estimate import ModelCostEstimate
 from omnibase_infra.models.pricing.model_pricing_entry import ModelPricingEntry
 from omnibase_infra.models.pricing.model_pricing_table import ModelPricingTable
+from omnibase_infra.models.pricing.model_runner_cost_policy import (
+    ModelRunnerCostPolicy,
+)
 
 __all__: list[str] = [
     "ModelCostEstimate",
     "ModelComputeCostEntry",
     "ModelPricingEntry",
     "ModelPricingTable",
+    "ModelRunnerCostPolicy",
 ]

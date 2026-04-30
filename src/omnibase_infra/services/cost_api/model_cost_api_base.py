@@ -19,6 +19,10 @@ class ModelCostApiBase(BaseModel):
 
     @field_serializer(
         "total_cost_usd",
+        "total_savings_usd",
+        "local_cost_usd",
+        "cloud_cost_usd",
+        "savings_usd",
         "estimated_coverage_pct",
         "average_tokens_per_call",
         check_fields=False,

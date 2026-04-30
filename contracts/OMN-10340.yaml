@@ -1,0 +1,36 @@
+# OMN-10340 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical OCC evidence lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the savings API/runtime surface.
+schema_version: "1.0.0"
+ticket_id: "OMN-10340"
+title: "Add savings pipeline API"
+summary: "Create savings_estimates persistence and expose /api/savings/summary from the cost API."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Savings migration and API route tests pass"
+    command: "uv run pytest tests/unit/db/test_migration_074.py tests/integration/migrations/test_074_savings_estimates.py tests/integration/api/test_cost_api_routes.py -q"
+  - kind: "manual"
+    description: "Post-merge deploy smoke confirms the savings summary handler imports in the deployed runtime container"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.services.cost_api.handlers import fetch_savings_summary; print('deploy smoke ok', fetch_savings_summary.__name__)\""
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Savings migration and API route tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/db/test_migration_074.py tests/integration/migrations/test_074_savings_estimates.py tests/integration/api/test_cost_api_routes.py -q"
+  - id: "dod-002"
+    description: "Post-merge deploy smoke plan for savings summary handler"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.services.cost_api.handlers import fetch_savings_summary; print('deploy smoke ok', fetch_savings_summary.__name__)\""

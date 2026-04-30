@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
@@ -15,8 +16,16 @@ from omnibase_infra.services.cost_api.models import (
     ModelCostSummary,
     ModelCostTrend,
     ModelCostTrendPoint,
+    ModelSavingsSummary,
+    ModelSavingsSummaryItem,
     ModelTokenUsage,
     TrendBucket,
+)
+from omnibase_infra.services.cost_api.snapshot_cache import (
+    TOPIC_COST_BY_REPO,
+    TOPIC_COST_SUMMARY,
+    TOPIC_COST_TOKEN_USAGE,
+    get_latest_snapshot,
 )
 
 if TYPE_CHECKING:
@@ -63,7 +72,17 @@ async def fetch_cost_summary(
     *,
     window: AggregationWindow,
 ) -> ModelCostSummary:
-    """Fetch totals from canonical session aggregate rows."""
+    """Fetch totals from canonical session aggregate rows or projection snapshots."""
+    snapshot = get_latest_snapshot(TOPIC_COST_SUMMARY, window)
+    if snapshot is not None:
+        return ModelCostSummary(
+            window=window,
+            total_cost_usd=_decimal(snapshot.get("total_cost_usd")),
+            total_tokens=_int(snapshot.get("total_tokens")),
+            call_count=_int(snapshot.get("session_count")),
+            estimated_coverage_pct=None,
+        )
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -191,6 +210,24 @@ async def fetch_cost_by_repo(
     window: AggregationWindow,
 ) -> ModelCostBreakdown:
     """Fetch repo cost groups from composite session keys or legacy repo keys."""
+    snapshot = get_latest_snapshot(TOPIC_COST_BY_REPO, window)
+    if snapshot is not None:
+        raw_rows = snapshot.get("rows")
+        rows = raw_rows if isinstance(raw_rows, list) else []
+        return ModelCostBreakdown(
+            window=window,
+            items=[
+                ModelCostBreakdownItem(
+                    name=str(row.get("repo_name") or "unknown"),
+                    total_cost_usd=_decimal(row.get("cost_usd")),
+                    total_tokens=_int(row.get("total_tokens")),
+                    call_count=_int(row.get("call_count")),
+                )
+                for row in rows
+                if isinstance(row, dict)
+            ],
+        )
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -234,7 +271,29 @@ async def fetch_token_usage(
     *,
     window: AggregationWindow,
 ) -> ModelTokenUsage:
-    """Fetch token totals from canonical session aggregate rows."""
+    """Fetch token totals from canonical session aggregate rows or projection snapshots."""
+    snapshot = get_latest_snapshot(TOPIC_COST_TOKEN_USAGE, window)
+    if snapshot is not None:
+        raw_rows = snapshot.get("rows")
+        rows = raw_rows if isinstance(raw_rows, list) else []
+        total_tokens = sum(
+            _int(row.get("total_tokens")) for row in rows if isinstance(row, dict)
+        )
+        call_count = sum(
+            _int(row.get("call_count")) for row in rows if isinstance(row, dict)
+        )
+        average = (
+            Decimal(total_tokens) / Decimal(call_count)
+            if call_count
+            else Decimal("0.000000")
+        )
+        return ModelTokenUsage(
+            window=window,
+            total_tokens=total_tokens,
+            call_count=call_count,
+            average_tokens_per_call=average.quantize(Decimal("0.000001")),
+        )
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -260,6 +319,76 @@ async def fetch_token_usage(
         total_tokens=_int(_row_get(row, "total_tokens")),
         call_count=_int(_row_get(row, "call_count")),
         average_tokens_per_call=_decimal(_row_get(row, "average_tokens_per_call")),
+    )
+
+
+async def fetch_savings_summary(
+    pool: asyncpg.Pool,
+    *,
+    window: AggregationWindow,
+) -> ModelSavingsSummary:
+    """Fetch savings totals for the requested trailing window."""
+    anchor_ts = datetime.now(tz=UTC)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(savings_usd), 0)::numeric(14, 6) AS total_savings_usd,
+                COALESCE(SUM(local_cost_usd), 0)::numeric(14, 6) AS local_cost_usd,
+                COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
+                COUNT(DISTINCT session_id)::bigint AS session_count
+            FROM savings_estimates
+            WHERE event_timestamp >= $2::timestamptz - (
+                CASE $1
+                    WHEN '24h' THEN INTERVAL '24 hours'
+                    WHEN '7d' THEN INTERVAL '7 days'
+                    WHEN '30d' THEN INTERVAL '30 days'
+                END
+            )
+              AND event_timestamp <= $2::timestamptz
+            """,
+            window,
+            anchor_ts,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                model_local,
+                COALESCE(SUM(savings_usd), 0)::numeric(14, 6) AS total_savings_usd,
+                COALESCE(SUM(local_cost_usd), 0)::numeric(14, 6) AS local_cost_usd,
+                COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
+                COUNT(DISTINCT session_id)::bigint AS session_count
+            FROM savings_estimates
+            WHERE event_timestamp >= $2::timestamptz - (
+                CASE $1
+                    WHEN '24h' THEN INTERVAL '24 hours'
+                    WHEN '7d' THEN INTERVAL '7 days'
+                    WHEN '30d' THEN INTERVAL '30 days'
+                END
+            )
+              AND event_timestamp <= $2::timestamptz
+            GROUP BY model_local
+            ORDER BY total_savings_usd DESC, model_local ASC
+            """,
+            window,
+            anchor_ts,
+        )
+    return ModelSavingsSummary(
+        window=window,
+        total_savings_usd=_decimal(_row_get(row, "total_savings_usd")),
+        local_cost_usd=_decimal(_row_get(row, "local_cost_usd")),
+        cloud_cost_usd=_decimal(_row_get(row, "cloud_cost_usd")),
+        session_count=_int(_row_get(row, "session_count")),
+        items=[
+            ModelSavingsSummaryItem(
+                model_local=str(_row_get(item, "model_local") or "unknown"),
+                total_savings_usd=_decimal(_row_get(item, "total_savings_usd")),
+                local_cost_usd=_decimal(_row_get(item, "local_cost_usd")),
+                cloud_cost_usd=_decimal(_row_get(item, "cloud_cost_usd")),
+                session_count=_int(_row_get(item, "session_count")),
+            )
+            for item in rows
+        ],
     )
 
 

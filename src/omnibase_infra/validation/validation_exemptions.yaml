@@ -2974,6 +2974,60 @@ pattern_exemptions:
       - omnidash/migrations/0034_savings_estimates.sql (actual_model_id TEXT)
     ticket: OMN-6964
   # ==========================================================================
+  # Runner Usage Savings Node Exemptions (OMN-10343)
+  # ==========================================================================
+  # GitHub workflow_run_id and job_id are external GitHub Actions identifiers,
+  # not OmniNode UUIDs. source_event_id and session_id are deterministic wire
+  # identifiers derived from the required idempotency key.
+  - file_pattern: 'model_runner_usage_event\.py'
+    violation_pattern: "Field 'workflow_run_id' should use UUID type instead of str"
+    reason: >
+      workflow_run_id is the GitHub Actions workflow run identifier from GITHUB_RUN_ID. It is part of the required runner usage idempotency key and is not an OmniNode UUID.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  - file_pattern: 'model_runner_usage_event\.py'
+    violation_pattern: "Field 'job_id' should use UUID type instead of str"
+    reason: >
+      job_id is the GitHub Actions job identifier or job name. It is part of the required runner usage idempotency key and is not an OmniNode UUID.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  - file_pattern: 'model_runner_savings_estimated\.py'
+    violation_pattern: "Field 'source_event_id' should use UUID type instead of str"
+    reason: >
+      source_event_id is a deterministic wire id derived from workflow_run_id and job_id so replay emits the same event identity.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  - file_pattern: 'model_runner_savings_estimated\.py'
+    violation_pattern: "Field 'session_id' should use UUID type instead of str"
+    reason: >
+      session_id is a deterministic savings grouping key derived from workflow_run_id and job_id, not an OmniNode UUID.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  - file_pattern: 'model_runner_savings_estimated\.py'
+    violation_pattern: "Field 'workflow_run_id' should use UUID type instead of str"
+    reason: >
+      workflow_run_id mirrors the external GitHub Actions workflow run identifier from the source event.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  - file_pattern: 'model_runner_savings_estimated\.py'
+    violation_pattern: "Field 'job_id' should use UUID type instead of str"
+    reason: >
+      job_id mirrors the external GitHub Actions job identifier from the source event.
+
+    documentation:
+      - docs/plans/2026-04-29-unified-cost-observability-completion.md (Task 12)
+    ticket: OMN-10343
+  # ==========================================================================
   # Contract Verification Models (OMN-7042)
   # ==========================================================================
   # contract_name is a canonical identifier string (e.g., "node_registration_orchestrator")

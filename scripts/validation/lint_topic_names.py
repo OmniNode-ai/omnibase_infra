@@ -10,8 +10,9 @@
 # files follow the canonical ONEX naming convention:
 #
 #   onex.{kind}.{producer}.{event-slug}.v{n}
+#   onex.snapshot.{producer}.{snapshot.slug}.v{n}
 #
-#   kind:     evt | cmd | dlq | intent
+#   kind:     evt | cmd | dlq | intent | snapshot
 #   producer: lowercase, hyphens allowed, no underscores
 #   event:    kebab-case slug  [a-z0-9._-]+
 #   version:  v followed by one or more digits (no leading zeros after 'v')
@@ -57,7 +58,7 @@ import yaml
 # Constants — must stay in sync with ContractTopicExtractor
 # ---------------------------------------------------------------------------
 
-_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "dlq", "intent"})
+_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "dlq", "intent", "snapshot"})
 _VALID_SEGMENT_PATTERN = re.compile(r"^[a-z0-9._-]+$")
 _VALID_PRODUCER_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _VALID_VERSION_PATTERN = re.compile(r"^v[1-9]\d*$|^v1$")
@@ -77,6 +78,7 @@ _KNOWN_PRODUCERS: frozenset[str] = frozenset(
         "platform",
     }
 )
+_KNOWN_SNAPSHOT_PRODUCERS: frozenset[str] = frozenset({"platform", "projection"})
 
 # Regex to detect strings that look like complete ONEX topic names (for Python
 # scanning).  We require the string to start with 'onex.' AND end with a version
@@ -128,15 +130,29 @@ def lint_topic(raw: str) -> LintResult:
     violations: list[str] = []
     parts = raw.split(".")
 
-    if len(parts) != 5:
+    if len(parts) < 5:
         violations.append(
-            f"expected 5 dot-separated segments "
+            f"expected at least 5 dot-separated segments "
             f"(onex.{{kind}}.{{producer}}.{{event}}.{{version}}), "
             f"got {len(parts)}: {raw!r}"
         )
         return LintResult(topic=raw, violations=violations)
 
-    prefix, kind, producer, event_name, version = parts
+    prefix, kind = parts[0], parts[1]
+
+    if kind == "snapshot":
+        producer = parts[2]
+        event_name = ".".join(parts[3:-1])
+        version = parts[-1]
+    else:
+        if len(parts) != 5:
+            violations.append(
+                f"expected 5 dot-separated segments "
+                f"(onex.{{kind}}.{{producer}}.{{event}}.{{version}}), "
+                f"got {len(parts)}: {raw!r}"
+            )
+            return LintResult(topic=raw, violations=violations)
+        producer, event_name, version = parts[2], parts[3], parts[4]
 
     if prefix != "onex":
         violations.append(
@@ -149,15 +165,18 @@ def lint_topic(raw: str) -> LintResult:
             f"must be one of {sorted(_VALID_KINDS)}"
         )
 
+    known_producers = (
+        _KNOWN_SNAPSHOT_PRODUCERS if kind == "snapshot" else _KNOWN_PRODUCERS
+    )
     if not _VALID_PRODUCER_PATTERN.match(producer):
         violations.append(
             f"invalid producer {producer!r} in topic {raw!r}; "
             f"must match ^[a-z0-9-]+$ (no underscores)"
         )
-    elif producer not in _KNOWN_PRODUCERS:
+    elif producer not in known_producers:
         violations.append(
             f"unknown producer {producer!r} in topic {raw!r}; "
-            f"must be one of {sorted(_KNOWN_PRODUCERS)}. "
+            f"must be one of {sorted(known_producers)}. "
             f"Did you mean the repo name (e.g. 'omnimarket' not {producer!r})?"
         )
 

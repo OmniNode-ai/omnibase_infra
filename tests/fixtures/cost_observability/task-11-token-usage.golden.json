@@ -1,0 +1,30 @@
+{
+  "window": "24h",
+  "rows": [
+    {
+      "bucket_timestamp": "2026-04-29T09:00:00Z",
+      "model_id": "gpt-4.1",
+      "prompt_tokens": 30,
+      "completion_tokens": 20,
+      "total_tokens": 50,
+      "call_count": 1
+    },
+    {
+      "bucket_timestamp": "2026-04-29T10:00:00Z",
+      "model_id": "gpt-4.1",
+      "prompt_tokens": 180,
+      "completion_tokens": 70,
+      "total_tokens": 250,
+      "call_count": 2
+    },
+    {
+      "bucket_timestamp": "2026-04-29T11:00:00Z",
+      "model_id": "gpt-4.1-mini",
+      "prompt_tokens": 200,
+      "completion_tokens": 100,
+      "total_tokens": 300,
+      "call_count": 1
+    }
+  ],
+  "snapshot_timestamp": "2026-04-29T12:00:00Z"
+}
