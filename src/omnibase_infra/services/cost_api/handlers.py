@@ -63,7 +63,7 @@ async def fetch_cost_summary(
     *,
     window: AggregationWindow,
 ) -> ModelCostSummary:
-    """Fetch totals from canonical session/composite-session aggregate rows."""
+    """Fetch totals from canonical session aggregate rows."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -81,6 +81,7 @@ async def fetch_cost_summary(
             FROM llm_cost_aggregates
             WHERE "window" = $1::cost_aggregation_window
               AND aggregation_key LIKE 'session:%'
+              AND aggregation_key NOT LIKE 'session:%;%'
             """,
             window,
         )
@@ -233,7 +234,7 @@ async def fetch_token_usage(
     *,
     window: AggregationWindow,
 ) -> ModelTokenUsage:
-    """Fetch token totals from canonical session/composite-session aggregate rows."""
+    """Fetch token totals from canonical session aggregate rows."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -250,6 +251,7 @@ async def fetch_token_usage(
             FROM llm_cost_aggregates
             WHERE "window" = $1::cost_aggregation_window
               AND aggregation_key LIKE 'session:%'
+              AND aggregation_key NOT LIKE 'session:%;%'
             """,
             window,
         )

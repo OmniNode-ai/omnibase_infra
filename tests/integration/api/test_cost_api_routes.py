@@ -130,7 +130,10 @@ async def get_json(app: Any, path: str) -> dict[str, Any]:
     return response.json()
 
 
-async def test_cost_summary_uses_canonical_session_totals(app: Any) -> None:
+async def test_cost_summary_uses_canonical_session_totals(
+    app: Any,
+    fake_conn: FakeConnection,
+) -> None:
     body = await get_json(app, "/api/costs/summary")
 
     assert body == {
@@ -140,6 +143,10 @@ async def test_cost_summary_uses_canonical_session_totals(app: Any) -> None:
         "call_count": 3,
         "estimated_coverage_pct": "33.33",
     }
+    sql, args = fake_conn.queries[-1]
+    assert "aggregation_key LIKE 'session:%'" in sql
+    assert "aggregation_key NOT LIKE 'session:%;%'" in sql
+    assert args == ("24h",)
 
 
 async def test_cost_trend_uses_raw_call_metric_timestamps(
@@ -232,7 +239,7 @@ async def test_cost_by_repo_groups_composite_and_legacy_fallback(
     assert args == ("24h",)
 
 
-async def test_token_usage_response(app: Any) -> None:
+async def test_token_usage_response(app: Any, fake_conn: FakeConnection) -> None:
     body = await get_json(app, "/api/costs/token-usage")
 
     assert body == {
@@ -241,6 +248,10 @@ async def test_token_usage_response(app: Any) -> None:
         "call_count": 3,
         "average_tokens_per_call": "2000.000000",
     }
+    sql, args = fake_conn.queries[-1]
+    assert "aggregation_key LIKE 'session:%'" in sql
+    assert "aggregation_key NOT LIKE 'session:%;%'" in sql
+    assert args == ("24h",)
 
 
 async def test_savings_summary_returns_stable_503_body(app: Any) -> None:
