@@ -64,6 +64,9 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # GitHub webhooks are external triggers
     "onex.evt.github.pr-webhook.v1": "Published by GitHub webhook relay, not a node | owner: jonah | expiry: 2026-12-01",
     "onex.evt.github.push-webhook.v1": "Published by GitHub webhook relay | owner: jonah | expiry: 2026-12-01",
+    # Runner usage events are produced by self-hosted runner telemetry outside
+    # contract-declared node publishers.
+    "onex.evt.omninode.runner-usage-recorded.v1": "Published by runner telemetry outside node contracts | owner: jonah | expiry: 2026-12-01",
     # omnimarket build-loop orchestrator publishes the workflow terminal event;
     # node_build_loop_projection_compute (this repo) consumes it. Cross-repo
     # publisher lives in omnimarket and is not visible to this scan.

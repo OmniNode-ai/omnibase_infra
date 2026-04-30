@@ -54,6 +54,7 @@ topics:
       description: "Cost summary projection snapshots."
       schema: "ModelCostSummarySnapshot"
 metadata:
+  description: "Materializes aggregate LLM cost and savings snapshots for the cost API read path."
   related_tickets:
     - "OMN-10342"
   tags:

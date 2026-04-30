@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Protocol
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.cost_projection_models import ModelCostSummarySnapshot
@@ -17,11 +16,6 @@ from omnibase_infra.services.cost_api.snapshot_cache import (
 )
 
 WINDOWS: tuple[str, ...] = ("24h", "7d", "30d")
-
-
-class SnapshotPublisher(Protocol):
-    async def publish(self, topic: str, payload: dict[str, object]) -> object:
-        raise NotImplementedError
 
 
 def _decimal(value: object) -> Decimal:
@@ -65,7 +59,7 @@ class HandlerProjectionCostSummary:
     async def emit_snapshot(
         self,
         pool: object,
-        publisher: SnapshotPublisher | None = None,
+        publisher: object | None = None,
         *,
         window: str = "24h",
         snapshot_timestamp: datetime | None = None,
@@ -114,8 +108,8 @@ class HandlerProjectionCostSummary:
         payload = snapshot.model_dump(mode="json")
         store_latest_snapshot(TOPIC_COST_SUMMARY, window, payload)
         if publisher is not None:
-            await publisher.publish(TOPIC_COST_SUMMARY, payload)
+            await publisher.publish(TOPIC_COST_SUMMARY, payload)  # type: ignore[attr-defined]
         return snapshot
 
 
-__all__ = ["HandlerProjectionCostSummary", "SnapshotPublisher", "WINDOWS"]
+__all__ = ["HandlerProjectionCostSummary", "WINDOWS"]

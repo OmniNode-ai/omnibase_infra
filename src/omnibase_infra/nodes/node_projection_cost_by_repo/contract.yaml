@@ -54,6 +54,7 @@ topics:
       description: "Repository cost projection snapshots."
       schema: "ModelCostByRepoSnapshot"
 metadata:
+  description: "Materializes repository-level LLM cost snapshots for the cost API read path."
   related_tickets:
     - "OMN-10342"
   tags:

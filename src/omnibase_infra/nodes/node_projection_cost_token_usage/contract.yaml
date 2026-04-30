@@ -54,6 +54,7 @@ topics:
       description: "Token usage projection snapshots."
       schema: "ModelCostTokenUsageSnapshot"
 metadata:
+  description: "Materializes model token-usage snapshots for the cost API read path."
   related_tickets:
     - "OMN-10342"
   tags:

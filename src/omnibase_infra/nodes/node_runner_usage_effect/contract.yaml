@@ -60,6 +60,7 @@ topics:
       description: "Runner cost avoidance savings estimates"
       schema: "ModelRunnerSavingsEstimated"
 metadata:
+  description: "Turns self-hosted runner usage events into durable savings estimates."
   related_tickets:
     - "OMN-10343"
   tags:
