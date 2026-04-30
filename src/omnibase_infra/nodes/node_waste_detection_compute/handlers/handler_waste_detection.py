@@ -11,22 +11,22 @@ from datetime import datetime
 from typing import cast
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_agent_loop import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_agent_loop import (
     analyze_agent_loop,
 )
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_high_output import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_high_output import (
     analyze_high_output,
 )
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_low_cache import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_low_cache import (
     analyze_low_cache,
 )
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_model_overkill import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_model_overkill import (
     analyze_model_overkill,
 )
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_retry_waste import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_retry_waste import (
     analyze_retry_waste,
 )
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_tool_failure_waste import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_tool_failure_waste import (
     analyze_tool_failure_waste,
 )
 from omnibase_infra.nodes.node_waste_detection_compute.models import (

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_utils import (
+from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_utils import (
     build_finding,
     first_attribution,
 )
