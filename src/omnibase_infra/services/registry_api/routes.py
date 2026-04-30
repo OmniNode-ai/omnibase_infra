@@ -24,7 +24,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -45,9 +45,7 @@ from omnibase_infra.services.registry_api.models import (
     ModelTopicView,
     ModelWidgetMapping,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
 
 def get_correlation_id(
