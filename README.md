@@ -1,6 +1,6 @@
 # omnibase_infra
 
-Production infrastructure runtime for ONEX.
+Production infrastructure runtime for ONEX (OmniNode eXecution).
 
 [![CI](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml/badge.svg)](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
