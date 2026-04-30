@@ -1,6 +1,6 @@
 # Stability-Test Runtime Lane
 
-Ticket: OMN-10281
+Ticket: OMN-10281, extended by OMN-10345
 
 This runbook defines the first non-deploying prep slice for a separate
 stability-test runtime lane. It does not start, restart, deploy, or mutate any
@@ -19,6 +19,10 @@ the two-phase runtime build plan into a concrete runtime lane:
   the production/local `ONEX_ENVIRONMENT=local` group prefix.
 - Explicit `ONEX_GROUP_ID` values use the `onex-stability-test-` prefix for the
   coarse runtime group settings.
+- `ONEX_RUNTIME_ADDRESS` gives each runtime a routable address instead of
+  treating stability-test as a special runtime flag.
+- `ONEX_RUNTIME_ID`, `ONEX_BOX_ID`, and `ONEX_RUNTIME_CAPABILITIES` describe
+  the concrete runtime target that orchestration can select later.
 - `KAFKA_INSTANCE_ID` values are stability-test specific, so selector-aware
   event-bus consumers can append a lane-specific instance discriminator.
 - Runtime state is mounted on stability-test volumes and uses
@@ -33,6 +37,15 @@ the two-phase runtime build plan into a concrete runtime lane:
   - `omninode-stability-test-runtime`
   - `omninode-stability-test-runtime-effects`
   - `omninode-stability-test-runtime-worker`
+- Runtime addresses:
+  - `runtime://omninode-pc/stability-test/main`
+  - `runtime://omninode-pc/stability-test/effects`
+  - `runtime://omninode-pc/stability-test/worker`
+- Runtime IDs:
+  - `stability-test-main`
+  - `stability-test-effects`
+  - `stability-test-worker`
+- Runtime box ID: `omninode-pc`
 - Runtime group IDs:
   - `onex-stability-test-runtime-main`
   - `onex-stability-test-runtime-effects`
