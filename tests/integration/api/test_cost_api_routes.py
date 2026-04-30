@@ -76,7 +76,7 @@ class FakeConnection:
         if "FROM savings_estimates" in sql:
             return [
                 {
-                    "model_local": "qwen3-coder-30b",
+                    "model_local": None,
                     "total_savings_usd": Decimal("5.000000"),
                     "local_cost_usd": Decimal("0.500000"),
                     "cloud_cost_usd": Decimal("5.500000"),
@@ -402,7 +402,7 @@ async def test_savings_summary_route_returns_seeded_value(
         "session_count": 1,
         "items": [
             {
-                "model_local": "qwen3-coder-30b",
+                "model_local": "unknown",
                 "total_savings_usd": "5.000000",
                 "local_cost_usd": "0.500000",
                 "cloud_cost_usd": "5.500000",

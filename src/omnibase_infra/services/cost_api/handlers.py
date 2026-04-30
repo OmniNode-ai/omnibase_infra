@@ -381,7 +381,7 @@ async def fetch_savings_summary(
         session_count=_int(_row_get(row, "session_count")),
         items=[
             ModelSavingsSummaryItem(
-                model_local=str(_row_get(item, "model_local", "unknown")),
+                model_local=str(_row_get(item, "model_local") or "unknown"),
                 total_savings_usd=_decimal(_row_get(item, "total_savings_usd")),
                 local_cost_usd=_decimal(_row_get(item, "local_cost_usd")),
                 cloud_cost_usd=_decimal(_row_get(item, "cloud_cost_usd")),
