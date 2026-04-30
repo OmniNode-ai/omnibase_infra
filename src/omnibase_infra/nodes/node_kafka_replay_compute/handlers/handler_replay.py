@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from asyncio import gather
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -282,7 +283,7 @@ class HandlerKafkaReplay:
         )
         result = self._progress_callback(progress)
         if inspect.isawaitable(result):
-            await result
+            await gather(result)
 
     @staticmethod
     def _sequence_key(topic: str, partition: int) -> str:
