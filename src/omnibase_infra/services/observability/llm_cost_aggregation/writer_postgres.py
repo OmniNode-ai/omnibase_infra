@@ -1020,6 +1020,9 @@ def _resolve_usage_source(event: dict[str, object]) -> str:
     normalized = event.get("usage_normalized")
     if isinstance(normalized, dict):
         source = normalized.get("source", "")
+        # no-migration: legacy API value maps to the existing measured enum.
+        if source == "api":
+            return EnumUsageSource.MEASURED.value
         try:
             return EnumUsageSource(source).value
         except ValueError:
