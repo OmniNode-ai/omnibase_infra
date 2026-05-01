@@ -838,11 +838,10 @@ def _dispatch_freeze_wait_timeout_seconds() -> float:
 
 def _derive_route_id(
     contract_name: str,
-    handler_name: str,
+    handler_key: str,
     topic: str,
-    operation: str | None = None,
 ) -> str:
-    """Derive a route ID from contract name, handler name, full topic path, and optional operation.
+    """Derive a route ID from contract name, handler entry key, and full topic path.
 
     Uses the full topic path (sanitized) to guarantee uniqueness across topics
     that share a common segment (OMN-8735).
@@ -850,40 +849,70 @@ def _derive_route_id(
     When two routing entries reference the same handler class for different
     operations (e.g. ``HandlerLlmCliSubprocess`` for both ``inference.gemini_cli``
     and ``inference.codex_cli``) and subscribe to the same topic, the
-    ``handler_name + topic`` pair alone produces a collision.  Including the
-    sanitized ``operation`` suffix guarantees each entry gets a distinct route
-    ID (OMN-9461).
+    ``handler + topic`` pair alone produces a collision.  The handler entry key
+    includes the sanitized operation suffix when present, guaranteeing each
+    entry gets a distinct route ID (OMN-9461 / OMN-10447).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
-    if operation:
-        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
-        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
-        safe_op = f"{normalized}_{digest}" if normalized else digest
-        return f"route.auto.{contract_name}.{handler_name}.{safe_op}.{safe_topic}"
-    return f"route.auto.{contract_name}.{handler_name}.{safe_topic}"
+    return f"route.auto.{contract_name}.{handler_key}.{safe_topic}"
 
 
-def _derive_dispatcher_id(
-    contract_name: str, handler_name: str, operation: str | None = None
-) -> str:
-    """Derive a dispatcher ID from contract name, handler name, and optional operation.
+def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
+    """Derive a dispatcher ID from contract name and handler entry key.
 
     When two routing entries in the same contract reference the same handler
     class (e.g. ``HandlerLlmCliSubprocess`` wired for both ``inference.gemini_cli``
-    and ``inference.codex_cli``), the plain ``handler_name`` alone produces a
-    collision.  Including the sanitized ``operation`` suffix guarantees each
-    entry gets a distinct dispatcher ID (OMN-9461).
-
-    When ``operation`` is absent the ID degrades to the original two-segment
-    form so existing contracts without repeated handler references are
-    unaffected.
+    and ``inference.codex_cli``), the plain handler name alone produces a
+    collision.  The entry key includes the sanitized operation suffix and keeps
+    dispatcher IDs distinct (OMN-9461 / OMN-10447).
     """
+    return f"dispatcher.auto.{contract_name}.{handler_key}"
+
+
+def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
+    """Return the stable per-entry handler key used for pre-resolution and IDs.
+
+    The key preserves the legacy plain handler name when ``operation`` is
+    absent. When operation is present, it appends a sanitized operation label
+    plus a short digest, preventing collisions when a contract uses the same
+    handler class for multiple operations.
+    """
+    handler_name = entry.handler.name
+    operation = entry.operation
     if operation:
         normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
         digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
         safe_op = f"{normalized}_{digest}" if normalized else digest
-        return f"dispatcher.auto.{contract_name}.{handler_name}.{safe_op}"
-    return f"dispatcher.auto.{contract_name}.{handler_name}"
+        return f"{handler_name}.{safe_op}"
+    return handler_name
+
+
+def _required_handler_init_params(handler_cls: type) -> frozenset[str]:
+    """Return required constructor parameter names for a handler class."""
+    sig = inspect.signature(handler_cls)
+    return frozenset(
+        name
+        for name, param in sig.parameters.items()
+        if name != "self"
+        and param.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+        and param.default is inspect.Parameter.empty
+    )
+
+
+def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
+    """Return True when sync container resolution is unnecessary for handler_cls.
+
+    Zero-arg handlers can be constructed directly by the resolver, and handlers
+    that require only ``event_bus`` can be constructed from the event-bus path.
+    In both cases, calling a sync container from runtime-managed async boot is
+    unnecessary and can trip ``asyncio.run()`` crashes.
+    """
+    required_params = _required_handler_init_params(handler_cls)
+    return not required_params or required_params == frozenset({"event_bus"})
 
 
 def _derive_topic_pattern_from_topic(topic: str) -> str:
@@ -1141,7 +1170,8 @@ async def wire_from_manifest(
                 continue
             for entry in contract.handler_routing.handlers:
                 handler_name = entry.handler.name
-                if handler_name in pre_resolved_handlers:
+                handler_key = _derive_handler_entry_key(entry)
+                if handler_key in pre_resolved_handlers:
                     continue
                 try:
                     handler_cls = _import_handler_class(
@@ -1151,11 +1181,12 @@ async def wire_from_manifest(
                         container, handler_cls
                     )
                     if instance is not None:
-                        pre_resolved_handlers[handler_name] = instance
+                        pre_resolved_handlers[handler_key] = instance
                         logger.debug(
-                            "Auto-wiring: pre-resolved %s.%s via container (async)",
+                            "Auto-wiring: pre-resolved %s.%s key=%s via container (async)",
                             entry.handler.module,
                             handler_name,
+                            handler_key,
                         )
                 except Exception:  # noqa: BLE001 — import errors are caught per-contract in Phase 1
                     pass
@@ -1749,6 +1780,7 @@ def _prepare_handler_wiring(
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     handler_ref = entry.handler
+    handler_key = _derive_handler_entry_key(entry)
 
     # Determine category/message types before importing or constructing the
     # handler. Some domain-owned contracts use auto-wiring for subscriptions
@@ -1807,24 +1839,11 @@ def _prepare_handler_wiring(
     # Fast path: if Phase 0 pre-resolved this handler via get_service_async,
     # skip the sync resolver's container Step 3 entirely (OMN-9410).
     pre_resolved_instance = (
-        pre_resolved_handlers.get(handler_ref.name) if pre_resolved_handlers else None
+        pre_resolved_handlers.get(handler_key) if pre_resolved_handlers else None
     )
-    sig = inspect.signature(handler_cls)
-    required_ctor_params = {
-        k
-        for k, v in sig.parameters.items()
-        if k != "self"
-        and v.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        and v.default is inspect.Parameter.empty
-    }
-    can_construct_without_container = (
-        not required_ctor_params or required_ctor_params == {"event_bus"}
-    )
-    if pre_resolved_handlers is not None and can_construct_without_container:
+    if pre_resolved_handlers is not None and _should_skip_sync_container_resolution(
+        handler_cls
+    ):
         _effective_container = None
     else:
         _effective_container = container or (
@@ -1873,9 +1892,10 @@ def _prepare_handler_wiring(
             handler_instance=pre_resolved_instance,
         )
         logger.debug(
-            "Auto-wiring: using pre-resolved instance for %s.%s",
+            "Auto-wiring: using pre-resolved instance for %s.%s key=%s",
             handler_ref.module,
             handler_ref.name,
+            handler_key,
         )
     else:
         # node_name=contract.name: established ONEX naming convention — see
@@ -1948,18 +1968,14 @@ def _prepare_handler_wiring(
         )
     else:
         callback = _make_dispatch_callback(handler_instance, entry.event_model)
-    dispatcher_id = _derive_dispatcher_id(
-        contract.name, handler_ref.name, entry.operation
-    )
+    dispatcher_id = _derive_dispatcher_id(contract.name, handler_key)
 
     # Pre-compute routes (no engine calls yet)
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
         for topic in contract.event_bus.subscribe_topics:
-            route_id = _derive_route_id(
-                contract.name, handler_ref.name, topic, entry.operation
-            )
+            route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
             route = ModelDispatchRoute(
