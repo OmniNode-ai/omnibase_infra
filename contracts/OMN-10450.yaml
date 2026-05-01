@@ -1,0 +1,52 @@
+# OMN-10450 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for stability overlay image alignment.
+schema_version: '1.0.0'
+ticket_id: OMN-10450
+summary: 'fix(OMN-10450): make stability overlay inherit release runtime image'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Stability-test compose render tests pass
+    command: uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - kind: manual
+    description: Stability overlay compose config renders successfully
+    command: env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+  - kind: tests
+    description: Stability-test compose render test passes ruff
+    command: uv run ruff check tests/integration/infra/test_stability_test_runtime_compose_render.py
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks {pr} --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Stability-test compose render tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q'
+  - id: dod-002
+    description: Stability overlay compose config renders successfully
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet'
+  - id: dod-003
+    description: Stability-test compose render test passes ruff
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run ruff check tests/integration/infra/test_stability_test_runtime_compose_render.py'
+  - id: dod-004
+    description: Runtime deploy smoke validates stability overlay inherits release runtime image after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy stability-test after merge and verify rendered compose has no runtime:stability-test-workspace image override, restart unless-stopped, and release build args'
