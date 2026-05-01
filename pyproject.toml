@@ -484,6 +484,7 @@ node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cle
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"
 node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_compute"
 node_intent_storage_effect = "omnibase_infra.nodes.node_intent_storage_effect"
+node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"
 node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"

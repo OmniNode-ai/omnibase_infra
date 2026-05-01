@@ -147,6 +147,12 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] DI boundary for lifecycle event emission — lets the remote-agent effect
     # test lifecycle publication without coupling the handler to EventBusKafka (OMN-9637).
     "ProtocolLifecycleEventSink": "nodes/node_remote_agent_invoke_effect/services/lifecycle_event_sink.py",
+    # [NODE] OMN-10392 replay compute narrows the AIOKafkaConsumer surface and
+    # Kafka record/key shapes for isolated replay handler tests.
+    "ProtocolKafkaMessage": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_message.py",
+    "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
+    "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
+    "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
