@@ -110,6 +110,10 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "OMNIBASE_INFRA_DIR",
         # OmniMemory crawl path — local server path, has no k8s equivalent
         "OMNIMEMORY_CRAWL_PATH_PREFIXES",
+        # Local runtime surface and marketplace skill roots are Docker-runtime
+        # ingress controls; k8s derives package/skill mounts separately.
+        "ONEX_ACTIVE_RUNTIME_PACKAGES",
+        "ONEX_MARKETPLACE_SKILLS_ROOT",
         # LLM endpoints — lab-local GPU servers (192.168.86.*); k8s onex-dev
         # routes to cluster-internal or public model endpoints via a different
         # mechanism (tracked: OMN-7979). In local docker these activate PluginLlm.
@@ -141,14 +145,8 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         # Qdrant vector store connection — not yet in k8s ConfigMap (tracked: OMN-4307)
         "QDRANT_HOST",
         "QDRANT_PORT",
-        "OMNICLAUDE_CONTRACTS_ROOT",  # container-internal path (OMN-5382: re-added for PluginClaude.wire_dispatchers)
-        "OMNICLAUDE_SKILLS_ROOT",  # container-internal path — same as CONTRACTS_ROOT
         "ONEX_REGISTRATION_AUTO_ACK",
         "USE_EVENT_ROUTING",
-        # Runtime package activation selector. k8s ConfigMap parity is tracked
-        # with the OMN-10445 release/deploy follow-up because this PR cannot
-        # update the sibling omninode_infra checkout used by the parity job.
-        "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",

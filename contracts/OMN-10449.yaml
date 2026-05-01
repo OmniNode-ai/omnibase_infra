@@ -1,0 +1,61 @@
+# OMN-10449 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for compose runtime alignment.
+schema_version: '1.0.0'
+ticket_id: OMN-10449
+summary: 'fix(OMN-10449): align runtime compose env with production'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Runtime env anchor and compose env parity tests pass
+    command: OMNINODE_INFRA_DIR=/Users/jonah/Code/omni_home/omninode_infra uv run pytest tests/ci/test_runtime_env_anchor.py tests/ci/test_env_parity.py tests/ci/test_compose_required_env_coverage.py -q
+  - kind: manual
+    description: Base compose config renders successfully
+    command: env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml --profile runtime config --quiet
+  - kind: manual
+    description: Stability overlay compose config renders successfully
+    command: env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+  - kind: tests
+    description: Runtime compose env and health values match OMN-10449
+    command: uv run python -c "from pathlib import Path; import yaml; raw=yaml.safe_load(Path('docker/docker-compose.infra.yml').read_text()); env=raw['x-runtime-env']; assert env['ONEX_STATE_ROOT'] == '/app/data/.onex_state'; assert env['ONEX_ACTIVE_RUNTIME_PACKAGES'] == '${ONEX_ACTIVE_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}'; assert env['ONEX_MARKETPLACE_SKILLS_ROOT'] == '${ONEX_MARKETPLACE_SKILLS_ROOT:-/app/skills}'; assert 'OMNICLAUDE_CONTRACTS_ROOT' not in env; assert 'OMNICLAUDE_SKILLS_ROOT' not in env; runtime_base=raw['x-runtime-base']['deploy']['resources']; assert runtime_base['limits']['memory'] == '1536M'; assert runtime_base['reservations']['memory'] == '256M'; assert raw['services']['omninode-runtime']['healthcheck']['start_period'] == '1800s'; assert raw['services']['runtime-effects']['healthcheck']['start_period'] == '1800s'; assert raw['services']['autoheal']['environment']['AUTOHEAL_START_PERIOD'] == 2400"
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks {pr} --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Runtime env anchor and compose env parity tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'OMNINODE_INFRA_DIR=/Users/jonah/Code/omni_home/omninode_infra uv run pytest tests/ci/test_runtime_env_anchor.py tests/ci/test_env_parity.py tests/ci/test_compose_required_env_coverage.py -q'
+  - id: dod-002
+    description: Base compose config renders successfully
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml --profile runtime config --quiet'
+  - id: dod-003
+    description: Stability overlay compose config renders successfully
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet'
+  - id: dod-004
+    description: Runtime compose env and health values match OMN-10449
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run python -c "from pathlib import Path; import yaml; raw=yaml.safe_load(Path(''docker/docker-compose.infra.yml'').read_text()); env=raw[''x-runtime-env'']; assert env[''ONEX_STATE_ROOT''] == ''/app/data/.onex_state''; assert env[''ONEX_ACTIVE_RUNTIME_PACKAGES''] == ''${ONEX_ACTIVE_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}''; assert env[''ONEX_MARKETPLACE_SKILLS_ROOT''] == ''${ONEX_MARKETPLACE_SKILLS_ROOT:-/app/skills}''; assert ''OMNICLAUDE_CONTRACTS_ROOT'' not in env; assert ''OMNICLAUDE_SKILLS_ROOT'' not in env; runtime_base=raw[''x-runtime-base''][''deploy''][''resources'']; assert runtime_base[''limits''][''memory''] == ''1536M''; assert runtime_base[''reservations''][''memory''] == ''256M''; assert raw[''services''][''omninode-runtime''][''healthcheck''][''start_period''] == ''1800s''; assert raw[''services''][''runtime-effects''][''healthcheck''][''start_period''] == ''1800s''; assert raw[''services''][''autoheal''][''environment''][''AUTOHEAL_START_PERIOD''] == 2400"'
+  - id: dod-005
+    description: Runtime deploy smoke validates compose alignment after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy omninode-runtime-effects after merge and verify docker compose config includes ONEX_MARKETPLACE_SKILLS_ROOT with no OMNICLAUDE_* runtime env roots'
