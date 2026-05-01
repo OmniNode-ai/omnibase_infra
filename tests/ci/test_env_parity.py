@@ -145,6 +145,10 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "OMNICLAUDE_SKILLS_ROOT",  # container-internal path — same as CONTRACTS_ROOT
         "ONEX_REGISTRATION_AUTO_ACK",
         "USE_EVENT_ROUTING",
+        # Runtime package activation selector. k8s ConfigMap parity is tracked
+        # with the OMN-10445 release/deploy follow-up because this PR cannot
+        # update the sibling omninode_infra checkout used by the parity job.
+        "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",
