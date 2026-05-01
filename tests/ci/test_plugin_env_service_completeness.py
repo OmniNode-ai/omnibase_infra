@@ -76,3 +76,15 @@ def test_plugin_host_envvars_have_compose_services() -> None:
         "Plugin HOST env vars point at non-existent compose services:\n"
         + "\n".join(failures)
     )
+
+
+@pytest.mark.unit
+def test_runtime_env_declares_active_runtime_packages() -> None:
+    """Runtime must not scan inactive installed packages during boot."""
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+    runtime_env: dict = compose.get("x-runtime-env", {})
+
+    assert (
+        runtime_env.get("ONEX_ACTIVE_RUNTIME_PACKAGES")
+        == "${ONEX_ACTIVE_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}"
+    )
