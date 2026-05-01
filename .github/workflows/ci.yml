@@ -79,6 +79,9 @@ jobs:
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
+      - name: Check Plugin* lifecycle class guard (OMN-10123)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 

@@ -190,6 +190,16 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-10123: Plugin* classes are deterministic compute plugins only.
+      # Daemon/service/worker lifecycles belong behind ONEX nodes and handlers.
+      - id: no-plugin-daemon-classes
+        name: Block Plugin* daemon/service/worker classes
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       # Union usage validation
       # TECH DEBT: Baseline increased to 108 violations (OMN-871)
       # Target: Reduce to 30 incrementally after PR #37 merges
