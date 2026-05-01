@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
+    _derive_handler_entry_key,
     _derive_message_category,
     _derive_route_id,
     _derive_topic_pattern_from_topic,
@@ -132,6 +133,15 @@ class TestDeriveMessageCategory:
 
 
 class TestDeriveIds:
+    @staticmethod
+    def _entry(
+        handler_name: str, operation: str | None = None
+    ) -> ModelHandlerRoutingEntry:
+        return ModelHandlerRoutingEntry(
+            handler=ModelHandlerRef(name=handler_name, module="test.handlers"),
+            operation=operation,
+        )
+
     def test_route_id(self) -> None:
         assert (
             _derive_route_id("my_node", "my_handler", "onex.evt.platform.my-topic.v1")
@@ -140,12 +150,15 @@ class TestDeriveIds:
 
     def test_route_id_with_operation(self) -> None:
         """OMN-9461: operation suffix disambiguates repeated handler references."""
+        handler_key = _derive_handler_entry_key(
+            self._entry("HandlerLlmCliSubprocess", "inference.gemini_cli")
+        )
+
         assert (
             _derive_route_id(
                 "my_node",
-                "HandlerLlmCliSubprocess",
+                handler_key,
                 "onex.cmd.omnibase-infra.llm-inference-request.v1",
-                "inference.gemini_cli",
             )
             == "route.auto.my_node.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661.onex_cmd_omnibase_infra_llm_inference_request_v1"
         )
@@ -157,7 +170,6 @@ class TestDeriveIds:
                 "my_node",
                 "my_handler",
                 "onex.evt.platform.my-topic.v1",
-                None,
             )
             == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
         )
@@ -170,25 +182,30 @@ class TestDeriveIds:
 
     def test_dispatcher_id_with_operation(self) -> None:
         """OMN-9461: operation suffix disambiguates repeated handler references."""
+        handler_key = _derive_handler_entry_key(
+            self._entry("HandlerLlmCliSubprocess", "inference.gemini_cli")
+        )
+
         assert (
             _derive_dispatcher_id(
                 "node_llm_inference_effect",
-                "HandlerLlmCliSubprocess",
-                "inference.gemini_cli",
+                handler_key,
             )
             == "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661"
         )
 
     def test_dispatcher_id_collision_safe(self) -> None:
         """OMN-9461: operations that normalize identically still produce distinct IDs."""
-        id_a = _derive_dispatcher_id("n", "H", "inference.a-b")
-        id_b = _derive_dispatcher_id("n", "H", "inference.a/b")
+        key_a = _derive_handler_entry_key(self._entry("H", "inference.a-b"))
+        key_b = _derive_handler_entry_key(self._entry("H", "inference.a/b"))
+        id_a = _derive_dispatcher_id("n", key_a)
+        id_b = _derive_dispatcher_id("n", key_b)
         assert id_a != id_b
 
     def test_dispatcher_id_without_operation_unchanged(self) -> None:
         """OMN-9461: absence of operation keeps original ID form."""
         assert (
-            _derive_dispatcher_id("my_node", "my_handler", None)
+            _derive_dispatcher_id("my_node", "my_handler")
             == "dispatcher.auto.my_node.my_handler"
         )
 
