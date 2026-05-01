@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Integration tests for single-authority dispatcher wiring in registration plugin.
 
-Verifies that ServiceRegistration owns explicit dispatcher adapters while
-generic contract-driven auto-wiring owns event-bus subscriptions.
+Verifies that ServiceRegistration does not register plugin-local dispatcher
+adapters while generic contract-driven auto-wiring owns event-bus wiring.
 
 The duplicate-registration error (ONEX_CORE_064_DUPLICATE_REGISTRATION)
 arose because both the legacy explicit path and the generic contract-driven
@@ -12,7 +12,7 @@ confirms that:
 
 1. The contract.yaml has the fields that justify auto-wiring subscription ownership.
 2. The plugin can be imported and instantiated without side effects.
-3. Dispatcher adapter registration happens through the domain wiring helper.
+3. Dispatcher adapter registration is intentionally skipped by the plugin.
 
 Fixtures from conftest.py:
     contract_data: parsed YAML content of node_registration_orchestrator/contract.yaml
@@ -20,7 +20,7 @@ Fixtures from conftest.py:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -89,7 +89,7 @@ class TestContractDeclaresHandlerRouting:
 
 
 class TestPluginWireDispatchersNoDuplicateRegistration:
-    """The plugin.wire_dispatchers() delegates to explicit dispatcher adapters."""
+    """The plugin.wire_dispatchers() defers to generic contract auto-wiring."""
 
     def test_plugin_importable(self) -> None:
         """ServiceRegistration can be imported without side effects."""
@@ -110,13 +110,8 @@ class TestPluginWireDispatchersNoDuplicateRegistration:
         assert plugin.plugin_id == "registration"
 
     @pytest.mark.asyncio
-    async def test_wire_dispatchers_delegates_to_domain_wiring_helper(self) -> None:
-        """wire_dispatchers() delegates adapter registration to domain wiring.
-
-        Generic auto-wiring still owns subscriptions. The registration plugin
-        owns the adapter layer because registration handlers expect domain
-        envelope semantics rather than raw dict envelopes.
-        """
+    async def test_wire_dispatchers_skips_plugin_local_adapter_wiring(self) -> None:
+        """wire_dispatchers() avoids duplicate plugin-local dispatcher wiring."""
         from dataclasses import dataclass
         from uuid import uuid4
 
@@ -150,25 +145,10 @@ class TestPluginWireDispatchersNoDuplicateRegistration:
         )
 
         plugin = ServiceRegistration()
-        with patch(
-            "omnibase_infra.nodes.node_registration_orchestrator.wiring"
-            ".wire_registration_dispatchers",
-            new=AsyncMock(
-                return_value={
-                    "dispatchers": ["dispatcher.registration.catalog-request"],
-                    "routes": ["route.registration.catalog-request"],
-                    "status": "success",
-                }
-            ),
-        ) as wire_registration_dispatchers:
-            result = await plugin.wire_dispatchers(config)
+        result = await plugin.wire_dispatchers(config)
 
         assert result.success is True
-        assert result.message == "Registration dispatchers wired"
-        assert result.services_registered == ["dispatcher.registration.catalog-request"]
-        wire_registration_dispatchers.assert_awaited_once_with(
-            config.container,
-            config.dispatch_engine,
-            correlation_id=config.correlation_id,
-            event_bus=config.event_bus,
-        )
+        assert "auto-wiring" in result.message.lower()
+        assert result.services_registered == []
+        engine.register_dispatcher.assert_not_called()
+        engine.register_route.assert_not_called()

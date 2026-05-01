@@ -997,76 +997,38 @@ class ServiceRegistration:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Wire registration dispatcher adapters into the dispatch engine.
+        """Defer registration dispatcher wiring to generic contract auto-wiring.
 
-        Registration remains a domain-owned dispatch surface because its
-        handlers expect domain envelope/adapter semantics. Generic
-        contract auto-wiring owns the Kafka subscriptions and result applier,
-        while this plugin owns the dispatcher adapters and routes that bridge
-        wire envelopes into registration handlers.
+        Generic contract auto-wiring owns registration event-bus wiring. The
+        registration plugin keeps handler/container wiring and output-side
+        result applier preparation, but it must not register a second
+        dispatcher/route family.
 
         Args:
-            config: Plugin configuration with container, dispatch engine, and
-                event bus.
+            config: Plugin configuration. Accepted for lifecycle symmetry; no
+                fields are required by this deferred step.
 
         Returns:
-            ``ModelDomainPluginResult`` for the explicit dispatcher wiring step.
+            ``ModelDomainPluginResult`` indicating dispatcher wiring was
+            intentionally skipped because auto-wiring owns it.
         """
         start_time = time.time()
-        correlation_id = config.correlation_id
-
-        if config.dispatch_engine is None:
-            return ModelDomainPluginResult.failed(
-                plugin_id=self.plugin_id,
-                error_message="Registration dispatcher wiring requires dispatch_engine",
-                duration_seconds=time.time() - start_time,
-            )
-
-        try:
-            from omnibase_infra.nodes.node_registration_orchestrator.wiring import (
-                wire_registration_dispatchers,
-            )
-
-            summary = await wire_registration_dispatchers(
-                config.container,
-                config.dispatch_engine,
-                correlation_id=correlation_id,
-                event_bus=config.event_bus,
-            )
-            dispatchers = summary["dispatchers"]
-            routes = summary["routes"]
-            if not isinstance(dispatchers, list) or not isinstance(routes, list):
-                raise TypeError("registration dispatcher summary is malformed")
-            duration = time.time() - start_time
-
-            logger.info(
-                "Registration dispatchers wired (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "dispatchers": dispatchers,
-                    "routes": routes,
-                },
-            )
-
-            return ModelDomainPluginResult(
-                plugin_id=self.plugin_id,
-                success=True,
-                message="Registration dispatchers wired",
-                services_registered=dispatchers,
-                duration_seconds=duration,
-            )
-
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(
-                "Failed to wire Registration dispatchers (correlation_id=%s)",
-                correlation_id,
-            )
-            return ModelDomainPluginResult.failed(
-                plugin_id=self.plugin_id,
-                error_message=sanitize_error_message(e),
-                duration_seconds=duration,
-            )
+        message = (
+            "Registration dispatcher wiring skipped: generic contract "
+            "auto-wiring owns registration event-bus wiring"
+        )
+        logger.info(
+            "%s (correlation_id=%s)",
+            message,
+            config.correlation_id,
+        )
+        return ModelDomainPluginResult(
+            plugin_id=self.plugin_id,
+            success=True,
+            message=message,
+            services_registered=[],
+            duration_seconds=time.time() - start_time,
+        )
 
     async def prepare_result_applier(
         self,
