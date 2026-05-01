@@ -3,6 +3,7 @@
 # contract carries deploy-gate evidence for runtime boot validation.
 schema_version: '1.0.0'
 ticket_id: OMN-10453
+title: 'Runtime boot auto-wiring validation'
 summary: 'test(OMN-10453): add main-profile runtime boot auto-wiring gate'
 is_seam_ticket: true
 interface_change: true
