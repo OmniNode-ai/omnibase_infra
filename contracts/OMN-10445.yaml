@@ -12,7 +12,7 @@ evidence_requirements:
     command: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
   - kind: "manual"
     description: "Sibling omninode_infra env parity checks pass with explicit OMNINODE_INFRA_DIR"
-    command: "OMNINODE_INFRA_DIR=/Users/jonah/Code/omni_home/omninode_infra uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
+    command: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
   - kind: "manual"
     description: "Post-merge deploy/readiness smoke command recorded; live deploy requires explicit approval"
     command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
@@ -32,7 +32,7 @@ dod_evidence:
     source: "generated"
     checks:
       - check_type: "command"
-        check_value: "OMNINODE_INFRA_DIR=/Users/jonah/Code/omni_home/omninode_infra uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
+        check_value: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
   - id: "dod-deploy"
     description: "Post-merge deploy/readiness smoke plan only; this PR has not deployed, restarted runtime, or mutated .201"
     source: "manual"
