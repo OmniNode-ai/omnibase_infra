@@ -24,6 +24,7 @@ def _default_consumed_topics() -> list[str]:
     reg = ServiceTopicRegistry.from_defaults()
     return [
         reg.resolve(topic_keys.LLM_CALL_COMPLETED),
+        reg.resolve(topic_keys.DISPATCH_OUTCOME_EVALUATED),
         reg.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
         reg.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
         reg.resolve(topic_keys.VALIDATOR_CATCH),

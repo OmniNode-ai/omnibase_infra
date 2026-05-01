@@ -93,6 +93,9 @@ class ServiceTopicRegistry:
             topic_keys.LLM_CALL_COMPLETED: (
                 "onex.evt.omniintelligence.llm-call-completed.v1"
             ),
+            topic_keys.DISPATCH_OUTCOME_EVALUATED: (
+                "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
+            ),
             topic_keys.LLM_CALL_COMPLETED_INFRA: (
                 "onex.evt.omnibase-infra.llm-call-completed.v1"
             ),

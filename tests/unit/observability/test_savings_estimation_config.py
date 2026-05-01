@@ -73,3 +73,23 @@ class TestSavingsEstimationConfig:
 
         with pytest.raises(ValidationError):
             ConfigSavingsEstimation()
+
+    def test_default_topics_include_dispatch_outcome_evaluated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS", "broker-specific:9092"
+        )
+
+        from omnibase_infra.services.observability.savings_estimation.config import (
+            ConfigSavingsEstimation,
+        )
+        from omnibase_infra.topics import topic_keys
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        registry = ServiceTopicRegistry.from_defaults()
+        cfg = ConfigSavingsEstimation()
+
+        assert registry.resolve(topic_keys.DISPATCH_OUTCOME_EVALUATED) in (
+            cfg.consumed_topics
+        )
