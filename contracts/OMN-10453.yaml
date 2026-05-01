@@ -1,0 +1,52 @@
+# OMN-10453 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for runtime boot validation.
+schema_version: '1.0.0'
+ticket_id: OMN-10453
+summary: 'test(OMN-10453): add main-profile runtime boot auto-wiring gate'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Main-profile runtime boot auto-wiring validation passes
+    command: uv run pytest tests/integration/runtime/test_runtime_boot_clean.py -q
+  - kind: tests
+    description: Runtime boot validation test passes ruff
+    command: uv run ruff check tests/integration/runtime/test_runtime_boot_clean.py
+  - kind: manual
+    description: Repo-local ticket contract validates
+    command: uv run validate-yaml contracts/OMN-10453.yaml
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks {pr} --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-runtime-boot-tests
+    description: Main-profile runtime boot auto-wiring validation passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/runtime/test_runtime_boot_clean.py -q'
+  - id: dod-lint
+    description: Runtime boot validation test passes ruff
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run ruff check tests/integration/runtime/test_runtime_boot_clean.py'
+  - id: dod-contract-validate
+    description: Repo-local ticket contract validates
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run validate-yaml contracts/OMN-10453.yaml'
+  - id: dod-post-merge-runtime-proof
+    description: Runtime deploy proof validates same main-profile manifest after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'after merge, deploy release candidate and verify omninode-runtime boots with RUNTIME_PROFILE=main without ModelOnexError'
