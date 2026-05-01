@@ -298,7 +298,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             prepared.resolution_outcome
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
         )
-        assert "explicit dispatcher adapters" in prepared.skip_reason
+        assert "auto-wiring" in prepared.skip_reason
 
     @pytest.mark.unit
     def test_message_types_includes_topic_derived_alias_when_no_explicit_alias(

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for ServiceRegistration.wire_dispatchers registration ownership.
 
-Verifies that the registration domain plugin owns explicit dispatcher adapter
-wiring while generic contract-driven auto-wiring owns subscriptions.
+Verifies that the registration domain plugin defers dispatcher and route
+wiring to generic contract-driven auto-wiring.
 
 Historical context
 ------------------
@@ -13,18 +13,21 @@ contract auto-wiring path against the same registration contract produced
 ``dispatcher.registration.node-introspected`` on fresh runtime-effects boots.
 
 These tests pin the corrected ownership invariant: the plugin's
-``wire_dispatchers`` method invokes the explicit wiring helper, and
-auto-wiring skips generic direct-handler dispatchers for this domain.
+``wire_dispatchers`` method does not invoke explicit dispatcher wiring or
+register plugin-local routes.
 """
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+import omnibase_infra.nodes.node_registration_orchestrator.plugin as plugin_module
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     ServiceRegistration,
 )
@@ -73,94 +76,94 @@ def _make_plugin_config() -> ModelDomainPluginConfig:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_wire_dispatchers_returns_wired_result() -> None:
-    """wire_dispatchers() returns a success result from explicit adapter wiring."""
+async def test_wire_dispatchers_returns_auto_wiring_skip_result() -> None:
+    """wire_dispatchers() returns success with an auto-wiring skip reason."""
     plugin = ServiceRegistration()
     config = _make_plugin_config()
 
-    with patch(
-        f"{_WIRING_MOD}.wire_registration_dispatchers",
-        new=AsyncMock(
-            return_value={
-                "dispatchers": ["dispatcher.registration.catalog-request"],
-                "routes": ["route.registration.catalog-request"],
-                "status": "success",
-            }
-        ),
-    ):
-        result = await plugin.wire_dispatchers(config)
+    result = await plugin.wire_dispatchers(config)
 
     assert result.success is True
     assert result.plugin_id == "registration"
-    assert result.message == "Registration dispatchers wired"
-    assert result.services_registered == ["dispatcher.registration.catalog-request"]
+    assert "skipped" in result.message.lower()
+    assert "auto-wiring" in result.message.lower()
+    assert result.services_registered == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_wire_dispatchers_invokes_explicit_helper() -> None:
-    """wire_dispatchers() delegates to registration's dispatcher adapters."""
+async def test_wire_dispatchers_does_not_touch_dispatch_engine() -> None:
+    """wire_dispatchers() must not register plugin-local dispatchers or routes."""
     plugin = ServiceRegistration()
     config = _make_plugin_config()
 
-    with patch(
-        f"{_WIRING_MOD}.wire_registration_dispatchers",
-        new=AsyncMock(
-            return_value={
-                "dispatchers": ["dispatcher.registration.catalog-request"],
-                "routes": ["route.registration.catalog-request"],
-                "status": "success",
-            }
-        ),
-    ) as mock_wire:
-        await plugin.wire_dispatchers(config)
+    result = await plugin.wire_dispatchers(config)
 
-    mock_wire.assert_awaited_once_with(
-        config.container,
-        config.dispatch_engine,
-        correlation_id=config.correlation_id,
-        event_bus=config.event_bus,
-    )
+    assert result.success is True
+    assert config.dispatch_engine is not None
+    config.dispatch_engine.register_dispatcher.assert_not_called()
+    config.dispatch_engine.register_route.assert_not_called()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_wire_dispatchers_fails_without_dispatch_engine() -> None:
-    """wire_dispatchers() must fail fast without a dispatch engine."""
+async def test_wire_dispatchers_skips_without_dispatch_engine() -> None:
+    """wire_dispatchers() does not require a dispatch engine when deferred."""
     plugin = ServiceRegistration()
     config = _make_plugin_config()
     config.dispatch_engine = None
 
     result = await plugin.wire_dispatchers(config)
 
-    assert result.success is False
-    assert result.error_message is not None
-    assert "dispatch_engine" in result.error_message
+    assert result.success is True
+    assert result.error_message is None
+    assert "auto-wiring" in result.message.lower()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_wire_dispatchers_delegates_each_repeat_call() -> None:
-    """Repeat calls delegate to the explicit helper each time."""
+async def test_wire_dispatchers_repeat_calls_remain_idempotent_skips() -> None:
+    """Repeat calls return the same deferred ownership result."""
     plugin = ServiceRegistration()
     config = _make_plugin_config()
 
-    with patch(
-        f"{_WIRING_MOD}.wire_registration_dispatchers",
-        new=AsyncMock(
-            return_value={
-                "dispatchers": ["dispatcher.registration.catalog-request"],
-                "routes": ["route.registration.catalog-request"],
-                "status": "success",
-            }
-        ),
-    ) as mock_wire:
-        first = await plugin.wire_dispatchers(config)
-        second = await plugin.wire_dispatchers(config)
+    first = await plugin.wire_dispatchers(config)
+    second = await plugin.wire_dispatchers(config)
 
     assert first.success is True
     assert second.success is True
-    assert mock_wire.await_count == 2
+    assert first.services_registered == []
+    assert second.services_registered == []
+
+
+@pytest.mark.unit
+def test_wire_dispatchers_ast_has_no_explicit_dispatch_registration() -> None:
+    """wire_dispatchers() must not call dispatcher/route registration APIs."""
+    source = Path(plugin_module.__file__).read_text(encoding="utf-8")
+    module = ast.parse(source)
+    service_cls = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "ServiceRegistration"
+    )
+    wire_dispatchers = next(
+        node
+        for node in service_cls.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "wire_dispatchers"
+    )
+
+    attrs = {
+        node.attr
+        for node in ast.walk(wire_dispatchers)
+        if isinstance(node, ast.Attribute)
+    }
+    names = {
+        node.id for node in ast.walk(wire_dispatchers) if isinstance(node, ast.Name)
+    }
+
+    assert "register_dispatcher" not in attrs
+    assert "register_route" not in attrs
+    assert "wire_registration_dispatchers" not in names
 
 
 @pytest.mark.unit

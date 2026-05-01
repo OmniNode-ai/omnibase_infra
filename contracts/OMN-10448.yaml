@@ -1,0 +1,54 @@
+# OMN-10448 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the registration dispatcher wiring change.
+schema_version: '1.0.0'
+ticket_id: OMN-10448
+title: 'Registration dispatcher auto-wiring'
+summary: 'fix(OMN-10448): defer registration dispatcher wiring to auto-wiring'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+  - topics
+evidence_requirements:
+  - kind: tests
+    description: Registration plugin dispatcher ownership unit and integration tests pass
+    command: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_wire_dispatchers_deferred.py tests/integration/nodes/test_plugin_wire_dispatchers_single_authority.py -q
+  - kind: tests
+    description: Auto-wiring registration skip reason regression passes
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q
+  - kind: tests
+    description: Touched plugin, auto-wiring, and tests pass ruff
+    command: uv run ruff check src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py src/omnibase_infra/runtime/auto_wiring/handler_wiring.py tests/unit/nodes/node_registration_orchestrator/test_plugin_wire_dispatchers_deferred.py tests/integration/nodes/test_plugin_wire_dispatchers_single_authority.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks {pr} --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Registration plugin dispatcher ownership unit and integration tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_wire_dispatchers_deferred.py tests/integration/nodes/test_plugin_wire_dispatchers_single_authority.py -q'
+  - id: dod-002
+    description: Auto-wiring registration skip reason regression passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q'
+  - id: dod-003
+    description: Touched plugin, auto-wiring, and tests pass ruff
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run ruff check src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py src/omnibase_infra/runtime/auto_wiring/handler_wiring.py tests/unit/nodes/node_registration_orchestrator/test_plugin_wire_dispatchers_deferred.py tests/integration/nodes/test_plugin_wire_dispatchers_single_authority.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py'
+  - id: dod-004
+    description: Runtime effects deploy smoke validates plugin dispatcher deferral after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime-effects python -c "from omnibase_infra.nodes.node_registration_orchestrator.plugin import ServiceRegistration; assert ServiceRegistration().plugin_id == ''registration''"'

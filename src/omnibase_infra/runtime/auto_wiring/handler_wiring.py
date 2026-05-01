@@ -1797,7 +1797,8 @@ def _prepare_handler_wiring(
                 EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
             ),
             skip_reason=(
-                "registration domain plugin owns explicit dispatcher adapters"
+                "registration direct-handler dispatcher creation is skipped; "
+                "generic contract auto-wiring owns registration event-bus wiring"
             ),
         )
 
