@@ -3,6 +3,7 @@
 # contract carries deploy-gate evidence for compose runtime alignment.
 schema_version: '1.0.0'
 ticket_id: OMN-10449
+title: 'Runtime compose environment alignment'
 summary: 'fix(OMN-10449): align runtime compose env with production'
 is_seam_ticket: true
 interface_change: true
