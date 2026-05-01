@@ -38,6 +38,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -1006,36 +1007,36 @@ def _safe_varchar(value: object, max_length: int) -> str | None:
 def _resolve_usage_source(event: dict[str, object]) -> str:
     """Resolve the usage_source enum value from an event.
 
-    The PostgreSQL enum ``usage_source_type`` has values: API, ESTIMATED, MISSING.
-    The ContractLlmCallMetrics uses ``usage_normalized.source`` with values:
-    api, estimated, missing (lowercase). We normalize to uppercase for the DB enum.
+    The PostgreSQL enum ``usage_source_type`` uses the shared usage-source
+    vocabulary.
 
     Args:
         event: Event dictionary.
 
     Returns:
-        One of 'API', 'ESTIMATED', or 'MISSING'.
+        A shared usage-source enum value.
     """
     # Check usage_normalized.source first
     normalized = event.get("usage_normalized")
     if isinstance(normalized, dict):
         source = normalized.get("source", "")
-        if isinstance(source, str) and source.upper() in (
-            "API",
-            "ESTIMATED",
-            "MISSING",
-        ):
-            return source.upper()
+        # no-migration: legacy API value maps to the existing measured enum.
+        if source == "api":
+            return EnumUsageSource.MEASURED.value
+        try:
+            return EnumUsageSource(source).value
+        except ValueError:
+            pass
 
     # Fall back to usage_is_estimated flag
     if event.get("usage_is_estimated"):
-        return "ESTIMATED"
+        return EnumUsageSource.ESTIMATED.value
 
     # Check if any token data is present
     if event.get("total_tokens") or event.get("prompt_tokens"):
-        return "API"
+        return EnumUsageSource.MEASURED.value
 
-    return "MISSING"
+    return EnumUsageSource.UNKNOWN.value
 
 
 __all__ = [

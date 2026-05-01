@@ -73,7 +73,7 @@ class TestGpuMeasurement:
         assert metrics.extensions["gpu_seconds"] == 2.346
         assert metrics.extensions["gpu_type"] == "rtx_5090"
         assert metrics.extensions["gpu_count"] == 1
-        assert metrics.extensions["compute_usage_source"] == "API"
+        assert metrics.extensions["compute_usage_source"] == "measured"
 
     @pytest.mark.asyncio
     async def test_compute_usage_source_estimated_when_usage_is_estimated(
@@ -95,7 +95,7 @@ class TestGpuMeasurement:
 
         metrics = handler.last_call_metrics
         assert metrics is not None
-        assert metrics.extensions["compute_usage_source"] == "ESTIMATED"
+        assert metrics.extensions["compute_usage_source"] == "estimated"
 
     def test_gpu_type_and_count_must_be_configured_together(self) -> None:
         with pytest.raises(ValueError, match="gpu_type and gpu_count"):
@@ -112,5 +112,5 @@ class TestGpuMeasurement:
             _make_request(
                 gpu_type=None,
                 gpu_count=None,
-                compute_usage_source="API",
+                compute_usage_source="measured",
             )

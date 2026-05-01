@@ -87,7 +87,7 @@ async def test_gpu_usage_evidence_reaches_both_metric_events() -> None:
         assert payload["gpu_seconds"] == 2.346
         assert payload["gpu_type"] == "rtx_5090"
         assert payload["gpu_count"] == 1
-        assert payload["compute_usage_source"] == "API"
+        assert payload["compute_usage_source"] == "measured"
 
 
 def test_pricing_manifest_rates_gpu_usage_evidence() -> None:

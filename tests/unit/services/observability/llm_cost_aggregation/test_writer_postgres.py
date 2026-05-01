@@ -352,38 +352,38 @@ class TestResolveUsageSource:
 
     @pytest.mark.unit
     def test_api_source_from_normalized(self) -> None:
-        """Resolves 'API' from usage_normalized.source."""
+        """Resolves measured source from usage_normalized.source."""
         event = {"usage_normalized": {"source": "api"}}
-        assert _resolve_usage_source(event) == "API"
+        assert _resolve_usage_source(event) == "measured"
 
     @pytest.mark.unit
     def test_estimated_source_from_normalized(self) -> None:
-        """Resolves 'ESTIMATED' from usage_normalized.source."""
+        """Resolves estimated source from usage_normalized.source."""
         event = {"usage_normalized": {"source": "estimated"}}
-        assert _resolve_usage_source(event) == "ESTIMATED"
+        assert _resolve_usage_source(event) == "estimated"
 
     @pytest.mark.unit
     def test_missing_source_from_normalized(self) -> None:
-        """Resolves 'MISSING' from usage_normalized.source."""
+        """Resolves unknown source from usage_normalized.source."""
         event = {"usage_normalized": {"source": "missing"}}
-        assert _resolve_usage_source(event) == "MISSING"
+        assert _resolve_usage_source(event) == "unknown"
 
     @pytest.mark.unit
     def test_estimated_from_flag(self) -> None:
         """Falls back to usage_is_estimated flag."""
         event = {"usage_is_estimated": True}
-        assert _resolve_usage_source(event) == "ESTIMATED"
+        assert _resolve_usage_source(event) == "estimated"
 
     @pytest.mark.unit
     def test_api_from_token_presence(self) -> None:
-        """Falls back to token presence for API detection."""
+        """Falls back to token presence for measured usage detection."""
         event = {"total_tokens": 100, "usage_is_estimated": False}
-        assert _resolve_usage_source(event) == "API"
+        assert _resolve_usage_source(event) == "measured"
 
     @pytest.mark.unit
     def test_missing_default(self) -> None:
-        """Returns MISSING when no data available."""
-        assert _resolve_usage_source({}) == "MISSING"
+        """Returns unknown when no data available."""
+        assert _resolve_usage_source({}) == "unknown"
 
 
 # =============================================================================

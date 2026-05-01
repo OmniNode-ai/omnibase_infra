@@ -16,7 +16,7 @@ contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
-  minor: 2
+  minor: 3
   patch: 0
 node_version:
   major: 0
@@ -26,7 +26,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, structured response parsing, and optional GPU usage evidence for local-model compute attribution.
+  LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, structured response parsing, and optional GPU usage evidence for local-model compute attribution using the shared EnumUsageSource vocabulary.
 
 # Strongly typed I/O models
 # Note: These models live in the shared omnibase_infra.models.llm package.
@@ -36,7 +36,7 @@ description: >
 input_model:
   name: "ModelLlmInferenceRequest"
   module: "omnibase_infra.models.llm"
-  description: "Input model containing LLM inference parameters and routing configuration."
+  description: "Input model containing LLM inference parameters, routing configuration, and optional EnumUsageSource-backed compute usage provenance."
 output_model:
   name: "ModelLlmInferenceResponse"
   module: "omnibase_infra.models.llm"
@@ -135,7 +135,7 @@ consumed_events:
 published_events:
   - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
     event_type: "LlmCallCompletedEvent"
-    description: "Per-call metrics emitted after each inference call; may include gpu_seconds, gpu_type, gpu_count, and compute_usage_source when the request declares GPU configuration"
+    description: "Per-call metrics emitted after each inference call; may include gpu_seconds, gpu_type, gpu_count, and EnumUsageSource-backed compute_usage_source when the request declares GPU configuration"
   - topic: "onex.evt.omnibase-infra.llm-call-completed.v1"
     event_type: "LlmCallCompletedInfraEvent"
     description: "Lightweight per-call metrics for infra-owned consumers; mirrors optional GPU usage evidence fields for infra projections"
@@ -157,7 +157,7 @@ capabilities:
   - name: "circuit_breaker_protection"
     description: "Per-backend circuit breaker for provider fault isolation"
   - name: "gpu_usage_evidence"
-    description: "When gpu_type and gpu_count are provided together, emits measured gpu_seconds and compute_usage_source on both LLM metric events"
+    description: "When gpu_type and gpu_count are provided together, emits measured gpu_seconds and shared EnumUsageSource compute_usage_source values on both LLM metric events"
 # Golden path: llm_cost chain (llm-call-completed -> llm_cost_aggregates table)
 golden_path:
   - "Complete LLM inference via provider-specific handler"
@@ -168,7 +168,7 @@ golden_path:
   - "Golden chain test: omnimarket/tests/test_golden_chain_projection_llm_cost.py"
 # Metadata
 metadata:
-  description: "LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, structured response parsing, and optional GPU usage evidence."
+  description: "LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, structured response parsing, and optional EnumUsageSource-backed GPU usage evidence."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-13"
