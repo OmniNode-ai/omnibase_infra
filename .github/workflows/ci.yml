@@ -41,6 +41,18 @@ env:
 
 jobs:
   # =============================================================================
+  # Phase 0 - Zone filter (OMN-10475)
+  # =============================================================================
+  # Calls the reusable workflow in omnibase_core. When every changed file is in
+  # the DOCS zone (including contracts/, drift/dod_receipts/, allowlists/,
+  # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
+  # lint, validators, contract gates, and receipt-gate callers still run.
+  zone-filter:
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@296431f68a7431b9a98cd3661c6a2e05d1a18e45
+    with:
+      python-version: "3.12"
+
+  # =============================================================================
   # Phase 1 - Quick Validation (parallel, ~2-3 min)
   # =============================================================================
   # Phase 2 - Parallel Test Suite (after Phase 1 completes)
@@ -780,7 +792,8 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    if: needs.zone-filter.outputs.docs_only != 'true'
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -1003,11 +1016,15 @@ jobs:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
           SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
         run: |
-          if [ "$TESTS_RESULT" != "success" ]; then
+          if [ "$TESTS_RESULT" != "success" ] && [ "$TESTS_RESULT" != "skipped" ]; then
             echo "::error::Test matrix failed (result: $TESTS_RESULT)"
             exit 1
           fi
-          echo "All ${SPLIT_COUNT} test splits passed"
+          if [ "$TESTS_RESULT" = "skipped" ]; then
+            echo "Test matrix skipped - docs-only / declarative-evidence diff"
+          else
+            echo "All ${SPLIT_COUNT} test splits passed"
+          fi
 
   # ============================================================================
   # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
@@ -1088,7 +1105,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
+    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
@@ -1123,7 +1140,7 @@ jobs:
              [[ "$topicdriftcheck" == "success" ]] && \
              [[ "$archinvariants" == "success" ]] && \
              [[ "$schemahandshake" == "success" ]] && \
-             [[ "$migrationintegration" == "success" ]] && \
+             [[ "$migrationintegration" == "success" || "$migrationintegration" == "skipped" ]] && \
              [[ "$migrationrequiredcheck" == "success" ]] && \
              [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
              [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
@@ -1278,6 +1295,8 @@ jobs:
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
     name: Migration Integration Test
+    needs: zone-filter
+    if: needs.zone-filter.outputs.docs_only != 'true'
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
