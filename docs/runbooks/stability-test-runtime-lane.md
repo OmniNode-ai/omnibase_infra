@@ -12,9 +12,8 @@ The stability-test lane exists so runtime proof can be prepared without sharing
 production runtime names, state paths, or consumer groups. It is the bridge from
 the two-phase runtime build plan into a concrete runtime lane:
 
-- `BUILD_SOURCE=workspace` is declared in the overlay so selector-aware builds
-  use local workspace contents once OMN-9471 or equivalent selector support is
-  on main.
+- The overlay inherits the release runtime image build from the base compose
+  file instead of declaring a lane-specific workspace image.
 - `ONEX_ENVIRONMENT=stability-test` separates derived node consumer groups from
   the production/local `ONEX_ENVIRONMENT=local` group prefix.
 - Explicit `ONEX_GROUP_ID` values use the `onex-stability-test-` prefix for the
@@ -36,7 +35,7 @@ the two-phase runtime build plan into a concrete runtime lane:
 
 - Compose overlay: `docker/docker-compose.stability-test.yml`
 - Compose project name: `omnibase-infra-stability-test`
-- Runtime image tag: `runtime:stability-test-workspace`
+- Runtime image: inherited from the base runtime build.
 - Runtime containers:
   - `omninode-stability-test-runtime`
   - `omninode-stability-test-runtime-effects`
@@ -62,9 +61,7 @@ the two-phase runtime build plan into a concrete runtime lane:
   - Valkey: `26379`
   - Runtime main: `18085`
   - Runtime effects: `18086`
-- Build args:
-  - `BUILD_SOURCE=workspace`
-  - `EXPECTED_BUILD_SOURCE=workspace`
+- Build args: inherited from the base runtime build.
 - Networks:
   - `omnibase-infra-stability-test-network`
   - `omnibase-infra-stability-test-omnimemory-network`
@@ -109,8 +106,8 @@ uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render
 - It does not install launchd, cron, systemd, or autoheal hooks.
 - It does not prove runtime health, Redpanda membership, or build-loop to
   ticket-pipeline processing.
-- It does not prove workspace image provenance until `BUILD_SOURCE` selector
-  support is available on this branch.
+- It does not prove workspace image provenance; this lane intentionally follows
+  the release runtime build until a separately approved selector change lands.
 
 ## Operator Gate
 

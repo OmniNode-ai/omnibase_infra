@@ -3,6 +3,7 @@
 # contract carries deploy-gate evidence for stability overlay image alignment.
 schema_version: '1.0.0'
 ticket_id: OMN-10450
+title: 'Stability overlay inherits release runtime image'
 summary: 'fix(OMN-10450): make stability overlay inherit release runtime image'
 is_seam_ticket: true
 interface_change: true

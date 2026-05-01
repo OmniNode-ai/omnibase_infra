@@ -114,12 +114,9 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
         container_name = service["container_name"]
         assert "stability-test" in container_name
         assert container_name not in PRODUCTION_CONTAINER_NAMES
-        assert service["image"] == "runtime:stability-test-workspace"
-        assert service["restart"] == "no"
-        assert service["build"]["args"] == {
-            "BUILD_SOURCE": "workspace",
-            "EXPECTED_BUILD_SOURCE": "workspace",
-        }
+        assert "image" not in service
+        assert "build" not in service
+        assert service["restart"] == "unless-stopped"
 
 
 @pytest.mark.unit
@@ -129,8 +126,8 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
 
     for service_name in RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
-        assert environment["BUILD_SOURCE"] == "workspace"
-        assert environment["EXPECTED_BUILD_SOURCE"] == "workspace"
+        assert "BUILD_SOURCE" not in environment
+        assert "EXPECTED_BUILD_SOURCE" not in environment
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
@@ -326,7 +323,7 @@ def test_stability_runbook_is_validation_only() -> None:
     assert "does not render inherited out-of-lane runtime services" in runbook
     assert "config" in runbook
     assert "--profile runtime" in runbook
-    assert "BUILD_SOURCE=workspace" in runbook
+    assert "inherits the release runtime image build" in runbook
     assert "runtime://omninode-pc/stability-test/main" in runbook
     assert "runtime://omninode-pc/stability-test/effects" in runbook
     assert "runtime://omninode-pc/stability-test/worker" in runbook
