@@ -151,6 +151,24 @@ class ValidatorCatchSignal:
 
 
 @dataclass
+class DispatchEvalSignal:
+    """Raw dispatch evaluation signal for task-level savings projection."""
+
+    task_id: str
+    dispatch_id: str
+    ticket_id: str | None = None
+    verdict: str = ""
+    quality_score: float | None = None
+    token_cost: int = 0
+    dollars_cost: float = 0.0
+    usage_source: str = "UNKNOWN"
+    estimation_method: str | None = None
+    source_payload_hash: str | None = None
+    model_local: str | None = None
+    model_cloud_baseline: str | None = None
+
+
+@dataclass
 class SessionBuffer:
     """Accumulates signals for a single session."""
 
@@ -159,6 +177,7 @@ class SessionBuffer:
     llm_calls: list[LlmCallSignal] = field(default_factory=list)
     injection_signals: list[InjectionSignal] = field(default_factory=list)
     validator_catches: list[ValidatorCatchSignal] = field(default_factory=list)
+    dispatch_evals: list[DispatchEvalSignal] = field(default_factory=list)
     treatment_group: str = "treatment"
     outcome_received: bool = False
     outcome_received_at: float = 0.0
@@ -185,6 +204,66 @@ def _classify_severity(raw: str) -> EnumCatchSeverity:
     if lower in ("major", "warning", "warn"):
         return EnumCatchSeverity.MAJOR
     return EnumCatchSeverity.MINOR
+
+
+def _coerce_int(value: object, default: int = 0) -> int:
+    """Coerce wire payload numeric values without raising on missing fields."""
+    if value is None:
+        return default
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    """Coerce wire payload numeric values without raising on missing fields."""
+    if value is None:
+        return default
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_optional_str(value: object) -> str | None:
+    """Return a non-empty string or None for absent wire fields."""
+    if value is None:
+        return None
+    text = str(value)
+    return text or None
+
+
+def _coerce_quality_score(value: object) -> float | None:
+    """Return a bounded dispatch quality score when present."""
+    if value is None:
+        return None
+    score = _coerce_float(value, default=-1.0)
+    if 0.0 <= score <= 1.0:
+        return score
+    return None
+
+
+def _first_model_call_model(payload: dict[str, object]) -> str | None:
+    """Extract the first model call's model name from a dispatch payload."""
+    model_calls = payload.get("model_calls")
+    if not isinstance(model_calls, list) or not model_calls:
+        return None
+    first_call = model_calls[0]
+    if not isinstance(first_call, dict):
+        return None
+    model = str(first_call.get("model", ""))
+    return model or None
+
+
+def _session_id_for_topic(topic: str, payload: dict[str, object]) -> str:
+    """Resolve the correlation key for session and dispatch feeds."""
+    session_id = _coerce_optional_str(payload.get("session_id"))
+    if session_id:
+        return session_id
+    if "dispatch-outcome-evaluated" in topic:
+        return _coerce_optional_str(payload.get("task_id")) or ""
+    return ""
 
 
 def _compute_validator_catch_savings(
@@ -315,7 +394,66 @@ def _build_effectiveness_entries(
             )
         )
 
+    for dispatch_sig in buf.dispatch_evals:
+        if dispatch_sig.token_cost <= 0 or dispatch_sig.verdict.upper() != "PASS":
+            continue
+        utilization = (
+            dispatch_sig.quality_score
+            if dispatch_sig.quality_score is not None
+            else 0.5
+        )
+        entries.append(
+            ModelEffectivenessEntry(
+                utilization_score=round(utilization, 4),
+                patterns_count=0,
+                tokens_saved=dispatch_sig.token_cost,
+                model_tier=_model_tier_from_id(
+                    dispatch_sig.model_cloud_baseline or "claude-opus-4-6"
+                ),
+                is_output_tokens=False,
+            )
+        )
+
     return tuple(entries)
+
+
+def _ingest_dispatch_eval(buf: SessionBuffer, payload: dict[str, object]) -> None:
+    """Accumulate an idempotent dispatch-eval signal in a session buffer."""
+    task_id = str(payload.get("task_id", ""))
+    dispatch_id = str(payload.get("dispatch_id", ""))
+    if not task_id or not dispatch_id:
+        return
+
+    model_local = _coerce_optional_str(
+        payload.get("model_local")
+    ) or _first_model_call_model(payload)
+    model_cloud_baseline = _coerce_optional_str(payload.get("model_cloud_baseline"))
+    usage_source = str(payload.get("usage_source", "UNKNOWN")).upper()
+    if usage_source not in {"MEASURED", "ESTIMATED", "UNKNOWN"}:
+        usage_source = "UNKNOWN"
+
+    signal = DispatchEvalSignal(
+        task_id=task_id,
+        dispatch_id=dispatch_id,
+        ticket_id=_coerce_optional_str(payload.get("ticket_id")),
+        verdict=str(payload.get("verdict", "")).upper(),
+        quality_score=_coerce_quality_score(payload.get("quality_score")),
+        token_cost=_coerce_int(payload.get("token_cost")),
+        dollars_cost=_coerce_float(payload.get("dollars_cost")),
+        usage_source=usage_source,
+        estimation_method=_coerce_optional_str(payload.get("estimation_method")),
+        source_payload_hash=_coerce_optional_str(payload.get("source_payload_hash")),
+        model_local=model_local,
+        model_cloud_baseline=model_cloud_baseline,
+    )
+    for index, existing in enumerate(buf.dispatch_evals):
+        if existing.task_id == task_id and existing.dispatch_id == dispatch_id:
+            buf.dispatch_evals[index] = signal
+            break
+    else:
+        buf.dispatch_evals.append(signal)
+    buf.outcome_received = True
+    buf.outcome_received_at = time.monotonic()
 
 
 class ServiceSavingsEstimator:
@@ -348,7 +486,7 @@ class ServiceSavingsEstimator:
 
     def ingest_event(self, topic: str, payload: dict[str, object]) -> None:
         """Ingest a consumed event into the correlation buffer."""
-        session_id = str(payload.get("session_id", ""))
+        session_id = _session_id_for_topic(topic, payload)
         if not session_id:
             return
 
@@ -359,6 +497,8 @@ class ServiceSavingsEstimator:
 
         if "llm-call-completed" in topic:
             self._ingest_llm_call(buf, payload)
+        elif "dispatch-outcome-evaluated" in topic:
+            _ingest_dispatch_eval(buf, payload)
         elif "session-outcome" in topic:
             self._ingest_session_outcome(buf, payload)
         elif "hook-context-injected" in topic:
@@ -464,11 +604,16 @@ class ServiceSavingsEstimator:
         actual_total_tokens = sum(
             c.prompt_tokens + c.completion_tokens for c in buf.llm_calls
         )
+        dispatch_total_tokens = sum(sig.token_cost for sig in buf.dispatch_evals)
+        if actual_total_tokens == 0:
+            actual_total_tokens = dispatch_total_tokens
 
         # Determine model ID from LLM calls
         actual_model_id = "claude-opus-4-6"
         if buf.llm_calls:
             actual_model_id = buf.llm_calls[0].model_id
+        elif buf.dispatch_evals and buf.dispatch_evals[0].model_local:
+            actual_model_id = buf.dispatch_evals[0].model_local
 
         # Pass the session's correlation_id through to the estimate so it
         # appears in the Kafka payload.  The omnidash projection handler uses
@@ -495,6 +640,8 @@ class ServiceSavingsEstimator:
 
             # --- Counterfactual model ---
             counterfactual = _resolve_counterfactual(actual_model_id)
+            if buf.dispatch_evals and buf.dispatch_evals[0].model_cloud_baseline:
+                counterfactual = buf.dispatch_evals[0].model_cloud_baseline
             result["counterfactual_model_id"] = counterfactual
 
             # --- Heuristic savings from validator catches (Task 3) ---
@@ -539,6 +686,26 @@ class ServiceSavingsEstimator:
             # savings_estimates table for A/B analysis.
             if buf.treatment_group:
                 result["treatment_group"] = buf.treatment_group
+
+            if buf.dispatch_evals:
+                first_dispatch = buf.dispatch_evals[0]
+                result["task_id"] = first_dispatch.task_id
+                result["dispatch_id"] = first_dispatch.dispatch_id
+                result["ticket_id"] = first_dispatch.ticket_id
+                result["usage_source"] = first_dispatch.usage_source
+                result["estimation_method"] = (
+                    first_dispatch.estimation_method or "dispatch_eval_projection_v1"
+                )
+                result["source_payload_hash"] = first_dispatch.source_payload_hash
+                result["model_local"] = first_dispatch.model_local or actual_model_id
+                result["model_cloud_baseline"] = counterfactual
+                result["local_cost_usd"] = first_dispatch.dollars_cost
+                result["cloud_cost_usd"] = round(
+                    first_dispatch.dollars_cost
+                    + float(result.get("estimated_total_savings_usd", 0.0)),
+                    10,
+                )
+                result["savings_usd"] = result["estimated_total_savings_usd"]
             return result
         except Exception:
             logger.exception(
