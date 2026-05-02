@@ -54,6 +54,7 @@ x-runner-base: &runner-base
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+    - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
   group_add:
     - "984" # Match host Docker socket GID for DinD access
@@ -77,6 +78,7 @@ services:
       RUNNER_NAME: omninode-runner-1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
@@ -87,6 +89,7 @@ services:
       RUNNER_NAME: omninode-runner-2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
@@ -97,6 +100,7 @@ services:
       RUNNER_NAME: omninode-runner-3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
@@ -107,6 +111,7 @@ services:
       RUNNER_NAME: omninode-runner-4
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
@@ -117,6 +122,7 @@ services:
       RUNNER_NAME: omninode-runner-5
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
@@ -127,6 +133,7 @@ services:
       RUNNER_NAME: omninode-runner-6
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
@@ -137,6 +144,7 @@ services:
       RUNNER_NAME: omninode-runner-7
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
@@ -147,6 +155,7 @@ services:
       RUNNER_NAME: omninode-runner-8
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
@@ -157,6 +166,7 @@ services:
       RUNNER_NAME: omninode-runner-9
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
@@ -167,6 +177,7 @@ services:
       RUNNER_NAME: omninode-runner-10
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-10-creds:/home/runner/.runner-creds
   omninode-runner-11:
@@ -177,6 +188,7 @@ services:
       RUNNER_NAME: omninode-runner-11
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-11-creds:/home/runner/.runner-creds
   omninode-runner-12:
@@ -187,6 +199,7 @@ services:
       RUNNER_NAME: omninode-runner-12
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
@@ -197,6 +210,7 @@ services:
       RUNNER_NAME: omninode-runner-13
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
@@ -207,6 +221,7 @@ services:
       RUNNER_NAME: omninode-runner-14
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
@@ -217,6 +232,7 @@ services:
       RUNNER_NAME: omninode-runner-15
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
@@ -227,6 +243,7 @@ services:
       RUNNER_NAME: omninode-runner-16
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
@@ -237,6 +254,7 @@ services:
       RUNNER_NAME: omninode-runner-17
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
@@ -247,6 +265,7 @@ services:
       RUNNER_NAME: omninode-runner-18
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
@@ -257,6 +276,7 @@ services:
       RUNNER_NAME: omninode-runner-19
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
@@ -267,6 +287,7 @@ services:
       RUNNER_NAME: omninode-runner-20
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - runner-20-creds:/home/runner/.runner-creds
 volumes:

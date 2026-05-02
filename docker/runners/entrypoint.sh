@@ -87,8 +87,17 @@ _restore_cached_creds() {
     local cache_file="${CRED_CACHE_DIR}/${key}"
     if [[ -d "${cache_file}" ]]; then
         echo "[entrypoint] Restoring cached runner credentials (key=${key:0:12}...)"
-        cp -r "${cache_file}/"* "${RUNNER_HOME}/" 2>/dev/null || true
-        return 0
+        local restored=0
+        for f in .runner .credentials .credentials_rsaparams; do
+            if [[ -f "${cache_file}/${f}" ]]; then
+                cp "${cache_file}/${f}" "${RUNNER_HOME}/${f}"
+                restored=$((restored + 1))
+            fi
+        done
+        if [[ "${restored}" -gt 0 ]]; then
+            return 0
+        fi
+        echo "[entrypoint] Credential cache exists but contains no runner credential files."
     fi
     return 1
 }
