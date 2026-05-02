@@ -95,8 +95,6 @@ def _load_registry() -> tuple[ModelRegistryEntry, ...]:
                 api_key_env=m.get("api_key_env", ""),
                 capabilities=tuple(m.get("capabilities", [])),
                 context_window=m.get("context_window", 4096),
-                seed_cost_per_1k_tokens=m.get("seed_cost_per_1k_tokens", 0.0),
-                seed_tokens_per_sec=m.get("seed_tokens_per_sec", 0.0),
                 tier=m.get("tier", "local"),
             )
         )
@@ -124,8 +122,6 @@ async def list_models() -> dict[str, list[dict]]:
                 "tier": m.tier,
                 "capabilities": list(m.capabilities),
                 "context_window": m.context_window,
-                "seed_cost_per_1k_tokens": m.seed_cost_per_1k_tokens,
-                "seed_tokens_per_sec": m.seed_tokens_per_sec,
             }
             for m in registry
         ]

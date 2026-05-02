@@ -5,20 +5,20 @@
 # Intelligent Model Router — pure scoring of candidate models.
 # No I/O, no state mutation. Deterministic for same inputs.
 #
-# Ticket: OMN-7267
+# Tickets: OMN-7267, OMN-7841
 #
 name: "node_model_router_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
-description: "Pure scoring of candidate models by quality, cost, speed, and availability."
+  patch: 1
+node_version: "1.0.1"
+description: "Pure scoring of candidate models by quality, measured cost tier, live speed metrics, and availability."
 input_model:
   name: "ModelScoringInput"
   module: "omnibase_infra.nodes.node_model_router_compute.models.model_scoring_input"
-  description: "Combined registry, health, metrics, and constraints for scoring."
+  description: "Combined seedless registry, health, live metrics, and constraints for scoring."
 output_model:
   name: "ModelRoutingDecision"
   module: "omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision"
@@ -31,12 +31,20 @@ handler_routing:
         name: "HandlerScoreModels"
         module: "omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models"
 metadata:
-  description: "Pure model scoring compute for intelligent router"
+  description: "Pure model scoring compute for intelligent router; seed cost/speed fields are not authoritative inputs."
   author: "OmniNode Team"
   created: "2026-04-02"
+  updated: "2026-04-30"
+  routing_policy:
+    ticket: "OMN-7841"
+    live_metrics_threshold: 20
+    unmeasured_speed_score: 0.0
+    registry_seed_cost_speed_authoritative: false
   tags:
     - "compute"
     - "scoring"
     - "model-router"
     - "llm"
     - "pure-function"
+    - "seedless-registry"
+    - "live-metrics"

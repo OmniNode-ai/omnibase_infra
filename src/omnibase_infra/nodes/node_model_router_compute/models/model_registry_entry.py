@@ -27,12 +27,6 @@ class ModelRegistryEntry(BaseModel):
         default_factory=tuple, description="Declared capabilities."
     )
     context_window: int = Field(default=4096, description="Max context window tokens.")
-    seed_cost_per_1k_tokens: float = Field(
-        default=0.0, description="Bootstrap cost estimate per 1K tokens."
-    )
-    seed_tokens_per_sec: float = Field(
-        default=0.0, description="Bootstrap throughput estimate."
-    )
     tier: str = Field(default="local", description="Tier: local or frontier_api.")
     concurrency_limit: int | None = Field(
         default=None,

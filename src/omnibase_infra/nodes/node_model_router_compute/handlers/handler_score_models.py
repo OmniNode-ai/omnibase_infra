@@ -4,6 +4,10 @@
 
 This is a COMPUTE handler — NO I/O, NO state mutation.
 Scores candidate models by: quality * w + (1-cost) * w + speed * w + chain_bonus.
+
+Models without sufficient live metrics (>=20 samples) receive lowest routing
+priority. Seed/bootstrap estimates have been removed (OMN-7841) — only measured
+eval data drives routing decisions.
 """
 
 from __future__ import annotations
@@ -32,25 +36,27 @@ from omnibase_infra.nodes.node_model_router_compute.models.model_scoring_input i
 
 logger = logging.getLogger(__name__)
 
-# Minimum live sample count before live metrics override seeds
 _LIVE_METRICS_THRESHOLD = 20
 
-# Queue depth above which availability drops to 0
 _MAX_QUEUE_DEPTH = 50
 
-# Maximum cost for normalization ($/1K tokens)
-_MAX_COST_NORM = 0.02
-
-# Maximum speed for normalization (tokens/sec)
-_MAX_SPEED_NORM = 250.0
-
-# Cold-start quality estimate for models with no live data
 _COLD_START_QUALITY = 0.3
+
+_UNMEASURED_SPEED_SCORE = 0.0
+
+_LOCAL_COST_PER_1K = 0.0
+
+_FRONTIER_COST_PER_1K = 0.015
 
 
 def _capability_match(model: ModelRegistryEntry, task_type: str) -> bool:
-    """Check if model declares a capability matching the task type."""
     return task_type in model.capabilities
+
+
+def _effective_cost_per_1k(model: ModelRegistryEntry) -> float:
+    if model.tier == "local":
+        return _LOCAL_COST_PER_1K
+    return _FRONTIER_COST_PER_1K
 
 
 def _passes_hard_constraints(
@@ -58,28 +64,22 @@ def _passes_hard_constraints(
     constraints: ModelRoutingConstraints,
     health_map: dict[str, ModelEndpointHealth],
 ) -> bool:
-    """Check hard constraints — returns False if model is filtered out."""
-    # Context window
     if model.context_window < constraints.min_context_window:
         return False
 
-    # Cost cap
-    if constraints.max_cost_per_1k < model.seed_cost_per_1k_tokens:
+    cost = _effective_cost_per_1k(model)
+    if cost > constraints.max_cost_per_1k:
         return False
 
-    # Vision requirement
     if constraints.needs_vision and "vision" not in model.capabilities:
         return False
 
-    # Computer use requirement
     if constraints.needs_computer_use and "computer_use" not in model.capabilities:
         return False
 
-    # Tool use requirement
     if constraints.needs_tool_use and "tool_use" not in model.capabilities:
         return False
 
-    # Health check — unhealthy models are excluded
     health = health_map.get(model.model_key)
     if health is not None and not health.healthy:
         return False
@@ -88,8 +88,6 @@ def _passes_hard_constraints(
 
 
 class ScoringContext:
-    """Pre-built lookup tables passed to _compute_score."""
-
     __slots__ = (
         "chain_hit_model_key",
         "health_map",
@@ -113,11 +111,15 @@ class ScoringContext:
         self.weights = weights
 
 
+_MAX_COST_NORM = 0.02
+
+_MAX_SPEED_NORM = 250.0
+
+
 def _compute_score(
     model: ModelRegistryEntry,
     ctx: ScoringContext,
 ) -> float:
-    """Compute composite score for a single model."""
     task_type = ctx.task_type
     health_map = ctx.health_map
     metrics_map = ctx.metrics_map
@@ -125,13 +127,11 @@ def _compute_score(
     weights = ctx.weights
     live = metrics_map.get(model.model_key)
 
-    # Quality dimension
     if live and live.sample_count >= _LIVE_METRICS_THRESHOLD:
         quality = live.success_rate
         if live.graduated:
-            quality = min(1.0, quality + 0.1)  # graduation boost
+            quality = min(1.0, quality + 0.1)
     elif live and live.sample_count > 0:
-        # Interpolate between seed and live
         ratio = live.sample_count / _LIVE_METRICS_THRESHOLD
         seed_quality = (
             0.5 if _capability_match(model, task_type) else _COLD_START_QUALITY
@@ -140,22 +140,17 @@ def _compute_score(
     else:
         quality = 0.5 if _capability_match(model, task_type) else _COLD_START_QUALITY
 
-    # Cost dimension (1 - normalized_cost, so cheaper = higher score)
-    cost_norm = min(model.seed_cost_per_1k_tokens / _MAX_COST_NORM, 1.0)
+    cost = _effective_cost_per_1k(model)
+    cost_norm = min(cost / _MAX_COST_NORM, 1.0)
     cost_score = 1.0 - cost_norm
 
-    # Speed dimension
-    speed = (
-        live.avg_tokens_per_sec
-        if live and live.sample_count > 0
-        else model.seed_tokens_per_sec
-    )
-    speed_score = min(speed / _MAX_SPEED_NORM, 1.0)
+    if live and live.sample_count > 0 and live.avg_tokens_per_sec > 0:
+        speed_score = min(live.avg_tokens_per_sec / _MAX_SPEED_NORM, 1.0)
+    else:
+        speed_score = _UNMEASURED_SPEED_SCORE
 
-    # Chain bonus
     chain_bonus = 1.0 if chain_hit_model_key == model.model_key else 0.0
 
-    # Availability (health + queue depth)
     health = health_map.get(model.model_key)
     if health is None or health.healthy:
         queue = health.queue_depth if health else 0
@@ -187,14 +182,6 @@ class HandlerScoreModels:
     def score_candidates(
         self, scoring_input: ModelScoringInput
     ) -> ModelRoutingDecision:
-        """Score all candidate models and return the routing decision.
-
-        Args:
-            scoring_input: Complete scoring input with registry, health, metrics.
-
-        Returns:
-            ModelRoutingDecision with selected model and rationale.
-        """
         health_map: dict[str, ModelEndpointHealth] = {
             e.model_key: e for e in scoring_input.health
         }
@@ -204,7 +191,6 @@ class HandlerScoreModels:
 
         task_type_str = scoring_input.task_type.value
 
-        # Filter by hard constraints
         candidates = [
             m
             for m in scoring_input.registry
@@ -221,7 +207,6 @@ class HandlerScoreModels:
                 error_message="No eligible models after constraint filtering.",
             )
 
-        # Score each candidate
         ctx = ScoringContext(
             task_type=task_type_str,
             health_map=health_map,
@@ -235,7 +220,6 @@ class HandlerScoreModels:
         for model in candidates:
             scores[model.model_key] = _compute_score(model, ctx)
 
-        # Sort by score descending, then prefer_local as tiebreaker
         def sort_key(model: ModelRegistryEntry) -> tuple[float, int]:
             score = scores[model.model_key]
             local_bonus = (
@@ -250,7 +234,6 @@ class HandlerScoreModels:
         selected = candidates[0]
         fallback = candidates[1] if len(candidates) > 1 else None
 
-        # Build rationale
         parts = [
             f"Selected {selected.model_key} (score={scores[selected.model_key]:.3f})",
             f"task_type={task_type_str}",
@@ -270,6 +253,21 @@ class HandlerScoreModels:
 
         endpoint_env = selected.base_url_env or selected.api_key_env
 
+        selected_live = metrics_map.get(selected.model_key)
+        estimated_cost = _effective_cost_per_1k(selected) * (
+            scoring_input.context_length_estimate / 1000
+        )
+        estimated_speed = (
+            selected_live.avg_tokens_per_sec
+            if selected_live
+            and selected_live.sample_count > 0
+            and selected_live.avg_tokens_per_sec > 0
+            else 1.0
+        )
+        estimated_latency_ms = int(
+            (scoring_input.context_length_estimate / estimated_speed) * 1000
+        )
+
         return ModelRoutingDecision(
             correlation_id=scoring_input.correlation_id,
             selected_model_key=selected.model_key,
@@ -277,13 +275,6 @@ class HandlerScoreModels:
             fallback_model_key=fallback.model_key if fallback else None,
             rationale="; ".join(parts),
             scores=scores,
-            estimated_cost=selected.seed_cost_per_1k_tokens
-            * (scoring_input.context_length_estimate / 1000),
-            estimated_latency_ms=int(
-                (
-                    scoring_input.context_length_estimate
-                    / max(selected.seed_tokens_per_sec, 1)
-                )
-                * 1000
-            ),
+            estimated_cost=estimated_cost,
+            estimated_latency_ms=estimated_latency_ms,
         )
