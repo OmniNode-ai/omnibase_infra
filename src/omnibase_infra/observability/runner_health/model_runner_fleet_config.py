@@ -23,6 +23,11 @@ class ModelRunnerFleetConfig(BaseModel):
     runner_group: str = Field(..., min_length=1)
     runner_name_prefix: str = Field(..., min_length=1)
     expected_count: int = Field(..., ge=1)
+    burst_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional maximum runner count enabled only by the compose burst profile.",
+    )
 
 
 def default_runner_fleet_config_path() -> Path:

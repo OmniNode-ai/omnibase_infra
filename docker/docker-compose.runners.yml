@@ -2,8 +2,8 @@
 # OmniNode self-hosted GitHub Actions runners
 # Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714
 #
-# Runs the configured stateful runner fleet.
-# The expected count is owned by config/runner_fleet.yaml.
+# Runs the configured steady-state runner fleet; burst runners are profile-gated.
+# The steady-state and burst counts are owned by config/runner_fleet.yaml.
 # Each runner registers with GitHub org OmniNode-ai in the 'omnibase-ci' runner group.
 #
 # Prerequisites:
@@ -34,8 +34,8 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 4g     — 80 GB total across 20 configured runners
-#   cpus: "2.0"       — 2 vCPUs per runner (40 total; host has 32 threads)
+#   mem_limit: 4g     - 48 GB steady across 12 runners; 80 GB only with the burst profile
+#   cpus: "2.0"       — 24 vCPUs steady; 40 vCPUs only with the burst profile
 #   pids_limit: 4096  — prevents fork bombs from runaway test processes
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
@@ -204,6 +204,7 @@ services:
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-13
     environment:
       !!merge <<: *runner-env
@@ -215,6 +216,7 @@ services:
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-14
     environment:
       !!merge <<: *runner-env
@@ -226,6 +228,7 @@ services:
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-15
     environment:
       !!merge <<: *runner-env
@@ -237,6 +240,7 @@ services:
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-16
     environment:
       !!merge <<: *runner-env
@@ -248,6 +252,7 @@ services:
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-17
     environment:
       !!merge <<: *runner-env
@@ -259,6 +264,7 @@ services:
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-18
     environment:
       !!merge <<: *runner-env
@@ -270,6 +276,7 @@ services:
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-19
     environment:
       !!merge <<: *runner-env
@@ -281,6 +288,7 @@ services:
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
+    profiles: ["burst"]
     container_name: omninode-runner-20
     environment:
       !!merge <<: *runner-env

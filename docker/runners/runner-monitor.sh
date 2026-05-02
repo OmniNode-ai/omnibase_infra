@@ -41,6 +41,7 @@ RUNNER_ORG="$(config_field github_org)"
 RUNNER_GROUP="$(config_field runner_group)"
 RUNNER_NAME_PREFIX="$(config_field runner_name_prefix)"
 EXPECTED_RUNNERS="$(config_field expected_count)"
+BURST_RUNNERS="$(config_field burst_count 2>/dev/null || echo "${EXPECTED_RUNNERS}")"
 RUNNER_HOST="$(config_field runner_host)"
 
 # Slack config — passed via environment (cron sources ~/.omnibase/.env)
@@ -178,8 +179,8 @@ for name in "${!current_status[@]}"; do
         continue
     fi
     index="${name##*-}"
-    if [[ "${index}" -gt "${EXPECTED_RUNNERS}" ]]; then
-        unhealthy_list+=("${name}: EXTRA Docker container beyond configured count ${EXPECTED_RUNNERS}")
+    if [[ "${index}" -gt "${BURST_RUNNERS}" ]]; then
+        unhealthy_list+=("${name}: EXTRA Docker container beyond configured burst count ${BURST_RUNNERS}")
     fi
 done
 
@@ -189,8 +190,8 @@ if [[ "${github_api_failed}" != true ]]; then
             continue
         fi
         index="${name##*-}"
-        if [[ "${index}" -gt "${EXPECTED_RUNNERS}" ]]; then
-            unhealthy_list+=("${name}: EXTRA GitHub registration beyond configured count ${EXPECTED_RUNNERS}")
+        if [[ "${index}" -gt "${BURST_RUNNERS}" ]]; then
+            unhealthy_list+=("${name}: EXTRA GitHub registration beyond configured burst count ${BURST_RUNNERS}")
         fi
     done
 fi

@@ -22,7 +22,8 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.github_org == "OmniNode-ai"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
-    assert config.expected_count == 20
+    assert config.expected_count == 12
+    assert config.burst_count == 20
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -34,13 +35,20 @@ def test_runner_compose_matches_configured_count() -> None:
     )
 
     services = compose["services"]
-    runner_services = [
+    steady_runner_services = [
+        name
+        for name, definition in services.items()
+        if re.fullmatch(rf"{config.runner_name_prefix}-\d+", name)
+        and "profiles" not in definition
+    ]
+    all_runner_services = [
         name
         for name in services
         if re.fullmatch(rf"{config.runner_name_prefix}-\d+", name)
     ]
 
-    assert len(runner_services) == config.expected_count
+    assert len(steady_runner_services) == config.expected_count
+    assert len(all_runner_services) == config.burst_count
 
 
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
