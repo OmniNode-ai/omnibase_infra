@@ -51,3 +51,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_contains_isolated_runtime_identity tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_inherits_release_build_source -q'
+  - id: dod-deploy
+    description: Post-deploy stability runtime smoke validates the stability-test lane identity
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec ${STABILITY_RUNTIME_CONTAINER:-omninode-stability-test-runtime} printenv ONEX_ENVIRONMENT'
