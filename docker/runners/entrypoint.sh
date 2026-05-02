@@ -91,6 +91,7 @@ _restore_cached_creds() {
         for f in .runner .credentials .credentials_rsaparams; do
             if [[ -f "${cache_file}/${f}" ]]; then
                 cp "${cache_file}/${f}" "${RUNNER_HOME}/${f}"
+                chown runner:runner "${RUNNER_HOME}/${f}"
                 restored=$((restored + 1))
             fi
         done
@@ -111,6 +112,7 @@ _save_creds() {
     for f in .runner .credentials .credentials_rsaparams; do
         if [[ -f "${RUNNER_HOME}/${f}" ]]; then
             cp "${RUNNER_HOME}/${f}" "${cache_file}/${f}"
+            chown runner:runner "${cache_file}/${f}"
         fi
     done
     echo "[entrypoint] Runner credentials cached (key=${key:0:12}...)"
