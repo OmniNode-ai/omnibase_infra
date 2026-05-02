@@ -1444,11 +1444,13 @@ async def bootstrap() -> int:
                             await event_bus.subscribe(
                                 _input_topic,
                                 on_message=_savings_on_message,  # type: ignore[arg-type]
+                                group_id=f"savings-estimator.{_input_topic}",
                             )
                         except Exception:  # noqa: BLE001
-                            logger.debug(
+                            logger.warning(
                                 "Could not subscribe to %s for savings estimation",
                                 _input_topic,
+                                exc_info=True,
                             )
 
                     while True:
