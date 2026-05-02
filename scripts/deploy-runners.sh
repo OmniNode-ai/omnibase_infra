@@ -83,6 +83,7 @@ SYNC_PATHS=(
     "${RUNNER_FLEET_CONFIG}"
     "docker/runners/Dockerfile"
     "docker/runners/entrypoint.sh"
+    "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
     "docker/docker-compose.runners.yml"
 )
@@ -147,7 +148,7 @@ run_local() {
 # ---------------------------------------------------------------------------
 
 fetch_registration_token() {
-    log "Fetching GitHub Actions registration token for org ${RUNNER_ORG}..."
+    log "Fetching GitHub Actions registration token for org ${RUNNER_ORG}..." >&2
     # Separate declaration from assignment so set -e catches gh api failures
     local token
     token=$(gh api --method POST "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token) \
@@ -191,6 +192,7 @@ rsync_artifacts() {
     rsync -av --checksum \
         "${REPO_ROOT}/docker/runners/Dockerfile" \
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
+        "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
@@ -208,6 +210,7 @@ rsync_artifacts() {
 
 deploy_runners() {
     local token_b64="${1}"
+    local remote_token_b64="${token_b64}"
 
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml"
 
@@ -219,10 +222,14 @@ deploy_runners() {
 
     log "Deploying runners on ${RUNNER_HOST} (force-recreate ensures fresh env)..."
 
+    if "${DRY_RUN}"; then
+        remote_token_b64="<redacted-token-b64>"
+    fi
+
     # Decode token on remote side to avoid shell metacharacter issues
     run_ssh "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${token_b64}' | base64 -d)
+        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
         export RUNNER_TOKEN
         cd ${RUNNER_HOST_DIR}
         ${compose_cmd} up -d ${up_flags}
@@ -267,7 +274,11 @@ install_monitor_cron() {
     local runner_github_token="${RUNNER_GITHUB_TOKEN:-${GH_PAT:-${GITHUB_TOKEN:-}}}"
     if [[ -f "${HOME}/.omnibase/.env" ]]; then
         # shellcheck disable=SC1091
-        set -a && source "${HOME}/.omnibase/.env" && set +a
+        set +u
+        set -a
+        source "${HOME}/.omnibase/.env"
+        set +a
+        set -u
         slack_bot_token="${SLACK_BOT_TOKEN:-}"
         slack_channel_id="${SLACK_CHANNEL_ID:-}"
         runner_github_token="${RUNNER_GITHUB_TOKEN:-${GH_PAT:-${GITHUB_TOKEN:-${runner_github_token}}}}"
