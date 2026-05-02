@@ -205,13 +205,14 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
-        assert environment["BUILD_SOURCE"] == "workspace"
-        assert environment["EXPECTED_BUILD_SOURCE"] == "workspace"
+        assert "BUILD_SOURCE" not in environment
+        assert "EXPECTED_BUILD_SOURCE" not in environment
         assert environment["OMNIMEMORY_ENABLED"] == ""
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
-        assert services[service_name]["image"] == "runtime:stability-test-workspace"
+        assert "image" not in services[service_name]
+        assert services[service_name]["restart"] == "unless-stopped"
         assert environment["ONEX_RUNTIME_ADDRESS"].startswith(
             "runtime://omninode-pc/stability-test/"
         )
@@ -261,7 +262,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
 
 
 @pytest.mark.integration
-def test_stability_lane_render_uses_workspace_build_source() -> None:
+def test_stability_lane_render_inherits_release_build_source() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
 
@@ -270,8 +271,8 @@ def test_stability_lane_render_uses_workspace_build_source() -> None:
         assert build["context"] == str(REPO_ROOT)
         assert build["dockerfile"] == "docker/Dockerfile.runtime"
         assert build["args"] == {
-            "BUILD_SOURCE": "workspace",
-            "EXPECTED_BUILD_SOURCE": "workspace",
+            "BUILD_SOURCE": "release",
+            "EXPECTED_BUILD_SOURCE": "release",
         }
 
 

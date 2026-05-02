@@ -15,12 +15,6 @@
 #
 # Requires Docker Compose v2.24.4 or later for !override merge semantics.
 name: omnibase-infra-stability-test
-x-stability-runtime-build: &stability-runtime-build
-  context: ..
-  dockerfile: docker/Dockerfile.runtime
-  args:
-    BUILD_SOURCE: workspace
-    EXPECTED_BUILD_SOURCE: workspace
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -88,18 +82,14 @@ services:
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
   omninode-runtime:
-    build: *stability-runtime-build
-    image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime
-    restart: "no"
+    restart: unless-stopped
     depends_on:
       intelligence-migration:
         condition: service_completed_successfully
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      BUILD_SOURCE: workspace
-      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
@@ -126,13 +116,9 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
-    build: *stability-runtime-build
-    image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-effects
-    restart: "no"
+    restart: unless-stopped
     environment:
-      BUILD_SOURCE: workspace
-      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
@@ -159,13 +145,9 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
       - "com.omninode.runtime.id=stability-test-effects"
   runtime-worker:
-    build: *stability-runtime-build
-    image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime-worker
-    restart: "no"
+    restart: unless-stopped
     environment:
-      BUILD_SOURCE: workspace
-      EXPECTED_BUILD_SOURCE: workspace
       # Keep PluginMemory inactive in stability lane:
       # - blank legacy flag
       # - blank Memgraph host override
