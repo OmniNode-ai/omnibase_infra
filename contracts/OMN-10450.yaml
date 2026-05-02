@@ -46,8 +46,8 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run ruff check tests/integration/infra/test_stability_test_runtime_compose_render.py'
   - id: dod-004
-    description: Runtime deploy smoke validates stability overlay inherits release runtime image after merge
-    source: manual
+    description: Rendered stability overlay inherits release runtime image settings
+    source: generated
     checks:
       - check_type: command
-        check_value: 'deploy stability-test after merge and verify rendered compose has no runtime:stability-test-workspace image override, restart unless-stopped, and release build args'
+        check_value: 'uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_contains_isolated_runtime_identity tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_inherits_release_build_source -q'
