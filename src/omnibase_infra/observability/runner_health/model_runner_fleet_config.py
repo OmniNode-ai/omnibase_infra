@@ -30,7 +30,8 @@ def default_runner_fleet_config_path() -> Path:
     env_path = os.environ.get("RUNNER_FLEET_CONFIG_PATH", "")
     if env_path:
         return Path(env_path).expanduser()
-    return Path.cwd() / "config" / "runner_fleet.yaml"
+    repo_root = Path(__file__).resolve().parents[4]
+    return repo_root / "config" / "runner_fleet.yaml"
 
 
 def load_runner_fleet_config(path: Path | None = None) -> ModelRunnerFleetConfig:

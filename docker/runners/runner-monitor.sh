@@ -86,6 +86,7 @@ declare -A github_status
 total_found=0
 healthy=0
 unhealthy_list=()
+github_api_failed=false
 
 while IFS=$'\t' read -r name status; do
     [[ -z "${name}" ]] && continue
@@ -98,16 +99,17 @@ github_json=$(curl -fsS \
     "https://api.github.com/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null || true)
 
 if [[ -z "${github_json}" ]]; then
+    github_api_failed=true
     unhealthy_list+=("GITHUB_API: failed to fetch org runner status")
 else
-    while IFS=$'\t' read -r name status busy; do
+    while IFS=$'\t' read -r name status; do
         [[ -z "${name}" ]] && continue
         github_status["$name"]="$status"
     done < <(jq -r --arg prefix "${RUNNER_NAME_PREFIX}" --arg group "${RUNNER_GROUP}" '
         .runners[]
         | select(.name | startswith($prefix))
         | select(any(.labels[]; .name == $group))
-        | [.name, .status, (.busy | tostring)]
+        | [.name, .status]
         | @tsv
     ' <<< "${github_json}")
 fi
@@ -119,7 +121,6 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     name="${RUNNER_NAME_PREFIX}-${i}"
     total_found=$((total_found + 1))
     docker_state="${current_status[$name]:-MISSING (no container)}"
-    gh_state="${github_status[$name]:-missing}"
 
     if [[ "${docker_state}" == "MISSING (no container)" ]]; then
         unhealthy_list+=("${name}: MISSING (no container)")
@@ -131,6 +132,12 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
         continue
     fi
 
+    if [[ "${github_api_failed}" == true ]]; then
+        healthy=$((healthy + 1))
+        continue
+    fi
+
+    gh_state="${github_status[$name]:-missing}"
     if [[ "${gh_state}" != "online" ]]; then
         unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state}")
         continue
@@ -165,15 +172,17 @@ for name in "${!current_status[@]}"; do
     fi
 done
 
-for name in "${!github_status[@]}"; do
-    if [[ ! "${name}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]]; then
-        continue
-    fi
-    index="${name##*-}"
-    if [[ "${index}" -gt "${EXPECTED_RUNNERS}" ]]; then
-        unhealthy_list+=("${name}: EXTRA GitHub registration beyond configured count ${EXPECTED_RUNNERS}")
-    fi
-done
+if [[ "${github_api_failed}" != true ]]; then
+    for name in "${!github_status[@]}"; do
+        if [[ ! "${name}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]]; then
+            continue
+        fi
+        index="${name##*-}"
+        if [[ "${index}" -gt "${EXPECTED_RUNNERS}" ]]; then
+            unhealthy_list+=("${name}: EXTRA GitHub registration beyond configured count ${EXPECTED_RUNNERS}")
+        fi
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Compare with previous state and alert on transitions
