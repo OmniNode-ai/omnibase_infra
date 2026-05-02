@@ -5,6 +5,10 @@
 from omnibase_infra.observability.runner_health.enum_runner_health_state import (
     EnumRunnerHealthState,
 )
+from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
+    ModelRunnerFleetConfig,
+    load_runner_fleet_config,
+)
 from omnibase_infra.observability.runner_health.model_runner_health_alert import (
     ModelRunnerHealthAlert,
 )
@@ -20,4 +24,6 @@ __all__ = [
     "ModelRunnerHealthAlert",
     "ModelRunnerHealthSnapshot",
     "ModelRunnerStatus",
+    "ModelRunnerFleetConfig",
+    "load_runner_fleet_config",
 ]

@@ -16,7 +16,8 @@
 #   4. Deploy via SSH: docker compose up -d --build --force-recreate --remove-orphans
 #   5. Install docker prune cron idempotently (build cache + untagged images, tee)
 #   6. Install runner health monitor cron (Slack alerts on state transitions)
-#   7. Poll GitHub API until all 10 runners online (max 5 min, 15s interval)
+#   7. Poll GitHub API until the configured runner fleet is online
+#      (max 5 min, 15s interval)
 #   8. Retry once with fresh token if poll times out
 #   9. Print stale runner report (offline runners with no host container)
 #
@@ -41,21 +42,45 @@ set -euo pipefail
 # Constants
 # ---------------------------------------------------------------------------
 
-RUNNER_HOST="192.168.86.201"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RUNNER_FLEET_CONFIG="${RUNNER_FLEET_CONFIG_PATH:-${REPO_ROOT}/config/runner_fleet.yaml}"
+
+runner_config_field() {
+    local field="${1}"
+    [[ -f "${RUNNER_FLEET_CONFIG}" ]] || {
+        echo "[deploy-runners] ERROR: runner fleet config not found: ${RUNNER_FLEET_CONFIG}" >&2
+        exit 1
+    }
+    local value
+    value=$(awk -F':[[:space:]]*' -v key="${field}" '
+        $1 == key {
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", $2)
+            print $2
+            found=1
+        }
+        END { if (!found) exit 1 }
+    ' "${RUNNER_FLEET_CONFIG}") || {
+        echo "[deploy-runners] ERROR: missing ${field} in ${RUNNER_FLEET_CONFIG}" >&2
+        exit 1
+    }
+    echo "${value}"
+}
+
+RUNNER_HOST="$(runner_config_field runner_host)"
 # Remote path on the CI host — NOT local $HOME (which differs between macOS and Linux)
 RUNNER_HOST_DIR="/home/jonah/.omnibase/runners"
-RUNNER_ORG="OmniNode-ai"
-RUNNER_GROUP="omnibase-ci"
-RUNNER_NAME_PREFIX="omninode-runner"
-RUNNER_COUNT=10
+RUNNER_ORG="$(runner_config_field github_org)"
+RUNNER_GROUP="$(runner_config_field runner_group)"
+RUNNER_NAME_PREFIX="$(runner_config_field runner_name_prefix)"
+RUNNER_COUNT="$(runner_config_field expected_count)"
 COMPOSE_FILE="docker/docker-compose.runners.yml"
 POLL_MAX_SECONDS=300
 POLL_INTERVAL_SECONDS=15
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Artifacts to sync to the host (relative to repo root)
 SYNC_PATHS=(
+    "config/runner_fleet.yaml"
     "docker/runners/Dockerfile"
     "docker/runners/entrypoint.sh"
     "docker/runners/runner-monitor.sh"
@@ -151,14 +176,18 @@ rsync_artifacts() {
     log "Rsyncing runner artifacts to ${RUNNER_HOST}:${RUNNER_HOST_DIR}/ ..."
 
     # Ensure remote directory structure exists
-    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker"
+    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/config ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker"
 
     if "${DRY_RUN}"; then
         log "[DRY RUN] rsync ${SYNC_PATHS[*]} -> ${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
         return 0
     fi
 
-    # Sync Dockerfile, entrypoint, and monitor into docker/runners/
+    # Sync fleet config, Dockerfile, entrypoint, and monitor.
+    rsync -av --checksum \
+        "${REPO_ROOT}/config/runner_fleet.yaml" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/config/"
+
     rsync -av --checksum \
         "${REPO_ROOT}/docker/runners/Dockerfile" \
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
@@ -235,16 +264,26 @@ install_monitor_cron() {
     # Source local .env to get Slack credentials
     local slack_bot_token=""
     local slack_channel_id=""
+    local runner_github_token="${RUNNER_GITHUB_TOKEN:-${GH_PAT:-${GITHUB_TOKEN:-}}}"
     if [[ -f "${HOME}/.omnibase/.env" ]]; then
         # shellcheck disable=SC1091
         set -a && source "${HOME}/.omnibase/.env" && set +a
         slack_bot_token="${SLACK_BOT_TOKEN:-}"
         slack_channel_id="${SLACK_CHANNEL_ID:-}"
+        runner_github_token="${RUNNER_GITHUB_TOKEN:-${GH_PAT:-${GITHUB_TOKEN:-${runner_github_token}}}}"
     fi
 
     if [[ -z "${slack_bot_token}" ]] || [[ -z "${slack_channel_id}" ]]; then
         warn "SLACK_BOT_TOKEN or SLACK_CHANNEL_ID not set in ~/.omnibase/.env"
         warn "Skipping monitor cron install. Monitor script is deployed but cron won't work without credentials."
+        return 0
+    fi
+    if [[ -z "${runner_github_token}" ]]; then
+        runner_github_token="$(gh auth token 2>/dev/null || true)"
+    fi
+    if [[ -z "${runner_github_token}" ]]; then
+        warn "RUNNER_GITHUB_TOKEN/GH_PAT/GITHUB_TOKEN not set and gh auth token unavailable"
+        warn "Skipping monitor cron install. GitHub-aware monitor requires org runner API access."
         return 0
     fi
 
@@ -259,6 +298,8 @@ install_monitor_cron() {
         ssh "${RUNNER_HOST}" "cat > ${RUNNER_HOST_DIR}/.monitor-env" <<ENVEOF
 SLACK_BOT_TOKEN=${slack_bot_token}
 SLACK_CHANNEL_ID=${slack_channel_id}
+RUNNER_GITHUB_TOKEN=${runner_github_token}
+RUNNER_FLEET_CONFIG_PATH=${RUNNER_HOST_DIR}/config/runner_fleet.yaml
 ENVEOF
         ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
     fi
@@ -277,7 +318,8 @@ ENVEOF
 }
 
 # ---------------------------------------------------------------------------
-# Step 7: Poll GitHub API until all 10 runners are online and validated
+# Step 7: Poll GitHub API until the configured runner fleet is online
+# and validated
 # ---------------------------------------------------------------------------
 
 poll_runners_online() {
@@ -296,7 +338,6 @@ poll_runners_online() {
           [.runners[] |
            select(.name | startswith(\"${RUNNER_NAME_PREFIX}\")) |
            select(.status == \"online\") |
-           select(.runner_group_name == \"${RUNNER_GROUP}\") |
            select(any(.labels[]; .name == \"${RUNNER_GROUP}\"))] | length
         ")
 
@@ -468,7 +509,7 @@ install_health_cron() {
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    local cron_line="*/3 * * * * set -a && source ~/.omnibase/.env && set +a && cd ${repo_root} && RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
+    local cron_line="*/3 * * * * set -a && source ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${repo_root}/config/runner_fleet.yaml RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
 
     # Filter out any existing runner-health-check line, then append new one
     local existing

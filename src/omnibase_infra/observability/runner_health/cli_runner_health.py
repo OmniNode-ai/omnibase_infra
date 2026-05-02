@@ -13,9 +13,10 @@ Flags:
     --host    Override RUNNER_HEALTH_HOST env var
 
 Environment:
-    RUNNER_HEALTH_HOST            CI host address (required if --host not given)
-    RUNNER_HEALTH_GITHUB_ORG      GitHub org (default: OmniNode-ai)
-    RUNNER_HEALTH_EXPECTED_COUNT  Expected runner count (default: 10)
+    RUNNER_FLEET_CONFIG_PATH      Path to config/runner_fleet.yaml
+    RUNNER_HEALTH_HOST            Optional CI host override
+    RUNNER_HEALTH_GITHUB_ORG      Optional GitHub org override
+    RUNNER_HEALTH_RUNNER_PREFIX   Optional runner name prefix override
     KAFKA_BOOTSTRAP_SERVERS       Kafka brokers for --emit
     SLACK_BOT_TOKEN               Slack bot token for --alert
     SLACK_CHANNEL_ID              Slack channel for --alert
@@ -35,6 +36,9 @@ from omnibase_infra.observability.runner_health.collector_runner_health import (
 from omnibase_infra.observability.runner_health.enum_runner_health_state import (
     EnumRunnerHealthState,
 )
+from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
+    load_runner_fleet_config,
+)
 from omnibase_infra.observability.runner_health.model_runner_health_alert import (
     ModelRunnerHealthAlert,
 )
@@ -42,16 +46,17 @@ from omnibase_infra.observability.runner_health.model_runner_health_snapshot imp
     ModelRunnerHealthSnapshot,
 )
 
-# Config from environment -- no hardcoded lab values
-GITHUB_ORG = os.environ.get("RUNNER_HEALTH_GITHUB_ORG", "OmniNode-ai")
-RUNNER_HOST = os.environ.get("RUNNER_HEALTH_HOST", "")
-RUNNER_COUNT = int(os.environ.get("RUNNER_HEALTH_EXPECTED_COUNT", "10"))
-
 
 async def main(args: list[str]) -> int:
     """Run runner health collection with optional Kafka emit and Slack alert."""
+    try:
+        fleet_config = load_runner_fleet_config()
+    except Exception as exc:
+        print(f"[runner-health] ERROR: {exc}")
+        return 1
+
     # CLI flag overrides for env vars
-    host = RUNNER_HOST
+    host = os.environ.get("RUNNER_HEALTH_HOST", fleet_config.runner_host)
     for i, arg in enumerate(args):
         if arg == "--host" and i + 1 < len(args):
             host = args[i + 1]
@@ -60,11 +65,16 @@ async def main(args: list[str]) -> int:
             "[runner-health] ERROR: RUNNER_HEALTH_HOST not set and --host not provided."
         )
         return 1
+    github_org = os.environ.get("RUNNER_HEALTH_GITHUB_ORG", fleet_config.github_org)
+    runner_prefix = os.environ.get(
+        "RUNNER_HEALTH_RUNNER_PREFIX", fleet_config.runner_name_prefix
+    )
 
     collector = CollectorRunnerHealth(
-        github_org=GITHUB_ORG,
+        github_org=github_org,
         runner_host=host,
-        runner_count=RUNNER_COUNT,
+        runner_count=fleet_config.expected_count,
+        runner_prefix=runner_prefix,
     )
 
     correlation_id = uuid4()

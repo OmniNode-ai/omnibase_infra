@@ -2,7 +2,8 @@
 # OmniNode self-hosted GitHub Actions runners
 # Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714
 #
-# Runs 10 identical runner containers (omninode-runner-1 through omninode-runner-10).
+# Runs the configured stateful runner fleet.
+# The expected count is owned by config/runner_fleet.yaml.
 # Each runner registers with GitHub org OmniNode-ai in the 'omnibase-ci' runner group.
 #
 # Prerequisites:
@@ -32,8 +33,8 @@
 #
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
-# Resource allocation per runner (10 runners on RTX 5090 host with ample RAM):
-#   mem_limit: 6g     — 60 GB total across 10 runners
+# Resource allocation per runner (RTX 5090 host with ample RAM):
+#   mem_limit: 6g     — 72 GB total across 12 configured runners
 #   cpus: "4.0"       — 4 vCPUs per runner (40 total; host has 48+ cores)
 #   pids_limit: 4096  — prevents fork bombs from runaway test processes
 #
@@ -156,6 +157,24 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-10-creds:/home/runner/.runner-creds
+  omninode-runner-11:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-11
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-11
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-11-creds:/home/runner/.runner-creds
+  omninode-runner-12:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-12
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-12
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-12-creds:/home/runner/.runner-creds
 volumes:
   runner-1-creds:
     name: omninode-runner-1-creds
@@ -177,3 +196,7 @@ volumes:
     name: omninode-runner-9-creds
   runner-10-creds:
     name: omninode-runner-10-creds
+  runner-11-creds:
+    name: omninode-runner-11-creds
+  runner-12-creds:
+    name: omninode-runner-12-creds
