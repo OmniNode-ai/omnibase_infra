@@ -126,7 +126,9 @@ def _build_event(
         title=title,
         merged_at=merged_at if merged_at else None,
     )
-    return json.loads(event.model_dump_json())
+    if hasattr(event, "model_dump_json"):
+        return json.loads(event.model_dump_json())
+    return json.loads(event.json())
 
 
 def _publish(
