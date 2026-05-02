@@ -207,11 +207,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-intelligence>=0.15.0,<2.0.0"
 
 # Install omnibase_compat before omnimarket — omnimarket declares it as a
-# required dependency but we use --no-deps for the git install, so it must
-# be present first. Pinned to git main until PyPI publishing is automated.
+# required dependency but we use --no-deps for the source install, so it must
+# be present first. The GitHub archive source avoids recursive submodule
+# checkout from the repository while PyPI publishing is automated.
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/ba32d12efdf2671846c2267b570763d4fab18672.tar.gz"
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/omnibase_compat.git@main#egg=omnibase-compat"
+    "${OMNIBASE_COMPAT_SOURCE}"
 
 # Install onex_change_control before omnimarket — omnimarket's node_overseer_verifier
 # imports it at module level but omnimarket is installed --no-deps, so it must

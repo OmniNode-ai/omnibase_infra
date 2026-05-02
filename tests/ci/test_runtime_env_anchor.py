@@ -41,6 +41,8 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "INFISICAL_CLIENT_SECRET",
         "INFISICAL_PROJECT_ID",
         "ONEX_CONTRACTS_DIR",
+        "ONEX_ACTIVE_RUNTIME_PACKAGES",
+        "ONEX_MARKETPLACE_SKILLS_ROOT",
         "ONEX_LOG_LEVEL",
         "ONEX_ENVIRONMENT",
         "USE_EVENT_ROUTING",
@@ -129,6 +131,17 @@ class TestRuntimeEnvAnchorSyntaxValid:
             f"x-runtime-env has {len(null_keys)} key(s) with null values: {null_keys}. "
             "Use KEY: ${{KEY:-}} for optional vars or KEY: ${{KEY:?error}} for required vars."
         )
+
+    @pytest.mark.unit
+    def test_anchor_uses_onex_marketplace_skill_roots(self) -> None:
+        """Assert legacy OmniClaude runtime roots are not exposed to runtime containers."""
+        data = _load_compose()
+        runtime_env_keys = _get_runtime_env_keys(data)
+
+        assert "ONEX_ACTIVE_RUNTIME_PACKAGES" in runtime_env_keys
+        assert "ONEX_MARKETPLACE_SKILLS_ROOT" in runtime_env_keys
+        assert "OMNICLAUDE_CONTRACTS_ROOT" not in runtime_env_keys
+        assert "OMNICLAUDE_SKILLS_ROOT" not in runtime_env_keys
 
 
 class TestRuntimeEnvPassthroughNotBypassed:

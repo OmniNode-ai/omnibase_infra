@@ -190,8 +190,8 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
-# Environment variable for omniclaude skills root (cross-repo topic discovery)
-ENV_OMNICLAUDE_SKILLS_ROOT = "OMNICLAUDE_SKILLS_ROOT"
+# Environment variable for marketplace skill roots (cross-repo topic discovery)
+ENV_MARKETPLACE_SKILLS_ROOT = "ONEX_MARKETPLACE_SKILLS_ROOT"
 DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -1044,21 +1044,21 @@ async def bootstrap() -> int:
                 )
 
                 # Resolve optional cross-repo skill-manifest root for topic discovery.
-                # OMNICLAUDE_SKILLS_ROOT: path to omniclaude plugins/onex/skills/
+                # ONEX_MARKETPLACE_SKILLS_ROOT: path to marketplace-packaged skills.
                 _skills_root_env = os.environ.get(
-                    ENV_OMNICLAUDE_SKILLS_ROOT, ""
+                    ENV_MARKETPLACE_SKILLS_ROOT, ""
                 ).strip()
                 _skill_manifests_root: Path | None = None
                 if not _skills_root_env:
                     logger.info(
                         "Topic provisioning: skill-manifest discovery disabled"
-                        " (OMNICLAUDE_SKILLS_ROOT not set)"
+                        " (ONEX_MARKETPLACE_SKILLS_ROOT not set)"
                     )
                 else:
                     _skill_manifests_path = Path(_skills_root_env)
                     if not _skill_manifests_path.exists():
                         logger.warning(
-                            "Topic provisioning: OMNICLAUDE_SKILLS_ROOT=%s not found,"
+                            "Topic provisioning: ONEX_MARKETPLACE_SKILLS_ROOT=%s not found,"
                             " skill topics will not be provisioned",
                             _skills_root_env,
                         )
@@ -3787,7 +3787,7 @@ if __name__ == "__main__":
 
 __all__: list[str] = [
     "ENV_CONTRACTS_DIR",
-    "ENV_OMNICLAUDE_SKILLS_ROOT",
+    "ENV_MARKETPLACE_SKILLS_ROOT",
     "bootstrap",
     "load_runtime_config",
     "main",
