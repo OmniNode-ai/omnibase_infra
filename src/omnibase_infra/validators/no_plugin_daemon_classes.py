@@ -125,7 +125,10 @@ def _is_compute_base_definition(path: Path, node: ast.ClassDef) -> bool:
 
 
 def _is_direct_compute_plugin(base_names: Iterable[str]) -> bool:
-    return any(_simple_name(base) == COMPUTE_PLUGIN_BASE for base in base_names)
+    names = tuple(base_names)
+    return bool(names) and all(
+        _simple_name(base) == COMPUTE_PLUGIN_BASE for base in names
+    )
 
 
 def _lifecycle_reason(class_name: str, base_names: Sequence[str]) -> str | None:

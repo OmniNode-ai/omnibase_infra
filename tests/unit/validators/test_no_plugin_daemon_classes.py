@@ -49,6 +49,32 @@ class PluginDataService(PluginComputeBase):
     assert validate_paths([source]) == []
 
 
+def test_flags_compute_plugin_with_lifecycle_base(tmp_path: Path) -> None:
+    source = tmp_path / "plugin_mixed_base.py"
+    source.write_text(
+        """
+from omnibase_infra.plugins import PluginComputeBase
+
+
+class ServiceBase:
+    pass
+
+
+class PluginDataNormalizer(PluginComputeBase, ServiceBase):
+    def execute(self, input_data, context):
+        return input_data
+""",
+        encoding="utf-8",
+    )
+
+    findings = validate_paths([source])
+
+    assert len(findings) == 1
+    assert findings[0].class_name == "PluginDataNormalizer"
+    assert findings[0].bases == ("PluginComputeBase", "ServiceBase")
+    assert findings[0].reason == "base class ServiceBase contains Service"
+
+
 def test_allows_non_plugin_service_classes(tmp_path: Path) -> None:
     source = tmp_path / "service.py"
     source.write_text(
