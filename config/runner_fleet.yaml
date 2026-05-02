@@ -7,4 +7,4 @@ github_org: OmniNode-ai
 runner_host: 192.168.86.201
 runner_group: omnibase-ci
 runner_name_prefix: omninode-runner
-expected_count: 12
+expected_count: 20

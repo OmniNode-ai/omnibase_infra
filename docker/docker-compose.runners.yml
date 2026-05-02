@@ -34,8 +34,8 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     — 72 GB total across 12 configured runners
-#   cpus: "4.0"       — 4 vCPUs per runner (40 total; host has 48+ cores)
+#   mem_limit: 4g     — 80 GB total across 20 configured runners
+#   cpus: "2.0"       — 2 vCPUs per runner (40 total; host has 32 threads)
 #   pids_limit: 4096  — prevents fork bombs from runaway test processes
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
@@ -43,8 +43,8 @@
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
-  mem_limit: 6g
-  cpus: "4.0"
+  mem_limit: 4g
+  cpus: "2.0"
   pids_limit: 4096
   environment: &runner-env
     RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
@@ -175,6 +175,78 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-12-creds:/home/runner/.runner-creds
+  omninode-runner-13:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-13
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-13
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-13-creds:/home/runner/.runner-creds
+  omninode-runner-14:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-14
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-14
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-14-creds:/home/runner/.runner-creds
+  omninode-runner-15:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-15
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-15
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-15-creds:/home/runner/.runner-creds
+  omninode-runner-16:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-16
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-16
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-16-creds:/home/runner/.runner-creds
+  omninode-runner-17:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-17
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-17
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-17-creds:/home/runner/.runner-creds
+  omninode-runner-18:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-18
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-18
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-18-creds:/home/runner/.runner-creds
+  omninode-runner-19:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-19
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-19
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-19-creds:/home/runner/.runner-creds
+  omninode-runner-20:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-20
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-20
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-20-creds:/home/runner/.runner-creds
 volumes:
   runner-1-creds:
     name: omninode-runner-1-creds
@@ -200,3 +272,19 @@ volumes:
     name: omninode-runner-11-creds
   runner-12-creds:
     name: omninode-runner-12-creds
+  runner-13-creds:
+    name: omninode-runner-13-creds
+  runner-14-creds:
+    name: omninode-runner-14-creds
+  runner-15-creds:
+    name: omninode-runner-15-creds
+  runner-16-creds:
+    name: omninode-runner-16-creds
+  runner-17-creds:
+    name: omninode-runner-17-creds
+  runner-18-creds:
+    name: omninode-runner-18-creds
+  runner-19-creds:
+    name: omninode-runner-19-creds
+  runner-20-creds:
+    name: omninode-runner-20-creds
