@@ -10,11 +10,18 @@ from __future__ import annotations
 
 import pytest
 
+from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.models.contracts.enum_llm_endpoint_status import (
     EnumLlmEndpointStatus,
 )
 from omnibase_infra.models.contracts.model_llm_endpoint_contract import (
     load_llm_endpoint_contract,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
+    HandlerLlmOpenaiCompatible,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
+    ModelLlmInferenceRequest,
 )
 
 _CONTRACTS_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "contracts"
@@ -54,3 +61,16 @@ def test_all_entries_have_required_fields() -> None:
         assert entry.slot_id
         assert entry.role
         assert entry.status in EnumLlmEndpointStatus.__members__.values()
+
+
+def test_llm_inference_endpoint_url_contract_bypasses_path_append() -> None:
+    endpoint_url = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+    request = ModelLlmInferenceRequest(
+        endpoint_url=endpoint_url,
+        base_url="https://api.z.ai",
+        operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+        model="glm-4.6",
+        messages=({"role": "user", "content": "ping"},),
+    )
+
+    assert HandlerLlmOpenaiCompatible._build_url(request) == endpoint_url

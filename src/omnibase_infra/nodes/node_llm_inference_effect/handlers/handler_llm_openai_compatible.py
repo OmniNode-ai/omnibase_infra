@@ -17,7 +17,7 @@ Architecture:
     - Builds ContractLlmCallMetrics for caller to publish
 
 Handler Responsibilities:
-    - Build URL from base_url + operation_type path
+    - Build URL: use endpoint_url directly when set; fall back to base_url + path
     - Serialize request fields to OpenAI JSON payload
     - Translate ModelLlmToolChoice to wire format
     - Serialize ModelLlmToolDefinition to wire format
@@ -465,17 +465,31 @@ class HandlerLlmOpenaiCompatible:
 
     @staticmethod
     def _build_url(request: ModelLlmInferenceRequest) -> str:
-        """Build the full URL from base_url and operation type.
+        """Return the URL to POST to for this inference request.
+
+        When ``request.endpoint_url`` is set, it is returned directly — no
+        path is appended. This is the preferred path for contracts that declare
+        the full endpoint URL (e.g. z.ai GLM, Google Gemini).
+
+        When only ``request.base_url`` is set (legacy path), the appropriate
+        path suffix is appended based on ``operation_type``. This preserves
+        backwards compatibility with callers that pre-date ``endpoint_url``.
 
         Args:
             request: The inference request.
 
         Returns:
-            Full URL string with the appropriate path suffix.
+            Full URL string to POST to.
 
         Raises:
-            ValueError: If operation_type is not CHAT_COMPLETION or COMPLETION.
+            ValueError: If operation_type is not CHAT_COMPLETION or COMPLETION
+                and ``endpoint_url`` is not set (legacy path only).
         """
+        # Fast path: contract provides the full URL — use it as-is.
+        if request.endpoint_url is not None:
+            return request.endpoint_url
+
+        # Legacy path: construct URL from base_url + operation type path.
         path = _OPERATION_PATHS.get(request.operation_type)
         if path is None:
             msg = (
@@ -485,15 +499,6 @@ class HandlerLlmOpenaiCompatible:
             raise ValueError(msg)
 
         base = request.base_url.rstrip("/")
-        # If base_url already includes a version path (e.g., /v4 for Z.AI GLM),
-        # append only the operation suffix without the /v1 prefix.
-        # Standard vLLM/OpenAI endpoints use base_url without version.
-        import re
-
-        if re.search(r"/v\d+$", base):
-            # base_url ends with /vN — strip /v1 from the operation path
-            path_no_version = re.sub(r"^/v\d+", "", path)
-            return f"{base}{path_no_version}"
         return f"{base}{path}"
 
     # ── Payload building ─────────────────────────────────────────────────

@@ -12,6 +12,7 @@ Related:
     - ModelLlmToolChoice: Caller constraint on tool selection
     - EnumLlmOperationType: Type of LLM operation (CHAT_COMPLETION, COMPLETION)
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
+    - OMN-10489: endpoint_url field — full URL, bypasses base_url + path construction
 """
 
 from __future__ import annotations
@@ -38,9 +39,17 @@ class ModelLlmInferenceRequest(BaseModel):
     fields into the provider-specific wire format.
 
     Attributes:
+        endpoint_url: Full URL to POST to (e.g.
+            ``"https://api.z.ai/api/coding/paas/v4/chat/completions"``).
+            When set, the handler posts to this URL directly — no path is appended.
+            Takes precedence over ``base_url`` + path construction. Use this field
+            when the contract declares the complete endpoint (preferred for non-OpenAI
+            providers such as z.ai GLM, Google Gemini, etc.).
         base_url: Base URL of the LLM endpoint (e.g. ``"http://192.168.86.201:8000"``).
             The handler appends the appropriate path (``/v1/chat/completions`` or
-            ``/v1/completions``) based on ``operation_type``.
+            ``/v1/completions``) based on ``operation_type``. Ignored when
+            ``endpoint_url`` is set. Retained for backwards compatibility with callers
+            that pre-date ``endpoint_url``.
         operation_type: Type of LLM operation to perform.
         model: Model identifier to use for inference.
         messages: Chat messages for CHAT_COMPLETION operations.
@@ -72,10 +81,24 @@ class ModelLlmInferenceRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
+    endpoint_url: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Full URL to POST to. When set, the handler posts to this URL directly "
+            "without appending any path suffix. Takes precedence over base_url + "
+            "operation-type path construction. Use for non-OpenAI providers whose "
+            "contract declares the complete endpoint URL (e.g. z.ai GLM, Google Gemini)."
+        ),
+    )
     base_url: str = Field(
         ...,
         min_length=1,
-        description="Base URL of the LLM endpoint.",
+        description=(
+            "Base URL of the LLM endpoint. The handler appends the appropriate path "
+            "(``/v1/chat/completions`` or ``/v1/completions``) based on "
+            "``operation_type``. Ignored when ``endpoint_url`` is set."
+        ),
     )
     operation_type: EnumLlmOperationType = Field(
         ...,
@@ -184,6 +207,26 @@ class ModelLlmInferenceRequest(BaseModel):
         if not v.startswith(("http://", "https://")):
             raise ValueError(
                 f"base_url must start with 'http://' or 'https://', got: {v!r}"
+            )
+        return v
+
+    @field_validator("endpoint_url")
+    @classmethod
+    def _validate_endpoint_url_scheme(cls, v: str | None) -> str | None:
+        """Validate that endpoint_url starts with http:// or https:// when set.
+
+        Args:
+            v: The endpoint_url value to validate.
+
+        Returns:
+            The validated endpoint_url value (unchanged), or None.
+
+        Raises:
+            ValueError: If the URL does not start with ``http://`` or ``https://``.
+        """
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError(
+                f"endpoint_url must start with 'http://' or 'https://', got: {v!r}"
             )
         return v
 
