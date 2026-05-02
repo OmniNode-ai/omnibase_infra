@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10445"
+title: "Runtime Stability Reconciliation -- runtime package activation"
+summary: "Pin active runtime package activation for omnibase_infra and omnimarket in the infra compose runtime environment."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
+    command: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
+  - kind: "manual"
+    description: "Sibling omninode_infra env parity checks pass with explicit OMNINODE_INFRA_DIR"
+    command: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
+  - kind: "manual"
+    description: "Post-merge deploy/readiness smoke command recorded; live deploy requires explicit approval"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
+  - id: "dod-002"
+    description: "Sibling omninode_infra env parity checks pass with explicit OMNINODE_INFRA_DIR"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
+  - id: "dod-deploy"
+    description: "Post-merge deploy/readiness smoke plan only; this PR has not deployed, restarted runtime, or mutated .201"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
