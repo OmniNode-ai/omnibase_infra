@@ -345,12 +345,15 @@ poll_runners_online() {
     local elapsed=0
     while true; do
         local online
-        online=$(gh api "/orgs/${RUNNER_ORG}/actions/runners" --jq "
-          [.runners[] |
-           select(.name | startswith(\"${RUNNER_NAME_PREFIX}\")) |
-           select(.status == \"online\") |
-           select(any(.labels[]; .name == \"${RUNNER_GROUP}\"))] | length
-        ")
+        online=$(
+            gh api --paginate "/orgs/${RUNNER_ORG}/actions/runners?per_page=100" |
+                jq -s --arg prefix "${RUNNER_NAME_PREFIX}" --arg group "${RUNNER_GROUP}" '
+                  [.[].runners[] |
+                   select(.name | startswith($prefix)) |
+                   select(.status == "online") |
+                   select(any(.labels[]; .name == $group))] | length
+                '
+        )
 
         log "Online runners validated: ${online}/${RUNNER_COUNT} (${elapsed}s elapsed)"
 
@@ -459,12 +462,15 @@ print_stale_runner_report() {
 
     # Get all offline runners matching our prefix
     local offline_runners
-    offline_runners=$(gh api "/orgs/${RUNNER_ORG}/actions/runners" --jq "
-      [.runners[] |
-       select(.name | startswith(\"${RUNNER_NAME_PREFIX}\")) |
-       select(.status == \"offline\")] |
-      .[] | {id: .id, name: .name, status: .status}
-    " 2>/dev/null || echo "")
+    offline_runners=$(
+        gh api --paginate "/orgs/${RUNNER_ORG}/actions/runners?per_page=100" |
+            jq -s --arg prefix "${RUNNER_NAME_PREFIX}" '
+              [.[].runners[] |
+               select(.name | startswith($prefix)) |
+               select(.status == "offline")] |
+              .[] | {id: .id, name: .name, status: .status}
+            ' 2>/dev/null || echo ""
+    )
 
     if [[ -z "${offline_runners}" ]]; then
         log "No offline runners found. All runners appear healthy."
