@@ -57,6 +57,15 @@ class TestCollectorRunnerHealth:
         )
         assert state == EnumRunnerHealthState.CRASH_LOOPING
 
+    def test_classify_oom_killed(self, handler: CollectorRunnerHealth) -> None:
+        state = handler._classify_runner(
+            github_status="online",
+            github_busy=False,
+            docker_status="oom_killed",
+            docker_uptime="Up 7 days (healthy)",
+        )
+        assert state == EnumRunnerHealthState.OOM_KILLED
+
     def test_classify_missing(self, handler: CollectorRunnerHealth) -> None:
         state = handler._classify_runner(
             github_status="offline",
@@ -110,6 +119,46 @@ class TestCollectorRunnerHealth:
         assert snapshot.runners[1].state == EnumRunnerHealthState.CRASH_LOOPING
         assert snapshot.github_source_ok
         assert snapshot.docker_source_ok
+
+    @pytest.mark.asyncio
+    async def test_collect_marks_oom_killed_runner_degraded(
+        self, handler: CollectorRunnerHealth
+    ) -> None:
+        github_data: list[dict[str, object]] = [
+            {"name": "omninode-runner-1", "status": "online", "busy": False},
+        ]
+        docker_data: dict[str, dict[str, str]] = {
+            "omninode-runner-1": {
+                "status": "oom_killed",
+                "uptime": "Up 7 days (healthy)",
+            },
+        }
+
+        with (
+            patch.object(
+                handler,
+                "_fetch_github_runners",
+                new_callable=AsyncMock,
+                return_value=(github_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_docker_status",
+                new_callable=AsyncMock,
+                return_value=(docker_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_host_disk",
+                new_callable=AsyncMock,
+                return_value=38.0,
+            ),
+        ):
+            snapshot = await handler.collect(correlation_id=uuid4())
+
+        assert snapshot.healthy_count == 0
+        assert snapshot.degraded_count == 1
+        assert snapshot.runners[0].state == EnumRunnerHealthState.OOM_KILLED
 
     @pytest.mark.asyncio
     async def test_collect_github_failure(self, handler: CollectorRunnerHealth) -> None:

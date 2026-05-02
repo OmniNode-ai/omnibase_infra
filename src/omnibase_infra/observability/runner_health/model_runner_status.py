@@ -29,3 +29,6 @@ class ModelRunnerStatus(BaseModel):
     docker_uptime: str = Field(default="", description="Docker ps status string")
     state: EnumRunnerHealthState = Field(..., description="Computed health state")
     error: str = Field(default="", description="Error detail if degraded")
+
+
+__all__ = ["EnumRunnerHealthState", "ModelRunnerStatus"]

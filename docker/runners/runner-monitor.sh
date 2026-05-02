@@ -81,6 +81,7 @@ slack_post() {
 # Collect current state
 # ---------------------------------------------------------------------------
 declare -A current_status
+declare -A docker_oom_killed
 declare -A github_status
 
 total_found=0
@@ -92,6 +93,11 @@ while IFS=$'\t' read -r name status; do
     [[ -z "${name}" ]] && continue
     current_status["$name"]="$status"
 done < <(docker ps -a --filter "name=${RUNNER_NAME_PREFIX}" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+for name in "${!current_status[@]}"; do
+    oom_killed="$(docker inspect --format '{{.State.OOMKilled}}' "$name" 2>/dev/null || echo "unknown")"
+    docker_oom_killed["$name"]="$oom_killed"
+done
 
 github_json=$(curl -fsS \
     -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
@@ -124,6 +130,11 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 
     if [[ "${docker_state}" == "MISSING (no container)" ]]; then
         unhealthy_list+=("${name}: MISSING (no container)")
+        continue
+    fi
+
+    if [[ "${docker_oom_killed[$name]:-false}" == "true" ]]; then
+        unhealthy_list+=("${name}: Docker OOMKilled=true while ${docker_state}")
         continue
     fi
 

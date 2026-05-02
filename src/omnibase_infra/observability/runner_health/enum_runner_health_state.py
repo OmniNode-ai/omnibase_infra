@@ -13,6 +13,7 @@ class EnumRunnerHealthState(StrEnum):
     HEALTHY = "healthy"
     GITHUB_OFFLINE = "github_offline"
     DOCKER_UNHEALTHY = "docker_unhealthy"
+    OOM_KILLED = "oom_killed"
     CRASH_LOOPING = "crash_looping"
     STALE_REGISTRATION = "stale_registration"
     MISSING = "missing"
