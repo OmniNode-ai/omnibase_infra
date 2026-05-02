@@ -1,0 +1,49 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10123"
+title: "Document plugin_compute_base scope and forbid new Plugin* daemon classes"
+summary: "Add an AST guard that blocks Plugin* daemon/service/worker lifecycle classes while allowing deterministic PluginComputeBase subclasses."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit tests prove the AST guard catches fake PluginXyzDaemon classes and allows PluginComputeBase subclasses."
+    command: "uv run pytest tests/unit/validators/test_no_plugin_daemon_classes.py -q"
+  - kind: "tests"
+    description: "Validator scans current infra source tree without baseline violations."
+    command: "PYTHONPATH=src uv run python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra"
+  - kind: "ci"
+    description: "Pre-commit hook blocks Plugin* daemon/service/worker classes."
+    command: "pre-commit run no-plugin-daemon-classes --all-files"
+  - kind: "ci"
+    description: "Required lint job runs the Plugin* lifecycle class guard."
+    command: "gh pr checks {pr} --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "AST validator unit tests pass, including fake PluginXyzDaemon detection."
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/validators/test_no_plugin_daemon_classes.py -q"
+  - id: "dod-002"
+    description: "Current omnibase_infra source tree has no Plugin* lifecycle violations."
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "PYTHONPATH=src uv run python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra"
+  - id: "dod-003"
+    description: "Pre-commit hook enforces the Plugin* lifecycle class guard."
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "pre-commit run no-plugin-daemon-classes --all-files"
+  - id: "dod-004"
+    description: "CI lint job includes the Plugin* lifecycle class guard as a required check."
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "rg -n \"Check Plugin\\* lifecycle class guard|no_plugin_daemon_classes\" .github/workflows/ci.yml .pre-commit-config.yaml"
