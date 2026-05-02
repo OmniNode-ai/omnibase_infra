@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10500"
+title: "Trust omnimarket runtime namespaces"
+summary: "Add omnimarket. to trusted handler and plugin namespace prefixes so omnimarket nodes can pass dynamic namespace validation."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Runtime trusted namespace constants tests pass"
+    command: "uv run pytest tests/unit/runtime/test_constants_security.py -q"
+  - kind: "manual"
+    description: "Repo-local ticket contract validates"
+    command: "uv run validate-yaml contracts/OMN-10500.yaml"
+  - kind: "manual"
+    description: "Post-merge deploy validation confirms omnimarket namespace loading without live deploy in this PR"
+    command: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES'"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Runtime trusted namespace constants tests pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_constants_security.py -q"
+  - id: "dod-contract"
+    description: "Repo-local ticket contract validates"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run validate-yaml contracts/OMN-10500.yaml"
+  - id: "dod-deploy"
+    description: "Post-merge namespace loading smoke plan only; this PR has not deployed, restarted runtime, or mutated .201"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES'"
