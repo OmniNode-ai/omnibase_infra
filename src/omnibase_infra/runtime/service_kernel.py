@@ -1450,6 +1450,7 @@ async def bootstrap() -> int:
                             logger.warning(
                                 "Could not subscribe to %s for savings estimation",
                                 _input_topic,
+                                exc_info=True,
                             )
 
                     while True:
