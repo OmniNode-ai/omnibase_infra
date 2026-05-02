@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10489"
+title: "LLM endpoint_url support for exact provider endpoints"
+summary: "Add a typed endpoint_url field to LLM inference requests so the OpenAI-compatible handler can post to exact contract-declared provider endpoints without appending legacy OpenAI paths."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Endpoint URL unit and integration coverage passes"
+    command: "uv run pytest tests/unit/nodes/node_llm_inference_effect/ tests/unit/models/effects/test_model_llm_inference_request.py tests/integration/test_llm_endpoint_contract_integration.py -q"
+  - kind: "manual"
+    description: "Post-merge runtime smoke plan for exact endpoint URL requests; live deploy requires explicit approval"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -m omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible --help"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Endpoint URL unit and integration coverage passes"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_llm_inference_effect/ tests/unit/models/effects/test_model_llm_inference_request.py tests/integration/test_llm_endpoint_contract_integration.py -q"
+  - id: "dod-deploy"
+    description: "Post-merge runtime smoke plan only; this PR has not deployed, restarted runtime, or mutated .201"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -m omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible --help"

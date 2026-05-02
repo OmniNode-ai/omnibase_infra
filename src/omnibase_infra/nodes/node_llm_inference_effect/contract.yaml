@@ -16,7 +16,7 @@ contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
-  minor: 3
+  minor: 4
   patch: 0
 node_version:
   major: 0
@@ -36,7 +36,7 @@ description: >
 input_model:
   name: "ModelLlmInferenceRequest"
   module: "omnibase_infra.models.llm"
-  description: "Input model containing LLM inference parameters, routing configuration, and optional EnumUsageSource-backed compute usage provenance."
+  description: "Input model containing LLM inference parameters, routing configuration, optional direct endpoint_url override, and optional EnumUsageSource-backed compute usage provenance."
 output_model:
   name: "ModelLlmInferenceResponse"
   module: "omnibase_infra.models.llm"
@@ -158,6 +158,8 @@ capabilities:
     description: "Per-backend circuit breaker for provider fault isolation"
   - name: "gpu_usage_evidence"
     description: "When gpu_type and gpu_count are provided together, emits measured gpu_seconds and shared EnumUsageSource compute_usage_source values on both LLM metric events"
+  - name: "direct_endpoint_url"
+    description: "When endpoint_url is provided on ModelLlmInferenceRequest, the OpenAI-compatible handler posts to that full URL directly instead of appending an operation path to base_url."
 # Golden path: llm_cost chain (llm-call-completed -> llm_cost_aggregates table)
 golden_path:
   - "Complete LLM inference via provider-specific handler"
@@ -172,7 +174,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-13"
-  updated: "2026-04-30"
+  updated: "2026-05-02"
   tags:
     - effect
     - llm
