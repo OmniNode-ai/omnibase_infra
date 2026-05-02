@@ -55,6 +55,8 @@ class ModelSavingsEstimate(BaseModel):
         heuristic_confidence_avg: Average confidence across heuristic estimates.
         estimation_method: Algorithm identifier.
         treatment_group: A/B test group if applicable.
+        usage_source: Dispatch/cost provenance source when available.
+        source_payload_hash: Stable source payload hash for measured dispatch costs.
         is_measured: Whether savings are directly measured vs estimated.
         completeness_status: Data completeness ('complete', 'partial').
         pricing_manifest_version: Pricing table version used.
@@ -120,6 +122,14 @@ class ModelSavingsEstimate(BaseModel):
         default="tiered_attribution_v1", description="Estimation algorithm"
     )
     treatment_group: str | None = Field(default=None, description="A/B test group")
+    usage_source: str = Field(
+        default="UNKNOWN",
+        description="Cost provenance source: MEASURED, ESTIMATED, or UNKNOWN.",
+    )
+    source_payload_hash: str | None = Field(
+        default=None,
+        description="Stable source payload hash for measured dispatch costs.",
+    )
     is_measured: bool = Field(default=False, description="True if directly measured")
     completeness_status: str = Field(
         default="complete", description="Data completeness"

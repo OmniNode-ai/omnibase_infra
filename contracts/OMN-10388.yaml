@@ -1,0 +1,63 @@
+# OMN-10388 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-10388"
+title: "Dispatch eval savings projection"
+summary: >-
+  Project dispatch evaluation outcomes into savings evidence with cost provenance and migration coverage.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - events
+  - topics
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Dispatch savings projection and migration tests pass
+    command: >-
+      uv run pytest tests/unit/services/observability/savings_estimation/test_consumer.py tests/integration/observability/test_savings_estimation_dispatch_eval_projection.py tests/unit/db/test_migration_076.py -q
+  - kind: ci
+    description: Focused savings consumer type check passes
+    command: >-
+      uv run mypy src/omnibase_infra/services/observability/savings_estimation/consumer.py
+  - kind: ci
+    description: Focused ruff checks pass
+    command: >-
+      uv run ruff check src/omnibase_infra/services/observability/savings_estimation/consumer.py src/omnibase_infra/nodes/node_savings_estimation_compute/models/model_savings_estimate.py tests/integration/observability/test_savings_estimation_dispatch_eval_projection.py tests/unit/db/test_migration_076.py
+  - kind: manual
+    description: Post-merge runtime deploy smoke verifies savings projection consumer
+    command: >-
+      after merge, deploy the runtime release candidate and verify the savings projection consumer can process a dispatch evaluation event without DLQ
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-dispatch-savings-tests
+    description: Dispatch savings projection and migration tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/unit/services/observability/savings_estimation/test_consumer.py tests/integration/observability/test_savings_estimation_dispatch_eval_projection.py tests/unit/db/test_migration_076.py -q
+  - id: dod-savings-consumer-mypy
+    description: Focused savings consumer type check passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run mypy src/omnibase_infra/services/observability/savings_estimation/consumer.py
+  - id: dod-focused-ruff
+    description: Focused ruff checks pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run ruff check src/omnibase_infra/services/observability/savings_estimation/consumer.py src/omnibase_infra/nodes/node_savings_estimation_compute/models/model_savings_estimate.py tests/integration/observability/test_savings_estimation_dispatch_eval_projection.py tests/unit/db/test_migration_076.py
+  - id: dod-post-merge-deploy-smoke
+    description: Post-merge runtime deploy smoke verifies savings projection consumer
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          after merge, deploy the runtime release candidate and verify the savings projection consumer can process a dispatch evaluation event without DLQ
