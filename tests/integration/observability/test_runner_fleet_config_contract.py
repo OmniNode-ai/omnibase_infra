@@ -16,6 +16,7 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 REPO_ROOT = Path(__file__).parents[3]
 
 
+@pytest.mark.integration
 def test_runner_fleet_config_default_is_repo_anchored(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -28,6 +29,7 @@ def test_runner_fleet_config_default_is_repo_anchored(
     assert load_runner_fleet_config(config_path).runner_name_prefix == "omninode-runner"
 
 
+@pytest.mark.integration
 def test_deploy_runner_config_path_is_propagated_to_sync_and_cron() -> None:
     deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
         encoding="utf-8"
