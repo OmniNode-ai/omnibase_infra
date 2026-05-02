@@ -51,6 +51,7 @@ x-runner-base: &runner-base
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
   group_add:
