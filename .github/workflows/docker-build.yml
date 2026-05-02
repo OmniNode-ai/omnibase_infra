@@ -48,7 +48,13 @@ jobs:
   # See: scripts/check_dockerfile_pins.py
   dockerfile-pin-check:
     name: Validate Dockerfile Plugin Pins
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -67,12 +73,13 @@ jobs:
   docker-build:
     name: Build Runtime Image
     needs: dockerfile-pin-check
-    # OMNINODE_SELF_HOSTED_DOCKER_V1 — always self-hosted when enabled; kill-switch fallback to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (vars.USE_SELF_HOSTED_RUNNERS == 'true')
-        && fromJSON('["self-hosted","omnibase-ci"]')
-        || fromJSON('["ubuntu-latest"]')
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     permissions:
       contents: read
@@ -200,12 +207,13 @@ jobs:
   # Run Docker integration tests
   docker-integration-tests:
     name: Docker Integration Tests
-    # OMNINODE_SELF_HOSTED_DOCKER_V1 — always self-hosted when enabled; kill-switch fallback to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (vars.USE_SELF_HOSTED_RUNNERS == 'true')
-        && fromJSON('["self-hosted","omnibase-ci"]')
-        || fromJSON('["ubuntu-latest"]')
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     needs: docker-build
     timeout-minutes: 30
@@ -285,7 +293,13 @@ jobs:
   # Security scanning
   security-scan:
     name: Security Scan (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
     needs: docker-build
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 15
@@ -337,7 +351,13 @@ jobs:
   # Warning-only for initial rollout — does not block builds.
   image-analysis:
     name: Image Size Analysis
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
     needs: docker-build
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 10
@@ -380,7 +400,13 @@ jobs:
   # Build summary
   build-summary:
     name: Build Summary
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
     needs: [docker-build, docker-integration-tests]
     if: always()
 
