@@ -1,5 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-8131"
+title: "Fix savings estimator Kafka subscriptions"
 summary: "Fix savings estimator Kafka subscriptions"
 is_seam_ticket: false
 interface_change: false
