@@ -41,6 +41,15 @@ class CollectorRunnerHealth:
         self._runner_count = runner_count
         self._runner_prefix = runner_prefix
 
+    def _runner_index(self, name: str) -> int | None:
+        prefix = f"{self._runner_prefix}-"
+        if not name.startswith(prefix):
+            return None
+        suffix = name.removeprefix(prefix)
+        if not suffix.isdigit():
+            return None
+        return int(suffix)
+
     def _classify_runner(
         self,
         github_status: str,
@@ -179,6 +188,9 @@ class CollectorRunnerHealth:
         seen_docker_names: set[str] = set()
         for gh in github_runners:
             name = str(gh["name"])
+            index = self._runner_index(name)
+            if index is None or index > self._runner_count:
+                continue
             seen_docker_names.add(name)
             docker = docker_statuses.get(name, {"status": "not_found", "uptime": ""})
             state = self._classify_runner(
@@ -200,6 +212,9 @@ class CollectorRunnerHealth:
 
         # Reverse pass: Docker containers not in GitHub -> orphaned
         for docker_name, docker_info in docker_statuses.items():
+            index = self._runner_index(docker_name)
+            if index is None or index > self._runner_count:
+                continue
             if docker_name not in seen_docker_names:
                 statuses.append(
                     ModelRunnerStatus(
