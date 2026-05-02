@@ -1,0 +1,23 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-8131"
+summary: "Fix savings estimator Kafka subscriptions"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Runtime service kernel passes an explicit savings estimator consumer group"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/runtime/test_savings_estimator_subscription_group.py -q"
+  - id: "dod-deploy"
+    description: "Post-merge deploy smoke verifies savings estimator Kafka consumption"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omnibase_infra after merge, then rpk topic produce onex.evt.omniclaude.session-outcome.v1 with a synthetic session and verify onex.evt.omnibase-infra.savings-estimated.v1 receives the savings estimate"
