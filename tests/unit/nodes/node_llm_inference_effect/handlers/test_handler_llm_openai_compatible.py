@@ -246,16 +246,51 @@ class TestBuildUrl:
         assert "//" not in url.split("://")[1]
 
     def test_unsupported_operation_type_raises_value_error(self) -> None:
-        """Unsupported operation_type raises ValueError."""
+        """Unsupported operation_type raises ValueError (legacy path, no endpoint_url)."""
         # EMBEDDING is not supported by the OpenAI handler
         # We can't construct a request with EMBEDDING and messages, so test
-        # the static method directly with a mock request
+        # the static method directly with a mock request.
+        # endpoint_url=None forces the legacy base_url + path construction path.
         mock_request = MagicMock()
+        mock_request.endpoint_url = None
         mock_request.operation_type = EnumLlmOperationType.EMBEDDING
         mock_request.base_url = _BASE_URL
 
         with pytest.raises(ValueError, match="Unsupported operation type"):
             HandlerLlmOpenaiCompatible._build_url(mock_request)
+
+    def test_endpoint_url_returned_directly(self) -> None:
+        """When endpoint_url is set, _build_url returns it verbatim — no path appended."""
+        full_url = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        request = _make_chat_request(endpoint_url=full_url)
+        url = HandlerLlmOpenaiCompatible._build_url(request)
+        assert url == full_url
+
+    def test_endpoint_url_takes_precedence_over_base_url(self) -> None:
+        """endpoint_url wins even when base_url is also set."""
+        full_url = (
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        )
+        request = _make_chat_request(
+            endpoint_url=full_url,
+            base_url="http://192.168.86.201:8000",
+        )
+        url = HandlerLlmOpenaiCompatible._build_url(request)
+        assert url == full_url
+        assert "192.168.86.201" not in url
+
+    def test_endpoint_url_none_falls_back_to_base_url_path(self) -> None:
+        """When endpoint_url is None, legacy base_url + path construction is used."""
+        request = _make_chat_request(endpoint_url=None)
+        url = HandlerLlmOpenaiCompatible._build_url(request)
+        assert url == f"{_BASE_URL}/v1/chat/completions"
+
+    def test_endpoint_url_local_model_full_url(self) -> None:
+        """Full URL for a local model is returned unchanged."""
+        full_url = "http://192.168.86.201:8000/v1/chat/completions"
+        request = _make_chat_request(endpoint_url=full_url)
+        url = HandlerLlmOpenaiCompatible._build_url(request)
+        assert url == full_url
 
 
 # ---------------------------------------------------------------------------

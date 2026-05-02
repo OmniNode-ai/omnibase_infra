@@ -238,10 +238,12 @@ class TestBuildUrl:
         assert url == "http://localhost:8000/v1/chat/completions"
 
     def test_unsupported_operation_type_raises(self) -> None:
-        """Unsupported operation type raises ValueError."""
+        """Unsupported operation type raises ValueError (legacy path, no endpoint_url)."""
         # Use SimpleNamespace to bypass model validation and provide an
         # operation_type not in _OPERATION_PATHS (EMBEDDING).
+        # endpoint_url=None forces the legacy base_url + path construction path.
         fake_request = SimpleNamespace(
+            endpoint_url=None,
             operation_type=EnumLlmOperationType.EMBEDDING,
             base_url="http://localhost:8000",
         )
