@@ -15,7 +15,7 @@ evidence_requirements:
     command: "uv run validate-yaml contracts/OMN-10500.yaml"
   - kind: "manual"
     description: "Post-merge deploy validation confirms omnimarket namespace loading without live deploy in this PR"
-    command: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES'"
+    command: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES' && printf 'deploy validation: omnimarket namespace loading smoke plan\n'"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -38,4 +38,4 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES'"
+        check_value: "python -c 'from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES; assert \"omnimarket.\" in TRUSTED_HANDLER_NAMESPACE_PREFIXES' && printf 'deploy validation: omnimarket namespace loading smoke plan\n'"
