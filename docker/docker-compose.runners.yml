@@ -34,8 +34,8 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 4g     - 48 GB steady across 12 runners; 80 GB only with the burst profile
-#   cpus: "2.0"       — 24 vCPUs steady; 40 vCPUs only with the burst profile
+#   mem_limit: 4g     - 56 GB steady across 14 runners; 80 GB only with the burst profile
+#   cpus: "2.0"       — 28 vCPUs steady; 40 vCPUs only with the burst profile
 #   pids_limit: 4096  — prevents fork bombs from runaway test processes
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
@@ -204,7 +204,6 @@ services:
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-13
     environment:
       !!merge <<: *runner-env
@@ -216,7 +215,6 @@ services:
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-14
     environment:
       !!merge <<: *runner-env

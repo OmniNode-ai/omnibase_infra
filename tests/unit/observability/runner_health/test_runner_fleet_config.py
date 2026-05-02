@@ -22,7 +22,7 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.github_org == "OmniNode-ai"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
-    assert config.expected_count == 12
+    assert config.expected_count == 14
     assert config.burst_count == 20
 
 
