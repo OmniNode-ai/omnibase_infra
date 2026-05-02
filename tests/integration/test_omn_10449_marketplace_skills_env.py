@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 def test_runtime_compose_env_matches_kernel_marketplace_skills_env() -> None:
     """Compose and kernel agree on the marketplace skill-manifest env name."""
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).parent.parent.parent
     compose_path = repo_root / "docker" / "docker-compose.infra.yml"
     compose = yaml.safe_load(compose_path.read_text())
 
