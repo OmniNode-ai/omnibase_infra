@@ -23,19 +23,22 @@ if [[ -z "${workspace}" ]]; then
     exit 0
 fi
 
-case "${workspace}" in
-    "${WORK_ROOT}/"*/*) ;;
+canonical_work_root="$(realpath -m -- "${WORK_ROOT}")"
+canonical_workspace="$(realpath -m -- "${workspace}")"
+
+case "${canonical_workspace}" in
+    "${canonical_work_root}/"*/*) ;;
     *)
-        echo "[runner-job-started] Refusing to clean workspace outside ${WORK_ROOT}: ${workspace}" >&2
+        echo "[runner-job-started] Refusing to clean workspace outside ${canonical_work_root}: ${canonical_workspace}" >&2
         exit 1
         ;;
 esac
 
-if [[ "${workspace}" == "/" || "${workspace}" == "${WORK_ROOT}" ]]; then
-    echo "[runner-job-started] Refusing unsafe workspace path: ${workspace}" >&2
+if [[ "${canonical_workspace}" == "/" || "${canonical_workspace}" == "${canonical_work_root}" ]]; then
+    echo "[runner-job-started] Refusing unsafe workspace path: ${canonical_workspace}" >&2
     exit 1
 fi
 
-echo "[runner-job-started] Resetting workspace: ${workspace}"
-rm -rf -- "${workspace}"
-mkdir -p -- "${workspace}"
+echo "[runner-job-started] Resetting workspace: ${canonical_workspace}"
+rm -rf -- "${canonical_workspace}"
+mkdir -p -- "${canonical_workspace}"

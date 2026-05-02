@@ -520,7 +520,7 @@ install_health_cron() {
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    local cron_line="*/3 * * * * set -a && source ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
+    local cron_line="*/3 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
 
     # Filter out any existing runner-health-check line, then append new one
     local existing

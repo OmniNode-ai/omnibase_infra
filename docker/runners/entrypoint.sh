@@ -95,10 +95,14 @@ _restore_cached_creds() {
                 restored=$((restored + 1))
             fi
         done
-        if [[ "${restored}" -gt 0 ]]; then
+        if [[ -f "${RUNNER_HOME}/.runner" && -f "${RUNNER_HOME}/.credentials" ]]; then
             return 0
         fi
-        echo "[entrypoint] Credential cache exists but contains no runner credential files."
+        rm -f -- \
+            "${RUNNER_HOME}/.runner" \
+            "${RUNNER_HOME}/.credentials" \
+            "${RUNNER_HOME}/.credentials_rsaparams"
+        echo "[entrypoint] Credential cache is incomplete; falling back to registration."
     fi
     return 1
 }
@@ -137,7 +141,6 @@ _clear_cached_creds() {
 _is_registration_error() {
     local log_content="${1}"
     local known_patterns=(
-        "Runner.Listener"
         "not registered"
         "HTTP 401"
         "Failed to get session"
