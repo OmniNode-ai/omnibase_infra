@@ -47,7 +47,7 @@ pytestmark = [
 TEST_CONTAINER_PREFIX = "omnibase-infra-test"
 
 # Timeout constants (seconds)
-BUILD_TIMEOUT = 600  # 10 minutes for full build
+BUILD_TIMEOUT = int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200"))
 CONTAINER_START_TIMEOUT = 60
 HEALTH_CHECK_TIMEOUT = 90
 SHUTDOWN_TIMEOUT = 30

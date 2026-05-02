@@ -867,9 +867,16 @@ jobs:
     continue-on-error: true
     steps:
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
+        id: migration_conflicts
+        continue-on-error: true
         with:
           checks: "migration-conflicts"
           warn-only: "true"
+
+      - name: Report non-blocking boundary validator startup failure
+        if: steps.migration_conflicts.outcome == 'failure'
+        run: |
+          echo "::warning::Cross-repo migration conflict validation could not complete. This job is warn-only; see the validate-boundaries action logs for the upstream packaging/setup failure."
 
 
   contract-compliance:
@@ -1120,7 +1127,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_DB: omnibase_infra
         ports:
-          - 5436:5432
+          - 5432/tcp
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -1140,15 +1147,16 @@ jobs:
 
       - name: Apply all migrations
         env:
-          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@localhost:5436/omnibase_infra
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@localhost:${{ job.services.postgres.ports[5432] }}/omnibase_infra
         run: |
           uv run python scripts/run-migrations.py
 
       - name: Assert manifest tables exist
         env:
           PGPASSWORD: test_password
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
         run: |
-          psql -h localhost -p 5436 -U postgres -d omnibase_infra -c "
+          psql -h localhost -p "$POSTGRES_PORT" -U postgres -d omnibase_infra -c "
             SELECT table_name
             FROM information_schema.tables
             WHERE table_schema = 'public'

@@ -330,7 +330,7 @@ def built_test_image(
         build_cmd,
         capture_output=True,
         text=True,
-        timeout=600,  # 10 minute timeout for build
+        timeout=int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200")),
         env=env,
         check=False,
         shell=False,

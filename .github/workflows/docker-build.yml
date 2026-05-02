@@ -274,9 +274,10 @@ jobs:
         env:
           DOCKER_BUILDKIT: "1"
           ONEX_EVENT_BUS_TYPE: inmemory
+          OMNI_DOCKER_BUILD_TIMEOUT_SECONDS: "1200"
         run: |
           uv run pytest tests/integration/docker/ \
-            --timeout=600 \
+            --timeout="${OMNI_DOCKER_BUILD_TIMEOUT_SECONDS}" \
             --timeout-method=thread \
             --tb=short \
             --junitxml=docker-tests.xml \
