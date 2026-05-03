@@ -61,6 +61,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check ruff formatting
         run: uv run ruff format --check src/ tests/
@@ -106,6 +107,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Run architecture layer check
         run: |
@@ -209,6 +211,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Run demo loop assertion gate
         run: |
@@ -264,6 +267,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check topic enum drift
         run: |
@@ -365,6 +369,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
           cache-key-prefix: uv-topic-drift
           lock-file-path: 'omnibase_infra/**/uv.lock'
           skip-install: 'true'
@@ -437,6 +442,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
           skip-install: 'true'
@@ -494,6 +500,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check for raw topic literals in production code
         run: |
@@ -525,6 +532,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Plugin ENV->Service Completeness Check
         run: |
@@ -556,6 +564,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check compose :? env var fixture coverage
         run: |
@@ -671,6 +680,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Run test split ${{ matrix.split }}/15
         run: |
@@ -742,6 +752,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check version pin compliance
         run: |
@@ -791,6 +802,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Install dependencies
         run: uv sync
@@ -1107,6 +1119,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
       - name: Check writer-migration coupling
@@ -1147,6 +1160,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
       - name: Verify Python Postgres client

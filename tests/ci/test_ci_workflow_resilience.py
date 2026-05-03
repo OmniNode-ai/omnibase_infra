@@ -152,12 +152,17 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     assert cache_step["if"] == "inputs.cache-enabled != 'false'"
 
     ci_workflow = _load_yaml(CI_WORKFLOW)
-    for job_name in ("fingerprint-check", "topic-naming-lint"):
-        setup_step = next(
+    for job_name, job in ci_workflow["jobs"].items():
+        setup_steps = [
             step
-            for step in ci_workflow["jobs"][job_name]["steps"]
+            for step in job.get("steps", [])
             if step.get("uses") == "./.github/actions/setup-python-uv"
-        )
+        ]
+        if not setup_steps:
+            continue
+
+        assert len(setup_steps) == 1
+        setup_step = setup_steps[0]
         assert setup_step["with"]["cache-enabled"] == "false"
 
     env_parity_workflow = _load_yaml(ENV_PARITY_WORKFLOW)
