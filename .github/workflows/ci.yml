@@ -1148,8 +1148,19 @@ jobs:
       - name: Install Postgres client
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client
+          if command -v psql >/dev/null 2>&1; then
+            psql --version
+            exit 0
+          fi
+
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
 
       - name: Resolve Postgres service host
         id: postgres_host

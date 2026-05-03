@@ -71,6 +71,8 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
     assert_step_index = steps.index(assert_step)
     assert install_step_index < assert_step_index
     install_step = steps[install_step_index]
+    assert "command -v psql" in install_step["run"]
+    assert "command -v sudo" in install_step["run"]
     assert "postgresql-client" in install_step["run"]
 
 
