@@ -23,7 +23,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def test_migration_integration_uses_dynamic_postgres_port() -> None:
+def test_migration_integration_resolves_reachable_postgres_host() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-integration"]
 
@@ -31,21 +31,36 @@ def test_migration_integration_uses_dynamic_postgres_port() -> None:
     assert ports == ["5432/tcp"]
 
     steps = job["steps"]
+    resolve_step = next(
+        step for step in steps if step.get("name") == "Resolve Postgres service host"
+    )
+    assert resolve_step["id"] == "postgres_host"
+    assert (
+        resolve_step["env"]["POSTGRES_PORT"]
+        == "${{ job.services.postgres.ports['5432'] }}"
+    )
+    assert "socket.create_connection" in resolve_step["run"]
+    assert "/proc/net/route" in resolve_step["run"]
+
     apply_step = next(
         step for step in steps if step.get("name") == "Apply all migrations"
     )
     assert (
         apply_step["env"]["OMNIBASE_INFRA_DB_URL"]
-        == "postgresql://postgres:test_password@localhost:${{ job.services.postgres.ports[5432] }}/omnibase_infra"
+        == "postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra"
     )
 
     assert_step = next(
         step for step in steps if step.get("name") == "Assert manifest tables exist"
     )
     assert (
-        assert_step["env"]["POSTGRES_PORT"]
-        == "${{ job.services.postgres.ports[5432] }}"
+        assert_step["env"]["POSTGRES_HOST"] == "${{ steps.postgres_host.outputs.host }}"
     )
+    assert (
+        assert_step["env"]["POSTGRES_PORT"]
+        == "${{ job.services.postgres.ports['5432'] }}"
+    )
+    assert '-h "$POSTGRES_HOST"' in assert_step["run"]
     assert '-p "$POSTGRES_PORT"' in assert_step["run"]
 
 
