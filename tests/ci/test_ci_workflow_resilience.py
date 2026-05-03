@@ -96,3 +96,27 @@ def test_docker_integration_build_timeout_matches_workflow_budget() -> None:
 
     assert step["env"]["OMNI_DOCKER_BUILD_TIMEOUT_SECONDS"] == "1200"
     assert '--timeout="${OMNI_DOCKER_BUILD_TIMEOUT_SECONDS}"' in step["run"]
+
+
+def test_docker_integration_installs_compose_plugin_before_tests() -> None:
+    workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
+
+    job = workflow["jobs"]["docker-integration-tests"]
+    steps = job["steps"]
+    compose_step_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Install Docker Compose plugin"
+    )
+    test_step_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Run Docker integration tests"
+    )
+
+    compose_step = steps[compose_step_index]
+    assert compose_step_index < test_step_index
+    assert "docker compose version" in compose_step["run"]
+    assert "DOCKER_COMPOSE_VERSION" in compose_step["run"]
+    assert "docker-compose-linux-x86_64" in compose_step["run"]

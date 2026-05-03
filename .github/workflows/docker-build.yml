@@ -38,6 +38,7 @@ concurrency:
 env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
+  DOCKER_COMPOSE_VERSION: "v2.40.3"
   REGISTRY: ghcr.io
   IMAGE_NAME: omnibase-infra-runtime
 
@@ -246,6 +247,21 @@ jobs:
           if [[ "${DRIVER}" != "docker" ]]; then
             echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
           fi
+
+      - name: Install Docker Compose plugin
+        run: |
+          if docker compose version >/dev/null 2>&1; then
+            docker compose version
+            exit 0
+          fi
+
+          plugin_dir="${HOME}/.docker/cli-plugins"
+          mkdir -p "${plugin_dir}"
+          curl -fsSL \
+            "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+            -o "${plugin_dir}/docker-compose"
+          chmod +x "${plugin_dir}/docker-compose"
+          docker compose version
 
       - name: Set up Python
         uses: actions/setup-python@v6
