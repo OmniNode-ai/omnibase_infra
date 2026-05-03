@@ -1,0 +1,43 @@
+# OMN-10518 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Central overnight-loop evidence remains in omni_home/Linear; this repo-local
+# contract carries deploy-gate evidence for the runtime image ownership fix.
+schema_version: "1.0.0"
+ticket_id: "OMN-10518"
+title: "Avoid recursive runtime image ownership walk"
+summary: "Preserve runtime image file ownership at COPY time so Docker builds do not stall on recursive chown over the large virtualenv."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "manual"
+    description: "Dockerfile copies the runtime virtualenv with omniinfra ownership."
+    command: "grep -n 'COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv' docker/Dockerfile.runtime"
+  - kind: "manual"
+    description: "Dockerfile no longer recursively chowns all of /app in the runtime stage."
+    command: "! grep -n 'chown -R omniinfra:omniinfra /app' docker/Dockerfile.runtime"
+  - kind: "manual"
+    description: "Patch has no whitespace errors."
+    command: "git diff --check"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-copy-ownership"
+    description: "Runtime virtualenv COPY uses --chown=omniinfra:omniinfra."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -n 'COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv' docker/Dockerfile.runtime"
+  - id: "dod-no-recursive-app-chown"
+    description: "Runtime image build no longer performs a recursive ownership walk over /app."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "! grep -n 'chown -R omniinfra:omniinfra /app' docker/Dockerfile.runtime"
+  - id: "dod-diff-check"
+    description: "Patch has no whitespace errors."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "git diff --check"
