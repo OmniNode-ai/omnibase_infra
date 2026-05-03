@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol
@@ -76,6 +77,7 @@ _TERMINAL_LIFECYCLES = {
     EnumAgentTaskLifecycleType.TIMED_OUT,
     EnumAgentTaskLifecycleType.CANCELED,
 }
+logger = logging.getLogger(__name__)
 
 
 class ProtocolA2ATransport(Protocol):
@@ -96,6 +98,54 @@ class ProtocolA2ATransport(Protocol):
         remote_task_handle: str,
     ) -> ModelA2ATaskResponse:
         """Fetch the current status of a remote task by handle."""
+
+
+class NoopRemoteTaskStateRepository:
+    """Fail-closed repository used only for zero-arg runtime discovery."""
+
+    async def upsert(
+        self,
+        state: ModelRemoteTaskState,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        del state, correlation_id
+        logger.warning("Dropping A2A remote task state in runtime lockdown mode")
+
+    async def get_by_remote_task_handle(
+        self,
+        remote_task_handle: str,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> ModelRemoteTaskState | None:
+        del remote_task_handle, correlation_id
+        return None
+
+    async def get_last_emitted_artifact_payload(
+        self,
+        task_id: UUID,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> list[dict[str, ModelSchemaValue]] | None:
+        del task_id, correlation_id
+        return None
+
+    async def set_last_emitted_artifact_payload(
+        self,
+        task_id: UUID,
+        payload: list[dict[str, ModelSchemaValue]],
+        *,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        del task_id, payload, correlation_id
+
+
+class NoopLifecycleEventSink:
+    """Fail-closed lifecycle sink used only for zero-arg runtime discovery."""
+
+    async def write(self, event: ModelAgentTaskLifecycleEvent) -> None:
+        del event
+        logger.warning("Dropping A2A lifecycle event in runtime lockdown mode")
 
 
 def map_remote_status(raw_status: object) -> EnumAgentTaskLifecycleType:
@@ -269,18 +319,18 @@ class HandlerA2ATask:
     def __init__(
         self,
         *,
-        repository: RemoteTaskStateRepository,
-        lifecycle_sink: ProtocolLifecycleEventSink,
-        target_registry: Mapping[str, ModelTargetAgent],
+        repository: RemoteTaskStateRepository | None = None,
+        lifecycle_sink: ProtocolLifecycleEventSink | None = None,
+        target_registry: Mapping[str, ModelTargetAgent] | None = None,
         http_session: aiohttp.ClientSession | None = None,
         clock: Callable[[], datetime] | None = None,
         poll_interval_seconds: float = 1.0,
         transport: ProtocolA2ATransport | None = None,
     ) -> None:
-        self._repository = repository
-        self._lifecycle_sink = lifecycle_sink
+        self._repository = repository or NoopRemoteTaskStateRepository()
+        self._lifecycle_sink = lifecycle_sink or NoopLifecycleEventSink()
         self._lifecycle_target_name = "agent_task_lifecycle"
-        self._target_registry = target_registry
+        self._target_registry = target_registry or {}
         self._http_session = http_session
         self._clock = clock or (lambda: datetime.now(UTC))
         self._poll_interval_seconds = poll_interval_seconds
@@ -639,6 +689,8 @@ def _remote_status_value(raw_status: object) -> str:
 __all__ = [
     "A2ASdkTransport",
     "HandlerA2ATask",
+    "NoopLifecycleEventSink",
+    "NoopRemoteTaskStateRepository",
     "ProtocolA2ATransport",
     "_STATUS_MAP",
     "_TERMINAL_LIFECYCLES",
