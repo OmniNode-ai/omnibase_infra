@@ -34,7 +34,8 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 4g     - 56 GB steady across 14 runners; 80 GB only with the burst profile
+#   mem_limit: 6g     - 84 GB steady across 14 runners; 120 GB only with the burst profile
+#   memswap_limit: 12g - bounded swap headroom for large CI spikes
 #   cpus: "2.0"       — 28 vCPUs steady; 40 vCPUs only with the burst profile
 #   pids_limit: 4096  — prevents fork bombs from runaway test processes
 #
@@ -43,7 +44,8 @@
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
-  mem_limit: 4g
+  mem_limit: 6g
+  memswap_limit: 12g
   cpus: "2.0"
   pids_limit: 4096
   environment: &runner-env

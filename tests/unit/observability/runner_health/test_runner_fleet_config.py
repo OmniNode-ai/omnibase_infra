@@ -51,6 +51,20 @@ def test_runner_compose_matches_configured_count() -> None:
     assert len(all_runner_services) == config.burst_count
 
 
+def test_runner_compose_resource_limits_match_live_capacity() -> None:
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    base = compose["x-runner-base"]
+    assert base["mem_limit"] == "6g"
+    assert base["memswap_limit"] == "12g"
+    assert base["cpus"] == "2.0"
+    assert base["pids_limit"] == 4096
+
+
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
     deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
         encoding="utf-8"
