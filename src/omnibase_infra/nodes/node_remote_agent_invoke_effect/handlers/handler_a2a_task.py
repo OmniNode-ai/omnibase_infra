@@ -327,10 +327,14 @@ class HandlerA2ATask:
         poll_interval_seconds: float = 1.0,
         transport: ProtocolA2ATransport | None = None,
     ) -> None:
-        self._repository = repository or NoopRemoteTaskStateRepository()
-        self._lifecycle_sink = lifecycle_sink or NoopLifecycleEventSink()
+        self._repository = (
+            repository if repository is not None else NoopRemoteTaskStateRepository()
+        )
+        self._lifecycle_sink = (
+            lifecycle_sink if lifecycle_sink is not None else NoopLifecycleEventSink()
+        )
         self._lifecycle_target_name = "agent_task_lifecycle"
-        self._target_registry = target_registry or {}
+        self._target_registry = target_registry if target_registry is not None else {}
         self._http_session = http_session
         self._clock = clock or (lambda: datetime.now(UTC))
         self._poll_interval_seconds = poll_interval_seconds
