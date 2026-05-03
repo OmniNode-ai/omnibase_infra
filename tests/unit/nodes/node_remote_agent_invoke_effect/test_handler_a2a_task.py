@@ -194,6 +194,15 @@ def test_status_mapping_rejects_unknown() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_zero_arg_handler_fails_closed_for_unknown_target() -> None:
+    handler = HandlerA2ATask()
+
+    with pytest.raises(ValueError, match="Unknown target_ref"):
+        await handler.submit(_command())
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_submit_emits_submitted_event_and_persists() -> None:
     repo = RecordingRepository()
     event_bus = RecordingEventBus()

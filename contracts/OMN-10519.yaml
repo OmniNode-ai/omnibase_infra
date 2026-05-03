@@ -1,0 +1,43 @@
+# OMN-10519 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The central evidence remains in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the stability runtime wiring fix.
+schema_version: "1.0.0"
+ticket_id: "OMN-10519"
+title: "Make remote agent invoke effect runtime-wirable"
+summary: "Allow HandlerA2ATask to resolve through zero-arg runtime auto-wiring in fail-closed lockdown mode."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused A2A task handler tests prove injected behavior and zero-arg lockdown."
+    command: "uv run pytest tests/unit/nodes/node_remote_agent_invoke_effect/test_handler_a2a_task.py -q"
+  - kind: "tests"
+    description: "Touched handler and tests pass lint."
+    command: "uv run ruff check src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py tests/unit/nodes/node_remote_agent_invoke_effect/test_handler_a2a_task.py"
+  - kind: "manual"
+    description: "Post-merge deploy/readiness smoke imports HandlerA2ATask and constructs it in the runtime container."
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python - <<'PY'\nfrom omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import HandlerA2ATask\nhandler = HandlerA2ATask()\nprint(handler.handler_category.value)\nPY"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-handler-tests"
+    description: "Focused A2A task handler tests pass, including zero-arg fail-closed construction."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_remote_agent_invoke_effect/test_handler_a2a_task.py -q"
+  - id: "dod-ruff"
+    description: "Touched runtime handler and tests pass lint."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run ruff check src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py tests/unit/nodes/node_remote_agent_invoke_effect/test_handler_a2a_task.py"
+  - id: "dod-deploy"
+    description: "Deploy/readiness smoke constructs HandlerA2ATask with zero arguments inside the deployed runtime container."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python - <<'PY'\nfrom omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import HandlerA2ATask\nhandler = HandlerA2ATask()\nprint(handler.handler_category.value)\nPY"
