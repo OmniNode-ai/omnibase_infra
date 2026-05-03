@@ -156,7 +156,8 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         setup_steps = [
             step
             for step in job.get("steps", [])
-            if step.get("uses") == "./.github/actions/setup-python-uv"
+            if str(step.get("uses", "")).endswith("/.github/actions/setup-python-uv")
+            or step.get("uses") == "./.github/actions/setup-python-uv"
         ]
         if not setup_steps:
             continue
