@@ -18,6 +18,9 @@ evidence_requirements:
   - kind: "manual"
     description: "Patch has no whitespace errors."
     command: "git diff --check"
+  - kind: "manual"
+    description: "Live stability-test runtime deploy proof remains healthy after the rebuild that exposed the ownership bottleneck."
+    command: "docker exec omninode-stability-test-runtime /app/.venv/bin/python - <<'PY'\nimport inspect\nfrom omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import HandlerA2ATask\nprint(inspect.signature(HandlerA2ATask))\nPY"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -41,3 +44,9 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "git diff --check"
+  - id: "dod-stability-runtime-deploy"
+    description: "The stability-test runtime deploy remains live and can import the runtime-wired A2A handler after the rebuild."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omninode-stability-test-runtime /app/.venv/bin/python - <<'PY'\nimport inspect\nfrom omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import HandlerA2ATask\nprint(inspect.signature(HandlerA2ATask))\nPY"
