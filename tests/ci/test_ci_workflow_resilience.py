@@ -172,3 +172,12 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
     )
     assert setup_step["with"]["cache-enabled"] == "false"
+
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    docker_cache_step = next(
+        step
+        for step in docker_workflow["jobs"]["docker-integration-tests"]["steps"]
+        if step.get("name") == "Load cached uv"
+    )
+    assert docker_cache_step["if"] == "${{ false }}"
+    assert docker_cache_step["uses"] == "actions/cache/restore@v5"
