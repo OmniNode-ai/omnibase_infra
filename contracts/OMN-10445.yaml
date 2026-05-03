@@ -15,6 +15,9 @@ evidence_requirements:
   - kind: "manual"
     description: "Live .201 read-only proof shows 14 running containers and effective 6g memory / 12g swap / 2 CPU limits."
     command: "ssh jonah@192.168.86.201 'docker ps --filter name=omninode-runner --format \"{{.Names}}\" | wc -l; docker inspect omninode-runner-1 --format \"Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} NanoCpus={{.HostConfig.NanoCpus}} PidsLimit={{.HostConfig.PidsLimit}}\"'"
+  - kind: "manual"
+    description: "Deploy validation is read-only for this PR; no live runner restart is claimed."
+    command: "deploy validation: compare docker/docker-compose.runners.yml with /home/jonah/.omnibase/runners/docker/docker-compose.runners.yml on .201 and inspect runner limits before any approved restart"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -38,3 +41,9 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "ssh jonah@192.168.86.201 'docker ps --filter name=omninode-runner --format \"{{.Names}}\" | wc -l; docker inspect omninode-runner-1 --format \"Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} NanoCpus={{.HostConfig.NanoCpus}} PidsLimit={{.HostConfig.PidsLimit}}\"'"
+  - id: "dod-deploy-readonly"
+    description: "Deploy validation is read-only for this PR; no live runner restart is claimed."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy validation: compare docker/docker-compose.runners.yml with /home/jonah/.omnibase/runners/docker/docker-compose.runners.yml on .201 and inspect runner limits before any approved restart"
