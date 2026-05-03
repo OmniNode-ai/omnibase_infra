@@ -12,14 +12,14 @@ node_name: "node_remote_agent_invoke_effect"
 contract_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 2
 node_version:
   major: 0
   minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Remote-agent invocation effect node for the A2A delegation bridge. Consumes invocation commands emitted by the delegation orchestrator, delegates task submission and watch operations to protocol-specific handlers, persists remote task state, and emits lifecycle events back to the orchestration pipeline.
+  Remote-agent invocation effect node for the A2A delegation bridge. Consumes invocation commands emitted by the delegation orchestrator, delegates task submission and watch operations to protocol-specific handlers, persists remote task state, and emits lifecycle events back to the orchestration pipeline. Runtime auto-wiring may construct the A2A handler without injected repository, lifecycle sink, or target registry dependencies; that mode fails closed before network submission when no target is registered.
 
 input_model:
   name: "ModelInvocationCommand"
@@ -37,7 +37,7 @@ handler_routing:
         name: "HandlerA2ATask"
         module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task"
         handler_type: "HTTP"
-      description: "Submit remote A2A tasks, persist lifecycle state, deduplicate artifact payloads, and emit terminal lifecycle outcomes."
+      description: "Submit remote A2A tasks, persist lifecycle state, deduplicate artifact payloads, and emit terminal lifecycle outcomes. Supports zero-argument runtime discovery by using no-op persistence/lifecycle dependencies and an empty target registry that rejects unknown target_ref values."
   execution_mode: "single"
   max_timeout_seconds: 600
 event_bus:
@@ -76,8 +76,10 @@ capabilities:
     description: "Watch remote task state and emit typed lifecycle events."
   - name: "remote_task_restart_resumption"
     description: "Reload unfinished remote task state on startup."
+  - name: "runtime_discovery_fail_closed"
+    description: "Allow runtime handler discovery to instantiate HandlerA2ATask with no arguments while rejecting unregistered targets before external side effects."
 metadata:
-  description: "A2A delegation bridge effect node scaffold."
+  description: "A2A delegation bridge effect node with fail-closed runtime discovery support."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-04-25"
