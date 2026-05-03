@@ -57,6 +57,15 @@ class TestCollectorRunnerHealth:
         )
         assert state == EnumRunnerHealthState.CRASH_LOOPING
 
+    def test_classify_oom_killed(self, handler: CollectorRunnerHealth) -> None:
+        state = handler._classify_runner(
+            github_status="online",
+            github_busy=False,
+            docker_status="oom_killed",
+            docker_uptime="Up 7 days (healthy)",
+        )
+        assert state == EnumRunnerHealthState.OOM_KILLED
+
     def test_classify_missing(self, handler: CollectorRunnerHealth) -> None:
         state = handler._classify_runner(
             github_status="offline",
@@ -112,6 +121,46 @@ class TestCollectorRunnerHealth:
         assert snapshot.docker_source_ok
 
     @pytest.mark.asyncio
+    async def test_collect_marks_oom_killed_runner_degraded(
+        self, handler: CollectorRunnerHealth
+    ) -> None:
+        github_data: list[dict[str, object]] = [
+            {"name": "omninode-runner-1", "status": "online", "busy": False},
+        ]
+        docker_data: dict[str, dict[str, str]] = {
+            "omninode-runner-1": {
+                "status": "oom_killed",
+                "uptime": "Up 7 days (healthy)",
+            },
+        }
+
+        with (
+            patch.object(
+                handler,
+                "_fetch_github_runners",
+                new_callable=AsyncMock,
+                return_value=(github_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_docker_status",
+                new_callable=AsyncMock,
+                return_value=(docker_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_host_disk",
+                new_callable=AsyncMock,
+                return_value=38.0,
+            ),
+        ):
+            snapshot = await handler.collect(correlation_id=uuid4())
+
+        assert snapshot.healthy_count == 0
+        assert snapshot.degraded_count == 1
+        assert snapshot.runners[0].state == EnumRunnerHealthState.OOM_KILLED
+
+    @pytest.mark.asyncio
     async def test_collect_github_failure(self, handler: CollectorRunnerHealth) -> None:
         with (
             patch.object(
@@ -150,7 +199,7 @@ class TestCollectorRunnerHealth:
         ]
         docker_data: dict[str, dict[str, str]] = {
             "omninode-runner-1": {"status": "healthy", "uptime": "Up 2h (healthy)"},
-            "omninode-runner-99": {"status": "running", "uptime": "Up 5d"},
+            "omninode-runner-3": {"status": "running", "uptime": "Up 5d"},
         }
 
         with (
@@ -176,6 +225,46 @@ class TestCollectorRunnerHealth:
             snapshot = await handler.collect(correlation_id=uuid4())
 
         assert snapshot.observed_runners == 2
-        orphan = [r for r in snapshot.runners if r.name == "omninode-runner-99"]
+        orphan = [r for r in snapshot.runners if r.name == "omninode-runner-3"]
         assert len(orphan) == 1
         assert orphan[0].state == EnumRunnerHealthState.STALE_REGISTRATION
+
+    @pytest.mark.asyncio
+    async def test_collect_ignores_profile_gated_burst_runners(
+        self, handler: CollectorRunnerHealth
+    ) -> None:
+        github_data: list[dict[str, object]] = [
+            {"name": "omninode-runner-1", "status": "online", "busy": False},
+            {"name": "omninode-runner-13", "status": "offline", "busy": False},
+        ]
+        docker_data: dict[str, dict[str, str]] = {
+            "omninode-runner-1": {"status": "healthy", "uptime": "Up 2h (healthy)"},
+            "omninode-runner-13": {"status": "not_found", "uptime": ""},
+        }
+
+        with (
+            patch.object(
+                handler,
+                "_fetch_github_runners",
+                new_callable=AsyncMock,
+                return_value=(github_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_docker_status",
+                new_callable=AsyncMock,
+                return_value=(docker_data, None),
+            ),
+            patch.object(
+                handler,
+                "_fetch_host_disk",
+                new_callable=AsyncMock,
+                return_value=25.0,
+            ),
+        ):
+            snapshot = await handler.collect(correlation_id=uuid4())
+
+        assert snapshot.expected_runners == 10
+        assert snapshot.observed_runners == 1
+        assert snapshot.healthy_count == 1
+        assert [runner.name for runner in snapshot.runners] == ["omninode-runner-1"]

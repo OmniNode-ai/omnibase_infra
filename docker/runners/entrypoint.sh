@@ -87,8 +87,22 @@ _restore_cached_creds() {
     local cache_file="${CRED_CACHE_DIR}/${key}"
     if [[ -d "${cache_file}" ]]; then
         echo "[entrypoint] Restoring cached runner credentials (key=${key:0:12}...)"
-        cp -r "${cache_file}/"* "${RUNNER_HOME}/" 2>/dev/null || true
-        return 0
+        local restored=0
+        for f in .runner .credentials .credentials_rsaparams; do
+            if [[ -f "${cache_file}/${f}" ]]; then
+                cp "${cache_file}/${f}" "${RUNNER_HOME}/${f}"
+                chown runner:runner "${RUNNER_HOME}/${f}"
+                restored=$((restored + 1))
+            fi
+        done
+        if [[ -f "${RUNNER_HOME}/.runner" && -f "${RUNNER_HOME}/.credentials" ]]; then
+            return 0
+        fi
+        rm -f -- \
+            "${RUNNER_HOME}/.runner" \
+            "${RUNNER_HOME}/.credentials" \
+            "${RUNNER_HOME}/.credentials_rsaparams"
+        echo "[entrypoint] Credential cache is incomplete; falling back to registration."
     fi
     return 1
 }
@@ -102,6 +116,7 @@ _save_creds() {
     for f in .runner .credentials .credentials_rsaparams; do
         if [[ -f "${RUNNER_HOME}/${f}" ]]; then
             cp "${RUNNER_HOME}/${f}" "${cache_file}/${f}"
+            chown runner:runner "${cache_file}/${f}"
         fi
     done
     echo "[entrypoint] Runner credentials cached (key=${key:0:12}...)"
@@ -126,7 +141,6 @@ _clear_cached_creds() {
 _is_registration_error() {
     local log_content="${1}"
     local known_patterns=(
-        "Runner.Listener"
         "not registered"
         "HTTP 401"
         "Failed to get session"

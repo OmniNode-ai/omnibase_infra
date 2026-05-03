@@ -12,8 +12,8 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
   matches POSTGRES_PORT in docker/docker-compose.e2e.yml)
 * `on.workflow_call.inputs.real_ssh_user` present (empty default, falls back to
   `whoami` on the runner — avoids hardcoded operator identity)
-* `jobs.boot.runs-on` uses the exact USE_SELF_HOSTED_RUNNERS conditional from
-  ci-baseline.md §B (shared with ci.yml)
+* `jobs.boot.runs-on` uses the fork-safe OMNI_RUNNER_SELECTOR_V1 expression
+  shared with ci.yml
 * `jobs.boot.steps` contains checkout, uv setup, conditional compose bring-up,
   launch + hard-gate checks for both runtime (`:8085`) and runtime-effects
   (`:8086`) health (matches service_health.py::_handle_health response shape),
@@ -155,25 +155,23 @@ def test_real_ssh_user_input_has_empty_default(workflow: Workflow) -> None:
 
 
 def test_boot_job_runs_on_uses_self_hosted_conditional(workflow: Workflow) -> None:
-    """runs-on must match the shared ci-baseline §B conditional verbatim.
-
-    Pattern (whitespace-normalized):
-        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
-         (github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'schedule'))
-        && fromJSON('["self-hosted","omnibase-ci"]')
-        || fromJSON('["ubuntu-latest"]')
-    """
+    """runs-on must keep public forks off trusted self-hosted runners."""
     runs_on = _boot_job(workflow)["runs-on"]
     assert isinstance(runs_on, str), "runs-on must be a string expression"
     normalized = " ".join(runs_on.split())
-    assert "vars.USE_SELF_HOSTED_RUNNERS == 'true'" in normalized
-    assert "github.event_name == 'push'" in normalized
-    assert "github.event_name == 'workflow_dispatch'" in normalized
-    assert "github.event_name == 'schedule'" in normalized
-    assert 'fromJSON(\'["self-hosted","omnibase-ci"]\')' in normalized
-    assert "fromJSON('[\"ubuntu-latest\"]')" in normalized
+    assert "github.event_name == 'pull_request'" in normalized
+    assert "github.event.pull_request.head.repo.full_name != github.repository" in (
+        normalized
+    )
+    assert "vars.OMNI_PUBLIC_PR_RUNS_ON_JSON" in normalized
+    assert "vars.OMNI_TRUSTED_CI_RUNS_ON_JSON" in normalized
+    assert "fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '[\"ubuntu-latest\"]')" in (
+        normalized
+    )
+    assert (
+        'fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || \'["self-hosted","omnibase-ci"]\')'
+        in normalized
+    )
 
 
 def test_boot_env_parameterizes_runtime_host_and_pg_port(workflow: Workflow) -> None:

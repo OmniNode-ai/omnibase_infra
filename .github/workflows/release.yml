@@ -20,7 +20,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     outputs:
       version: ${{ steps.tag.outputs.tag }}
     steps:
@@ -109,7 +110,8 @@ jobs:
     name: Post-Release Checks
     needs: release
     if: always() && needs.release.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -147,7 +149,8 @@ jobs:
     name: Trigger Runtime Image Rebuild
     needs: release
     if: ${{ !contains(needs.release.outputs.version, 'rc') }}
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     steps:
       - name: Check CROSS_REPO_PAT is configured
         id: token_check

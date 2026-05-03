@@ -45,6 +45,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.observability.hooks import HookObservability
+from omnibase_infra.observability.hooks import hook_observability as hook_obs_mod
 
 # =============================================================================
 # CONTEXTVARS ISOLATION TESTS - CRITICAL
@@ -307,15 +308,31 @@ class TestTiming:
         # Should measure at least ~1ms (perf_counter is high resolution)
         assert duration >= 0.5, f"Duration {duration}ms should measure sub-ms precision"
 
-    def test_multiple_timing_cycles(self) -> None:
+    def test_multiple_timing_cycles(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify multiple timing cycles work correctly."""
         hook = HookObservability(metrics_sink=None)
+        perf_values = iter(
+            [
+                0.00,
+                0.01,
+                1.00,
+                1.02,
+                2.00,
+                2.03,
+                3.00,
+                3.04,
+                4.00,
+                4.05,
+            ]
+        )
+        monkeypatch.setattr(
+            hook_obs_mod.time, "perf_counter", lambda: next(perf_values)
+        )
 
         durations: list[float] = []
 
         for i in range(5):
             hook.before_operation(f"cycle_{i}")
-            time.sleep(0.01 * (i + 1))  # 10ms, 20ms, 30ms, 40ms, 50ms
             durations.append(hook.after_operation())
 
         # Each duration should be progressively longer

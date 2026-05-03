@@ -3,19 +3,11 @@
 #
 # baselines-scheduler.yml — Daily Baselines & ROI computation
 #
-# Invokes NodeBaselinesBatchCompute once per day. Runs on the self-hosted
-# runner when USE_SELF_HOSTED_RUNNERS=true (has local PostgreSQL + Kafka).
-# Falls back to ubuntu-latest when no self-hosted runner is available,
-# connecting to cloud PostgreSQL via the OMNIBASE_INFRA_DB_URL secret
-# (Kafka emission is skipped on ubuntu-latest; DB computation still runs).
+# Invokes NodeBaselinesBatchCompute once per day on the trusted runner selector.
 #
 # Requirements (self-hosted runner environment):
 #   OMNIBASE_INFRA_DB_URL  — set in ~/.omnibase/.env (runner picks up via env)
 #   KAFKA_BOOTSTRAP_SERVERS — defaults to localhost:19092 in the script
-#
-# Requirements (ubuntu-latest fallback):
-#   OMNIBASE_INFRA_DB_URL  — GitHub secret pointing to cloud PostgreSQL
-#   KAFKA_BOOTSTRAP_SERVERS — set to empty (no Kafka on ubuntu-latest)
 #
 # Ticket: OMN-3335
 
@@ -39,19 +31,14 @@ env:
 jobs:
   baselines-compute:
     name: Baselines Batch Compute
-    # Self-hosted runner required: needs PostgreSQL and Kafka access.
-    # When USE_SELF_HOSTED_RUNNERS is false, skip entirely — ubuntu-latest
-    # has no PostgreSQL and the OMNIBASE_INFRA_DB_URL secret is not configured.
-    if: vars.USE_SELF_HOSTED_RUNNERS == 'true'
-    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    # Trusted runner required: needs PostgreSQL and Kafka access.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
-         (github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'schedule'))
-        && fromJSON('["self-hosted","omnibase-ci"]')
-        || fromJSON('["ubuntu-latest"]')
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
 
@@ -76,16 +63,13 @@ jobs:
 
       - name: Run baselines batch compute
         env:
-          # Self-hosted runner: OMNIBASE_INFRA_DB_URL comes from ~/.omnibase/.env
-          # ubuntu-latest fallback: OMNIBASE_INFRA_DB_URL comes from the GitHub secret
-          # The secret value takes precedence only when ~/.omnibase/.env is absent.
+          # Trusted runner: OMNIBASE_INFRA_DB_URL comes from ~/.omnibase/.env.
           OMNIBASE_INFRA_DB_URL: ${{ secrets.OMNIBASE_INFRA_DB_URL }}
-          # Self-hosted: Kafka on localhost:19092. ubuntu-latest: no Kafka, skip emission.
           KAFKA_BOOTSTRAP_SERVERS: >-
             ${{
               github.event.inputs.dry_run == 'true'
               && ''
-              || (vars.USE_SELF_HOSTED_RUNNERS == 'true' && 'localhost:19092' || '')
+              || 'localhost:19092'
             }}
         run: |
           # On self-hosted runner, shell env from ~/.omnibase/.env overrides the secret.

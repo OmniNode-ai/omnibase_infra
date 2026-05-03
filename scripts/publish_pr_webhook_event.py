@@ -135,7 +135,9 @@ def _build_event(
         actor=actor or None,
         merged=merged,
     )
-    return dict(json.loads(event.model_dump_json()))
+    if hasattr(event, "model_dump_json"):
+        return dict(json.loads(event.model_dump_json()))
+    return dict(json.loads(event.json()))
 
 
 def _publish(

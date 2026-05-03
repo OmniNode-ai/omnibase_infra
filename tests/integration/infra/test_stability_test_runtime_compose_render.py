@@ -124,6 +124,18 @@ def _docker_compose_command(*args: str) -> list[str]:
     ]
 
 
+def _docker_compose_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    result = subprocess.run(
+        ["docker", "compose", "version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def _compose_render_env() -> dict[str, str]:
     return {
         "HOME": os.environ.get("HOME", ""),
@@ -133,15 +145,19 @@ def _compose_render_env() -> dict[str, str]:
     }
 
 
-def _compose_config_json() -> dict:
-    result = subprocess.run(
-        _docker_compose_command("config", "--format", "json"),
+def _run_compose_config(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _docker_compose_command("config", *args),
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
         env=_compose_render_env(),
         text=True,
     )
+
+
+def _compose_config_json() -> dict:
+    result = _run_compose_config("--format", "json")
 
     rendered_config = json.loads(result.stdout)
     assert isinstance(rendered_config, dict)
@@ -166,21 +182,14 @@ def _label_value(service_config: dict, key: str) -> str | None:
 
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("docker") is None,
-    reason="docker is required for non-mutating compose render validation",
+    not _docker_compose_available(),
+    reason="docker compose is required for non-mutating compose render validation",
 )
 
 
 @pytest.mark.integration
 def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
-    result = subprocess.run(
-        _docker_compose_command("config", "--services"),
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        env=_compose_render_env(),
-        text=True,
-    )
+    result = _run_compose_config("--services")
 
     rendered_services = set(result.stdout.splitlines())
 

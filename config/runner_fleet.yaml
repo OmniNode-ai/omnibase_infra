@@ -1,0 +1,11 @@
+# Authoritative GitHub Actions runner fleet config.
+#
+# This file is the source of truth for deploy-runners.sh, runner-monitor.sh,
+# and the runner health CLI. Do not duplicate these values in scripts.
+version: "1.0"
+github_org: OmniNode-ai
+runner_host: 192.168.86.201
+runner_group: omnibase-ci
+runner_name_prefix: omninode-runner
+expected_count: 14
+burst_count: 20

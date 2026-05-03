@@ -41,6 +41,15 @@ class CollectorRunnerHealth:
         self._runner_count = runner_count
         self._runner_prefix = runner_prefix
 
+    def _runner_index(self, name: str) -> int | None:
+        prefix = f"{self._runner_prefix}-"
+        if not name.startswith(prefix):
+            return None
+        suffix = name.removeprefix(prefix)
+        if not suffix.isdigit():
+            return None
+        return int(suffix)
+
     def _classify_runner(
         self,
         github_status: str,
@@ -51,6 +60,8 @@ class CollectorRunnerHealth:
         """Compute health state from GitHub and Docker status signals."""
         if docker_status == "not_found":
             return EnumRunnerHealthState.MISSING
+        if docker_status == "oom_killed":
+            return EnumRunnerHealthState.OOM_KILLED
         if (
             "restarting" in docker_status.lower()
             or "restarting" in docker_uptime.lower()
@@ -90,8 +101,15 @@ class CollectorRunnerHealth:
     ) -> tuple[dict[str, dict[str, str]], str | None]:
         """Fetch Docker container status via SSH. Returns (statuses, error)."""
         cmd = (
-            f"docker ps -a --filter 'name={self._runner_prefix}' "
-            f"--format '{{{{.Names}}}}\\t{{{{.Status}}}}'"
+            "for name in $(docker ps -a "
+            f"--filter 'name={self._runner_prefix}' "
+            "--format '{{.Names}}'); do "
+            "status=$(docker inspect --format '{{.State.Status}}' \"$name\"); "
+            "health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \"$name\"); "
+            "oom_killed=$(docker inspect --format '{{.State.OOMKilled}}' \"$name\"); "
+            "uptime=$(docker ps -a --filter \"name=^/${name}$\" --format '{{.Status}}'); "
+            'printf "%s\\t%s\\t%s\\t%s\\t%s\\n" "$name" "$status" "$health" "$oom_killed" "$uptime"; '
+            "done"
         )
         proc = await asyncio.create_subprocess_exec(
             "ssh",
@@ -108,13 +126,22 @@ class CollectorRunnerHealth:
             )
         result: dict[str, dict[str, str]] = {}
         for line in stdout.decode().strip().splitlines():
-            parts = line.split("\t", 1)
-            if len(parts) == 2:
-                name, uptime = parts
+            parts = line.split("\t", 4)
+            if len(parts) == 5:
+                name, container_status, health, oom_killed, uptime = parts
                 status = (
-                    "healthy"
-                    if "(healthy)" in uptime
-                    else ("restarting" if "Restarting" in uptime else "running")
+                    "oom_killed"
+                    if oom_killed == "true"
+                    else (
+                        "healthy"
+                        if health == "healthy" or "(healthy)" in uptime
+                        else (
+                            "restarting"
+                            if container_status == "restarting"
+                            or "Restarting" in uptime
+                            else container_status
+                        )
+                    )
                 )
                 result[name] = {"status": status, "uptime": uptime}
         return result, None
@@ -161,6 +188,9 @@ class CollectorRunnerHealth:
         seen_docker_names: set[str] = set()
         for gh in github_runners:
             name = str(gh["name"])
+            index = self._runner_index(name)
+            if index is None or index > self._runner_count:
+                continue
             seen_docker_names.add(name)
             docker = docker_statuses.get(name, {"status": "not_found", "uptime": ""})
             state = self._classify_runner(
@@ -182,6 +212,9 @@ class CollectorRunnerHealth:
 
         # Reverse pass: Docker containers not in GitHub -> orphaned
         for docker_name, docker_info in docker_statuses.items():
+            index = self._runner_index(docker_name)
+            if index is None or index > self._runner_count:
+                continue
             if docker_name not in seen_docker_names:
                 statuses.append(
                     ModelRunnerStatus(

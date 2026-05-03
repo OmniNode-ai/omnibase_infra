@@ -292,10 +292,49 @@ class TestSetupOrchestratorE2E:
                 detail=None,
             )
 
+        def _mock_docker_version_check() -> ModelPreflightCheckResult:
+            return ModelPreflightCheckResult(
+                check_key="docker_version",
+                passed=True,
+                message="Docker version ok (mocked)",
+                detail=None,
+            )
+
+        def _mock_compose_version_check() -> ModelPreflightCheckResult:
+            return ModelPreflightCheckResult(
+                check_key="compose_version",
+                passed=True,
+                message="Compose version ok (mocked)",
+                detail=None,
+            )
+
+        def _mock_docker_daemon_check() -> ModelPreflightCheckResult:
+            return ModelPreflightCheckResult(
+                check_key="docker_daemon",
+                passed=True,
+                message="Docker daemon ok (mocked)",
+                detail=None,
+            )
+
         with (
             patch.object(preflight_handler_mod, "_check_port_free", _mock_port_free),
             patch.object(
+                preflight_handler_mod,
+                "_check_docker_version",
+                _mock_docker_version_check,
+            ),
+            patch.object(
+                preflight_handler_mod,
+                "_check_compose_version",
+                _mock_compose_version_check,
+            ),
+            patch.object(
                 preflight_handler_mod, "_check_postgres_password", _mock_postgres_check
+            ),
+            patch.object(
+                preflight_handler_mod,
+                "_check_docker_daemon",
+                _mock_docker_daemon_check,
             ),
             patch.object(
                 preflight_handler_mod, "_check_omnibase_dir", _mock_omnibase_dir_check

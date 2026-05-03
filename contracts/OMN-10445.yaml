@@ -1,41 +1,49 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-10445"
-title: "Runtime Stability Reconciliation -- runtime package activation"
-summary: "Pin active runtime package activation for omnibase_infra and omnimarket in the infra compose runtime environment."
-is_seam_ticket: true
-interface_change: true
-interfaces_touched:
-  - "public_api"
+title: "Standardize self-hosted runner fleet health config"
+summary: "Make the .201 GitHub Actions runner fleet config-driven, with 14 steady runners, 20 burst-capable runners, 6g memory, 12g swap, and 2 CPU each."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
 evidence_requirements:
   - kind: "tests"
-    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
-    command: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
+    description: "Runner fleet config, deploy propagation, health collection, and resource-limit tests pass."
+    command: "PYTHONPATH=src uv run pytest tests/unit/observability/runner_health/test_cli_runner_health.py tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_collector_runner_health.py tests/integration/observability/test_runner_fleet_config_contract.py -q"
   - kind: "manual"
-    description: "Sibling omninode_infra env parity checks pass with explicit OMNINODE_INFRA_DIR"
-    command: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
+    description: "Runner compose renders the 20-runner fleet with 6g memory, 12g swap, and 2 CPU limits."
+    command: "RUNNER_TOKEN=dummy docker compose -f docker/docker-compose.runners.yml config"
   - kind: "manual"
-    description: "Post-merge deploy/readiness smoke command recorded; live deploy requires explicit approval"
-    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
+    description: "Live .201 read-only proof shows 14 running containers and effective 6g memory / 12g swap / 2 CPU limits."
+    command: "ssh jonah@192.168.86.201 'docker ps --filter name=omninode-runner --format \"{{.Names}}\" | wc -l; docker inspect omninode-runner-1 --format \"Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} NanoCpus={{.HostConfig.NanoCpus}} PidsLimit={{.HostConfig.PidsLimit}}\"'"
+  - kind: "manual"
+    description: "Deploy validation is read-only for this PR; no live runner restart is claimed."
+    command: "deploy validation: compare docker/docker-compose.runners.yml with /home/jonah/.omnibase/runners/docker/docker-compose.runners.yml on .201 and inspect runner limits before any approved restart"
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-001"
-    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
-    source: "generated"
-    checks:
-      - check_type: "command"
-        check_value: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
-  - id: "dod-002"
-    description: "Sibling omninode_infra env parity checks pass with explicit OMNINODE_INFRA_DIR"
-    source: "generated"
-    checks:
-      - check_type: "command"
-        check_value: "OMNINODE_INFRA_DIR=${OMNINODE_INFRA_DIR:?set OMNINODE_INFRA_DIR to sibling omninode_infra checkout} uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py -q"
-  - id: "dod-deploy"
-    description: "Post-merge deploy/readiness smoke plan only; this PR has not deployed, restarted runtime, or mutated .201"
+    description: "Runner fleet config, deploy propagation, health collection, and resource-limit tests pass."
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
+        check_value: "PYTHONPATH=src uv run pytest tests/unit/observability/runner_health/test_cli_runner_health.py tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_collector_runner_health.py tests/integration/observability/test_runner_fleet_config_contract.py -q"
+  - id: "dod-002"
+    description: "Runner compose renders the 20-runner fleet with 6g memory, 12g swap, and 2 CPU limits."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "RUNNER_TOKEN=dummy docker compose -f docker/docker-compose.runners.yml config"
+  - id: "dod-live-readonly"
+    description: "Live .201 read-only proof shows 14 running containers and effective 6g memory / 12g swap / 2 CPU limits."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "ssh jonah@192.168.86.201 'docker ps --filter name=omninode-runner --format \"{{.Names}}\" | wc -l; docker inspect omninode-runner-1 --format \"Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} NanoCpus={{.HostConfig.NanoCpus}} PidsLimit={{.HostConfig.PidsLimit}}\"'"
+  - id: "dod-deploy-readonly"
+    description: "Deploy validation is read-only for this PR; no live runner restart is claimed."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy validation: compare docker/docker-compose.runners.yml with /home/jonah/.omnibase/runners/docker/docker-compose.runners.yml on .201 and inspect runner limits before any approved restart"
