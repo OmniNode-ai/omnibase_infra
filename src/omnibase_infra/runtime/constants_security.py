@@ -54,6 +54,10 @@ Example:
 
 .. versionchanged:: 0.8.0
     Added omnimemory. to TRUSTED_PLUGIN_NAMESPACE_PREFIXES (OMN-6829).
+
+.. versionchanged:: 0.9.0
+    Added omnimarket. to TRUSTED_HANDLER_NAMESPACE_PREFIXES and
+    TRUSTED_PLUGIN_NAMESPACE_PREFIXES (OMN-10500).
 """
 
 from __future__ import annotations
@@ -73,10 +77,16 @@ from typing import Final
 # - Handlers are implementations that live in infra or application code
 # - Loading protocols as handlers is architecturally incorrect
 #
+# Why omnimarket.:
+# - omnimarket is the first-party node marketplace providing handler implementations
+# - Without this prefix, all omnimarket nodes are rejected at namespace validation
+# - omnimarket is maintained in the same OmniNode ecosystem (OMN-10500)
+#
 # Third-party namespaces must be explicitly configured via security config file.
 TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omnibase_core.",
     "omnibase_infra.",
+    "omnimarket.",
 )
 
 # Default trusted namespace prefixes for plugin loading.
@@ -108,6 +118,11 @@ TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 #   with status namespace_rejected (OMN-6829)
 # - omnimemory is a first-party package in the OmniNode ecosystem
 #
+# Why omnimarket. is included:
+# - omnimarket is in TRUSTED_HANDLER_NAMESPACE_PREFIXES; plugin prefixes must
+#   be a superset of handler prefixes
+# - omnimarket nodes register as both handlers and plugins (OMN-10500)
+#
 # Third-party plugin namespaces must be explicitly configured via security config file.
 TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omnibase_core.",
@@ -115,6 +130,7 @@ TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omniclaude.",
     "omniintelligence.",
     "omnimemory.",
+    "omnimarket.",
 )
 
 # PEP 621 entry_points group name for domain plugin discovery.

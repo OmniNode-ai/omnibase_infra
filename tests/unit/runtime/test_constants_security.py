@@ -14,10 +14,14 @@ Tests validate:
 .. versionchanged:: 0.6.0
     Updated parity tests for omniclaude. plugin namespace (OMN-2047).
 
+.. versionchanged:: 0.9.0
+    Added omnimarket. handler and plugin namespace tests (OMN-10500).
+
 Related Tickets:
     - OMN-2010: Add plugin security constants
     - OMN-1519: Security hardening for handler namespace configuration
     - OMN-2047: Add omniclaude to trusted plugin namespace prefixes
+    - OMN-10500: Add omnimarket to trusted handler namespace prefixes
 """
 
 from __future__ import annotations
@@ -27,6 +31,37 @@ from omnibase_infra.runtime.constants_security import (
     TRUSTED_HANDLER_NAMESPACE_PREFIXES,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
+
+
+class TestTrustedHandlerNamespacePrefixes:
+    """Tests for TRUSTED_HANDLER_NAMESPACE_PREFIXES constant."""
+
+    def test_contains_core_namespace(self) -> None:
+        """Test that omnibase_core is a trusted handler namespace."""
+        assert "omnibase_core." in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+    def test_contains_infra_namespace(self) -> None:
+        """Test that omnibase_infra is a trusted handler namespace."""
+        assert "omnibase_infra." in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+    def test_contains_omnimarket_namespace(self) -> None:
+        """Test that omnimarket is a trusted handler namespace (OMN-10500)."""
+        assert "omnimarket." in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+    def test_is_tuple(self) -> None:
+        """Test that the constant is a tuple (immutable), not a list."""
+        assert isinstance(TRUSTED_HANDLER_NAMESPACE_PREFIXES, tuple)
+
+    def test_all_prefixes_end_with_dot(self) -> None:
+        """Test that all prefixes end with a dot for package boundary safety."""
+        for prefix in TRUSTED_HANDLER_NAMESPACE_PREFIXES:
+            assert prefix.endswith("."), f"Prefix {prefix!r} must end with '.'"
+
+    def test_does_not_include_spi(self) -> None:
+        """Test that SPI namespace is excluded (protocols, not implementations)."""
+        assert not any(
+            p.startswith("omnibase_spi") for p in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+        )
 
 
 class TestTrustedPluginNamespacePrefixes:
@@ -51,6 +86,10 @@ class TestTrustedPluginNamespacePrefixes:
     def test_contains_omnimemory_namespace(self) -> None:
         """Test that omnimemory is a trusted plugin namespace (OMN-6829)."""
         assert "omnimemory." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+    def test_contains_omnimarket_namespace(self) -> None:
+        """Test that omnimarket is a trusted plugin namespace (OMN-10500)."""
+        assert "omnimarket." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
 
     def test_is_tuple(self) -> None:
         """Test that the constant is a tuple (immutable), not a list."""
@@ -98,6 +137,8 @@ class TestPluginHandlerNamespaceRelationship:
         assert "omniclaude." in extra
         assert "omniintelligence." in extra
         assert "omnimemory." in extra
+        # omnimarket. is in handler prefixes, so it's NOT in extra (but IS in both)
+        assert "omnimarket." not in extra
 
 
 class TestDomainPluginEntryPointGroup:
