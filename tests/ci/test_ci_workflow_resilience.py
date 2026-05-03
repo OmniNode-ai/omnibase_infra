@@ -60,20 +60,25 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
         assert_step["env"]["POSTGRES_PORT"]
         == "${{ job.services.postgres.ports['5432'] }}"
     )
-    assert '-h "$POSTGRES_HOST"' in assert_step["run"]
-    assert '-p "$POSTGRES_PORT"' in assert_step["run"]
+    assert 'host=os.environ["POSTGRES_HOST"]' in assert_step["run"]
+    assert 'port=int(os.environ["POSTGRES_PORT"])' in assert_step["run"]
 
-    install_step_index = next(
+    client_step_index = next(
         index
         for index, step in enumerate(steps)
-        if step.get("name") == "Install Postgres client"
+        if step.get("name") == "Verify Python Postgres client"
     )
     assert_step_index = steps.index(assert_step)
-    assert install_step_index < assert_step_index
-    install_step = steps[install_step_index]
-    assert "command -v psql" in install_step["run"]
-    assert "command -v sudo" in install_step["run"]
-    assert "postgresql-client" in install_step["run"]
+    assert client_step_index < assert_step_index
+    client_step = steps[client_step_index]
+    assert "import asyncpg" in client_step["run"]
+    assert "apt-get" not in client_step["run"]
+    assert "sudo" not in client_step["run"]
+
+    assert "import asyncpg" in assert_step["run"]
+    assert "asyncpg.connect" in assert_step["run"]
+    assert "EXPECTED_TABLES" in assert_step["run"]
+    assert "psql" not in assert_step["run"]
 
 
 def test_migration_conflict_action_startup_failure_is_warn_only() -> None:

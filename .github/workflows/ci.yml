@@ -1147,22 +1147,14 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
-      - name: Install Postgres client
+      - name: Verify Python Postgres client
         run: |
           set -euo pipefail
-          if command -v psql >/dev/null 2>&1; then
-            psql --version
-            exit 0
-          fi
+          uv run python - <<'PY'
+          import asyncpg
 
-          if command -v sudo >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends postgresql-client
-          else
-            apt-get update
-            apt-get install -y --no-install-recommends postgresql-client
-          fi
-          psql --version
+          print(f"asyncpg {asyncpg.__version__}")
+          PY
 
       - name: Resolve Postgres service host
         id: postgres_host
@@ -1213,29 +1205,76 @@ jobs:
       - name: Assert manifest tables exist
         env:
           POSTGRES_HOST: ${{ steps.postgres_host.outputs.host }}
-          PGPASSWORD: test_password
           POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
         run: |
-          psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U postgres -d omnibase_infra -c "
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            ORDER BY table_name;
-          " | tee /tmp/tables.txt
+          uv run python - <<'PY'
+          import asyncio
+          import os
 
-          for table in agent_actions agent_detection_failures agent_execution_logs \
-              agent_routing_decisions agent_status_events agent_transformation_events \
-              baselines_breakdown baselines_comparisons baselines_trend \
-              contracts db_error_tickets db_metadata gmail_intent_evaluations \
-              injection_effectiveness latency_breakdowns llm_call_metrics \
-              llm_cost_aggregates manifest_injection_lifecycle pattern_hit_rates \
-              registration_projections router_performance_metrics skill_executions topics \
-              schema_migrations; do
-            if ! grep -q "$table" /tmp/tables.txt; then
-              echo "FAIL: expected table '$table' not found in database"
-              exit 1
-            fi
-          done
+          import asyncpg
+
+          EXPECTED_TABLES = {
+              "agent_actions",
+              "agent_detection_failures",
+              "agent_execution_logs",
+              "agent_routing_decisions",
+              "agent_status_events",
+              "agent_transformation_events",
+              "baselines_breakdown",
+              "baselines_comparisons",
+              "baselines_trend",
+              "contracts",
+              "db_error_tickets",
+              "db_metadata",
+              "gmail_intent_evaluations",
+              "injection_effectiveness",
+              "latency_breakdowns",
+              "llm_call_metrics",
+              "llm_cost_aggregates",
+              "manifest_injection_lifecycle",
+              "pattern_hit_rates",
+              "registration_projections",
+              "router_performance_metrics",
+              "skill_executions",
+              "topics",
+              "schema_migrations",
+          }
+
+
+          async def main() -> None:
+              conn = await asyncpg.connect(
+                  host=os.environ["POSTGRES_HOST"],
+                  port=int(os.environ["POSTGRES_PORT"]),
+                  user="postgres",
+                  password="test_password",
+                  database="omnibase_infra",
+              )
+              try:
+                  rows = await conn.fetch(
+                      """
+                      SELECT table_name
+                      FROM information_schema.tables
+                      WHERE table_schema = 'public'
+                      ORDER BY table_name
+                      """
+                  )
+              finally:
+                  await conn.close()
+
+              tables = {row["table_name"] for row in rows}
+              for table in sorted(tables):
+                  print(table)
+
+              missing = sorted(EXPECTED_TABLES - tables)
+              if missing:
+                  raise SystemExit(
+                      "FAIL: expected table(s) not found in database: "
+                      + ", ".join(missing)
+                  )
+
+
+          asyncio.run(main())
+          PY
           echo "All 24 tables present."
 
   ai-slop-check:
