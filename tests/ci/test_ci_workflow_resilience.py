@@ -63,6 +63,16 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
     assert '-h "$POSTGRES_HOST"' in assert_step["run"]
     assert '-p "$POSTGRES_PORT"' in assert_step["run"]
 
+    install_step_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Install Postgres client"
+    )
+    assert_step_index = steps.index(assert_step)
+    assert install_step_index < assert_step_index
+    install_step = steps[install_step_index]
+    assert "postgresql-client" in install_step["run"]
+
 
 def test_migration_conflict_action_startup_failure_is_warn_only() -> None:
     workflow = _load_yaml(CI_WORKFLOW)

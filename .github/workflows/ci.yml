@@ -1145,6 +1145,12 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
+      - name: Install Postgres client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
       - name: Resolve Postgres service host
         id: postgres_host
         env:
