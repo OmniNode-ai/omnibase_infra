@@ -177,6 +177,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Check schema fingerprint (CI twin for B2)
         run: uv run python scripts/check_schema_fingerprint.py verify
@@ -295,6 +296,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
 
       - name: Lint topic names
         run: |

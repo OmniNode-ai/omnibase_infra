@@ -15,6 +15,10 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
+SETUP_PYTHON_UV_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
+)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -137,3 +141,29 @@ def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     assert "docker compose version" in compose_step["run"]
     assert "DOCKER_COMPOSE_VERSION" in compose_step["run"]
     assert "docker-compose-linux-x86_64" in compose_step["run"]
+
+
+def test_short_gates_can_disable_uv_cache_cleanup() -> None:
+    action = _load_yaml(SETUP_PYTHON_UV_ACTION)
+    assert action["inputs"]["cache-enabled"]["default"] == "true"
+    cache_step = next(
+        step for step in action["runs"]["steps"] if step.get("name") == "Load cached uv"
+    )
+    assert cache_step["if"] == "inputs.cache-enabled != 'false'"
+
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    for job_name in ("fingerprint-check", "topic-naming-lint"):
+        setup_step = next(
+            step
+            for step in ci_workflow["jobs"][job_name]["steps"]
+            if step.get("uses") == "./.github/actions/setup-python-uv"
+        )
+        assert setup_step["with"]["cache-enabled"] == "false"
+
+    env_parity_workflow = _load_yaml(ENV_PARITY_WORKFLOW)
+    setup_step = next(
+        step
+        for step in env_parity_workflow["jobs"]["env-parity"]["steps"]
+        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
+    )
+    assert setup_step["with"]["cache-enabled"] == "false"
