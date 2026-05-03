@@ -390,9 +390,9 @@ RUN groupadd --gid 1000 omniinfra && \
 
 WORKDIR /app
 
-# Copy virtual environment from builder stage
+# Copy virtual environment from builder stage with runtime ownership.
 # This contains all installed Python packages
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv
 
 # Copy source code with proper ownership
 COPY --chown=omniinfra:omniinfra src/ /app/src/
@@ -418,9 +418,11 @@ COPY --from=builder --chown=omniinfra:omniinfra \
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
 RUN chmod +x /app/entrypoint-runtime.sh
 
-# Create runtime directories with proper permissions
-RUN mkdir -p /app/logs /app/data /app/tmp && \
-    chown -R omniinfra:omniinfra /app
+# Create runtime directories with proper permissions.
+# Avoid a recursive chown over /app here: the venv and copied artifacts already
+# preserve ownership at COPY time, and the recursive walk can dominate Docker
+# builds on the large runtime image.
+RUN install -d -o omniinfra -g omniinfra /app/logs /app/data /app/tmp
 
 # Switch to non-root user for security
 USER omniinfra
