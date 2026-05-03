@@ -150,6 +150,9 @@ x-runtime-env: &runtime-env
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+  # Local Docker Redpanda cannot absorb hundreds of six-partition contract topics
+  # on constrained laptops. Operators can unset or raise this for larger brokers.
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---
@@ -181,10 +184,12 @@ x-runtime-env: &runtime-env
   # This is the single runtime ingress for marketplace-packaged skills.
   ONEX_MARKETPLACE_SKILLS_ROOT: ${ONEX_MARKETPLACE_SKILLS_ROOT:-/app/skills}
   # --- Infisical config store ---
-  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
-  INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
-  INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
-  INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+  # Runtime config prefetch is opt-in for local Docker. Use ONEX_RUNTIME_INFISICAL_*
+  # so host-level INFISICAL_* variables do not accidentally enable it.
+  INFISICAL_ADDR: ${ONEX_RUNTIME_INFISICAL_ADDR:-}
+  INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
+  INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
+  INFISICAL_PROJECT_ID: ${ONEX_RUNTIME_INFISICAL_PROJECT_ID:-}
   # OMN-5381: Containers always use event routing. Host-side USE_EVENT_ROUTING is for local dev scripts.
   USE_EVENT_ROUTING: "true"
   # --- Keycloak / Auth (auth profile, OMN-3361) ---

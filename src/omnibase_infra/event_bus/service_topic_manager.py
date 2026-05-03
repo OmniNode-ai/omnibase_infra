@@ -37,10 +37,60 @@ logger = logging.getLogger(__name__)
 
 # OMN-8783: No default — KAFKA_BOOTSTRAP_SERVERS must be set via overlay.
 ENV_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
+ENV_TOPIC_PARTITION_CAP = "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"
 
 # Default partition and replication settings for standard event topics
 DEFAULT_EVENT_TOPIC_PARTITIONS = 6
 DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1
+
+_CRITICAL_STARTUP_TOPICS: tuple[str, ...] = (
+    "onex.evt.omnibase-infra.runtime-health-check.v1",
+    "onex.evt.platform.node-introspection.v1",
+    "onex.evt.platform.registration-completed.v1",
+)
+
+_STARTUP_TOPIC_PREFIXES: tuple[str, ...] = (
+    "onex.evt.platform.",
+    "onex.intent.platform.",
+)
+"""Topics required for runtime boot, health, and registration must be first."""
+
+
+def _topic_partition_cap_from_env() -> int | None:
+    raw_value = os.environ.get(ENV_TOPIC_PARTITION_CAP)
+    if raw_value is None or raw_value.strip() == "":
+        return None
+
+    try:
+        cap = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid %s=%r; expected a positive integer",
+            ENV_TOPIC_PARTITION_CAP,
+            raw_value,
+        )
+        return None
+
+    if cap < 1:
+        logger.warning(
+            "Ignoring invalid %s=%r; expected a positive integer",
+            ENV_TOPIC_PARTITION_CAP,
+            raw_value,
+        )
+        return None
+
+    return cap
+
+
+def _topic_provisioning_sort_key(spec: ModelTopicSpec) -> tuple[int, str]:
+    """Sort critical runtime topics before the broad plugin topic surface."""
+    if spec.suffix in _CRITICAL_STARTUP_TOPICS:
+        priority = 0
+    elif spec.suffix.startswith(_STARTUP_TOPIC_PREFIXES):
+        priority = 1
+    else:
+        priority = 2
+    return (priority, spec.suffix)
 
 
 class TopicProvisioner:
@@ -106,7 +156,13 @@ class TopicProvisioner:
         self._contracts_root = contracts_root
         self._skill_manifests_root = skill_manifests_root
         self._skill_manifests_roots = skill_manifests_roots
+        self._topic_partition_cap = _topic_partition_cap_from_env()
         self._topic_specs = self._build_topic_specs()
+
+    def _creation_partitions(self, spec: ModelTopicSpec) -> int:
+        if self._topic_partition_cap is None:
+            return spec.partitions
+        return min(spec.partitions, self._topic_partition_cap)
 
     def _build_topic_specs(self) -> tuple[ModelTopicSpec, ...]:
         """Build topic specs from contract YAML extraction.
@@ -136,7 +192,7 @@ class TopicProvisioner:
         for entry in contract_entries:
             result_specs.append(ModelTopicSpec(suffix=entry.topic))
 
-        result = tuple(sorted(result_specs, key=lambda s: s.suffix))
+        result = tuple(sorted(result_specs, key=_topic_provisioning_sort_key))
 
         skill_count = len([e for e in contract_entries if "omniclaude" in e.topic])
         logger.info(
@@ -209,9 +265,10 @@ class TopicProvisioner:
 
             for spec in self._topic_specs:
                 try:
+                    partitions = self._creation_partitions(spec)
                     new_topic = NewTopic(
                         name=spec.suffix,
-                        num_partitions=spec.partitions,
+                        num_partitions=partitions,
                         replication_factor=spec.replication_factor,
                         topic_configs=dict(spec.kafka_config)
                         if spec.kafka_config
@@ -223,7 +280,7 @@ class TopicProvisioner:
                     logger.info(
                         "Created topic: %s (partitions=%d)",
                         spec.suffix,
-                        spec.partitions,
+                        partitions,
                         extra={"correlation_id": str(correlation_id)},
                     )
 

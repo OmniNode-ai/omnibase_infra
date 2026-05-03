@@ -80,11 +80,59 @@ class TestTopicProvisioner:
         assert manager._bootstrap_servers == "kafka1:9092,kafka2:9092"
         assert manager._request_timeout_ms == 5000
 
+    def test_topic_partition_cap_from_env(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Local brokers can cap contract topic partition creation."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+
+        manager = _make_provisioner(contracts_root)
+
+        assert manager._creation_partitions(manager._topic_specs[0]) == 1
+
+    def test_invalid_topic_partition_cap_is_ignored(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid partition caps do not override contract topic specs."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "nope")
+
+        manager = _make_provisioner(contracts_root)
+
+        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+
     def test_init_missing_contracts_root_raises(self, tmp_path: Path) -> None:
         """Constructing with a non-existent contracts_root raises immediately."""
         bad_path = tmp_path / "does_not_exist"
         with pytest.raises(FileNotFoundError, match="contracts_root"):
             TopicProvisioner(contracts_root=bad_path)
+
+    def test_startup_critical_topics_are_ordered_first(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Runtime-critical platform topics are created before broad plugin topics."""
+        node_dir = tmp_path / "node_example"
+        node_dir.mkdir()
+        (node_dir / "contract.yaml").write_text(
+            "name: node_example\n"
+            "event_bus:\n"
+            "  publish_topics:\n"
+            "    - onex.cmd.omnimarket.build-loop-start.v1\n"
+            "    - onex.evt.platform.node-introspection.v1\n"
+            "    - onex.evt.omnibase-infra.runtime-health-check.v1\n",
+            encoding="utf-8",
+        )
+
+        manager = _make_provisioner(tmp_path)
+
+        assert [spec.suffix for spec in manager._topic_specs[:2]] == [
+            "onex.evt.omnibase-infra.runtime-health-check.v1",
+            "onex.evt.platform.node-introspection.v1",
+        ]
 
     async def test_ensure_provisioned_topics_all_created(
         self, contracts_root: Path
