@@ -1,0 +1,27 @@
+# OMN-10530 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-10530"
+summary: "Release omnibase_infra 0.34.2 against published core 0.40.1 and SPI 0.20.6"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "ci"
+    description: "omnibase_infra release PR checks pass, including deploy gate"
+    command: "gh pr checks 1498 --repo OmniNode-ai/omnibase_infra --watch"
+  - kind: "manual"
+    description: "Runtime deploy plan for release dependency floor change"
+    command: "deploy: no live deploy or restart is performed pre-merge; publish the 0.34.2 wheel, then validate runtime consumers during the normal post-merge rollout before claiming live runtime completion"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-deploy"
+    description: "deploy gate evidence: release dependency floor update is packaged pre-merge; live runtime validation remains a post-merge rollout step."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: no live deploy or restart is performed pre-merge for this PyPI checkpoint release; after v0.34.2 publishes, validate runtime consumers during the normal rollout before claiming live runtime completion"
