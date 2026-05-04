@@ -3,7 +3,11 @@
 
 """Integration coverage for the exported InvariantViolation error."""
 
+import pytest
+
 from omnibase_infra.errors import InvariantViolation
+
+pytestmark = pytest.mark.integration
 
 
 def test_invariant_violation_export_preserves_structured_context() -> None:

@@ -5,12 +5,16 @@
 
 from uuid import uuid4
 
+import pytest
+
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InvariantViolation, RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_invariant_violation_is_exception() -> None:
