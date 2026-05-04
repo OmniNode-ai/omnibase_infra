@@ -43,16 +43,24 @@ class InvariantViolation(RuntimeHostError):  # noqa: N818 - Linear ticket names 
         self.protocol_domain = protocol_domain
         self.allowed_actions = allowed_actions
 
-        if correlation_id is None:
-            correlation_id = uuid4()
-
-        if context is None:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="validate_allowed_action",
-                target_name=protocol_domain,
-                correlation_id=correlation_id,
-            )
+        resolved_correlation_id = (
+            correlation_id
+            or (context.correlation_id if context is not None else None)
+            or uuid4()
+        )
+        context_values = context.model_dump() if context is not None else {}
+        context_values.pop("correlation_id", None)
+        context_values.update(
+            {
+                "transport_type": EnumInfraTransportType.RUNTIME,
+                "operation": "validate_allowed_action",
+                "target_name": protocol_domain,
+            }
+        )
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=resolved_correlation_id,
+            **context_values,
+        )
 
         extra_context["action_name"] = action_name
         extra_context["protocol_domain"] = protocol_domain
