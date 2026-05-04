@@ -23,7 +23,7 @@ ticket_id: OMN-10089
   - Emitting `docker ps` + `docker logs --tail 40` diagnostics on timeout
   - Caller-side localhost gate for `--reset-bootstrap-admin` (defense in depth alongside the callee gate already in `seed-keycloak-clients.py`)
   - `cd` into repo root and `exec uv run python scripts/seed-keycloak-clients.py ...`
-- **Modify:** `docker/docker-compose.infra.yml` — remove `profiles: ["auth", "full"]` from the `keycloak` service so `docker compose up -d` brings it up by default. Update the explanatory comments at the top of the file to reflect the change. The `auth` profile name itself remains valid for selective service startup (e.g., to bring up *only* keycloak); removing the profile gate makes keycloak default-on, which is the OMN-10089 acceptance criterion.
+- **Modify:** `docker/docker-compose.infra.yml` — remove `profiles: ["auth", "full"]` from the `keycloak` service so `docker compose up -d` brings it up by default. Update the explanatory comments at the top of the file to reflect the change. Note: with no `profiles:` key, `--profile auth` no longer selectively targets keycloak — it would start the full default stack plus any other service tagged `auth`. To bring up *only* keycloak (and its postgres dep), operators should use `docker compose up -d keycloak` (compose resolves `depends_on` to start postgres automatically).
 
 ## Acceptance criteria
 
@@ -49,4 +49,4 @@ This PR must merge before [`harsh-omni/omnibase#2`](https://github.com/harsh-omn
 - [ ] `bash scripts/seed-keycloak.sh` against the freshly-started Keycloak — verify exit 0 and JSON `op` lines.
 - [ ] Re-run `bash scripts/seed-keycloak.sh` — verify all `op=unchanged`.
 - [ ] `OMNIBASE_ENV_FILE=/nonexistent bash scripts/seed-keycloak.sh` — verify clear failure message naming the missing env vars.
-- [ ] `KC_URL=https://example.invalid bash scripts/seed-keycloak.sh` (without admin vars set) — verify the `--reset-bootstrap-admin` flag is NOT in the final `uv run python` invocation (`bash -x` to inspect).
+- [ ] `KEYCLOAK_ADMIN_USERNAME=x KEYCLOAK_ADMIN_PASSWORD=y KC_URL=http://staging.example.invalid bash -x scripts/seed-keycloak.sh 2>&1 | grep "uv run"` — verify the `--reset-bootstrap-admin` flag is NOT in the final `uv run python` invocation when `KC_URL` is non-localhost. Admin vars are required because the `${VAR:?}` guard fires before the `case` localhost-gate; CSI runs need the vars set so the assertion can actually inspect the `case` output.

@@ -83,5 +83,5 @@ exec uv run python scripts/seed-keycloak-clients.py \
   --realm "${KC_REALM}" \
   --admin-username "${KEYCLOAK_ADMIN_USERNAME}" \
   --admin-password "${KEYCLOAK_ADMIN_PASSWORD}" \
-  "${reset_flag[@]}" \
+  ${reset_flag[@]+"${reset_flag[@]}"} \
   --config "${REPO_ROOT}/docker/keycloak/desired-clients.json"
