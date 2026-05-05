@@ -188,6 +188,8 @@ __all__: list[str] = [
     # Event registry fingerprint errors
     "EventRegistryFingerprintMismatchError",
     "EventRegistryFingerprintMissingError",
+    # Overseer scope enforcement errors
+    "InvariantViolation",
     "InfraAuthenticationError",
     "InfraConnectionError",
     # Protocol/format errors
@@ -197,7 +199,6 @@ __all__: list[str] = [
     "InfraRequestRejectedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
-    "InvariantViolation",
     # Message type registry errors
     "MessageTypeRegistryError",
     # Configuration models
