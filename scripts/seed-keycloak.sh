@@ -45,11 +45,11 @@ fi
 : "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set in ${OMNIBASE_ENV_FILE} or environment}"
 
 echo "==> Waiting for Keycloak at ${KC_URL} to become ready (max ${KC_READY_TIMEOUT}s)..."
-attempts=$((KC_READY_TIMEOUT / 3))
+deadline=$((SECONDS + KC_READY_TIMEOUT))
 i=0
 until curl -fsS -m 3 "${KC_URL}/realms/${KC_REALM}/.well-known/openid-configuration" > /dev/null 2>&1; do
   i=$((i + 1))
-  if [ "${i}" -gt "${attempts}" ]; then
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
     echo "ERROR: Keycloak at ${KC_URL} did not become ready within ${KC_READY_TIMEOUT}s." >&2
     if command -v docker > /dev/null 2>&1; then
       echo "--- docker ps (${KC_CONTAINER_NAME}) ---" >&2
@@ -60,7 +60,7 @@ until curl -fsS -m 3 "${KC_URL}/realms/${KC_REALM}/.well-known/openid-configurat
     fi
     exit 1
   fi
-  echo "   Keycloak not ready — retrying in 3s... (${i}/${attempts})"
+  echo "   Keycloak not ready — retrying in 3s... (attempt ${i})"
   sleep 3
 done
 
