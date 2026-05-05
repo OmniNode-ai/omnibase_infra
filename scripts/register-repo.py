@@ -316,6 +316,69 @@ def _service_override_required(
     return frozenset(keys)
 
 
+def _services_keys(
+    data: dict[str, object] | None = None,
+) -> dict[str, dict[str, list[str]]]:
+    """Load the per-service keys section from the registry (added in 1.2).
+
+    Returns a mapping ``{repo: {transport: [key, ...]}}``. Each entry maps to
+    the Infisical path ``/services/<repo>/<transport>/<KEY>`` — these are the
+    per-service overrides that take precedence over ``/shared/<transport>/<KEY>``
+    at runtime.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+
+    The section is optional — registries without it return an empty mapping
+    so older test fixtures continue to load.
+    """
+    if data is None:
+        data = _read_registry_data()
+    services = data.get("services")
+    if services is None:
+        return {}
+    if not isinstance(services, dict):
+        raise ValueError(
+            f"Expected 'services' in {_REGISTRY_PATH} to be a mapping, "
+            f"got {type(services).__name__!r}."
+        )
+    result: dict[str, dict[str, list[str]]] = {}
+    for repo, transports in services.items():
+        if not isinstance(repo, str):
+            raise ValueError(
+                f"[ERROR] registry 'services' keys must be strings (repo names) in {_REGISTRY_PATH}"
+            )
+        if not isinstance(transports, dict):
+            raise ValueError(
+                f"Expected 'services.{repo}' in {_REGISTRY_PATH} to be a mapping, "
+                f"got {type(transports).__name__!r}."
+            )
+        result[repo] = {}
+        for transport, keys in transports.items():
+            if not isinstance(transport, str):
+                raise ValueError(
+                    f"[ERROR] registry 'services.{repo}' keys must be strings (transports) in {_REGISTRY_PATH}"
+                )
+            if not isinstance(keys, list):
+                raise ValueError(
+                    f"Expected 'services.{repo}.{transport}' in {_REGISTRY_PATH} to be a list, "
+                    f"got {type(keys).__name__!r}."
+                )
+            if not keys:
+                raise ValueError(
+                    f"Folder 'services.{repo}.{transport}' has an empty key list in registry — "
+                    "this is likely an authoring error"
+                )
+            if not all(isinstance(k, str) for k in keys):
+                raise ValueError(
+                    f"[ERROR] registry 'services.{repo}.{transport}' must be a list of strings in {_REGISTRY_PATH}"
+                )
+            result[repo][transport] = list(keys)
+    return result
+
+
 # Per-repo folders to create under /services/<repo>/
 REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 
