@@ -43,18 +43,6 @@ ENV_TOPIC_PARTITION_CAP = "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"
 DEFAULT_EVENT_TOPIC_PARTITIONS = 6
 DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1
 
-_CRITICAL_STARTUP_TOPICS: tuple[str, ...] = (
-    "onex.evt.omnibase-infra.runtime-health-check.v1",
-    "onex.evt.platform.node-introspection.v1",
-    "onex.evt.platform.registration-completed.v1",
-)
-
-_STARTUP_TOPIC_PREFIXES: tuple[str, ...] = (
-    "onex.evt.platform.",
-    "onex.intent.platform.",
-)
-"""Topics required for runtime boot, health, and registration must be first."""
-
 
 def _topic_partition_cap_from_env() -> int | None:
     raw_value = os.environ.get(ENV_TOPIC_PARTITION_CAP)
@@ -83,14 +71,8 @@ def _topic_partition_cap_from_env() -> int | None:
 
 
 def _topic_provisioning_sort_key(spec: ModelTopicSpec) -> tuple[int, str]:
-    """Sort critical runtime topics before the broad plugin topic surface."""
-    if spec.suffix in _CRITICAL_STARTUP_TOPICS:
-        priority = 0
-    elif spec.suffix.startswith(_STARTUP_TOPIC_PREFIXES):
-        priority = 1
-    else:
-        priority = 2
-    return (priority, spec.suffix)
+    """Sort topics using contract-declared provisioning priority."""
+    return (spec.provisioning_priority, spec.suffix)
 
 
 class TopicProvisioner:
@@ -190,7 +172,12 @@ class TopicProvisioner:
 
         result_specs: list[ModelTopicSpec] = []
         for entry in contract_entries:
-            result_specs.append(ModelTopicSpec(suffix=entry.topic))
+            result_specs.append(
+                ModelTopicSpec(
+                    suffix=entry.topic,
+                    provisioning_priority=entry.provisioning_priority,
+                )
+            )
 
         result = tuple(sorted(result_specs, key=_topic_provisioning_sort_key))
 

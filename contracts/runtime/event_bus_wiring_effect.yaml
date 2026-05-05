@@ -210,7 +210,7 @@ health_check:
       critical: false
       threshold_ms: 1000
 
-# Event subscriptions (what this node listens to)
+# Event bus declarations (what this node listens to and publishes)
 # NOTE: Each subscription defines a `handler` field that references a method that MUST be
 # implemented by the runtime or node implementation. These handlers are NOT protocol-based
 # dependencies (those go in the `handlers` section below). Instead, subscription handlers
@@ -230,16 +230,9 @@ health_check:
 #   3. Implement wire_single_subscription for hot-reload support
 #   4. Implement remove_subscription for graceful node removal
 #   5. Add handler validation during contract loading to fail-fast on missing handlers
-subscriptions:
-  # Implementation Status: PLANNED
-  # These handlers are contract-declared but not yet runtime-registered.
-  # The runtime will validate handler availability during contract loading
-  # and emit warnings for unregistered handlers in non-strict mode.
-  #
-  # Tracking: Planned for v1.2.0 - SubscriptionHandlerRegistry implementation
-  # Status: Handler implementation pending (not yet runtime-registered)
-  topics:
-    - topic: onex.runtime.node_graph.ready
+event_bus:
+  subscribe_topics:
+    - topic: onex.evt.runtime.node-graph-ready.v1
       description: Triggered when node graph is fully instantiated
       handler: wire_all_subscriptions
       handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
@@ -249,7 +242,8 @@ subscriptions:
         input_schema: ModelNodeGraphReadyEvent
         output_schema: ModelWiringResultEvent
         idempotent: true
-    - topic: onex.runtime.node.registered
+      provisioning_priority: 10
+    - topic: onex.evt.runtime.node-registered.v1
       description: Handle new node registration for hot reload
       handler: wire_single_subscription
       handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
@@ -259,7 +253,8 @@ subscriptions:
         input_schema: ModelNodeRegisteredEvent
         output_schema: ModelSubscriptionCreatedEvent
         idempotent: true
-    - topic: onex.runtime.node.unregistered
+      provisioning_priority: 10
+    - topic: onex.evt.runtime.node-unregistered.v1
       description: Handle node removal
       handler: remove_subscription
       handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
@@ -269,21 +264,24 @@ subscriptions:
         input_schema: ModelNodeUnregisteredEvent
         output_schema: ModelSubscriptionRemovedEvent
         idempotent: true
-
-# Events published by this node
-publications:
-  - topic: onex.runtime.ready
-    description: Runtime is fully initialized with all subscriptions wired
-    payload_schema: ModelRuntimeReadyEvent
-  - topic: onex.runtime.subscription.created
-    description: A new subscription was successfully created
-    payload_schema: ModelSubscriptionCreatedEvent
-  - topic: onex.runtime.subscription.failed
-    description: A subscription failed to be created
-    payload_schema: ModelSubscriptionFailedEvent
-  - topic: onex.runtime.wiring.error
-    description: Wiring encountered a critical error
-    payload_schema: ModelWiringErrorEvent
+      provisioning_priority: 10
+  publish_topics:
+    - topic: onex.evt.runtime.ready.v1
+      description: Runtime is fully initialized with all subscriptions wired
+      payload_schema: ModelRuntimeReadyEvent
+      provisioning_priority: 10
+    - topic: onex.evt.runtime.subscription-created.v1
+      description: A new subscription was successfully created
+      payload_schema: ModelSubscriptionCreatedEvent
+      provisioning_priority: 20
+    - topic: onex.evt.runtime.subscription-failed.v1
+      description: A subscription failed to be created
+      payload_schema: ModelSubscriptionFailedEvent
+      provisioning_priority: 20
+    - topic: onex.evt.runtime.wiring-error.v1
+      description: Wiring encountered a critical error
+      payload_schema: ModelWiringErrorEvent
+      provisioning_priority: 20
 
 # v1.1.0 Required Fields
 handlers:

@@ -43,12 +43,14 @@ class ModelTopicSpec:
         partitions: Number of partitions for the topic.
         replication_factor: Replication factor for the topic.
         kafka_config: Optional Kafka topic config overrides (e.g., {"cleanup.policy": "compact"}).
+        provisioning_priority: Lower values are provisioned first.
     """
 
     suffix: str
     partitions: int = DEFAULT_EVENT_TOPIC_PARTITIONS
     replication_factor: int = DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
     kafka_config: Mapping[str, str] | None = field(default=None)
+    provisioning_priority: int = 100
 
     def __post_init__(self) -> None:
         """Freeze mutable kafka_config dict passed at construction time."""
