@@ -83,6 +83,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
         # Per-service database DSNs — contain credentials, sourced from Infisical at runtime
         "OMNIBASE_INFRA_DB_URL",  # k8s uses OMNIBASE_INFRA_DB_HOST + OMNIBASE_INFRA_DB_PORT + Secret
         "OMNIINTELLIGENCE_DB_URL",  # cross-service DSN with embedded credentials
+        "OMNIDASH_ANALYTICS_DB_URL",  # analytics DSN with embedded credentials, sourced from Infisical
         "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN",
         "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN",
         # Valkey auth
