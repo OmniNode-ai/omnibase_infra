@@ -8,8 +8,7 @@ summary: 'fix(OMN-10534): harden local runtime topic bootstrap'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched:
-  - docker-compose
-  - event_bus
+  - topics
 evidence_requirements:
   - kind: tests
     description: Topic manager and env parity tests pass
