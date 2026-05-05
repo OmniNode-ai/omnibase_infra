@@ -23,7 +23,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
 from omnibase_core.enums.enum_enforcement import EnumEnforcement
 from omnibase_core.models.scope import ModelArtifactEnforcement, ModelEnforcementScope
