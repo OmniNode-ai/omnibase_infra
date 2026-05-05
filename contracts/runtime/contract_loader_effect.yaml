@@ -95,10 +95,11 @@ effect_operations:
         scan_mode: directory
         pattern: "**/*.yaml"
         exclude_patterns:
-          - "**/runtime/**"  # Don't reload runtime contracts
           - "**/_*.yaml"  # Skip disabled contracts (underscore prefix)
           - "**/.*"  # Skip hidden files
           - "**/__pycache__/**"  # Skip Python cache directories
+        hot_reload_exclude_patterns:
+          - "**/runtime/**"  # Runtime contracts are scanned at bootstrap but not hot-reloaded
         watch_mode: true
         watch_debounce_ms: 500
         recursive: true

@@ -223,26 +223,31 @@ workflow_coordination:
     health_check_interval_ms: 30000
     graceful_shutdown_timeout_ms: 60000
 
-  # Event subscriptions for runtime management
-  subscriptions:
-    - topic: runtime.startup
-      description: Trigger runtime startup sequence
-    - topic: runtime.shutdown
-      description: Trigger graceful shutdown sequence
-    - topic: runtime.contracts.reload
-      description: Trigger contract reload without full restart
-
-  # Events published by runtime
-  publications:
-    - topic: runtime.ready
-      description: Runtime is fully initialized and ready
-      payload_schema: ModelRuntimeReadyEvent
-    - topic: runtime.shutting_down
-      description: Runtime is beginning shutdown sequence
-      payload_schema: ModelRuntimeShutdownEvent
-    - topic: runtime.error
-      description: Runtime encountered a critical error
-      payload_schema: ModelRuntimeErrorEvent
+  # Event bus declarations for runtime management
+  event_bus:
+    subscribe_topics:
+      - topic: onex.evt.runtime.startup.v1
+        description: Trigger runtime startup sequence
+        provisioning_priority: 10
+      - topic: onex.evt.runtime.shutdown.v1
+        description: Trigger graceful shutdown sequence
+        provisioning_priority: 10
+      - topic: onex.evt.runtime.contracts-reload.v1
+        description: Trigger contract reload without full restart
+        provisioning_priority: 20
+    publish_topics:
+      - topic: onex.evt.runtime.ready.v1
+        description: Runtime is fully initialized and ready
+        payload_schema: ModelRuntimeReadyEvent
+        provisioning_priority: 10
+      - topic: onex.evt.runtime.shutting-down.v1
+        description: Runtime is beginning shutdown sequence
+        payload_schema: ModelRuntimeShutdownEvent
+        provisioning_priority: 20
+      - topic: onex.evt.runtime.error.v1
+        description: Runtime encountered a critical error
+        payload_schema: ModelRuntimeErrorEvent
+        provisioning_priority: 20
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Timing Constraints Validation

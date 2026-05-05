@@ -104,17 +104,29 @@ class TestTopicProvisioner:
 
         assert manager._creation_partitions(manager._topic_specs[0]) == 6
 
+    def test_empty_topic_partition_cap_is_disabled(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Empty partition cap values leave contract topic specs unchanged."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "")
+
+        manager = _make_provisioner(contracts_root)
+
+        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+
     def test_init_missing_contracts_root_raises(self, tmp_path: Path) -> None:
         """Constructing with a non-existent contracts_root raises immediately."""
         bad_path = tmp_path / "does_not_exist"
         with pytest.raises(FileNotFoundError, match="contracts_root"):
             TopicProvisioner(contracts_root=bad_path)
 
-    def test_startup_critical_topics_are_ordered_first(
+    def test_contract_priority_topics_are_ordered_first(
         self,
         tmp_path: Path,
     ) -> None:
-        """Runtime-critical platform topics are created before broad plugin topics."""
+        """Contract-declared provisioning priority controls creation order."""
         node_dir = tmp_path / "node_example"
         node_dir.mkdir()
         (node_dir / "contract.yaml").write_text(
@@ -122,8 +134,10 @@ class TestTopicProvisioner:
             "event_bus:\n"
             "  publish_topics:\n"
             "    - onex.cmd.omnimarket.build-loop-start.v1\n"
-            "    - onex.evt.platform.node-introspection.v1\n"
-            "    - onex.evt.omnibase-infra.runtime-health-check.v1\n",
+            "    - topic: onex.evt.platform.node-introspection.v1\n"
+            "      provisioning_priority: 10\n"
+            "    - topic: onex.evt.omnibase-infra.runtime-health-check.v1\n"
+            "      provisioning_priority: 0\n",
             encoding="utf-8",
         )
 
