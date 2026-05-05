@@ -32,4 +32,4 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: 'docker exec omninode-runtime printenv ONEX_EVENT_BUS'
+        check_value: 'docker exec omninode-runtime printenv ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS'

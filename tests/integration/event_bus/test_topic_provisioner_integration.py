@@ -21,6 +21,10 @@ from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 pytestmark = [pytest.mark.integration]
 
 
+def _bootstrap_servers() -> str:
+    return os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+
 @pytest.fixture
 def contracts_root_with_priority(tmp_path: Path) -> Path:
     """Contracts directory with two nodes at different provisioning priorities."""
@@ -73,7 +77,7 @@ class TestTopicProvisionerContractExtraction:
         self, contracts_root_with_priority: Path
     ) -> None:
         provisioner = TopicProvisioner(
-            bootstrap_servers="localhost:9092",
+            bootstrap_servers=_bootstrap_servers(),
             contracts_root=contracts_root_with_priority,
         )
         suffixes = [s.suffix for s in provisioner._topic_specs]
@@ -84,7 +88,7 @@ class TestTopicProvisionerContractExtraction:
         self, contracts_root_with_priority: Path
     ) -> None:
         provisioner = TopicProvisioner(
-            bootstrap_servers="localhost:9092",
+            bootstrap_servers=_bootstrap_servers(),
             contracts_root=contracts_root_with_priority,
         )
         suffixes = [s.suffix for s in provisioner._topic_specs]
@@ -99,7 +103,7 @@ class TestTopicProvisionerContractExtraction:
     ) -> None:
         with patch.dict(os.environ, {"ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS": "2"}):
             provisioner = TopicProvisioner(
-                bootstrap_servers="localhost:9092",
+                bootstrap_servers=_bootstrap_servers(),
                 contracts_root=contracts_root_high_partition,
             )
         for spec in provisioner._topic_specs:
@@ -115,7 +119,7 @@ class TestTopicProvisionerContractExtraction:
         }
         with patch.dict(os.environ, env, clear=True):
             provisioner = TopicProvisioner(
-                bootstrap_servers="localhost:9092",
+                bootstrap_servers=_bootstrap_servers(),
                 contracts_root=contracts_root_high_partition,
             )
         assert provisioner._topic_partition_cap is None
