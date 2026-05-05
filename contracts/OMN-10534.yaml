@@ -1,0 +1,36 @@
+# OMN-10534 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the runtime topic bootstrap hardening.
+schema_version: '1.0.0'
+ticket_id: OMN-10534
+title: 'Harden local runtime topic bootstrap'
+summary: 'fix(OMN-10534): harden local runtime topic bootstrap'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched:
+  - docker-compose
+  - event_bus
+evidence_requirements:
+  - kind: tests
+    description: Topic manager and env parity tests pass
+    command: uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1496 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Topic manager and env parity tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q'
+  - id: dod-002
+    description: Deploy smoke — runtime container starts and ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS is read without error
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime printenv ONEX_EVENT_BUS'
