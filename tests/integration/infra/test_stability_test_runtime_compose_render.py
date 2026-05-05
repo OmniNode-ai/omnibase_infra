@@ -30,6 +30,7 @@ EXPECTED_RENDERED_SERVICES = {
     "forward-migration",
     "intelligence-migration",
     "migration-gate",
+    "keycloak",
     *REQUIRED_RUNTIME_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
@@ -53,6 +54,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "intelligence-migration": set(),
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
+    "keycloak": {"38080"},
 }
 PRODUCTION_PUBLISHED_PORTS = {
     "5436",
@@ -70,6 +72,7 @@ PRODUCTION_PUBLISHED_PORTS = {
     "8092",
     "8093",
     "6006",
+    "28080",
 }
 PRODUCTION_CONTAINER_NAMES = {
     "omninode-runtime",
@@ -87,6 +90,7 @@ PRODUCTION_CONTAINER_NAMES = {
     "omninode-contract-resolver",
     "omnibase-infra-phoenix",
     "omnibase-infra-autoheal",
+    "omnibase-infra-keycloak",
 }
 COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
@@ -107,6 +111,7 @@ COMPOSE_RENDER_ENV = {
     "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
     "STABILITY_TEST_REDPANDA_EXTERNAL_PORT": "39092",
     "STABILITY_TEST_REDPANDA_PANDAPROXY_PORT": "28082",
+    "STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT": "38080",
 }
 
 
