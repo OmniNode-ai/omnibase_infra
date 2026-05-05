@@ -32,4 +32,4 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: 'docker exec omninode-runtime printenv OMNIDASH_ANALYTICS_DB_URL'
+        check_value: "docker exec omninode-runtime sh -lc 'test -n \"${OMNIDASH_ANALYTICS_DB_URL:-}\"'"
