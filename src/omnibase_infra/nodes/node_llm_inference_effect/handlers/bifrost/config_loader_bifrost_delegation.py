@@ -62,6 +62,31 @@ def load_bifrost_delegation_config(
 
     config = ModelBifrostDelegationConfig.model_validate(data)
 
+    declared_backend_ids = {b.backend_id for b in config.backends}
+
+    unknown_defaults = set(config.default_backends) - declared_backend_ids
+    if unknown_defaults:
+        msg = f"default_backends references undeclared backend(s): {sorted(unknown_defaults)}"
+        raise ValueError(msg)
+
+    for rule in config.routing_rules:
+        unknown_rule_backends = set(rule.backend_ids) - declared_backend_ids
+        if unknown_rule_backends:
+            msg = (
+                f"Rule {rule.rule_id!s} ({rule.task_class!r}) references "
+                f"undeclared backend(s): {sorted(unknown_rule_backends)}"
+            )
+            raise ValueError(msg)
+
+    rule_ids = [rule.rule_id for rule in config.routing_rules]
+    if len(rule_ids) != len(set(rule_ids)):
+        counts: dict[object, int] = {}
+        for rid in rule_ids:
+            counts[rid] = counts.get(rid, 0) + 1
+        duplicates = [rid for rid, count in counts.items() if count > 1]
+        msg = f"Duplicate rule_id(s) detected: {duplicates}"
+        raise ValueError(msg)
+
     logger.info(
         "Loaded bifrost delegation config v%s: %d backends, %d rules",
         config.config_version,

@@ -286,6 +286,104 @@ class TestBifrostDelegationConfigLoader:
             "aaaaaaaa-0001-4000-8000-000000000001"
         )
 
+    def test_raises_on_rule_backend_id_not_declared(self, tmp_path: Path) -> None:
+        """Loader raises ValueError when a rule backend_id is not in backends list."""
+        config_data = {
+            "config_version": "0.1.0",
+            "schema_version": "bifrost_delegation.v1",
+            "backends": [
+                {
+                    "backend_id": "real-backend",
+                    "model_name": "test-model",
+                    "tier": "local",
+                }
+            ],
+            "routing_rules": [
+                {
+                    "rule_id": "aaaaaaaa-0001-4000-8000-000000000001",
+                    "task_class": "code_generation",
+                    "task_class_contract_version": "1.0.0",
+                    "backend_policy_version": "1.0.0",
+                    "backend_ids": ["real-backend", "ghost-backend"],
+                    "fallback_policy": {"action": "return_error"},
+                    "shadow_policy_id": "bbbbbbbb-0001-4000-8000-000000000001",
+                }
+            ],
+        }
+        config_file = tmp_path / "bad_rule_backend.yaml"
+        config_file.write_text(yaml.dump(config_data), encoding="utf-8")
+        with pytest.raises(ValueError, match="undeclared backend"):
+            load_bifrost_delegation_config(config_file)
+
+    def test_raises_on_default_backend_not_declared(self, tmp_path: Path) -> None:
+        """Loader raises ValueError when a default_backend is not in backends list."""
+        config_data = {
+            "config_version": "0.1.0",
+            "schema_version": "bifrost_delegation.v1",
+            "backends": [
+                {
+                    "backend_id": "real-backend",
+                    "model_name": "test-model",
+                    "tier": "local",
+                }
+            ],
+            "routing_rules": [
+                {
+                    "rule_id": "aaaaaaaa-0001-4000-8000-000000000001",
+                    "task_class": "code_generation",
+                    "task_class_contract_version": "1.0.0",
+                    "backend_policy_version": "1.0.0",
+                    "backend_ids": ["real-backend"],
+                    "fallback_policy": {"action": "return_error"},
+                    "shadow_policy_id": "bbbbbbbb-0001-4000-8000-000000000001",
+                }
+            ],
+            "default_backends": ["ghost-backend"],
+        }
+        config_file = tmp_path / "bad_default_backend.yaml"
+        config_file.write_text(yaml.dump(config_data), encoding="utf-8")
+        with pytest.raises(ValueError, match="undeclared backend"):
+            load_bifrost_delegation_config(config_file)
+
+    def test_raises_on_duplicate_rule_ids(self, tmp_path: Path) -> None:
+        """Loader raises ValueError when two routing rules share the same rule_id."""
+        shared_rule_id = "aaaaaaaa-0001-4000-8000-000000000001"
+        config_data = {
+            "config_version": "0.1.0",
+            "schema_version": "bifrost_delegation.v1",
+            "backends": [
+                {
+                    "backend_id": "test-backend",
+                    "model_name": "test-model",
+                    "tier": "local",
+                }
+            ],
+            "routing_rules": [
+                {
+                    "rule_id": shared_rule_id,
+                    "task_class": "code_generation",
+                    "task_class_contract_version": "1.0.0",
+                    "backend_policy_version": "1.0.0",
+                    "backend_ids": ["test-backend"],
+                    "fallback_policy": {"action": "return_error"},
+                    "shadow_policy_id": "bbbbbbbb-0001-4000-8000-000000000001",
+                },
+                {
+                    "rule_id": shared_rule_id,
+                    "task_class": "documentation",
+                    "task_class_contract_version": "1.0.0",
+                    "backend_policy_version": "1.0.0",
+                    "backend_ids": ["test-backend"],
+                    "fallback_policy": {"action": "return_error"},
+                    "shadow_policy_id": "cccccccc-0001-4000-8000-000000000001",
+                },
+            ],
+        }
+        config_file = tmp_path / "duplicate_rule_ids.yaml"
+        config_file.write_text(yaml.dump(config_data), encoding="utf-8")
+        with pytest.raises(ValueError, match="Duplicate rule_id"):
+            load_bifrost_delegation_config(config_file)
+
 
 @pytest.mark.unit
 class TestBifrostResponseProvenanceFields:
