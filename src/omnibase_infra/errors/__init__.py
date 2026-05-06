@@ -26,6 +26,7 @@ Exports:
     EventBusRegistryError: Event bus registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
+    InvariantViolation: Runtime contract invariant violations
     BindingResolutionError: Binding resolution errors (declarative operation bindings)
     RepositoryError: Base error for repository operations
     RepositoryContractError: Contract-level errors (bad op_name, missing params)
@@ -142,6 +143,7 @@ from omnibase_infra.errors.error_infra import (
     SecretResolutionError,
     UnknownHandlerTypeError,
 )
+from omnibase_infra.errors.error_invariant_violation import InvariantViolation
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
@@ -195,6 +197,7 @@ __all__: list[str] = [
     "InfraRequestRejectedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
+    "InvariantViolation",
     # Message type registry errors
     "MessageTypeRegistryError",
     # Configuration models
