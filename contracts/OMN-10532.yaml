@@ -7,8 +7,7 @@ title: 'Add OMNIDASH_ANALYTICS_DB_URL to runtime-env anchor'
 summary: 'fix(compose): add OMNIDASH_ANALYTICS_DB_URL to runtime-env anchor (OMN-10532)'
 is_seam_ticket: false
 interface_change: false
-interfaces_touched:
-  - topics
+interfaces_touched: []
 evidence_requirements:
   - kind: tests
     description: Compose invariant and runtime anchor tests pass
