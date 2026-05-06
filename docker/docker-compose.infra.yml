@@ -8,7 +8,7 @@
 #
 #
 # Usage:
-#   # Core infrastructure only (postgres, valkey, redpanda)
+#   # Core infrastructure (postgres, valkey, redpanda, keycloak)
 #   docker compose -f docker/docker-compose.infra.yml up -d
 #
 #   # With runtime services
@@ -16,9 +16,6 @@
 #
 #   # With secrets management (Infisical)
 #   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
-#
-#   # With Keycloak (local OIDC/auth)
-#   docker compose -f docker/docker-compose.infra.yml --profile auth up -d
 #
 #   # Full stack (all services)
 #   docker compose -f docker/docker-compose.infra.yml --profile full up -d
@@ -37,12 +34,15 @@
 #   docker compose -f docker/docker-compose.infra.yml down -v
 #
 # Profiles:
-#   - (default): Core infrastructure (postgres, valkey, redpanda)
+#   - (default): Core infrastructure (postgres, valkey, redpanda, keycloak)
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
 #   - secrets: Infisical for secrets management
-#   - auth: Keycloak OIDC/auth service (local dev)
-#   - full: All services (infrastructure + runtime + secrets + auth)
+#   - full: All services (infrastructure + runtime + secrets)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
+# Note (OMN-10089): keycloak moved into the default profile so a vanilla
+# `docker compose up -d` brings up the full local auth stack with no extra
+# flags. Operators who want to skip keycloak can `docker compose stop keycloak`
+# after startup.
 #
 # Redpanda / Kafka:
 #   OMN-3431: Local Docker Redpanda is the default event bus (always-on, no profile needed).
@@ -56,7 +56,7 @@
 #     - Valkey: 16379 (internal 6379)
 #     - Redpanda: 19092 (internal 9092) [always-on]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
-#     - Keycloak: 28080 (internal 8080) [auth profile]
+#     - Keycloak: 28080 (internal 8080) [default — OMN-10089]
 #   Runtime:
 #     - omninode-runtime: 8085 [runtime profile]
 #     - runtime-effects: 8086 [runtime profile]
@@ -442,25 +442,29 @@ services:
       - "com.omninode.service=infisical"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
-  # Keycloak - OIDC / Auth Service (Auth Profile) [OMN-3361]
+  # Keycloak - OIDC / Auth Service (Default Profile) [OMN-3361, OMN-10089]
   # ==========================================================================
   # Local Keycloak for OIDC authentication in dev. Eliminates dependency on
   # auth.omninode.ai for local development.
   #
+  # OMN-10089: Moved out of the `auth` profile into the default profile so a
+  # vanilla `docker compose up -d` brings up the full local auth stack. The
+  # top-level omnibase Makefile (`make docker-up`) no longer needs to pass
+  # `--profile auth`. Skip locally with `docker compose stop keycloak` after
+  # startup if not needed.
+  #
   # Usage:
-  #   docker compose -f docker/docker-compose.infra.yml --profile auth up -d
-  #   # Then provision service clients:
-  #   uv run python scripts/provision-keycloak.py --kc-url http://localhost:28080 \
-  #     --realm omninode --admin-username admin \
-  #     --admin-password "${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}"
+  #   docker compose -f docker/docker-compose.infra.yml up -d
+  #   # Then reconcile service clients (idempotent):
+  #   bash scripts/seed-keycloak.sh
   #
   # Realm JSON is imported at startup via --import-realm (start-dev command).
-  # onex-service and onex-admin clients are created dynamically by provision-keycloak.py.
+  # Service clients (onex-service, onex-admin, etc.) are reconciled by
+  # seed-keycloak.sh → seed-keycloak-clients.py from desired-clients.json.
   # Compose healthcheck uses Keycloak's management readiness endpoint.
   keycloak:
     image: quay.io/keycloak/keycloak:26.3.3
     container_name: omnibase-infra-keycloak
-    profiles: ["auth", "full"]
     command: start-dev --import-realm
     environment:
       KC_DB: postgres

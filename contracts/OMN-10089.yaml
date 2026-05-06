@@ -3,6 +3,7 @@
 # This file is the per-repo deploy-evidence carrier only.
 schema_version: "1.0.0"
 ticket_id: "OMN-10089"
+title: "Wire seed-keycloak-clients reconciler into Makefile (local install)"
 summary: "feat(OMN-10089): add Keycloak readiness healthcheck to docker-compose"
 is_seam_ticket: true
 interface_change: true

@@ -71,6 +71,10 @@ services:
     container_name: omnibase-infra-stability-test-valkey
     ports: !override
       - "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
+  keycloak:
+    container_name: omnibase-infra-stability-test-keycloak
+    ports: !override
+      - "${STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT:-38080}:8080"
   infisical:
     profiles: !override ["stability-test-disabled"]
   forward-migration:
@@ -192,6 +196,8 @@ volumes:
     name: omnibase-infra-stability-test-redpanda-data
   valkey_data:
     name: omnibase-infra-stability-test-valkey-data
+  keycloak_data:
+    name: omnibase-infra-stability-test-keycloak-data
   runtime_data:
     name: omninode-stability-test-runtime-data
   runtime_logs:
