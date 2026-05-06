@@ -76,7 +76,7 @@ dependencies = [
     # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
-    "cryptography>=46.0.3,<48.0.0",
+    "cryptography>=46.0.3,<49.0.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
     "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
