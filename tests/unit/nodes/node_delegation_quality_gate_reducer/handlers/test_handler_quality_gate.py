@@ -39,6 +39,8 @@ def _input(
     content: str = "",
     expected_markers: tuple[str, ...] = (),
     min_response_length: int = 60,
+    dod_deterministic: tuple[str, ...] = (),
+    dod_heuristic: tuple[str, ...] = (),
 ) -> ModelQualityGateInput:
     """Build a valid ModelQualityGateInput."""
     return ModelQualityGateInput(
@@ -47,6 +49,8 @@ def _input(
         llm_response_content=content,
         expected_markers=expected_markers,
         min_response_length=min_response_length,
+        dod_deterministic=dod_deterministic,
+        dod_heuristic=dod_heuristic,
     )
 
 
@@ -211,3 +215,168 @@ class TestCorrelationIdPreserved:
         gate_input = _input(task_type="research", content="x" * 100)
         result = delta(gate_input)
         assert result.correlation_id == gate_input.correlation_id
+
+
+class TestLegacyFallbackCategory:
+    """Legacy path (no contract DoD) produces fail_heuristic, never fail_deterministic."""
+
+    def test_passing_response_is_pass_category(self) -> None:
+        content = (
+            "The authentication module uses JWT tokens for session management. "
+            "It validates signatures and checks expiration timestamps."
+        )
+        result = delta(_input(task_type="research", content=content))
+        assert result.passed is True
+        assert result.fail_category == "pass"
+
+    def test_failing_response_is_heuristic_category(self) -> None:
+        result = delta(_input(task_type="test", content="short"))
+        assert result.passed is False
+        assert result.fail_category == "fail_heuristic"
+
+
+class TestDeterministicDoDChecks:
+    """Contract deterministic checks block delegation on failure."""
+
+    def test_empty_content_fails_output_parses(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="",
+            dod_deterministic=("output_parses",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+        assert any("MALFORMED" in r for r in result.failure_reasons)
+
+    def test_bare_traceback_fails_output_parses(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="Traceback (most recent call last):\n  File foo.py",
+            dod_deterministic=("output_parses",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+
+    def test_truncated_mid_token_fails_signature_preserved(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="def test_foo(param1, param2,",
+            dod_deterministic=("signature_preserved",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+        assert any("signature_preserved" in r for r in result.failure_reasons)
+
+    def test_valid_content_passes_deterministic_checks(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="def test_auth():\n    assert True",
+            dod_deterministic=("output_parses", "signature_preserved"),
+        )
+        result = delta(gate_input)
+        assert result.passed is True
+        assert result.fail_category == "pass"
+
+    def test_deterministic_failure_recommends_fallback(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="",
+            dod_deterministic=("output_parses",),
+        )
+        result = delta(gate_input)
+        assert result.fallback_recommended is True
+
+
+class TestHeuristicDoDChecks:
+    """Contract heuristic checks escalate per policy on failure."""
+
+    def test_refusal_phrase_fails_no_refusal(self) -> None:
+        gate_input = _input(
+            task_type="research",
+            content="I cannot help with that. " + "x" * 100,
+            dod_heuristic=("no_refusal",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_heuristic"
+        assert any("REFUSAL" in r for r in result.failure_reasons)
+
+    def test_refusal_heuristic_recommends_fallback(self) -> None:
+        gate_input = _input(
+            task_type="research",
+            content="I cannot help with that. " + "x" * 100,
+            dod_heuristic=("no_refusal",),
+        )
+        result = delta(gate_input)
+        assert result.fallback_recommended is True
+
+    def test_min_length_check_passes(self) -> None:
+        gate_input = _input(
+            task_type="research",
+            content="x" * 100,
+            dod_heuristic=("min_length_chars_50",),
+        )
+        result = delta(gate_input)
+        assert result.passed is True
+        assert result.fail_category == "pass"
+
+    def test_min_length_check_fails(self) -> None:
+        gate_input = _input(
+            task_type="research",
+            content="short",
+            dod_heuristic=("min_length_chars_50",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_heuristic"
+        assert any("WEAK_OUTPUT" in r for r in result.failure_reasons)
+
+    def test_clean_content_passes_no_refusal(self) -> None:
+        gate_input = _input(
+            task_type="research",
+            content="The module validates JWT tokens by checking signature and expiry.",
+            dod_heuristic=("no_refusal",),
+        )
+        result = delta(gate_input)
+        assert result.passed is True
+        assert result.fail_category == "pass"
+
+
+class TestMixedDoDChecks:
+    """Deterministic pass + heuristic fail = fail_heuristic (escalate, not block)."""
+
+    def test_det_pass_heuristic_fail_is_fail_heuristic(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="I cannot help with that. x",
+            dod_deterministic=("output_parses",),
+            dod_heuristic=("no_refusal",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_heuristic"
+
+    def test_det_fail_overrides_heuristic_pass(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="",
+            dod_deterministic=("output_parses",),
+            dod_heuristic=("no_refusal",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+
+    def test_both_pass_is_pass(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="def test_auth():\n    assert True\n",
+            dod_deterministic=("output_parses", "signature_preserved"),
+            dod_heuristic=("no_refusal", "min_length_chars_10"),
+        )
+        result = delta(gate_input)
+        assert result.passed is True
+        assert result.fail_category == "pass"

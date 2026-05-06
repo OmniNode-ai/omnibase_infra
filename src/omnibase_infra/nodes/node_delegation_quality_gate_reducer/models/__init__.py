@@ -8,10 +8,12 @@ from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_qual
     ModelQualityGateInput,
 )
 from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_quality_gate_result import (
+    EnumQualityGateCategory,
     ModelQualityGateResult,
 )
 
 __all__: list[str] = [
+    "EnumQualityGateCategory",
     "ModelQualityGateInput",
     "ModelQualityGateResult",
 ]
