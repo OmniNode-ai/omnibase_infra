@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Invariant violation error."""
 
@@ -48,7 +48,7 @@ class InvariantViolation(RuntimeHostError):  # noqa: N818 - Linear ticket names 
             or (context.correlation_id if context is not None else None)
             or uuid4()
         )
-        context_values = context.model_dump() if context is not None else {}
+        context_values = context.model_dump(mode="json") if context is not None else {}
         context_values.pop("correlation_id", None)
         context_values.update(
             {

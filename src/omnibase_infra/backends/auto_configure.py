@@ -130,7 +130,7 @@ def select_event_bus(
             bootstrap_servers=resolved_bootstrap,
             environment=environment,
             circuit_breaker_threshold=circuit_breaker_threshold,
-        )
+        ).apply_environment_overrides()
         return EventBusKafka(config=kafka_config)
 
     if kafka_result.state == EnumProbeState.REACHABLE and resolved_bootstrap:
@@ -146,7 +146,7 @@ def select_event_bus(
             bootstrap_servers=resolved_bootstrap,
             environment=environment,
             circuit_breaker_threshold=circuit_breaker_threshold,
-        )
+        ).apply_environment_overrides()
         return EventBusKafka(config=kafka_config)
 
     # Fallback to in-memory

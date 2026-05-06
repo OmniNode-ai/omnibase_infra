@@ -68,6 +68,34 @@ class TestKernelRegistryResolution:
             )
             assert type(bus).__name__ == "EventBusKafka"
 
+    def test_registry_applies_kafka_environment_overrides(self) -> None:
+        """Explicit Kafka config still honors KAFKA_* runtime env overrides."""
+        kafka_probe_result = ModelProbeResult(
+            state=EnumProbeState.AUTHORITATIVE,
+            reason="Kafka healthy with 5 topics, brokers match config",
+            backend_label="event_bus_kafka",
+        )
+        with (
+            patch(
+                "omnibase_infra.backends.auto_configure.probe_kafka",
+                return_value=kafka_probe_result,
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "KAFKA_INSTANCE_ID": "runtime-effects",
+                    "ONEX_EVENT_BUS_TYPE": "",
+                },
+            ),
+        ):
+            bus = select_event_bus(
+                kafka_bootstrap_servers="localhost:9092",
+                environment="test",
+                consumer_group="test-group",
+            )
+            assert type(bus).__name__ == "EventBusKafka"
+            assert bus.config.instance_id == "runtime-effects"
+
     def test_env_override_forces_inmemory(self) -> None:
         """ONEX_EVENT_BUS_TYPE=inmemory forces in-memory regardless of probe."""
         with patch.dict("os.environ", {"ONEX_EVENT_BUS_TYPE": "inmemory"}):
