@@ -88,7 +88,7 @@ status: _check-docker ## Show running omnibase-infra containers
 seed-keycloak: _check-docker _check-env-file ## Reconcile Keycloak clients from desired-clients.json
 	@bash scripts/seed-keycloak.sh
 
-seed-infisical: _check-env-file ## Seed Infisical from ONEX contracts (uses --execute)
+seed-infisical: _check-docker _check-env-file ## Seed Infisical from ONEX contracts (uses --execute)
 	@uv run python scripts/seed-infisical.py \
 	  --contracts-dir src/omnibase_infra/nodes \
 	  --create-missing-keys \
@@ -124,11 +124,13 @@ _check-env-file:
 	@if [ ! -f "$(OMNIBASE_ENV_FILE)" ]; then \
 	  echo "ERROR: env file not found at $(OMNIBASE_ENV_FILE)"; \
 	  echo ""; \
-	  echo "Create it with at minimum:"; \
+	  echo "Create it from the template and fill the required keys:"; \
 	  echo "    KEYCLOAK_ADMIN_USERNAME=admin"; \
 	  echo "    KEYCLOAK_ADMIN_PASSWORD=<secure-random>"; \
+	  echo "    # plus any Infisical variables required by seed-infisical"; \
 	  echo ""; \
-	  echo "Generate a secure password: openssl rand -base64 24"; \
+	  echo "See .env.example for the full required key list."; \
+	  echo "Generate secure passwords: openssl rand -base64 24"; \
 	  echo "Or copy the template:       cp .env.example $(OMNIBASE_ENV_FILE)"; \
 	  echo "Then edit:                  \$$EDITOR $(OMNIBASE_ENV_FILE)"; \
 	  exit 1; \
