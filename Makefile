@@ -15,10 +15,13 @@
 #     make up              # Start core infra bundle (postgres, redpanda, valkey, infisical)
 #     make up-auth         # Start the auth bundle (keycloak)
 #     make up-runtime      # Start the runtime bundle (depends on core)
-#     make down            # Stop the core bundle
+#     make down            # Stop the core bundle ONLY (auth/runtime stay running)
+#     make down-auth       # Stop the auth bundle
+#     make down-runtime    # Stop the runtime bundle
+#     make down-all        # Stop runtime, then auth, then core (full teardown)
 #     make status          # Show running omnibase-infra containers
 #     make seed-keycloak   # Reconcile Keycloak clients from desired-clients.json
-#     make seed-infisical  # Seed Infisical from ONEX contracts (dry-run-safe)
+#     make seed-infisical  # Seed Infisical from ONEX contracts (writes with --execute)
 #
 # Environment:
 #
@@ -31,8 +34,8 @@
 # `seed-keycloak` delegates to scripts/seed-keycloak.sh (PR #1500).
 # `seed-infisical` delegates to scripts/seed-infisical.py.
 
-.PHONY: help up up-auth up-runtime down status seed-keycloak seed-infisical \
-        _check-docker _check-env-file
+.PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
+        seed-keycloak seed-infisical _check-docker _check-env-file
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 ONEX_CLI := uv run python -m omnibase_infra.docker.catalog.cli
@@ -56,9 +59,26 @@ up-runtime: _check-docker ## Start the full runtime bundle (extends core)
 	@echo "==> Starting runtime bundle..."
 	$(ONEX_CLI) up runtime
 
-down: _check-docker ## Stop the core bundle
+down: _check-docker ## Stop the core bundle ONLY (use down-all for full teardown)
 	@echo "==> Stopping core infrastructure bundle..."
 	$(ONEX_CLI) down core
+
+down-auth: _check-docker ## Stop the auth bundle (keycloak)
+	@echo "==> Stopping auth (keycloak) bundle..."
+	$(ONEX_CLI) down auth
+
+down-runtime: _check-docker ## Stop the runtime bundle
+	@echo "==> Stopping runtime bundle..."
+	$(ONEX_CLI) down runtime
+
+down-all: _check-docker ## Stop runtime, then auth, then core (full teardown)
+	@echo "==> Stopping runtime bundle (if running)..."
+	-$(ONEX_CLI) down runtime
+	@echo "==> Stopping auth bundle (if running)..."
+	-$(ONEX_CLI) down auth
+	@echo "==> Stopping core bundle..."
+	$(ONEX_CLI) down core
+	@echo "==> Done. All omnibase-infra bundles stopped."
 
 status: _check-docker ## Show running omnibase-infra containers
 	@docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' \

@@ -76,11 +76,20 @@ make up-auth
 # Reconcile Keycloak clients from desired-clients.json
 make seed-keycloak
 
+# Seed Infisical from ONEX contracts (writes with --execute)
+make seed-infisical
+
 # Show running containers
 make status
 
-# Stop the core bundle
+# Stop the core bundle ONLY (auth/runtime stay running)
 make down
+
+# Stop the auth bundle (keycloak)
+make down-auth
+
+# Stop everything (runtime + auth + core, in safe teardown order)
+make down-all
 
 # List all targets
 make help
