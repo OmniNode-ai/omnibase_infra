@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10635"
+title: "Make stability runtime lane permanent for .201 testing"
+summary: "Pin active runtime package activation and preserve the stability-test runtime lane as the trusted .201 test target."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Stability-test compose render, in-memory state store, and in-memory event bus selection tests pass"
+    command: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py tests/unit/services/snapshot/test_store_inmemory.py tests/unit/runtime/test_kernel_registry.py -q"
+  - kind: "tests"
+    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
+    command: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
+  - kind: "manual"
+    description: "Live .201 stability runtime is healthy and ready"
+    command: "curl -fsS http://127.0.0.1:18085/health && curl -fsS http://127.0.0.1:18085/ready"
+  - kind: "manual"
+    description: "Post-merge deploy/readiness smoke command recorded; live deploy requires explicit approval"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-stability-local"
+    description: "Stability-test compose render, in-memory state store, and in-memory event bus selection tests pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py tests/unit/services/snapshot/test_store_inmemory.py tests/unit/runtime/test_kernel_registry.py -q"
+  - id: "dod-runtime-packages"
+    description: "Runtime package activation, env completeness, parity, and auto-wiring tests pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/ci/test_env_parity.py tests/ci/test_plugin_env_service_completeness.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q"
+  - id: "dod-live-readonly"
+    description: "Live .201 stability runtime is healthy and ready"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "curl -fsS http://127.0.0.1:18085/health && curl -fsS http://127.0.0.1:18085/ready"
+  - id: "dod-deploy"
+    description: "Post-merge deploy/readiness smoke plan only; this PR does not deploy, restart runtime, or mutate .201"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} printenv ONEX_ACTIVE_RUNTIME_PACKAGES"
