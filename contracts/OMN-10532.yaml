@@ -1,0 +1,34 @@
+# OMN-10532 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the compose anchor change.
+schema_version: '1.0.0'
+ticket_id: OMN-10532
+title: 'Add OMNIDASH_ANALYTICS_DB_URL to runtime-env anchor'
+summary: 'fix(compose): add OMNIDASH_ANALYTICS_DB_URL to runtime-env anchor (OMN-10532)'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Compose invariant and runtime anchor tests pass
+    command: uv run pytest tests/ci/test_env_parity.py tests/unit/infra/test_compose_invariants.py tests/unit/infra/test_compose_no_silent_fallbacks.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1497 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Compose invariant and runtime anchor tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_env_parity.py tests/unit/infra/test_compose_invariants.py tests/unit/infra/test_compose_no_silent_fallbacks.py -q'
+  - id: dod-002
+    description: Deploy smoke — OMNIDASH_ANALYTICS_DB_URL resolves in the running runtime container
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "docker exec omninode-runtime sh -lc 'test -n \"${OMNIDASH_ANALYTICS_DB_URL:-}\"'"

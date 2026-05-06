@@ -162,6 +162,7 @@ x-runtime-env: &runtime-env
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin — Docker-internal hostname (same pattern as OMNIBASE_INFRA_DB_URL)
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
   # --- OmniMemory domain plugin ---
   # PluginMemory.should_activate() checks OMNIMEMORY_MEMGRAPH_HOST or OMNIMEMORY_ENABLED.
   # Both default to inactive values so the plugin stays opt-in.
