@@ -3,11 +3,10 @@ ticket_id: OMN-10563
 title: 'Register omnimarket service keys'
 summary: 'Register omnimarket per-service secret keys and topic provisioning metadata.'
 is_seam_ticket: false
-interface_change: false
+interface_change: true
 interfaces_touched:
-  - config
   - topics
-  - runtime
+  - public_api
 evidence_requirements:
   - kind: tests
     description: Registry, onboarding, env parity, and topic provisioning tests pass
