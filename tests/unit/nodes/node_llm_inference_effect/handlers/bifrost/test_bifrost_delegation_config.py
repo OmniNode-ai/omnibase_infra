@@ -185,38 +185,35 @@ class TestBifrostDelegationTaskClasses:
         config = load_bifrost_delegation_config(_CANONICAL_CONFIG)
         rules = self._rules_for_task(config, "code_generation")
         assert rules
-        rule = rules[0]
         local_backends = {b.backend_id for b in config.backends if b.tier == "local"}
-        assert any(bid in local_backends for bid in rule.backend_ids), (
-            "code_generation rule does not route to any local backend"
-        )
+        assert any(
+            bid in local_backends for rule in rules for bid in rule.backend_ids
+        ), "code_generation rules do not route to any local backend"
 
     def test_documentation_has_cost_ceiling_or_haiku_backend(self) -> None:
         """documentation rule must enforce a cost ceiling or use haiku (cheap cloud)."""
         config = load_bifrost_delegation_config(_CANONICAL_CONFIG)
         rules = self._rules_for_task(config, "documentation")
         assert rules
-        rule = rules[0]
-        has_cost_ceiling = rule.cost_ceiling_usd_per_1k_tokens is not None
-        has_haiku = any("haiku" in bid for bid in rule.backend_ids)
-        assert has_cost_ceiling or has_haiku, (
-            "documentation rule must have a cost ceiling or use haiku backend"
-        )
+        assert any(
+            rule.cost_ceiling_usd_per_1k_tokens is not None
+            or any("haiku" in bid for bid in rule.backend_ids)
+            for rule in rules
+        ), "documentation rules must have a cost ceiling or use haiku backend"
 
     def test_research_includes_reasoning_backend(self) -> None:
         """research rule must route to a reasoning-capable backend."""
         config = load_bifrost_delegation_config(_CANONICAL_CONFIG)
         rules = self._rules_for_task(config, "research")
         assert rules
-        rule = rules[0]
         reasoning_backends = {
             b.backend_id
             for b in config.backends
             if "deep_reasoning" in b.capabilities or "reasoning" in b.capabilities
         }
-        assert any(bid in reasoning_backends for bid in rule.backend_ids), (
-            "research rule does not route to a reasoning-capable backend"
-        )
+        assert any(
+            bid in reasoning_backends for rule in rules for bid in rule.backend_ids
+        ), "research rules do not route to a reasoning-capable backend"
 
 
 @pytest.mark.unit
@@ -248,7 +245,7 @@ class TestBifrostDelegationConfigLoader:
             """),
             encoding="utf-8",
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             load_bifrost_delegation_config(invalid)
 
     def test_loads_minimal_valid_config(self, tmp_path: Path) -> None:

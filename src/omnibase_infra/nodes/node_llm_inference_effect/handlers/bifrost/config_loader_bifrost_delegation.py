@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_delegation_config import (
     ModelBifrostDelegationConfig,
@@ -60,7 +61,11 @@ def load_bifrost_delegation_config(
         msg = f"Expected YAML mapping at root, got {type(data).__name__}"
         raise ValueError(msg)
 
-    config = ModelBifrostDelegationConfig.model_validate(data)
+    try:
+        config = ModelBifrostDelegationConfig.model_validate(data)
+    except ValidationError as exc:
+        msg = f"Bifrost delegation config schema validation failed: {exc}"
+        raise ValueError(msg) from exc
 
     declared_backend_ids = {b.backend_id for b in config.backends}
 
