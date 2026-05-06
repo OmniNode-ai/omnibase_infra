@@ -5,8 +5,8 @@ summary: 'Implement kustomize-style ONEX plugin enforcement-scope overlay loadin
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - scope
-  - runtime
+  - public_api
+  - protocols
 evidence_requirements:
   - kind: tests
     description: Scope loader unit and integration tests pass
