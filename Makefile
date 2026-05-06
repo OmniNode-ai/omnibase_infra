@@ -76,8 +76,8 @@ down-all: _check-docker ## Stop runtime, then auth, then core (full teardown)
 	-$(ONEX_CLI) down runtime
 	@echo "==> Stopping auth bundle (if running)..."
 	-$(ONEX_CLI) down auth
-	@echo "==> Stopping core bundle..."
-	$(ONEX_CLI) down core
+	@echo "==> Stopping core bundle (if running)..."
+	-$(ONEX_CLI) down core
 	@echo "==> Done. All omnibase-infra bundles stopped."
 
 status: _check-docker ## Show running omnibase-infra containers
