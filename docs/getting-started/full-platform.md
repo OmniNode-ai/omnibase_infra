@@ -28,11 +28,19 @@ Install the core ONEX package with uv
 
 ## Start Docker Infrastructure
 
-Start PostgreSQL, Redpanda, and Valkey via Docker Compose
+Start PostgreSQL, Redpanda, Valkey, and Infisical via the in-repo Makefile.
+The `Makefile` (OMN-10377) detects a missing/stopped Docker daemon and emits
+an actionable error before doing anything destructive.
 
 - [ ] **Start Docker Infrastructure**
-  - Verify: `localhost:5436` (tcp_probe)
+  - Run: `make up`
+  - Verify: `localhost:5436` (tcp_probe) and `make status` shows all
+    `omnibase-infra-*` containers as healthy
   - Estimated time: 2m 0s
+
+To add Keycloak for local OIDC/auth flows, follow up with `make up-auth` and
+then `make seed-keycloak` (requires `~/.omnibase/.env` with
+`KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD`).
 
 ## Configure Secrets
 

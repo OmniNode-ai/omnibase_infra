@@ -60,6 +60,40 @@ CI support, and requires a clone.
 
 ## Common Commands
 
+### Local infrastructure lifecycle
+
+The repo ships a top-level `Makefile` with user-facing infra entrypoints
+(OMN-10377). All Docker/Compose/Keycloak orchestration lives here, never in
+the public `omnibase` shell.
+
+```bash
+# Start core infra bundle (postgres, redpanda, valkey, infisical)
+make up
+
+# Add Keycloak (auth bundle) on top of core
+make up-auth
+
+# Reconcile Keycloak clients from desired-clients.json
+make seed-keycloak
+
+# Show running containers
+make status
+
+# Stop the core bundle
+make down
+
+# List all targets
+make help
+```
+
+`make` targets detect a missing/stopped Docker daemon and emit an actionable
+error before doing anything destructive. They also detect a missing
+`~/.omnibase/.env` and point at remediation rather than failing with a stack
+trace. See [`docs/getting-started/full-platform.md`](docs/getting-started/full-platform.md)
+for the full first-time bootstrap sequence.
+
+### Development and testing
+
 ```bash
 # Run unit tests
 uv run pytest tests/unit
