@@ -950,18 +950,6 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     path_prefix = f"/services/{repo_name}"
 
-    # Identify repo-specific secrets to seed.
-    # Keys missing from the env file are intentionally seeded as empty strings —
-    # they reserve the Infisical slot so the runtime can update_secret without a
-    # prior create step. Per-service identity (e.g. POSTGRES_DATABASE) is baked
-    # into each repo's Settings class as a default= and is NOT seeded here.
-    plan: list[tuple[str, str, str]] = []
-    for key in REPO_SECRET_KEYS:
-        value = env_values.get(key, "")
-        plan.append((f"{path_prefix}/db/", key, value))
-
-    # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
-    # and NOT an identity default (per-repo value baked into Settings.default=).
     try:
         registry_data = _read_registry_data()
     except FileNotFoundError as e:
@@ -974,6 +962,25 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     shared_keys_flat = {k for keys in registry.values() for k in keys}
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
+
+    # Identify repo-specific secrets to seed.
+    # Keys missing from the env file are intentionally seeded as empty strings —
+    # they reserve the Infisical slot so the runtime can update_secret without a
+    # prior create step. Per-service keys declared in shared_key_registry.yaml
+    # are authoritative and are seeded to /services/<repo>/<transport>/.
+    plan: list[tuple[str, str, str]] = []
+    for key in REPO_SECRET_KEYS:
+        value = env_values.get(key, "")
+        plan.append((f"{path_prefix}/db/", key, value))
+
+    service_key_map = _services_keys(registry_data).get(repo_name, {})
+    for transport, keys in sorted(service_key_map.items()):
+        for key in keys:
+            value = env_values.get(key, "")
+            plan.append((f"{path_prefix}/{transport}/", key, value))
+
+    # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
+    # and NOT an identity default (per-repo value baked into Settings.default=).
     # Build a set of keys already in the plan (from REPO_SECRET_KEYS) for O(1)
     # duplicate detection.  Without this, the inner check would be O(n*m).
     planned_keys: set[str] = {pk for _, pk, _ in plan}
@@ -1089,7 +1096,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         admin_token,
         project_id,
         f"{path_prefix}/",
-        list(REPO_TRANSPORT_FOLDERS),
+        sorted(set(REPO_TRANSPORT_FOLDERS) | set(service_key_map)),
     )
 
     print("Seeding repo-specific secrets...")

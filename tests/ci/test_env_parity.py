@@ -78,6 +78,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "INFISICAL_CLIENT_ID",
         "INFISICAL_CLIENT_SECRET",
         "INFISICAL_PROJECT_ID",
+        "INFISICAL_ENVIRONMENT",
         "INFISICAL_ENCRYPTION_KEY",
         "INFISICAL_AUTH_SECRET",
         # Per-service database DSNs — contain credentials, sourced from Infisical at runtime

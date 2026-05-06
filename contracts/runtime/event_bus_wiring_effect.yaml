@@ -186,7 +186,7 @@ wiring_config:
 
   # Ready event configuration
   ready_event:
-    topic: "onex.runtime.ready"
+    topic: "onex.evt.runtime.ready.v1"
     payload_schema: ModelRuntimeReadyEvent
     emit_on_success: true
 

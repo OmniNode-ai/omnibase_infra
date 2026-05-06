@@ -260,11 +260,8 @@ state_transitions:
       version: {major: 1, minor: 0, patch: 0}
   terminal_states:
     - stopped
-    - fatal
-    - timeout_error
   error_states:
-    - fatal
-    - timeout_error
+    - stopped
   persistence_enabled: true
   recovery_enabled: true
   operations:

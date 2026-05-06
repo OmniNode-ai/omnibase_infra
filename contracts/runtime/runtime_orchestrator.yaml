@@ -553,7 +553,10 @@ integration_testing:
   fixtures:
     mock_event_bus:
       description: In-memory event bus for capturing published events
-      captures: [runtime.ready, runtime.shutting_down, runtime.error]
+      captures:
+        - onex.evt.runtime.ready.v1
+        - onex.evt.runtime.shutting-down.v1
+        - onex.evt.runtime.error.v1
     mock_contracts_dir:
       description: Temp directory with valid/invalid contract YAML files
       contents:
@@ -578,7 +581,7 @@ integration_testing:
         - step: event_bus_wiring subscribes nodes to topics
           assert: Subscriptions active, runtime.ready event emitted
       expected_events:
-        - runtime.ready
+        - onex.evt.runtime.ready.v1
       expected_fsm_states:
         contract_registry: ready
         node_graph: running
@@ -598,7 +601,7 @@ integration_testing:
         - step: contract_loader stops watching
           assert: No file watchers active
       expected_events:
-        - runtime.shutting_down
+        - onex.evt.runtime.shutting-down.v1
       expected_fsm_states:
         node_graph: stopped
 
@@ -609,9 +612,9 @@ integration_testing:
         - step: contract_loader attempts scan
           assert: Raises validation error after retries exhausted
         - step: Orchestrator catches failure
-          assert: runtime.error event emitted with error details
+          assert: onex.evt.runtime.error.v1 event emitted with error details
       expected_events:
-        - runtime.error
+        - onex.evt.runtime.error.v1
       expected_error_code: CONTRACT_VALIDATION_FAILED
 
     - name: startup_failure_node_instantiation
@@ -621,11 +624,11 @@ integration_testing:
         - step: contract_loader and contract_registry succeed
           assert: FSM states progress normally
         - step: node_graph fails during instantiation
-          assert: runtime.error event with instantiation failure
+          assert: onex.evt.runtime.error.v1 event with instantiation failure
         - step: Partial cleanup triggered
           assert: Already-started nodes disposed
       expected_events:
-        - runtime.error
+        - onex.evt.runtime.error.v1
       expected_error_code: NODE_INSTANTIATION_FAILED
 
     - name: retry_behavior
@@ -637,9 +640,9 @@ integration_testing:
         - step: Second attempt fails
           assert: Retries after 4000ms (2x backoff)
         - step: Third attempt succeeds
-          assert: Startup continues, runtime.ready emitted
+          assert: Startup continues, onex.evt.runtime.ready.v1 emitted
       expected_events:
-        - runtime.ready
+        - onex.evt.runtime.ready.v1
       timing_assertions:
         - min_total_time_ms: 6000  # 2000 + 4000
 
@@ -650,9 +653,9 @@ integration_testing:
         - step: contract_loader exceeds step_timeout_ms (30000)
           assert: Operation cancelled, retries begin
         - step: All retries timeout
-          assert: runtime.error with TIMEOUT error code
+          assert: onex.evt.runtime.error.v1 with TIMEOUT error code
       expected_events:
-        - runtime.error
+        - onex.evt.runtime.error.v1
       expected_error_code: STEP_TIMEOUT
 
   # Assertions Checklist

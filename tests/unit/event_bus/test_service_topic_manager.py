@@ -143,10 +143,16 @@ class TestTopicProvisioner:
 
         manager = _make_provisioner(tmp_path)
 
-        assert [spec.suffix for spec in manager._topic_specs[:2]] == [
-            "onex.evt.omnibase-infra.runtime-health-check.v1",
-            "onex.evt.platform.node-introspection.v1",
-        ]
+        ordered_suffixes = [spec.suffix for spec in manager._topic_specs]
+        health_idx = ordered_suffixes.index(
+            "onex.evt.omnibase-infra.runtime-health-check.v1"
+        )
+        introspection_idx = ordered_suffixes.index(
+            "onex.evt.platform.node-introspection.v1"
+        )
+        default_idx = ordered_suffixes.index("onex.cmd.omnimarket.build-loop-start.v1")
+
+        assert health_idx < introspection_idx < default_idx
 
     async def test_ensure_provisioned_topics_all_created(
         self, contracts_root: Path

@@ -257,11 +257,11 @@ def _extract_raw_topics_from_contract(
             # new-style: topic key
             topic_val = item.get("topic")
             if isinstance(topic_val, str) and topic_val:
-                raw_topics.append((topic_val, 100))
+                raw_topics.append((topic_val, _topic_priority(item)))
             # old-style: name key — extract both if both present
             name_val = item.get("name")
             if isinstance(name_val, str) and name_val:
-                raw_topics.append((name_val, 100))
+                raw_topics.append((name_val, _topic_priority(item)))
 
     return raw_topics
 
