@@ -621,6 +621,7 @@ services:
       # Topics come from each node's contract.yaml event_bus declaration;
       # setting this var raises ProtocolConfigurationError at kernel bootstrap.
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
+      KAFKA_INSTANCE_ID: runtime-main
       # OMN-9060: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly
       # from env (matches the override already present on runtime-effects and
       # runtime-worker). Without it the handler throws KeyError during wiring and
@@ -676,6 +677,7 @@ services:
       # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
       # Topics come from each node's contract.yaml event_bus declaration.
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
+      KAFKA_INSTANCE_ID: runtime-effects
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
@@ -730,6 +732,7 @@ services:
       # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
       # Topics come from each node's contract.yaml event_bus declaration.
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
+      KAFKA_INSTANCE_ID: runtime-worker
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env

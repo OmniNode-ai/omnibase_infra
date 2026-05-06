@@ -148,6 +148,10 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "QDRANT_PORT",
         "ONEX_REGISTRATION_AUTO_ACK",
         "USE_EVENT_ROUTING",
+        # Runtime package activation selector. k8s ConfigMap parity is tracked
+        # with the OMN-10635 release/deploy follow-up because this PR cannot
+        # update the sibling omninode_infra checkout used by the parity job.
+        "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",

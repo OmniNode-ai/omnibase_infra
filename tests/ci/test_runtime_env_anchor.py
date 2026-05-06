@@ -199,3 +199,29 @@ class TestRuntimeEnvPassthroughNotBypassed:
                     f"x-runtime-env bypass advisory: {v}",
                     stacklevel=1,
                 )
+
+
+class TestRuntimeServiceKafkaInstanceIds:
+    """Production runtime services must not compete in the same Kafka groups."""
+
+    @pytest.mark.unit
+    def test_runtime_services_have_unique_kafka_instance_ids(self) -> None:
+        data = _load_compose()
+        services = data.get("services", {})
+
+        expected = {
+            "omninode-runtime": "runtime-main",
+            "runtime-effects": "runtime-effects",
+            "runtime-worker": "runtime-worker",
+        }
+
+        observed: dict[str, str] = {}
+        for service_name, expected_instance_id in expected.items():
+            service = services[service_name]
+            assert isinstance(service, dict)
+            environment = service["environment"]
+            assert isinstance(environment, dict)
+            observed[service_name] = environment["KAFKA_INSTANCE_ID"]
+            assert observed[service_name] == expected_instance_id
+
+        assert len(set(observed.values())) == len(observed)
