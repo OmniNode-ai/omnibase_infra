@@ -165,6 +165,9 @@ Published by a node after it receives a registration-accepted event,
 confirming that the node acknowledges successful registration.
 """
 
+SUFFIX_REGISTRATION_COMPLETED: str = "onex.evt.platform.registration-completed.v1"
+"""Topic suffix for completed runtime registration workflow events."""
+
 # Resolution event ledger (OMN-2895 / Phase 6 of OMN-2897)
 SUFFIX_FEATURE_FLAG_CHANGED: str = "onex.evt.platform.feature-flag-changed.v1"
 """Topic suffix for feature flag state change events.
@@ -1675,6 +1678,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_REGISTRATION_COMPLETED, partitions=6),
     # Feature flag changes (OMN-5580)
     ModelTopicSpec(
         suffix=SUFFIX_FEATURE_FLAG_CHANGED,
