@@ -513,3 +513,29 @@ def test_malformed_overlay_yaml_returns_base(
 
     assert result == base
     assert "Failed to parse overlay file" in caplog.text
+
+
+@pytest.mark.unit
+def test_non_dict_overlay_item_is_ignored(tmp_path: Path) -> None:
+    """Scalar/list overlay entries are ignored instead of raising."""
+    overlay = write_overlay(
+        tmp_path,
+        """
+        overlays:
+          - not-a-dict
+          - ["also", "not", "a", "dict"]
+          - selector:
+              hook: my_hook
+            set:
+              enforcement:
+                default: warn
+        """,
+    )
+
+    result = load_scope(
+        "my_hook",
+        overlay_path=overlay,
+        cache=fresh_cache(),
+    )
+
+    assert result.enforcement.default == "warn"

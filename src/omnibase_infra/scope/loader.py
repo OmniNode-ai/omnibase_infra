@@ -72,6 +72,7 @@ from typing import cast
 import yaml
 
 from omnibase_core.models.scope import ModelEnforcementScope
+from omnibase_infra.utils import sanitize_error_message, sanitize_secret_path
 
 _DEFAULT_OVERLAY_PATH = Path.home() / ".omninode" / "overlay.yaml"
 _ONEX_OVERLAY_PATH_ENV = "ONEX_OVERLAY_PATH"
@@ -182,7 +183,11 @@ def _load_overlay_entries(overlay_path: Path | None) -> list[OverlayEntry]:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
-        _logger.warning("Failed to parse overlay file %s: %s", path, exc)
+        _logger.warning(
+            "Failed to parse overlay file %s: %s",
+            sanitize_secret_path(str(path)),
+            sanitize_error_message(exc),
+        )
         return []
 
     if not isinstance(data, dict):
@@ -287,6 +292,8 @@ def _apply_overlays(
 
     any_match = False
     for entry in overlay_entries:
+        if not isinstance(entry, dict):
+            continue
         selector = entry.get("selector", {})
         if not isinstance(selector, dict):
             continue
