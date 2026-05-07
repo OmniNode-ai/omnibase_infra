@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -286,6 +287,31 @@ class ConfigPrefetcher:
         )
 
         return result
+
+    def prefetch_for_contracts(
+        self,
+        contracts_dir: Path,
+    ) -> ModelPrefetchResult:
+        """Extract requirements from a contracts directory and prefetch them.
+
+        Convenience wrapper: calls ``ContractConfigExtractor.extract_from_paths``
+        on ``contracts_dir``, then delegates to ``prefetch``.
+
+        Args:
+            contracts_dir: Path to a directory (or file) containing ONEX
+                contract YAML files.  Passed directly to
+                ``ContractConfigExtractor.extract_from_paths``.
+
+        Returns:
+            ``ModelPrefetchResult`` with resolved values and any errors.
+        """
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
+
+        extractor = ContractConfigExtractor()
+        requirements = extractor.extract_from_paths([contracts_dir])
+        return self.prefetch(requirements)
 
     def apply_to_environment(self, result: ModelPrefetchResult) -> int:
         """Apply prefetched values to the process environment.

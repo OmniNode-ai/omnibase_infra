@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10586"
+title: "Finish ConfigPrefetcher contract-directory prefetch"
+summary: "Add ConfigPrefetcher.prefetch_for_contracts so runtime bootstrap can extract config requirements from contract YAML and prefetch matching Infisical keys."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit and integration coverage for ConfigPrefetcher.prefetch_for_contracts passes"
+    command: "uv run pytest tests/unit/runtime/config_discovery/test_config_prefetcher_for_contracts.py tests/integration/test_config_prefetcher_for_contracts_integration.py -q"
+  - kind: "manual"
+    description: "Post-merge deploy/readiness smoke plan for runtime config prefetch availability; live deploy requires explicit approval"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.config_discovery.config_prefetcher import ConfigPrefetcher; assert hasattr(ConfigPrefetcher, 'prefetch_for_contracts')\""
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-unit-integration-tests"
+    description: "Unit and integration coverage for ConfigPrefetcher.prefetch_for_contracts passes"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/config_discovery/test_config_prefetcher_for_contracts.py tests/integration/test_config_prefetcher_for_contracts_integration.py -q"
+  - id: "dod-deploy"
+    description: "Post-merge deploy/readiness smoke plan only; this PR does not deploy, restart runtime, or mutate .201"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.config_discovery.config_prefetcher import ConfigPrefetcher; assert hasattr(ConfigPrefetcher, 'prefetch_for_contracts')\""
