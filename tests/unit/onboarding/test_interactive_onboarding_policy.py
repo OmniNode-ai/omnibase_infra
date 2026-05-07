@@ -217,7 +217,6 @@ class TestLocalPath:
     def test_local_no_llm_path_reaches_terminal(
         self, transitions_by_from: dict[str, Any]
     ) -> None:
-        visited = ["choose_deployment_mode"]
         # choose_deployment_mode -> configure_local_services
         t = transitions_by_from["choose_deployment_mode"]
         assert "local" in t["responses"]
