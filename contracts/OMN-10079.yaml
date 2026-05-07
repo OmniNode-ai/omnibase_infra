@@ -28,3 +28,9 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q"
+  - id: "dod-003"
+    description: ".201 runtime dry-run market dispatch produced the declared terminal event with status ready"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "ssh jonah@192.168.86.201 'docker exec omninode-runtime-effects rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1 < /tmp/omn-10079-pattern-b-command.json'"
