@@ -293,6 +293,7 @@ def _parse_contract(
         package_name=package_name,
         package_version=package_version,
         runtime_profiles=runtime_profiles,
+        terminal_event=raw.get("terminal_event"),
         event_bus=event_bus,
         handler_routing=handler_routing,
     )

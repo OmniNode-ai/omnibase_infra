@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
     _derive_handler_entry_key,
@@ -82,6 +83,7 @@ def _make_contract(
     package_name: str = "test-package",
     subscribe_topics: tuple[str, ...] = ("onex.evt.platform.test-input.v1",),
     publish_topics: tuple[str, ...] = (),
+    terminal_event: str | None = None,
     handler_routing: ModelHandlerRouting | None = None,
     consumer_purpose: str | None = None,
 ) -> ModelDiscoveredContract:
@@ -92,6 +94,7 @@ def _make_contract(
         contract_path=Path("/fake/contract.yaml"),
         entry_point_name=name,
         package_name=package_name,
+        terminal_event=terminal_event,
         event_bus=ModelEventBusWiring(
             subscribe_topics=subscribe_topics,
             publish_topics=publish_topics,
@@ -264,6 +267,98 @@ class TestMakeDispatchCallback:
         assert len(result.output_events) == 1
         assert isinstance(result.output_events[0], FakeTypedOutput)
         assert result.output_events[0].result == "handled:market"
+
+
+class TestTerminalEventResultApplier:
+    @pytest.mark.asyncio
+    async def test_multi_publish_contract_applies_output_to_terminal_event(
+        self,
+    ) -> None:
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        command_topic = "onex.cmd.omnimarket.session-bootstrap-start.v2"
+        terminal_topic = "onex.evt.omnimarket.session-bootstrap-completed.v2"
+        contract = _make_contract(
+            name="session_bootstrap",
+            subscribe_topics=(command_topic,),
+            publish_topics=(
+                terminal_topic,
+                "onex.evt.omnimarket.session-cron-health-violation.v1",
+            ),
+            terminal_event=terminal_topic,
+            handler_routing=_make_handler_routing(),
+        )
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+
+        class FakeEventBus:
+            def __init__(self) -> None:
+                self.subscribe_mock = AsyncMock(return_value=AsyncMock())
+                self.publish_envelope_mock = AsyncMock()
+
+            async def subscribe(self, **kwargs: object) -> object:
+                return await self.subscribe_mock(**kwargs)
+
+            async def publish_envelope(
+                self,
+                envelope: object,
+                topic: str,
+                *,
+                key: bytes | None = None,
+            ) -> None:
+                await self.publish_envelope_mock(
+                    envelope=envelope, topic=topic, key=key
+                )
+
+            async def publish(
+                self,
+                topic: str,
+                key: bytes | None,
+                value: bytes,
+            ) -> None:
+                return None
+
+        event_bus = FakeEventBus()
+
+        class Handler:
+            async def handle(self, _envelope: object) -> FakeTypedOutput:
+                return FakeTypedOutput(
+                    correlation_id=UUID("11111111-1111-4111-8111-111111111111"),
+                    result="ready",
+                )
+
+        engine = MessageDispatchEngine()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=Handler,
+        ):
+            await wire_from_manifest(
+                manifest,
+                engine,
+                event_bus=event_bus,
+                environment="local",
+            )
+        engine.freeze()
+
+        callback = event_bus.subscribe_mock.call_args.kwargs["on_message"]
+        envelope = ModelEventEnvelope[object](
+            payload={"session_id": "session-1"},
+            correlation_id=UUID("11111111-1111-4111-8111-111111111111"),
+            event_type="omnimarket.session-bootstrap-start",
+        )
+        message = MagicMock(value=envelope.model_dump_json().encode("utf-8"))
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._wait_for_dispatch_engine_freeze",
+            AsyncMock(return_value=True),
+        ):
+            await callback(message)
+
+        event_bus.publish_envelope_mock.assert_awaited_once()
+        assert (
+            event_bus.publish_envelope_mock.await_args.kwargs["topic"] == terminal_topic
+        )
 
 
 # ---------------------------------------------------------------------------

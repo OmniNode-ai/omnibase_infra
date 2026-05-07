@@ -288,7 +288,8 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
 
     monkeypatch.setattr(
         "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
-        lambda _packages: {"session_orchestrator": route},
+        lambda packages: captured.setdefault("packages", packages)
+        and {"session_orchestrator": route},
     )
     monkeypatch.setattr(
         "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
@@ -315,10 +316,61 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
 
     assert process._pattern_b_broker is not None
     assert captured["command_topic"] == "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"
+    assert captured["packages"] == ("omnibase_infra", "omnimarket")
     assert captured["routes"] == {"session_orchestrator": route}
     start_mock = captured["start_mock"]
     assert isinstance(start_mock, AsyncMock)
     start_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_broker_package_names_ignore_active_runtime_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route()
+    captured: dict[str, object] = {}
+
+    class FakeBroker:
+        def __init__(
+            self,
+            event_bus: object,
+            *,
+            command_topic: str,
+            routes: object,
+        ) -> None:
+            captured["routes"] = routes
+            self.start = AsyncMock()
+
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra")
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        lambda packages: captured.setdefault("packages", packages)
+        and {"session_orchestrator": route},
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        FakeBroker,
+    )
+
+    process = RuntimeHostProcess(
+        event_bus=EventBusInmemory(environment="test", group="pattern-b"),
+        config={
+            "service_name": "test-service",
+            "node_name": "test-node",
+            "env": "test",
+            "version": "v1",
+            "pattern_b_broker": {
+                "enabled": True,
+                "package_names": ["omnimarket"],
+            },
+        },
+        dispatch_engine=AsyncMock(),
+    )
+
+    await process._start_pattern_b_broker()
+
+    assert captured["packages"] == ("omnimarket",)
+    assert captured["routes"] == {"session_orchestrator": route}
 
 
 @pytest.mark.asyncio

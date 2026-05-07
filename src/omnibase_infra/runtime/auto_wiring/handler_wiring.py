@@ -1648,19 +1648,35 @@ async def _subscribe_contract_topics(
     if (
         effective_result_applier is None
         and contract.event_bus is not None
-        and len(contract.event_bus.publish_topics) == 1
+        and contract.event_bus.publish_topics
         and not _contract_declares_db_io(contract)
     ):
-        # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
-        # the type for mypy and provides a runtime use of the import (avoiding
-        # CodeQL py/unused-import false positive when cast() is the only ref).
-        assert isinstance(event_bus, ProtocolEventBusLike), (
-            f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
-        )
-        effective_result_applier = DispatchResultApplier(
-            event_bus=event_bus,
-            output_topic=contract.event_bus.publish_topics[0],
-        )
+        output_topic: str | None = None
+        if len(contract.event_bus.publish_topics) == 1:
+            output_topic = contract.event_bus.publish_topics[0]
+        elif contract.terminal_event in contract.event_bus.publish_topics:
+            output_topic = contract.terminal_event
+        else:
+            logger.warning(
+                "Auto-wired contract declares multiple publish topics but no "
+                "terminal_event default for handler output application: "
+                "contract=%s publish_topics=%s terminal_event=%s",
+                contract.name,
+                contract.event_bus.publish_topics,
+                contract.terminal_event,
+            )
+
+        if output_topic is not None:
+            # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
+            # the type for mypy and provides a runtime use of the import (avoiding
+            # CodeQL py/unused-import false positive when cast() is the only ref).
+            assert isinstance(event_bus, ProtocolEventBusLike), (
+                f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
+            )
+            effective_result_applier = DispatchResultApplier(
+                event_bus=event_bus,
+                output_topic=output_topic,
+            )
     node_identity = ModelNodeIdentity(
         env=environment,
         service=contract.package_name,
