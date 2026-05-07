@@ -22,9 +22,12 @@ inside _prefetch_config_from_infisical() does not trigger the "skipped" path.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+pytestmark = [pytest.mark.integration]
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
@@ -48,6 +51,11 @@ def _make_process(prefetch_policy: str = "disabled") -> RuntimeHostProcess:
     return RuntimeHostProcess(config=config, prefetch_policy=prefetch_policy)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_omnibase_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OMNIBASE_ENV_FILE", str(tmp_path / "missing.env"))
+
+
 def _make_mock_extractor_with_requirements() -> MagicMock:
     requirements = MagicMock()
     requirements.requirements = [MagicMock()]
@@ -60,6 +68,7 @@ def _make_mock_extractor_with_requirements() -> MagicMock:
 class TestDisabledPolicy:
     """profile=disabled: prefetcher must not be invoked."""
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_prefetcher_not_invoked(
         self, monkeypatch: pytest.MonkeyPatch
@@ -76,6 +85,7 @@ class TestDisabledPolicy:
         mock_extractor_cls.assert_not_called()
         assert process._config_prefetch_status == "skipped"
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_prefetcher_not_invoked_without_infisical_addr(
         self, monkeypatch: pytest.MonkeyPatch
@@ -94,6 +104,7 @@ class TestDisabledPolicy:
 class TestBestEffortPolicy:
     """profile=best_effort: prefetcher runs; missing keys are warnings, not errors."""
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_boots_with_one_missing_key(
         self,
@@ -137,6 +148,7 @@ class TestBestEffortPolicy:
         assert process._config_prefetch_status == "ok"
         assert mock_prefetcher.prefetch.called
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_prefetch_policy_logged(
         self,
@@ -182,6 +194,7 @@ class TestBestEffortPolicy:
 class TestRequiredPolicy:
     """profile=required: prefetcher runs; missing keys raise ProtocolConfigurationError."""
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_raises_on_missing_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With policy=required and a missing key, ProtocolConfigurationError is raised
@@ -219,6 +232,7 @@ class TestRequiredPolicy:
 
         assert missing_key in str(exc_info.value)
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_raises_on_error_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With policy=required and a key that errored, raise includes the key name."""
@@ -255,6 +269,7 @@ class TestRequiredPolicy:
 
         assert errored_key in str(exc_info.value)
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_no_raise_when_all_resolved(
         self, monkeypatch: pytest.MonkeyPatch
@@ -291,3 +306,9 @@ class TestRequiredPolicy:
             await process._prefetch_config_from_infisical()
 
         assert process._config_prefetch_status == "ok"
+
+
+@pytest.mark.integration
+def test_rejects_unknown_prefetch_policy() -> None:
+    with pytest.raises(ValueError, match="Invalid prefetch_policy"):
+        _make_process(prefetch_policy="requred")

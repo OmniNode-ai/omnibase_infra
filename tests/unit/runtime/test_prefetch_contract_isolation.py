@@ -30,6 +30,11 @@ _PREFETCHER_PATH = (
 _HANDLER_PATH = "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_omnibase_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OMNIBASE_ENV_FILE", str(tmp_path / "missing.env"))
+
+
 def _make_process(**kwargs: object) -> RuntimeHostProcess:
     """Create a RuntimeHostProcess with minimal config for prefetch testing.
 
