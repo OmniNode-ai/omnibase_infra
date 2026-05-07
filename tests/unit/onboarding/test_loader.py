@@ -24,15 +24,15 @@ class TestLoadCanonicalGraph:
         graph = load_canonical_graph()
         assert graph.title == "onex_onboarding_canonical"
 
-    def test_has_10_steps(self) -> None:
+    def test_has_13_steps(self) -> None:
         graph = load_canonical_graph()
-        assert len(graph.steps) == 10
+        assert len(graph.steps) == 13
 
     def test_dag_is_acyclic(self) -> None:
         """load_canonical_graph validates the DAG -- no exception means acyclic."""
         graph = load_canonical_graph()
         step_keys = {s.step_key for s in graph.steps}
-        assert len(step_keys) == 10  # All unique
+        assert len(step_keys) == 13  # All unique
 
     def test_all_depends_on_reference_valid_step_keys(self) -> None:
         graph = load_canonical_graph()
@@ -82,6 +82,9 @@ class TestLoadCanonicalGraph:
             "connect_node_to_bus",
             "configure_secrets",
             "start_omnidash",
+            "install_omnimarket",
+            "validate_omnimarket_config",
+            "register_omnimarket_node",
         ]
 
 

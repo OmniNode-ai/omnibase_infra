@@ -153,3 +153,45 @@ steps:
       target: "http://localhost:3000"
       timeout_seconds: 30
       description: "Omnidash is serving on port 3000"
+  - step_key: "install_omnimarket"
+    name: "Install omnimarket"
+    step_type: "action"
+    description: "Install the omnimarket package with uv"
+    depends_on: ["install_uv"]
+    required_capabilities: ["uv_installed"]
+    produces_capabilities: ["omnimarket_installed"]
+    tags: ["setup", "dependencies", "omnimarket"]
+    estimated_duration_seconds: 60
+    verification:
+      check_type: "python_import"
+      target: "omnimarket"
+      timeout_seconds: 10
+      description: "omnimarket is importable"
+  - step_key: "validate_omnimarket_config"
+    name: "Validate omnimarket Config"
+    step_type: "action"
+    description: "Run the omnimarket config validator to confirm all required secrets and env vars are present"
+    depends_on: ["install_omnimarket", "configure_secrets"]
+    required_capabilities: ["omnimarket_installed", "secrets_configured"]
+    produces_capabilities: ["omnimarket_config_valid"]
+    tags: ["setup", "validation", "omnimarket"]
+    estimated_duration_seconds: 30
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -m omnimarket.cli validate-config"
+      timeout_seconds: 30
+      description: "omnimarket validate-config exits 0"
+  - step_key: "register_omnimarket_node"
+    name: "Register omnimarket Node"
+    step_type: "action"
+    description: "Register the first omnimarket node with the runtime registry"
+    depends_on: ["validate_omnimarket_config", "connect_node_to_bus"]
+    required_capabilities: ["omnimarket_config_valid", "event_bus_connected"]
+    produces_capabilities: ["omnimarket_node_registered"]
+    tags: ["development", "omnimarket", "messaging"]
+    estimated_duration_seconds: 30
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -m omnimarket.cli register-node --dry-run"
+      timeout_seconds: 30
+      description: "omnimarket register-node dry-run exits 0"

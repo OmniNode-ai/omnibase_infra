@@ -376,6 +376,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- quality scoring pipeline topics (SOW Phase 2) ---
     "onex.cmd.omniintelligence.quality-assessment.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omniintelligence dispatch handler | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniintelligence.quality-assessment-completed.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omnidash pattern_quality_metrics projection | owner: jonah | expiry: 2026-09-01",
+    # --- platform registration events (OMN-10592 triage) ---
+    "onex.evt.platform.registration-completed.v1": "pre-existing gap; topic provisioned but no contract.yaml yet; owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
