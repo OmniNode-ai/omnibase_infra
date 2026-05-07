@@ -26,11 +26,15 @@ _PREFETCHER_PATH = (
     "omnibase_infra.runtime.config_discovery.config_prefetcher.ConfigPrefetcher"
 )
 _HANDLER_PATH = "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
+_LOAD_ENV_PATH = (
+    "omnibase_infra.runtime.service_runtime_host_process._load_omnibase_env_file"
+)
 
 
 def _make_process(**kwargs: object) -> RuntimeHostProcess:
     """Create a RuntimeHostProcess with minimal config for prefetch testing."""
     config = make_runtime_config()
+    kwargs.setdefault("prefetch_policy", "best_effort")
     return RuntimeHostProcess(config=config, **kwargs)  # type: ignore[arg-type]
 
 
@@ -63,8 +67,9 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         """When INFISICAL_ADDR is not set, status should be 'skipped'."""
         monkeypatch.delenv("INFISICAL_ADDR", raising=False)
 
-        process = _make_process()
-        await process._prefetch_config_from_infisical()
+        with patch(_LOAD_ENV_PATH):
+            process = _make_process()
+            await process._prefetch_config_from_infisical()
 
         health = await process.health_check()
         assert health["config_prefetch_status"] == "skipped"
@@ -83,9 +88,10 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_extractor = MagicMock()
         mock_requirements = MagicMock()
         mock_requirements.requirements = [MagicMock()]  # non-empty
+        mock_requirements.errors = ()  # no extraction errors
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
-        with patch(_EXTRACTOR_PATH, mock_extractor):
+        with patch(_LOAD_ENV_PATH), patch(_EXTRACTOR_PATH, mock_extractor):
             process = _make_process()
             await process._prefetch_config_from_infisical()
 

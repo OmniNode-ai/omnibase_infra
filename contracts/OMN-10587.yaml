@@ -1,0 +1,51 @@
+# OMN-10587 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Wires ConfigPrefetcher into the ONEX kernel via runtime profile.
+schema_version: "1.0.0"
+ticket_id: "OMN-10587"
+title: "Wire ConfigPrefetcher into kernel via runtime profile"
+summary: "feat(OMN-10587): add ModelRuntimeProfile schema, load profile in kernel bootstrap, gate ConfigPrefetcher behavior via prefetch_policy"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "All integration tests for policy disabled/best_effort/required pass"
+    command: "uv run pytest tests/integration/test_kernel_prefetcher_wiring.py -q"
+  - kind: "tests"
+    description: "Existing prefetch contract isolation tests pass"
+    command: "uv run pytest tests/unit/runtime/test_prefetch_contract_isolation.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Integration tests for all three prefetch_policy modes pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_kernel_prefetcher_wiring.py -q"
+  - id: "dod-002"
+    description: "Existing prefetch isolation unit tests pass with updated helper defaults"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_prefetch_contract_isolation.py -q"
+  - id: "dod-003"
+    description: "ModelRuntimeProfile schema and load_runtime_profile added at runtime_profile.py"
+    source: "manual"
+    checks:
+      - check_type: "file_exists"
+        check_value: "src/omnibase_infra/runtime/runtime_profile.py"
+  - id: "dod-004"
+    description: "mypy --strict passes with no new errors"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run mypy src/ --strict"
+  - id: "dod-005"
+    description: "Deploy smoke: runtime_profile module importable post-merge; no live deploy or .201 restart performed by this PR."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.runtime_profile import load_runtime_profile, ModelRuntimeProfile; p = load_runtime_profile(); assert isinstance(p, ModelRuntimeProfile)\""

@@ -30,9 +30,20 @@ _PREFETCHER_PATH = (
 _HANDLER_PATH = "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_omnibase_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OMNIBASE_ENV_FILE", str(tmp_path / "missing.env"))
+
+
 def _make_process(**kwargs: object) -> RuntimeHostProcess:
-    """Create a RuntimeHostProcess with minimal config for prefetch testing."""
+    """Create a RuntimeHostProcess with minimal config for prefetch testing.
+
+    Defaults prefetch_policy to "best_effort" so the prefetcher path is
+    exercised by tests in this module.  Individual tests can override via
+    kwargs if they specifically need a different policy.
+    """
     config = make_runtime_config()
+    kwargs.setdefault("prefetch_policy", "best_effort")  # type: ignore[arg-type]
     return RuntimeHostProcess(config=config, **kwargs)  # type: ignore[arg-type]
 
 
