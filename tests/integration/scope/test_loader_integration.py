@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_core.enums.enum_enforcement import EnumEnforcement
 from omnibase_infra.scope.loader import ScopeCache, load_scope
 
 
@@ -39,4 +38,4 @@ def test_load_scope_applies_file_backed_overlay(tmp_path: Path) -> None:
         cache=ScopeCache(),
     )
 
-    assert result.enforcement.default == EnumEnforcement.BLOCK
+    assert result.enforcement.default == "block"

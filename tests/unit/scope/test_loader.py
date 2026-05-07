@@ -25,7 +25,6 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_core.enums.enum_enforcement import EnumEnforcement
 from omnibase_core.models.scope import ModelArtifactEnforcement, ModelEnforcementScope
 from omnibase_infra.scope.loader import ScopeCache, load_scope
 
@@ -55,9 +54,7 @@ def fresh_cache() -> ScopeCache:
 def test_no_overlay_passthrough(tmp_path: Path) -> None:
     """When the overlay file is absent, base scope is returned unchanged."""
     non_existent = tmp_path / "does_not_exist.yaml"
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.WARN)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="warn"))
     result = load_scope(
         "pre_tool_use_bash_guard",
         base=base,
@@ -65,7 +62,7 @@ def test_no_overlay_passthrough(tmp_path: Path) -> None:
         cache=fresh_cache(),
     )
     assert result == base
-    assert result.enforcement.default == EnumEnforcement.WARN
+    assert result.enforcement.default == "warn"
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +89,7 @@ def test_selector_match_by_name_hook(tmp_path: Path) -> None:
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.WARN
+    assert result.enforcement.default == "warn"
 
 
 @pytest.mark.unit
@@ -114,7 +111,7 @@ def test_selector_match_by_name_skill(tmp_path: Path) -> None:
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.OBSERVE
+    assert result.enforcement.default == "observe"
 
 
 @pytest.mark.unit
@@ -131,16 +128,14 @@ def test_selector_name_no_match(tmp_path: Path) -> None:
                 default: observe
         """,
     )
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
     result = load_scope(
         "pre_tool_use_bash_guard",
         base=base,
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.BLOCK
+    assert result.enforcement.default == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +167,8 @@ def test_selector_match_by_glob(tmp_path: Path) -> None:
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result_guard.enforcement.default == EnumEnforcement.WARN
-    assert result_dispatch.enforcement.default == EnumEnforcement.WARN
+    assert result_guard.enforcement.default == "warn"
+    assert result_dispatch.enforcement.default == "warn"
 
 
 @pytest.mark.unit
@@ -190,16 +185,14 @@ def test_selector_glob_no_match(tmp_path: Path) -> None:
                 default: observe
         """,
     )
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
     result = load_scope(
         "post_tool_use_bash_guard",
         base=base,
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.BLOCK
+    assert result.enforcement.default == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -227,16 +220,14 @@ def test_selector_predicate_does_not_match_at_load_time(tmp_path: Path) -> None:
                 default: observe
         """,
     )
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
     result = load_scope(
         "pre_tool_use_bash_guard",
         base=base,
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.BLOCK
+    assert result.enforcement.default == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +259,7 @@ def test_multi_overlay_merge_order_last_write_wins(tmp_path: Path) -> None:
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.OBSERVE
+    assert result.enforcement.default == "observe"
 
 
 @pytest.mark.unit
@@ -295,8 +286,8 @@ def test_multi_overlay_non_conflicting_fields_accumulate(tmp_path: Path) -> None
         overlay_path=overlay,
         cache=fresh_cache(),
     )
-    assert result.enforcement.default == EnumEnforcement.WARN
-    assert result.enforcement.non_matching_scope == EnumEnforcement.WARN
+    assert result.enforcement.default == "warn"
+    assert result.enforcement.non_matching_scope == "warn"
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +304,8 @@ def test_explicit_null_clears_field(tmp_path: Path) -> None:
 
     base = ModelEnforcementScope(
         enforcement=ModelArtifactEnforcement(
-            default=EnumEnforcement.FAIL_FAST,
-            non_matching_scope=EnumEnforcement.WARN,
+            default="fail-fast",
+            non_matching_scope="warn",
         )
     )
     result = load_scope(
@@ -352,9 +343,7 @@ def test_disabled_true_short_circuits(tmp_path: Path) -> None:
               disabled: true
         """,
     )
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
     result = load_scope(
         "pre_tool_use_bash_guard",
         base=base,
@@ -385,9 +374,7 @@ def test_disabled_true_stops_further_overlay_application(tmp_path: Path) -> None
                 default: observe
         """,
     )
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
     result = load_scope(
         "my_hook",
         base=base,
@@ -395,7 +382,7 @@ def test_disabled_true_stops_further_overlay_application(tmp_path: Path) -> None
         cache=fresh_cache(),
     )
     assert result.applicability.disabled_when.is_universal()
-    assert result.enforcement.default == EnumEnforcement.BLOCK
+    assert result.enforcement.default == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -422,9 +409,7 @@ def test_missing_overlay_file_is_non_error(tmp_path: Path) -> None:
 def test_empty_overlay_file_is_non_error(tmp_path: Path) -> None:
     """An overlay file with no overlay entries returns the base scope."""
     overlay = write_overlay(tmp_path, "overlays: []\n")
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.WARN)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="warn"))
     result = load_scope(
         "my_skill",
         base=base,
@@ -471,8 +456,8 @@ def test_cache_isolates_artifact_ids(tmp_path: Path) -> None:
     cache = fresh_cache()
     result_a = load_scope("hook_a", overlay_path=overlay, cache=cache)
     result_b = load_scope("hook_b", overlay_path=overlay, cache=cache)
-    assert result_a.enforcement.default == EnumEnforcement.WARN
-    assert result_b.enforcement.default == EnumEnforcement.OBSERVE
+    assert result_a.enforcement.default == "warn"
+    assert result_b.enforcement.default == "observe"
     assert len(cache) == 2
 
 
@@ -505,7 +490,7 @@ def test_onex_overlay_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     )
     monkeypatch.setenv("ONEX_OVERLAY_PATH", str(overlay))
     result = load_scope("env_hook", cache=fresh_cache())
-    assert result.enforcement.default == EnumEnforcement.WARN
+    assert result.enforcement.default == "warn"
 
 
 @pytest.mark.unit
@@ -516,9 +501,7 @@ def test_malformed_overlay_yaml_returns_base(
     """Malformed overlays are ignored without mutating the base scope."""
     overlay = tmp_path / "overlay.yaml"
     overlay.write_text("overlays: [", encoding="utf-8")
-    base = ModelEnforcementScope(
-        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
-    )
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
 
     with caplog.at_level(WARNING, logger="omnibase_infra.scope.loader"):
         result = load_scope(
