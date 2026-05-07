@@ -230,9 +230,48 @@ wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
 
+PrefetchPolicy = Literal["disabled", "best_effort", "required"]
+_PREFETCH_POLICIES: frozenset[str] = frozenset(("disabled", "best_effort", "required"))
+
 _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
     {"audit", "projection"}
 )
+
+
+def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
+    """Normalize and validate the runtime config prefetch policy."""
+    policy = value.strip().lower()
+    if policy not in _PREFETCH_POLICIES:
+        allowed = ", ".join(sorted(_PREFETCH_POLICIES))
+        raise ValueError(
+            f"Invalid prefetch_policy {value!r}; expected one of: {allowed}"
+        )
+    return cast("PrefetchPolicy", policy)
+
+
+def _load_omnibase_env_file() -> None:
+    """Load OMNIBASE_ENV_FILE or ~/.omnibase/.env into os.environ if present."""
+    env_override = os.environ.get("OMNIBASE_ENV_FILE", "")
+    env_file = (
+        Path(env_override).expanduser()
+        if env_override
+        else Path.home() / ".omnibase" / ".env"
+    )
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key or key.startswith("export "):
+            key = key.removeprefix("export ").strip()
+        if not key or key in os.environ:
+            continue
+        value = raw_value.strip().strip("'\"")
+        os.environ[key] = value
 
 
 def _requires_raw_event_projection_wiring(event_bus_section: object) -> bool:
@@ -669,6 +708,7 @@ class RuntimeHostProcess:
         introspection_config: ModelRuntimeIntrospectionConfig | None = None,
         dispatch_engine: MessageDispatchEngine | None = None,
         runtime_node_graph_config: ModelRuntimeNodeGraphConfig | None = None,
+        prefetch_policy: PrefetchPolicy = "disabled",
     ) -> None:
         """Initialize the runtime host process.
 
@@ -888,6 +928,11 @@ class RuntimeHostProcess:
         # Config prefetch status (OMN-3902): tracks Infisical prefetch outcome.
         # Vocabulary: pending | skipped | ok | degraded_no_requirements | degraded_error
         self._config_prefetch_status: str = "pending"
+        # Prefetch policy from runtime profile (OMN-10587).
+        # Vocabulary: disabled | best_effort | required
+        self._prefetch_policy: PrefetchPolicy = _normalize_prefetch_policy(
+            prefetch_policy
+        )
 
         # Kafka contract source (created if KAFKA_EVENTS mode, wired separately)
         self._kafka_contract_source: KafkaContractSource | None = None
@@ -3499,21 +3544,37 @@ class RuntimeHostProcess:
             )
 
     async def _prefetch_config_from_infisical(self) -> None:
-        """Prefetch configuration values from Infisical (OMN-2287).
+        """Prefetch configuration values from Infisical (OMN-2287, OMN-10587).
 
-        Opt-in: Only runs when ``INFISICAL_ADDR`` is set in the environment.
-        This allows the bootstrap sequence to populate config before handlers
-        initialize, without requiring Infisical for local development.
+        Gated by the runtime profile's ``prefetch_policy``:
+            * ``"disabled"``    -- skipped entirely regardless of INFISICAL_ADDR.
+            * ``"best_effort"`` -- runs; missing/errored keys are logged as
+                                   structured warnings and boot continues.
+            * ``"required"``    -- runs; raises ``ProtocolConfigurationError``
+                                   if any key is missing or errors.
+
+        The policy is set in ``ModelRuntimeProfile`` and loaded by the kernel
+        from the ``RUNTIME_PROFILE`` environment variable before constructing
+        ``RuntimeHostProcess``.  Defaults to ``"disabled"`` (no change for
+        local-dev / unset profile).
 
         Steps:
-            1. Check ``INFISICAL_ADDR`` env var (opt-in gate)
-            2. Extract config requirements from discovered contracts
-            3. Build transport specs via ``TransportConfigMap``
-            4. Prefetch values through ``HandlerInfisical``
-            5. Apply resolved values to process environment
-
-        Errors are logged but do NOT block startup (graceful degradation).
+            1. Check ``prefetch_policy``; skip if ``"disabled"``
+            2. Check ``INFISICAL_ADDR`` env var (opt-in gate)
+            3. Extract config requirements from discovered contracts
+            4. Build transport specs via ``TransportConfigMap``
+            5. Prefetch values through ``HandlerInfisical``
+            6. Apply resolved values to process environment
+            7. If ``"required"`` and any missing/errors: raise
         """
+        if self._prefetch_policy == "disabled":
+            logger.debug(
+                "Config prefetch disabled by runtime profile (prefetch_policy=disabled)"
+            )
+            self._config_prefetch_status = "skipped"
+            return
+
+        _load_omnibase_env_file()
         infisical_addr = os.environ.get("INFISICAL_ADDR", "")
         if not infisical_addr:
             logger.debug("INFISICAL_ADDR not set, skipping config prefetch")
@@ -3689,6 +3750,7 @@ class RuntimeHostProcess:
                         "missing": len(result.missing),
                         "errors": len(result.errors),
                         "applied_to_env": applied,
+                        "prefetch_policy": self._prefetch_policy,
                     },
                 )
 
@@ -3699,6 +3761,22 @@ class RuntimeHostProcess:
                             key,
                             sanitize_error_string(err),
                         )
+
+                # Step 5: Enforce policy after reporting
+                if self._prefetch_policy == "required":
+                    problem_keys: list[str] = list(result.missing) + list(
+                        result.errors.keys()
+                    )
+                    if problem_keys:
+                        context = ModelInfraErrorContext.with_correlation(
+                            transport_type=EnumInfraTransportType.RUNTIME,
+                            operation="prefetch_config_from_infisical",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Config prefetch policy='required' — missing keys: "
+                            f"{', '.join(sorted(problem_keys))}",
+                            context=context,
+                        )
             finally:
                 # Always shut down the inline handler to release SDK resources.
                 # Handlers found in the handler registry manage their own lifecycle
@@ -3706,6 +3784,10 @@ class RuntimeHostProcess:
                 if _inline_handler is not None:
                     await _inline_handler.shutdown()
 
+        except ProtocolConfigurationError:
+            # Required-policy failures are fatal — re-raise so the kernel
+            # can surface the named missing keys to the operator.
+            raise
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,

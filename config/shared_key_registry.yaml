@@ -217,9 +217,25 @@ services:
       - LLM_CODER_MODEL_ID
       - LLM_REASONER_URL
       - LLM_REASONER_MODEL_ID
-    # Per-service database identity. POSTGRES_DATABASE is in identity_defaults
+    # Per-service database config. POSTGRES_DATABASE is in identity_defaults
     # globally (each repo bakes its own value as a Settings default), but is
     # also enumerated here so omnimarket's per-service path is explicit and
-    # the onboard-repo plan can verify it.
+    # the onboard-repo plan can verify it. POSTGRES_HOST / POSTGRES_PORT /
+    # POSTGRES_USER are in /shared/db/ globally; the per-service entries here
+    # allow omnimarket to override them if deployed against a dedicated DB.
+    # POSTGRES_PASSWORD is listed per-service so the onboard-repo plan can
+    # seed a service-scoped credential when omnimarket uses a dedicated role.
     db:
       - POSTGRES_DATABASE
+      - POSTGRES_HOST
+      - POSTGRES_PORT
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+    # Per-service Infisical project declaration. INFISICAL_ADDR and
+    # INFISICAL_PROJECT_ID are bootstrap_only globally (they must be available
+    # before Infisical can be reached). Listing them here as a per-service
+    # entry allows omnimarket to declare its own project scope and enables
+    # onboard-repo plan validation to confirm the per-service override exists.
+    infisical:
+      - INFISICAL_ADDR
+      - INFISICAL_PROJECT_ID

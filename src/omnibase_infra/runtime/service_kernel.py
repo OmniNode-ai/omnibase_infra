@@ -152,6 +152,7 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
+from omnibase_infra.runtime.runtime_profile import load_runtime_profile
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
@@ -779,6 +780,19 @@ async def bootstrap() -> int:
             "(correlation_id=%s)",
             node_graph_config.startup_timeout_ms,
             node_graph_config.step_timeout_ms,
+            correlation_id,
+        )
+
+        # 1c. Load runtime profile to determine subsystem policies (OMN-10587).
+        # Reads RUNTIME_PROFILE env var; unknown values fall back to "default"
+        # (prefetch_policy="disabled") with a structured warning.
+        # Named kernel_profile to avoid collision with the auto-wiring
+        # runtime_profile string variable used later in the bootstrap loop.
+        kernel_profile = load_runtime_profile()
+        logger.info(
+            "Runtime profile loaded: name=%s prefetch_policy=%s (correlation_id=%s)",
+            kernel_profile.name,
+            kernel_profile.prefetch_policy,
             correlation_id,
         )
 
@@ -2755,6 +2769,8 @@ async def bootstrap() -> int:
             # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
             # uses contract values instead of DEFAULT_* constants.
             runtime_node_graph_config=node_graph_config,
+            # OMN-10587: Wire prefetch policy from runtime profile.
+            prefetch_policy=kernel_profile.prefetch_policy,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
