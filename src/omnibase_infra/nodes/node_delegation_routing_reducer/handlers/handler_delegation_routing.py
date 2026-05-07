@@ -28,6 +28,7 @@ Related:
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
@@ -124,15 +125,6 @@ _SYSTEM_PROMPTS: dict[str, str] = {
     ),
 }
 
-# Cost tier ordinal — lower is cheaper.
-# Used to enforce pricing_ceiling_per_1k_tokens from task-class contracts.
-_TIER_COST_ORDINAL: dict[str, int] = {
-    "local": 0,
-    "cheap_cloud": 1,
-    "claude": 2,
-    "cli_agents": 1,
-}
-
 # Approximate per-1k-token cost by tier (USD).
 # These are conservative estimates used to compare against pricing ceiling.
 _TIER_COST_PER_1K: dict[str, float] = {
@@ -211,8 +203,6 @@ _DEFAULT_TASK_CLASS_CONTRACT_PATH = (
 # Module-level config singletons — loaded once on first call.
 # Tests can override by replacing these variables before calling delta().
 _config: ModelDelegationConfig | None = None
-_task_class_contract: dict[str, object] | None = None
-_task_class_contract_loaded: bool = False
 
 
 def _get_config() -> ModelDelegationConfig:
@@ -224,31 +214,26 @@ def _get_config() -> ModelDelegationConfig:
     return _config
 
 
+@lru_cache(maxsize=1)
 def _get_task_class_contract() -> dict[str, object] | None:
     """Load task-class contracts from YAML, returning None if not available.
 
     Reads from TASK_CLASS_CONTRACT_PATH env var, or the default location in
     configs/task_class_contracts.v1.yaml. Returns None when the file is absent
-    so that callers can gracefully degrade to tier-only routing.
+    so that callers can gracefully degrade to tier-only routing. The loaded
+    value is cached for the process lifetime; tests clear the cache explicitly
+    when changing environment overrides.
     """
-    global _task_class_contract, _task_class_contract_loaded  # noqa: PLW0603
-    if _task_class_contract_loaded:
-        return _task_class_contract
-
     env_path = os.environ.get(
         "TASK_CLASS_CONTRACT_PATH", ""
     )  # ONEX_EXCLUDE: env_access - contract path configuration
     contract_path = Path(env_path) if env_path else _DEFAULT_TASK_CLASS_CONTRACT_PATH
 
     if not contract_path.exists():
-        _task_class_contract_loaded = True
-        _task_class_contract = None
         return None
 
     raw = yaml.safe_load(contract_path.read_text())
-    _task_class_contract = raw if isinstance(raw, dict) else None
-    _task_class_contract_loaded = True
-    return _task_class_contract
+    return raw if isinstance(raw, dict) else None
 
 
 def _task_class_entry(

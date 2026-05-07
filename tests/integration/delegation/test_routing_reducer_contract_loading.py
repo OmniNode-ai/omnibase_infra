@@ -51,12 +51,10 @@ def _request(
 @pytest.fixture(autouse=True)
 def reset_singletons() -> Iterator[None]:
     _handler_mod._config = None
-    _handler_mod._task_class_contract = None
-    _handler_mod._task_class_contract_loaded = False
+    _handler_mod._get_task_class_contract.cache_clear()
     yield
     _handler_mod._config = None
-    _handler_mod._task_class_contract = None
-    _handler_mod._task_class_contract_loaded = False
+    _handler_mod._get_task_class_contract.cache_clear()
 
 
 def test_default_contract_file_exists_at_canonical_path() -> None:
