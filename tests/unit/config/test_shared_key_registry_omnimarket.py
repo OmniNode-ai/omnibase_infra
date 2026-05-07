@@ -86,6 +86,31 @@ class TestServicesOmnimarketSection:
         omnimarket = registry_data["services"]["omnimarket"]
         assert "POSTGRES_DATABASE" in omnimarket["db"]
 
+    def test_omnimarket_db_includes_connection_keys(
+        self, registry_data: dict[str, object]
+    ) -> None:
+        omnimarket = registry_data["services"]["omnimarket"]
+        db_keys = set(omnimarket["db"])
+        assert {
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+        }.issubset(db_keys)
+
+    def test_omnimarket_infisical_section_present(
+        self, registry_data: dict[str, object]
+    ) -> None:
+        omnimarket = registry_data["services"]["omnimarket"]
+        assert "infisical" in omnimarket
+
+    def test_omnimarket_infisical_includes_addr_and_project_id(
+        self, registry_data: dict[str, object]
+    ) -> None:
+        omnimarket = registry_data["services"]["omnimarket"]
+        infisical_keys = set(omnimarket["infisical"])
+        assert {"INFISICAL_ADDR", "INFISICAL_PROJECT_ID"}.issubset(infisical_keys)
+
 
 class TestServicesKeysLoader:
     def test_loader_returns_omnimarket_block(self, register_repo_module) -> None:  # type: ignore[no-untyped-def]
@@ -93,6 +118,9 @@ class TestServicesKeysLoader:
         assert "omnimarket" in result
         assert "KAFKA_GROUP_ID" in result["omnimarket"]["kafka"]
         assert "POSTGRES_DATABASE" in result["omnimarket"]["db"]
+        assert "POSTGRES_PASSWORD" in result["omnimarket"]["db"]
+        assert "INFISICAL_ADDR" in result["omnimarket"]["infisical"]
+        assert "INFISICAL_PROJECT_ID" in result["omnimarket"]["infisical"]
 
     def test_loader_returns_empty_dict_when_section_absent(
         self, register_repo_module
