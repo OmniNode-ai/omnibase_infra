@@ -50,6 +50,10 @@ class ModelDiscoveredContract(BaseModel):
             "Empty means backward-compatible ownership by every runtime profile."
         ),
     )
+    terminal_event: str | None = Field(
+        default=None,
+        description="Optional terminal event topic declared by orchestrator contracts.",
+    )
     event_bus: ModelEventBusWiring | None = Field(
         default=None, description="Event bus wiring if declared"
     )

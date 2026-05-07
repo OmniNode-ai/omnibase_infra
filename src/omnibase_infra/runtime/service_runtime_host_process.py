@@ -2241,8 +2241,10 @@ class RuntimeHostProcess:
         if self._local_ingress_config.enabled:
             routes = dict(self._local_ingress_routes)
         else:
-            package_names = parse_active_runtime_packages(
-                self._pattern_b_broker_config.package_names
+            package_names = tuple(
+                part.strip()
+                for part in self._pattern_b_broker_config.package_names
+                if part.strip()
             )
             routes = discover_runtime_local_ingress_routes(package_names)
         self._pattern_b_broker = RuntimePatternBBroker(
