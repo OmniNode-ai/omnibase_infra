@@ -30,4 +30,4 @@ dod_evidence:
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q'
+        check_value: 'deploy: no live deploy is performed pre-merge; preflight uses uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q, then post-merge validation checks the runtime container with docker exec omninode-runtime printenv ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS'

@@ -215,7 +215,7 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
 
 def _topic_priority(item: dict[object, object]) -> int:
     raw_priority = item.get("provisioning_priority", item.get("priority", 100))
-    if isinstance(raw_priority, int):
+    if isinstance(raw_priority, int) and not isinstance(raw_priority, bool):
         return raw_priority
     return 100
 

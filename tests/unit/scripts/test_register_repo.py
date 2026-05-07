@@ -335,6 +335,32 @@ class TestCmdOnboardRepoServiceKeys:
         )
         assert "/services/omnimarket/db/POSTGRES_DATABASE = omnimarket" in captured.out
 
+    @pytest.mark.unit
+    def test_dry_run_skips_empty_declared_service_keys(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rr = _module
+        env_file = tmp_path / ".env"
+        env_file.write_text("KAFKA_GROUP_ID=omnimarket-worker\n", encoding="utf-8")
+        args = _make_dry_run_args(str(env_file))
+        minimal_registry: dict[str, object] = {
+            "shared": {"/shared/llm/": ["LLM_CODER_URL"]},
+            "bootstrap_only": ["POSTGRES_PASSWORD"],
+            "identity_defaults": ["POSTGRES_DATABASE"],
+            "services": {"omnimarket": {"llm": ["LLM_CODER_URL"]}},
+        }
+
+        with patch.object(
+            rr,  # type: ignore[arg-type]
+            "_read_registry_data",
+            return_value=minimal_registry,
+        ):
+            result = rr.cmd_onboard_repo(args)  # type: ignore[attr-defined]
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "/services/omnimarket/llm/LLM_CODER_URL" not in captured.out
+
 
 # ---------------------------------------------------------------------------
 # Issue 4: _upsert_secret wraps bare SDK exceptions in InfraConnectionError

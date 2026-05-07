@@ -111,6 +111,24 @@ def test_extract_legacy_event_priority(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_extract_event_priority_rejects_bool(tmp_path: Path) -> None:
+    """YAML booleans are not accepted as integer provisioning priorities."""
+    write_contract(
+        tmp_path,
+        "node_bool_priority",
+        """
+        published_events:
+          - topic: "onex.evt.platform.node-introspection.v1"
+            provisioning_priority: false
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = extractor.extract(tmp_path)
+
+    assert results[0].provisioning_priority == 100
+
+
+@pytest.mark.unit
 def test_extract_new_style_produced_events(tmp_path: Path) -> None:
     """New-style produced_events[].topic entries are extracted."""
     write_contract(

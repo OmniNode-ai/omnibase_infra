@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
----
+# Contract Metadata
+node_type: EFFECT_GENERIC
 # ONEX Runtime Event Bus Wiring Effect Contract
 #
 # This contract defines the event_bus_wiring EFFECT node that wires instantiated
@@ -31,8 +32,6 @@
 # - Publish runtime.ready event when wiring is complete
 #
 
-# Contract Metadata
-node_type: EFFECT_GENERIC
 contract_version: {major: 1, minor: 1, patch: 0}
 # Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
 # See docs/architecture/CONTRACT_STABILITY_SPEC.md for normalization specification.
@@ -44,7 +43,6 @@ fingerprint: "1.1.0:5a885a8c9b69"
 # `effect_operations:` with an operations list (e.g., contract_loader_effect.yaml).
 effect:
   version: {major: 1, minor: 1, patch: 0}
-
   # Operation identification
   operation_name: event_bus_wiring
   operation_version: {major: 1, minor: 0, patch: 0}
@@ -52,19 +50,16 @@ effect:
     Wires instantiated nodes to event bus subscriptions.
     Receives the node graph from node_graph reducer, subscribes each node
     to its declared topics, and publishes runtime.ready when complete.
-
   # Execution mode
-  execution_mode: sequential_abort  # Abort on first failure (v1.0 semantics)
-
+  execution_mode: sequential_abort # Abort on first failure (v1.0 semantics)
   # Overall operation timeout (guards against retry stacking)
-  operation_timeout_ms: 60000  # 60 seconds total for all wiring operations
-
+  operation_timeout_ms: 60000 # 60 seconds total for all wiring operations
   # IO Configuration for event bus handler
   # CONSISTENCY: handler_type and wiring_config.event_bus_type MUST use the same
   # environment variable (ONEX_EVENT_BUS) to ensure the IO handler and wiring
   # logic target the same event bus instance.
   io_config:
-    handler_type: "${env.ONEX_EVENT_BUS:inmemory}"  # See also: wiring_config.event_bus_type
+    handler_type: "${env.ONEX_EVENT_BUS:inmemory}" # See also: wiring_config.event_bus_type
     topic: "onex.runtime.subscriptions"
     # SECURITY NOTE: ${input.subscriptions} is validated against topic_validation rules
     # in wiring_config before being used. This prevents command injection, event spoofing,
@@ -82,9 +77,8 @@ effect:
       x-onex-operation: "subscribe"
       x-onex-correlation-id: "${input.correlation_id}"
     timeout_ms: 5000
-    acks: "all"  # Strong delivery guarantee for subscription messages
+    acks: "all" # Strong delivery guarantee for subscription messages
     compression: "none"
-
   # Retry policy for subscription operations
   # Timing Validation: 1000 + 2000 + 4000 = 7000ms * 1.1 = 7700ms
   # Worst case retry (7700ms) << timeout (60000ms) - PASS (87% margin)
@@ -101,7 +95,6 @@ effect:
       - "ECONNREFUSED"
       - "SUBSCRIPTION_FAILED"
       - "BROKER_NOT_AVAILABLE"
-
   # Circuit breaker configuration
   circuit_breaker:
     enabled: true
@@ -109,7 +102,6 @@ effect:
     success_threshold: 2
     timeout_ms: 30000
     half_open_requests: 3
-
   # Response handling
   response_handling:
     success_codes:
@@ -121,29 +113,24 @@ effect:
       subscribed_at: "$.subscribed_at"
     fail_on_empty: false
     extraction_engine: jsonpath
-
   # Observability
   observability:
     log_request: true
     log_response: true
     emit_metrics: true
     trace_propagation: true
-
 # Wiring-specific configuration
 wiring_config:
   # Event bus type (overridable via environment variable)
   # NOTE: Must stay consistent with io_config.handler_type (line 64) - both use ONEX_EVENT_BUS
   event_bus_type: "${env.ONEX_EVENT_BUS:inmemory}"
-
   # Subscription management
   subscription_timeout_ms: 5000
   max_concurrent_subscriptions: 50
   subscription_batch_size: 10
-
   # Validation settings
   validate_topics: true
   fail_on_invalid_topic: true
-
   # Topic Name Validation (SECURITY)
   # ================================
   # Topic validation is critical for preventing several attack vectors:
@@ -169,27 +156,25 @@ wiring_config:
     allowed_pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$"
     # Deny dangerous patterns that could enable injection attacks
     deny_patterns:
-      - "\\.\\./"  # Path traversal sequences
-      - "\\$\\{"  # Variable/template injection
-      - "[<>\"'`]"  # Script injection characters (XSS, shell)
-      - "\\x00"  # Null bytes (string termination attacks)
-      - "\\s"  # Whitespace (parsing confusion, injection)
+      - "\\.\\./" # Path traversal sequences
+      - "\\$\\{" # Variable/template injection
+      - "[<>\"'`]" # Script injection characters (XSS, shell)
+      - "\\x00" # Null bytes (string termination attacks)
+      - "\\s" # Whitespace (parsing confusion, injection)
     # Reserved topic prefixes that only system components can use.
     # User-defined nodes attempting to subscribe to these will be rejected.
     reserved_prefixes:
-      - "onex.runtime."  # Runtime control plane events (system-only)
-      - "_internal."  # Internal system coordination topics
+      - "onex.runtime." # Runtime control plane events (system-only)
+      - "_internal." # Internal system coordination topics
     # Hard limit on topic name length to prevent buffer overflow
     max_topic_length: 255
     # Limit subscriptions per node to prevent resource exhaustion attacks
     max_subscriptions_per_node: 100
-
   # Ready event configuration
   ready_event:
     topic: "onex.evt.runtime.ready.v1"
     payload_schema: ModelRuntimeReadyEvent
     emit_on_success: true
-
 # Health check configuration
 health_check:
   enabled: true
@@ -209,7 +194,6 @@ health_check:
       check_type: latency
       critical: false
       threshold_ms: 1000
-
 # Event bus declarations (what this node listens to and publishes)
 # NOTE: Each subscription defines a `handler` field that references a method that MUST be
 # implemented by the runtime or node implementation. These handlers are NOT protocol-based
@@ -231,11 +215,12 @@ health_check:
 #   4. Implement remove_subscription for graceful node removal
 #   5. Add handler validation during contract loading to fail-fast on missing handlers
 event_bus:
-  subscribe_topics:
+  subscribe_topics: []
+  planned_subscribe_topics:
     - topic: onex.evt.runtime.node-graph-ready.v1
       description: Triggered when node graph is fully instantiated
       handler: wire_all_subscriptions
-      handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
+      handler_status: NOT_IMPLEMENTED # requires SubscriptionHandlerRegistry
       handler_implementation:
         class: NodeEventBusWiringEffect
         method: _handle_node_graph_ready
@@ -246,7 +231,7 @@ event_bus:
     - topic: onex.evt.runtime.node-registered.v1
       description: Handle new node registration for hot reload
       handler: wire_single_subscription
-      handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
+      handler_status: NOT_IMPLEMENTED # requires SubscriptionHandlerRegistry
       handler_implementation:
         class: NodeEventBusWiringEffect
         method: _handle_node_registered
@@ -257,7 +242,7 @@ event_bus:
     - topic: onex.evt.runtime.node-unregistered.v1
       description: Handle node removal
       handler: remove_subscription
-      handler_status: planned  # NOT_IMPLEMENTED - requires SubscriptionHandlerRegistry
+      handler_status: NOT_IMPLEMENTED # requires SubscriptionHandlerRegistry
       handler_implementation:
         class: NodeEventBusWiringEffect
         method: _handle_node_unregistered
@@ -282,7 +267,6 @@ event_bus:
       description: Wiring encountered a critical error
       payload_schema: ModelWiringErrorEvent
       provisioning_priority: 20
-
 # v1.1.0 Required Fields
 handlers:
   required:
@@ -291,13 +275,11 @@ handlers:
   optional:
     - type: ProtocolLogger
       version: {major: 1, minor: 0, patch: 0}
-
 profile_tags:
   - runtime
   - effect
   - event-bus
   - wiring
-
 # Metadata
 metadata:
   version: {major: 1, minor: 1, patch: 0}

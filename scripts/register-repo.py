@@ -976,8 +976,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     service_key_map = _services_keys(registry_data).get(repo_name, {})
     for transport, keys in sorted(service_key_map.items()):
         for key in keys:
-            value = env_values.get(key, "")
-            plan.append((f"{path_prefix}/{transport}/", key, value))
+            value = env_values.get(key)
+            if value:
+                plan.append((f"{path_prefix}/{transport}/", key, value))
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
