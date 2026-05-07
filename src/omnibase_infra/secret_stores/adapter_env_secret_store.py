@@ -46,7 +46,7 @@ class AdapterEnvSecretStore:
         return True
 
     async def close(self, timeout_seconds: float = 30.0) -> None:
-        del timeout_seconds
+        return None
 
 
 __all__: list[str] = ["AdapterEnvSecretStore"]
