@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "omnimarket_quickstart"
+description: "Minimal omnimarket setup: install, validate config, register first node (~10 min)"
+target_capabilities:
+  - "omnimarket_node_registered"
+max_estimated_minutes: 10
