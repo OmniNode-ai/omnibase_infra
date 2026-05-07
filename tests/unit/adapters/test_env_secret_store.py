@@ -14,6 +14,7 @@ def store() -> AdapterEnvSecretStore:
     return AdapterEnvSecretStore()
 
 
+@pytest.mark.unit
 class TestAdapterEnvSecretStoreGet:
     @pytest.mark.asyncio
     async def test_get_missing_key_returns_none(
@@ -32,6 +33,7 @@ class TestAdapterEnvSecretStoreGet:
         assert result == "secret-value"
 
 
+@pytest.mark.unit
 class TestAdapterEnvSecretStoreSet:
     @pytest.mark.asyncio
     async def test_set_and_get_roundtrip(
@@ -44,6 +46,7 @@ class TestAdapterEnvSecretStoreSet:
         assert result == "my-value"
 
 
+@pytest.mark.unit
 class TestAdapterEnvSecretStoreDelete:
     @pytest.mark.asyncio
     async def test_delete_existing_key_returns_true(
@@ -62,6 +65,7 @@ class TestAdapterEnvSecretStoreDelete:
         assert result is False
 
 
+@pytest.mark.unit
 class TestAdapterEnvSecretStoreListKeys:
     @pytest.mark.asyncio
     async def test_list_keys_no_prefix_returns_all(
@@ -91,6 +95,7 @@ class TestAdapterEnvSecretStoreListKeys:
         assert keys == []
 
 
+@pytest.mark.unit
 class TestAdapterEnvSecretStoreHealthAndClose:
     @pytest.mark.asyncio
     async def test_health_check_always_true(self, store: AdapterEnvSecretStore) -> None:
