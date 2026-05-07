@@ -64,9 +64,10 @@ Merge rules:
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import yaml
 
@@ -74,6 +75,8 @@ from omnibase_core.models.scope import ModelEnforcementScope
 
 _DEFAULT_OVERLAY_PATH = Path.home() / ".omninode" / "overlay.yaml"
 _ONEX_OVERLAY_PATH_ENV = "ONEX_OVERLAY_PATH"
+_logger = logging.getLogger(__name__)
+OverlayEntry = dict[str, object]
 
 
 class ScopeCache:
@@ -166,7 +169,7 @@ def _resolve_overlay_path(overlay_path: Path | None) -> Path:
     return _DEFAULT_OVERLAY_PATH
 
 
-def _load_overlay_entries(overlay_path: Path | None) -> list[dict[str, Any]]:
+def _load_overlay_entries(overlay_path: Path | None) -> list[OverlayEntry]:
     """Parse the overlay file and return the list of overlay entries.
 
     A missing file is non-error — returns an empty list.
@@ -175,18 +178,22 @@ def _load_overlay_entries(overlay_path: Path | None) -> list[dict[str, Any]]:
     if not path.exists():
         return []
 
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        _logger.warning("Failed to parse overlay file %s: %s", path, exc)
+        return []
 
     if not isinstance(data, dict):
         return []
     entries = data.get("overlays", [])
     if not isinstance(entries, list):
         return []
-    return entries
+    return cast("list[OverlayEntry]", entries)
 
 
-def _selector_matches(artifact_id: str, selector: dict[str, Any]) -> bool:
+def _selector_matches(artifact_id: str, selector: OverlayEntry) -> bool:
     """Return True if *selector* matches *artifact_id*."""
     if "skill" in selector:
         return str(selector["skill"]) == artifact_id
@@ -205,10 +212,14 @@ def _selector_matches(artifact_id: str, selector: dict[str, Any]) -> bool:
 
 
 def _merge_dict_field(
-    base_value: dict[str, Any] | None,
-    overlay_value: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Deep-merge two dict fields; overlay wins per-key; None clears."""
+    base_value: OverlayEntry | None,
+    overlay_value: OverlayEntry | None,
+) -> OverlayEntry | None:
+    """Shallow-merge dict fields using field-level last-write-wins semantics.
+
+    Overlay values win per top-level key, ``None`` clears the field, and nested
+    dicts are replaced instead of being recursively merged.
+    """
     if overlay_value is None:
         return None
     if base_value is None:
@@ -220,16 +231,16 @@ def _merge_dict_field(
 
 _DISABLED_SENTINEL = "__disabled__"
 
-_UNIVERSAL_DISABLED_WHEN: dict[str, Any] = {
+_UNIVERSAL_DISABLED_WHEN: OverlayEntry = {
     "applies_when": {},
     "disabled_when": {},
 }
 
 
 def _apply_single_overlay(
-    scope_dict: dict[str, Any],
-    set_fields: dict[str, Any],
-) -> dict[str, Any]:
+    scope_dict: OverlayEntry,
+    set_fields: OverlayEntry,
+) -> OverlayEntry:
     """Apply one overlay's ``set`` block to a scope dict (last-write wins per-field).
 
     ``disabled: true`` short-circuits: maps to setting ``applicability.disabled_when``
@@ -251,7 +262,10 @@ def _apply_single_overlay(
         if value is None:
             result.pop(key, None)
         elif isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _merge_dict_field(result[key], value)
+            result[key] = _merge_dict_field(
+                cast("OverlayEntry", result[key]),
+                cast("OverlayEntry", value),
+            )
         else:
             result[key] = value
     return result
@@ -260,7 +274,7 @@ def _apply_single_overlay(
 def _apply_overlays(
     artifact_id: str,
     base: ModelEnforcementScope,
-    overlay_entries: list[dict[str, Any]],
+    overlay_entries: list[OverlayEntry],
 ) -> ModelEnforcementScope:
     """Apply all matching overlays to *base* in declaration order.
 
@@ -269,22 +283,24 @@ def _apply_overlays(
     if not overlay_entries:
         return base
 
-    current: dict[str, Any] = base.model_dump()
+    current = cast("OverlayEntry", base.model_dump(mode="json"))
 
     any_match = False
     for entry in overlay_entries:
         selector = entry.get("selector", {})
         if not isinstance(selector, dict):
             continue
-        if not _selector_matches(artifact_id, selector):
+        selector_map = cast("OverlayEntry", selector)
+        if not _selector_matches(artifact_id, selector_map):
             continue
 
         set_fields = entry.get("set", {})
         if not isinstance(set_fields, dict):
             continue
+        set_fields_map = cast("OverlayEntry", set_fields)
 
         any_match = True
-        current = _apply_single_overlay(current, set_fields)
+        current = _apply_single_overlay(current, set_fields_map)
 
         if current.get(_DISABLED_SENTINEL) is True:
             break

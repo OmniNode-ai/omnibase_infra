@@ -20,6 +20,7 @@ Design source: kustomize strategic merge
 from __future__ import annotations
 
 import textwrap
+from logging import WARNING
 from pathlib import Path
 
 import pytest
@@ -505,3 +506,27 @@ def test_onex_overlay_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     monkeypatch.setenv("ONEX_OVERLAY_PATH", str(overlay))
     result = load_scope("env_hook", cache=fresh_cache())
     assert result.enforcement.default == EnumEnforcement.WARN
+
+
+@pytest.mark.unit
+def test_malformed_overlay_yaml_returns_base(
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Malformed overlays are ignored without mutating the base scope."""
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text("overlays: [", encoding="utf-8")
+    base = ModelEnforcementScope(
+        enforcement=ModelArtifactEnforcement(default=EnumEnforcement.BLOCK)
+    )
+
+    with caplog.at_level(WARNING, logger="omnibase_infra.scope.loader"):
+        result = load_scope(
+            "pre_tool_use_bash_guard",
+            base=base,
+            overlay_path=overlay,
+            cache=fresh_cache(),
+        )
+
+    assert result == base
+    assert "Failed to parse overlay file" in caplog.text
