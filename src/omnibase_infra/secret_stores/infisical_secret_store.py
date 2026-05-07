@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import UUID
 
 from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical
 from omnibase_infra.errors import InfraConnectionError, SecretResolutionError
@@ -52,7 +51,7 @@ class InfisicalSecretStore:
         self,
         adapter: AdapterInfisical,
         *,
-        project_id: UUID | str,
+        project_id: str,
         environment_slug: str,
         secret_path: str,
     ) -> None:
