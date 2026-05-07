@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -54,6 +55,10 @@ def _make_provisioner(
         bootstrap_servers=bootstrap_servers,
         contracts_root=contracts_root,
     )
+
+
+def _topic_spec(manager: TopicProvisioner, suffix: str) -> ModelTopicSpec:
+    return next(spec for spec in manager._topic_specs if spec.suffix == suffix)
 
 
 class TestTopicProvisioner:
@@ -90,7 +95,8 @@ class TestTopicProvisioner:
 
         manager = _make_provisioner(contracts_root)
 
-        assert manager._creation_partitions(manager._topic_specs[0]) == 1
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 1
 
     def test_invalid_topic_partition_cap_is_ignored(
         self,
@@ -102,7 +108,8 @@ class TestTopicProvisioner:
 
         manager = _make_provisioner(contracts_root)
 
-        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
 
     def test_empty_topic_partition_cap_is_disabled(
         self,
@@ -114,7 +121,8 @@ class TestTopicProvisioner:
 
         manager = _make_provisioner(contracts_root)
 
-        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
 
     def test_zero_topic_partition_cap_is_disabled(
         self,
@@ -127,7 +135,8 @@ class TestTopicProvisioner:
 
         manager = _make_provisioner(contracts_root)
 
-        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
         assert not [
             record
             for record in caplog.records
