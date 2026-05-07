@@ -151,8 +151,8 @@ x-runtime-env: &runtime-env
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
   # Local Docker Redpanda can cap contract topic partitions on constrained laptops.
-  # Leave unset/empty to use contract-declared partition counts.
-  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-}
+  # Use 0 to keep contract-declared partition counts.
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-0}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---

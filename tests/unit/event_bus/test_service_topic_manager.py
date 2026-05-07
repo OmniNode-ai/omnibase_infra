@@ -116,6 +116,18 @@ class TestTopicProvisioner:
 
         assert manager._creation_partitions(manager._topic_specs[0]) == 6
 
+    def test_zero_topic_partition_cap_is_disabled(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Zero partition cap values leave contract topic specs unchanged."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "0")
+
+        manager = _make_provisioner(contracts_root)
+
+        assert manager._creation_partitions(manager._topic_specs[0]) == 6
+
     def test_init_missing_contracts_root_raises(self, tmp_path: Path) -> None:
         """Constructing with a non-existent contracts_root raises immediately."""
         bad_path = tmp_path / "does_not_exist"
