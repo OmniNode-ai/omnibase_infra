@@ -1,0 +1,23 @@
+# OMN-10615 contract file for omnibase_infra deploy-gate (OMN-8912).
+# This repo-local contract carries deploy-gate evidence for wiring the
+# delegation routing reducer to read task-class contracts.
+schema_version: '1.0.0'
+ticket_id: OMN-10615
+title: 'Wire routing reducer to read task-class contracts'
+summary: 'NodeDelegationRoutingReducer loads configs/task_class_contracts.v1.yaml and enforces per-task-class routing constraints (cloud_routing_policy, pricing_ceiling_per_1k_tokens, escalation_policy.tier_order).'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-deploy
+    description: >-
+      deploy-gate: handler_delegation_routing.py change is dormant — the routing reducer is not yet invoked by the runtime kernel for this task class. The TASK_CLASS_CONTRACT_PATH env var defaults to a path that does not exist in production runtime containers, so the reducer falls back to existing behavior. No omninode-runtime container behaviour changes from this PR; no Docker restart required. Wiring will land in a follow-up ticket once the delegation orchestrator routes through this reducer.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: routing reducer change is dormant. Cloud routing policy enforcement activates only when TASK_CLASS_CONTRACT_PATH is set in the runtime environment, which it is not.

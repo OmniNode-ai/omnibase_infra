@@ -16,15 +16,15 @@ contract_name: "node_delegation_routing_reducer"
 node_name: "node_delegation_routing_reducer"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_type: "REDUCER_GENERIC"
 description: >
-  Deterministic routing reducer for the delegation pipeline. Maps task type and prompt token count to a routing decision: which model, endpoint, cost tier, and system prompt to use. Pure function, no I/O. Reads endpoint URLs from environment via contract config dependencies.
+  Deterministic routing reducer for the delegation pipeline. Maps task type and prompt token count to a routing decision: which model, endpoint, cost tier, and system prompt to use. Pure function, no I/O. Reads endpoint URLs from environment via contract config dependencies. Loads task-class contracts from configs/task_class_contracts.v1.yaml (overrideable via TASK_CLASS_CONTRACT_PATH) and enforces per-task-class cloud_routing_policy, pricing_ceiling_per_1k_tokens, and escalation_policy.tier_order constraints (OMN-10615).
 
 input_model:
   name: "ModelDelegationRequest"

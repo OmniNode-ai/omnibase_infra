@@ -9,16 +9,30 @@ and returns the first tier that has a configured endpoint for the given task typ
 All tier order, model assignments, and retry counts come from the YAML config —
 no constants are hardcoded here.
 
+Task-class contracts (task_class_contracts.v1.yaml) augment tier routing with
+per-class pricing ceilings and cloud routing policies. When the contract file is
+present (via TASK_CLASS_CONTRACT_PATH env var or the default location), routing
+additionally enforces:
+  - cloud_routing_policy: "blocked" skips non-local tiers for that task class
+  - pricing_ceiling_per_1k_tokens: tiers whose cost tier exceeds the ceiling
+    are skipped (local=low, cheap_cloud=medium, claude=high)
+  - escalation_policy.tier_order: when present, overrides the default tier
+    iteration order declared in routing_tiers.yaml
+
 Related:
     - OMN-7040: Node-based delegation pipeline
     - OMN-8029: Delegation pipeline — local→cheap-cloud→claude routing
+    - OMN-10615: Wire routing reducer to read task-class contracts
 """
 
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from uuid import NAMESPACE_DNS, UUID, uuid5
+
+import yaml
 
 from omnibase_core.enums.enum_agent_capability import EnumAgentCapability
 from omnibase_core.enums.enum_invocation_kind import EnumInvocationKind
@@ -40,6 +54,9 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_delegatio
 )
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_decision import (
     ModelRoutingDecision,
+)
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_tier import (
+    ModelRoutingTier,
 )
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_tier_model import (
     ModelTierModel,
@@ -108,6 +125,19 @@ _SYSTEM_PROMPTS: dict[str, str] = {
     ),
 }
 
+# Approximate per-1k-token cost by tier (USD).
+# These are conservative estimates used to compare against pricing ceiling.
+_TIER_COST_PER_1K: dict[str, float] = {
+    "local": 0.0,
+    "cheap_cloud": 0.002,
+    "claude": 0.015,
+    "cli_agents": 0.002,
+}
+
+# cloud_routing_policy values that block routing to non-local tiers.
+_CLOUD_BLOCKED_POLICY = "blocked"
+_LOCAL_TIERS = {"local", "cli_agents"}
+
 
 def _estimate_prompt_tokens(prompt: str) -> int:
     """Estimate token count from prompt character length (4 chars/token heuristic)."""
@@ -164,8 +194,14 @@ _DEFAULT_CONFIG_PATH = (
     Path(__file__).parent.parent.parent.parent / "configs" / "routing_tiers.yaml"
 )
 
-# Module-level config singleton — loaded once at import time.
-# Tests can override by replacing this variable before calling delta().
+_DEFAULT_TASK_CLASS_CONTRACT_PATH = (
+    Path(__file__).parent.parent.parent.parent
+    / "configs"
+    / "task_class_contracts.v1.yaml"
+)
+
+# Module-level config singletons — loaded once on first call.
+# Tests can override by replacing these variables before calling delta().
 _config: ModelDelegationConfig | None = None
 
 
@@ -176,6 +212,107 @@ def _get_config() -> ModelDelegationConfig:
         yaml_text = _DEFAULT_CONFIG_PATH.read_text()
         _config = ModelDelegationConfig.from_yaml_text(yaml_text)
     return _config
+
+
+@lru_cache(maxsize=1)
+def _get_task_class_contract() -> dict[str, object] | None:
+    """Load task-class contracts from YAML, returning None if not available.
+
+    Reads from TASK_CLASS_CONTRACT_PATH env var, or the default location in
+    configs/task_class_contracts.v1.yaml. Returns None when the file is absent
+    so that callers can gracefully degrade to tier-only routing. The loaded
+    value is cached for the process lifetime; tests clear the cache explicitly
+    when changing environment overrides.
+    """
+    env_path = os.environ.get(
+        "TASK_CLASS_CONTRACT_PATH", ""
+    )  # ONEX_EXCLUDE: env_access - contract path configuration
+    contract_path = Path(env_path) if env_path else _DEFAULT_TASK_CLASS_CONTRACT_PATH
+
+    if not contract_path.exists():
+        return None
+
+    raw = yaml.safe_load(contract_path.read_text())
+    return raw if isinstance(raw, dict) else None
+
+
+def _task_class_entry(
+    contract: dict[str, object] | None, task_type: str
+) -> dict[str, object] | None:
+    """Return the task-class entry for task_type, or None if not declared."""
+    if contract is None:
+        return None
+    task_classes = contract.get("task_classes")
+    if not isinstance(task_classes, dict):
+        return None
+    entry = task_classes.get(task_type)
+    if not isinstance(entry, dict):
+        return None
+    return entry
+
+
+def _tier_allowed_by_contract(
+    tier: ModelRoutingTier,
+    entry: dict[str, object] | None,
+) -> bool:
+    """Return True if the tier is permitted by task-class contract constraints.
+
+    When no entry is declared, all tiers are allowed (graceful degradation).
+    Enforces:
+      - cloud_routing_policy: "blocked" → only local tiers permitted
+      - pricing_ceiling_per_1k_tokens: tier cost must not exceed ceiling
+    """
+    if entry is None:
+        return True
+
+    policy = entry.get("cloud_routing_policy")
+    if policy == _CLOUD_BLOCKED_POLICY and tier.name not in _LOCAL_TIERS:
+        return False
+
+    ceiling_raw = entry.get("pricing_ceiling_per_1k_tokens")
+    if ceiling_raw is not None and isinstance(ceiling_raw, (int, float)):
+        tier_cost = _TIER_COST_PER_1K.get(tier.name, 0.0)
+        if tier_cost > float(ceiling_raw):
+            return False
+
+    return True
+
+
+def _tier_order_from_contract(
+    config: ModelDelegationConfig,
+    entry: dict[str, object] | None,
+) -> tuple[ModelRoutingTier, ...]:
+    """Return tiers in contract-declared escalation order, or config default.
+
+    When the task-class entry declares escalation_policy.tier_order, tiers are
+    reordered to match. Tiers not mentioned in tier_order are appended in their
+    original config order after declared tiers.
+    """
+    if entry is None:
+        return config.tiers
+
+    escalation = entry.get("escalation_policy")
+    if not isinstance(escalation, dict):
+        return config.tiers
+    tier_order = escalation.get("tier_order")
+    if not isinstance(tier_order, list) or not tier_order:
+        return config.tiers
+
+    tier_by_name = {t.name: t for t in config.tiers}
+    ordered: list[ModelRoutingTier] = []
+    seen: set[str] = set()
+
+    for name in tier_order:
+        if name in tier_by_name:
+            ordered.append(tier_by_name[name])
+            seen.add(name)
+
+    # Append any tiers not mentioned in tier_order (maintains coverage).
+    for tier in config.tiers:
+        if tier.name not in seen:
+            ordered.append(tier)
+
+    return tuple(ordered)
 
 
 def resolve_invocation_command(
@@ -215,9 +352,11 @@ def resolve_invocation_command(
 def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
     """Compute routing decision for a delegation request.
 
-    Iterates tiers in declaration order (local → cheap_cloud → claude).
-    Returns the first tier that has a configured endpoint and handles the
-    requested task type. Claude tier is always the final fallback.
+    Iterates tiers in declaration order (local → cheap_cloud → claude), with
+    optional reordering from task-class contract escalation_policy.tier_order.
+    Returns the first tier that has a configured endpoint, handles the requested
+    task type, and satisfies task-class contract constraints (cloud routing policy
+    and pricing ceiling).
 
     Args:
         request: The delegation request to route.
@@ -232,7 +371,14 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
     task_type = request.task_type
     estimated_tokens = _estimate_prompt_tokens(request.prompt)
 
-    for tier in config.tiers:
+    contract = _get_task_class_contract()
+    entry = _task_class_entry(contract, task_type)
+    tiers = _tier_order_from_contract(config, entry)
+
+    for tier in tiers:
+        if not _tier_allowed_by_contract(tier, entry):
+            continue
+
         selected = _select_model_for_task(tier.models, task_type, estimated_tokens)
         if selected is None:
             continue
@@ -258,6 +404,12 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
             and estimated_tokens <= selected.fast_path_threshold_tokens
         ):
             rationale += f" Fast-path: tokens within {selected.fast_path_threshold_tokens} threshold."
+        if entry is not None:
+            policy_val = entry.get("cloud_routing_policy")
+            policy_str = policy_val if isinstance(policy_val, str) else "allowed"
+            rationale += (
+                f" Contract-driven: task_class='{task_type}' policy='{policy_str}'."
+            )
 
         # Map cost tier from tier name
         cost_tier_map = {"local": "low", "cheap_cloud": "medium", "claude": "high"}
