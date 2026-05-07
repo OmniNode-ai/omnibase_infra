@@ -475,7 +475,77 @@ _DB_URL_ENV_MAP: dict[str, str] = {
 _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
     "node-heartbeat": "heartbeat",
     "node-introspection": "introspection",
+    "node-state-change": "state_change",
 }
+
+
+def _derive_projection_event_type(
+    topic: str,
+    envelope_event_type: object,
+    subscribe_topics: tuple[str, ...],
+) -> str:
+    """Derive projection handler event type from topic or dispatch alias."""
+    topic_candidate = topic
+    if not topic_candidate and len(subscribe_topics) == 1:
+        topic_candidate = subscribe_topics[0]
+
+    segment_candidates: list[str] = []
+    if topic_candidate:
+        segment_candidates.append(
+            topic_candidate.split(".")[-2]
+            if "." in topic_candidate
+            else topic_candidate
+        )
+    if envelope_event_type:
+        event_type = str(envelope_event_type).strip()
+        if event_type:
+            segment_candidates.append(event_type.split(".")[-1])
+
+    for segment in segment_candidates:
+        if segment in _TOPIC_TO_EVENT_TYPE:
+            return _TOPIC_TO_EVENT_TYPE[segment]
+
+    raise ValueError(
+        "Unknown projection event type from "
+        f"topic={topic_candidate!r} event_type={envelope_event_type!r} — "
+        f"must resolve to one of {sorted(_TOPIC_TO_EVENT_TYPE)!r}"
+    )
+
+
+def _materialized_dispatch_trace_value(
+    envelope: object,
+    key: str,
+) -> object:
+    """Extract trace metadata from a materialized dispatch dict."""
+    if not isinstance(envelope, dict):
+        return None
+    trace = envelope.get("__debug_trace")
+    if isinstance(trace, dict):
+        return trace.get(key)
+    return None
+
+
+def _extract_projection_topic(envelope: object) -> str:
+    """Extract projection route topic from envelope or materialized dispatch."""
+    if isinstance(envelope, dict):
+        value = _materialized_dispatch_trace_value(envelope, "topic")
+    else:
+        value = getattr(envelope, "topic", None)
+    return str(value).strip() if value else ""
+
+
+def _extract_projection_event_type(envelope: object) -> object:
+    """Extract event_type from envelope or materialized dispatch trace."""
+    if isinstance(envelope, dict):
+        return _materialized_dispatch_trace_value(envelope, "event_type")
+    return getattr(envelope, "event_type", None)
+
+
+def _extract_projection_payload(envelope: object) -> object:
+    """Extract payload from envelope or materialized dispatch dict."""
+    if isinstance(envelope, dict):
+        return envelope.get("payload")
+    return getattr(envelope, "payload", None)
 
 
 def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
@@ -562,6 +632,12 @@ def _build_sync_db_adapter(db_url: str) -> object:
             updates = ", ".join(
                 f'"{c}" = EXCLUDED."{c}"' for c in cols if c != conflict_key
             )
+            adapted_row = {
+                key: psycopg2.extras.Json(value)
+                if isinstance(value, (dict, list))
+                else value
+                for key, value in row.items()
+            }
             # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
             parts = [
                 f'INSERT INTO "{table}" ({quoted_cols})',
@@ -570,7 +646,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
             ]
             insert_sql = " ".join(parts)
             with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
-                cur.execute(insert_sql, row)
+                cur.execute(insert_sql, adapted_row)
             return True
 
         def query(
@@ -631,15 +707,13 @@ def _make_projection_dispatch_callback(
             return None
         try:
             adapter = _build_sync_db_adapter(db_url)
-            topic = getattr(envelope, "topic", "") or ""
-            topic_segment = topic.split(".")[-2] if "." in topic else topic
-            if topic_segment not in _TOPIC_TO_EVENT_TYPE:
-                raise ValueError(
-                    f"Unknown topic segment {topic_segment!r} from topic {topic!r} — "
-                    f"must be one of {sorted(_TOPIC_TO_EVENT_TYPE)!r}"
-                )
-            event_type = _TOPIC_TO_EVENT_TYPE[topic_segment]
-            payload = getattr(envelope, "payload", None)
+            topic = _extract_projection_topic(envelope)
+            event_type = _derive_projection_event_type(
+                topic,
+                _extract_projection_event_type(envelope),
+                subscribe_topics,
+            )
+            payload = _extract_projection_payload(envelope)
             input_data: dict[str, object] = (
                 dict(payload) if isinstance(payload, dict) else {}
             )
@@ -659,15 +733,16 @@ def _make_projection_dispatch_callback(
                 "Projection handler TypeError (likely missing _db or _event_type): "
                 "handler=%s topic=%s error_type=%s",
                 type(handler_instance).__name__,
-                getattr(envelope, "topic", "unknown"),
+                _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "Projection handler error: handler=%s topic=%s error_type=%s",
+                "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
                 type(handler_instance).__name__,
-                getattr(envelope, "topic", "unknown"),
+                _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
+                exc,
             )
         return None
 

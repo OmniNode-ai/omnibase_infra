@@ -131,6 +131,231 @@ def test_projection_callback_end_to_end_with_fake_db(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_projection_callback_uses_sole_subscribed_topic_when_envelope_has_no_topic(
+    tmp_path: Path,
+) -> None:
+    """Runtime-dispatched envelopes do not always carry topic metadata."""
+    upserted_rows: list[dict] = []
+
+    class FakeProjectionHandler:
+        def handle(self, input_data: dict) -> dict:
+            db = input_data.pop("_db")
+            event_type = input_data.pop("_event_type")
+            db.upsert(
+                "node_service_registry",
+                "service_name",
+                {**input_data, "event_type": event_type},
+            )
+            return {"rows_upserted": 1}
+
+    class FakeDb:
+        def upsert(self, table: str, key: str, row: dict) -> bool:
+            upserted_rows.append({"table": table, "key": key, "row": row})
+            return True
+
+        def query(self, table: str, filters: dict | None = None) -> list:
+            return []
+
+    callback = _make_projection_dispatch_callback(
+        FakeProjectionHandler(),
+        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        ("onex.evt.platform.node-heartbeat.v1",),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = ""
+    envelope.payload = {"service_name": "runtime-host", "health_status": "healthy"}
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        return_value=FakeDb(),
+    ):
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get",
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            asyncio.run(callback(envelope))
+
+    assert len(upserted_rows) == 1
+    assert upserted_rows[0]["row"]["service_name"] == "runtime-host"
+    assert upserted_rows[0]["row"]["event_type"] == "heartbeat"
+
+
+@pytest.mark.integration
+def test_projection_callback_uses_event_type_when_multitopic_envelope_has_no_topic(
+    tmp_path: Path,
+) -> None:
+    """Runtime dispatch preserves event_type even when envelopes omit topic metadata."""
+    upserted_rows: list[dict] = []
+
+    class FakeProjectionHandler:
+        def handle(self, input_data: dict) -> dict:
+            db = input_data.pop("_db")
+            event_type = input_data.pop("_event_type")
+            db.upsert(
+                "node_service_registry",
+                "service_name",
+                {**input_data, "event_type": event_type},
+            )
+            return {"rows_upserted": 1}
+
+    class FakeDb:
+        def upsert(self, table: str, key: str, row: dict) -> bool:
+            upserted_rows.append({"table": table, "key": key, "row": row})
+            return True
+
+        def query(self, table: str, filters: dict | None = None) -> list:
+            return []
+
+    callback = _make_projection_dispatch_callback(
+        FakeProjectionHandler(),
+        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        (
+            "onex.evt.platform.node-introspection.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+        ),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = ""
+    envelope.event_type = "platform.node-heartbeat"
+    envelope.payload = {"service_name": "runtime-host", "health_status": "healthy"}
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        return_value=FakeDb(),
+    ):
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get",
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            asyncio.run(callback(envelope))
+
+    assert len(upserted_rows) == 1
+    assert upserted_rows[0]["row"]["service_name"] == "runtime-host"
+    assert upserted_rows[0]["row"]["event_type"] == "heartbeat"
+
+
+@pytest.mark.integration
+def test_projection_callback_uses_materialized_dispatch_trace_topic(
+    tmp_path: Path,
+) -> None:
+    """Dispatch engine passes projection callbacks materialized dispatch dicts."""
+    upserted_rows: list[dict] = []
+
+    class FakeProjectionHandler:
+        def handle(self, input_data: dict) -> dict:
+            db = input_data.pop("_db")
+            event_type = input_data.pop("_event_type")
+            db.upsert(
+                "node_service_registry",
+                "service_name",
+                {**input_data, "event_type": event_type},
+            )
+            return {"rows_upserted": 1}
+
+    class FakeDb:
+        def upsert(self, table: str, key: str, row: dict) -> bool:
+            upserted_rows.append({"table": table, "key": key, "row": row})
+            return True
+
+        def query(self, table: str, filters: dict | None = None) -> list:
+            return []
+
+    callback = _make_projection_dispatch_callback(
+        FakeProjectionHandler(),
+        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        (
+            "onex.evt.platform.node-introspection.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+        ),
+    )
+
+    materialized_dispatch = {
+        "payload": {"service_name": "runtime-host", "health_status": "healthy"},
+        "__bindings": {},
+        "__debug_trace": {
+            "event_type": None,
+            "topic": "onex.evt.platform.node-heartbeat.v1",
+        },
+    }
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        return_value=FakeDb(),
+    ):
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get",
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            asyncio.run(callback(materialized_dispatch))
+
+    assert len(upserted_rows) == 1
+    assert upserted_rows[0]["row"]["service_name"] == "runtime-host"
+    assert upserted_rows[0]["row"]["event_type"] == "heartbeat"
+
+
+@pytest.mark.integration
+def test_projection_callback_maps_node_state_change_topic(
+    tmp_path: Path,
+) -> None:
+    """Projection event aliases include all node registration subscribed topics."""
+    upserted_rows: list[dict] = []
+
+    class FakeProjectionHandler:
+        def handle(self, input_data: dict) -> dict:
+            db = input_data.pop("_db")
+            event_type = input_data.pop("_event_type")
+            db.upsert(
+                "node_service_registry",
+                "service_name",
+                {**input_data, "event_type": event_type},
+            )
+            return {"rows_upserted": 1}
+
+    class FakeDb:
+        def upsert(self, table: str, key: str, row: dict) -> bool:
+            upserted_rows.append({"table": table, "key": key, "row": row})
+            return True
+
+        def query(self, table: str, filters: dict | None = None) -> list:
+            return []
+
+    callback = _make_projection_dispatch_callback(
+        FakeProjectionHandler(),
+        [{"name": "node_service_registry", "database": "omnidash_analytics"}],
+        (
+            "onex.evt.platform.node-introspection.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+            "onex.evt.platform.node-state-change.v1",
+        ),
+    )
+
+    materialized_dispatch = {
+        "payload": {"service_name": "runtime-host", "new_state": "active"},
+        "__bindings": {},
+        "__debug_trace": {
+            "event_type": None,
+            "topic": "onex.evt.platform.node-state-change.v1",
+        },
+    }
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._build_sync_db_adapter",
+        return_value=FakeDb(),
+    ):
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring.os.environ.get",
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            asyncio.run(callback(materialized_dispatch))
+
+    assert len(upserted_rows) == 1
+    assert upserted_rows[0]["row"]["service_name"] == "runtime-host"
+    assert upserted_rows[0]["row"]["event_type"] == "state_change"
+
+
+@pytest.mark.integration
 def test_wire_handler_entry_uses_projection_path_when_db_io_declared(
     tmp_path: Path,
 ) -> None:
