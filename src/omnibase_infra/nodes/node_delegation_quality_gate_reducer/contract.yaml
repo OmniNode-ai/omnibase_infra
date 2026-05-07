@@ -16,17 +16,17 @@ contract_name: "node_delegation_quality_gate_reducer"
 node_name: "node_delegation_quality_gate_reducer"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_type: "REDUCER_GENERIC"
 description: >
-  Deterministic quality gate reducer for the delegation pipeline. Evaluates LLM output quality using heuristic checks ported from the existing delegation_orchestrator.py: minimum response length, error phrase detection, and task-type marker presence. Pure function, no I/O.
+  Deterministic quality gate reducer for the delegation pipeline. Evaluates LLM output quality using DoD checks declared in the task-class contract: deterministic checks (output_parses, signature_preserved) BLOCK delegation result injection on failure (fail_category="fail_deterministic"); heuristic checks (no_refusal, min_length_chars, etc.) carry the legacy semantics. Reads dod_deterministic and dod_heuristic from ModelQualityGateInput (OMN-10616). Pure function, no I/O.
 
-  Failure categories: REFUSAL, MALFORMED, WEAK_OUTPUT, TASK_MISMATCH.
+  Failure categories: REFUSAL, MALFORMED, WEAK_OUTPUT, TASK_MISMATCH, FAIL_DETERMINISTIC.
 
 input_model:
   name: "ModelQualityGateInput"

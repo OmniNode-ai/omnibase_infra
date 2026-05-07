@@ -1,0 +1,24 @@
+# OMN-10616 contract file for omnibase_infra deploy-gate (OMN-8912).
+# This repo-local contract carries deploy-gate evidence for wiring the
+# delegation quality gate reducer to read DoD checks from the task-class
+# contract.
+schema_version: '1.0.0'
+ticket_id: OMN-10616
+title: 'Wire quality gate to read DoD from contract'
+summary: 'NodeDelegationQualityGateReducer reads DoD checks (dod_deterministic, dod_heuristic) from the task-class contract via ModelQualityGateInput. Deterministic checks BLOCK injection; heuristics retain legacy semantics.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-deploy
+    description: >-
+      deploy-gate: handler_quality_gate.py and ModelQualityGateInput/Result changes are dormant — the quality gate reducer is not yet wired into the delegation pipeline's runtime path. Callers do not yet populate dod_deterministic / dod_heuristic on the input model; the reducer falls back to existing heuristic semantics. No omninode-runtime container behaviour changes from this PR; no Docker restart required. Wiring will land in a follow-up ticket once the delegation orchestrator routes through this reducer.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: quality gate reducer change is dormant. Deterministic DoD enforcement activates only when callers populate dod_deterministic on ModelQualityGateInput, which they do not.
