@@ -36,6 +36,12 @@ ALLOWED_EMPTY_DEFAULTS = {
     "INFISICAL_CLIENT_SECRET",
     "INFISICAL_PROJECT_ID",
     "INFISICAL_REQUIRED",
+    # Local Docker runtime prefetch remains opt-in through prefixed host vars.
+    "ONEX_RUNTIME_INFISICAL_ADDR",
+    "ONEX_RUNTIME_INFISICAL_CLIENT_ID",
+    "ONEX_RUNTIME_INFISICAL_CLIENT_SECRET",
+    "ONEX_RUNTIME_INFISICAL_PROJECT_ID",
+    "ONEX_RUNTIME_INFISICAL_ENVIRONMENT",
     # Keycloak: opt-in auth; empty = keycloak not configured
     "KEYCLOAK_ADMIN_CLIENT_SECRET",
 }

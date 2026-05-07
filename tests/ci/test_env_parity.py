@@ -78,6 +78,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "INFISICAL_CLIENT_ID",
         "INFISICAL_CLIENT_SECRET",
         "INFISICAL_PROJECT_ID",
+        "INFISICAL_ENVIRONMENT",
         "INFISICAL_ENCRYPTION_KEY",
         "INFISICAL_AUTH_SECRET",
         # Per-service database DSNs — contain credentials, sourced from Infisical at runtime
@@ -122,6 +123,8 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
+        # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
+        "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS",
     }
 )
 

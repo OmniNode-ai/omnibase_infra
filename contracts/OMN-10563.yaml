@@ -1,0 +1,33 @@
+schema_version: '1.0.0'
+ticket_id: OMN-10563
+title: 'Register omnimarket service keys'
+summary: 'Register omnimarket per-service secret keys and topic provisioning metadata.'
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - topics
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Registry, onboarding, env parity, and topic provisioning tests pass
+    command: uv run pytest tests/ci/test_env_parity.py tests/unit/config/test_shared_key_registry_omnimarket.py tests/unit/scripts/test_register_repo.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1505 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Registry and onboarding tests prove omnimarket service keys map to /services/<repo>/<transport>/<KEY>
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/config/test_shared_key_registry_omnimarket.py tests/unit/scripts/test_register_repo.py -q'
+  - id: dod-deploy
+    description: Runtime deploy preflight covers env parity and topic provisioning for the compose/runtime changes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'deploy: no live deploy is performed pre-merge; preflight uses uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q, then post-merge validation checks the runtime container with docker exec omninode-runtime printenv ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS'

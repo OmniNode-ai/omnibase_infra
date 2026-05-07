@@ -23,7 +23,9 @@
 #   - scripts/register-repo.py seed-shared  (seed /shared/* in Infisical)
 #
 # version: increment minor when adding keys, major on breaking structural changes.
-version: "1.1"
+# 1.2 (OMN-10563): adds top-level `services:` section for per-service key
+# declarations. Loader: `_services_keys()` in scripts/register-repo.py.
+version: "1.2"
 # Keys written to /shared/<transport>/ in Infisical.
 shared:
   "/shared/db/":
@@ -182,3 +184,42 @@ service_override_required:
   # Each service must set its own consumer group ID to avoid unintended
   # load-balancing across topics when multiple services share a group.
   - KAFKA_GROUP_ID
+# Per-service key declarations.
+#
+# Schema (added in 1.2, OMN-10563):
+#   services:
+#     <repo>:
+#       <transport>:
+#         - KEY1
+#         - KEY2
+#
+# Each entry maps to Infisical path /services/<repo>/<transport>/<KEY>. These
+# are the per-service override paths that take precedence over /shared/<transport>/<KEY>
+# at runtime. A key may appear in both /shared and /services/<repo>; the
+# per-service override is the authoritative value when both exist.
+#
+# Used by:
+#   - scripts/register-repo.py onboard-repo (plan validation; per-service seeding)
+#   - omnimarket / other services' Settings classes (declare what they will read)
+services:
+  omnimarket:
+    # Per-service consumer group; required override per service_override_required above.
+    kafka:
+      - KAFKA_GROUP_ID
+    # Per-service LLM endpoint + model overrides. The flat path convention is
+    # /services/omnimarket/llm/<KEY> — no nested role paths (ChatGPT review §9).
+    # LLM_<ROLE>_URL points the role's coder/reasoner at a specific endpoint;
+    # LLM_<ROLE>_MODEL_ID names the model id served by that endpoint. Task 19
+    # (OMN-10568) wires bridge_config_loader to resolve these via
+    # ProtocolSecretStore.
+    llm:
+      - LLM_CODER_URL
+      - LLM_CODER_MODEL_ID
+      - LLM_REASONER_URL
+      - LLM_REASONER_MODEL_ID
+    # Per-service database identity. POSTGRES_DATABASE is in identity_defaults
+    # globally (each repo bakes its own value as a Settings default), but is
+    # also enumerated here so omnimarket's per-service path is explicit and
+    # the onboard-repo plan can verify it.
+    db:
+      - POSTGRES_DATABASE

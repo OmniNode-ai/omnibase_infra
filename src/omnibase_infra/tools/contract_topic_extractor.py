@@ -89,6 +89,7 @@ class ModelContractTopicEntry(BaseModel):
     event_name: str
     version: str  # e.g. "v1"
     source_contracts: tuple[Path, ...]
+    provisioning_priority: int = 100
 
     model_config = {"frozen": True}
 
@@ -97,7 +98,15 @@ class ModelContractTopicEntry(BaseModel):
         combined = tuple(
             sorted(set(self.source_contracts) | set(other.source_contracts))
         )
-        return self.model_copy(update={"source_contracts": combined})
+        return self.model_copy(
+            update={
+                "source_contracts": combined,
+                "provisioning_priority": min(
+                    self.provisioning_priority,
+                    other.provisioning_priority,
+                ),
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -204,16 +213,23 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
     )
 
 
+def _topic_priority(item: dict[object, object]) -> int:
+    raw_priority = item.get("provisioning_priority", item.get("priority", 100))
+    if isinstance(raw_priority, int) and not isinstance(raw_priority, bool):
+        return raw_priority
+    return 100
+
+
 def _extract_raw_topics_from_contract(
     data: dict[str, object], source: Path
-) -> list[str]:
+) -> list[tuple[str, int]]:
     """
     Extract all raw topic strings from a parsed contract YAML dict.
 
     Checks ALL applicable keys — no early break on first match.
     If a field has both 'topic' and 'name' values, extracts both.
     """
-    raw_topics: list[str] = []
+    raw_topics: list[tuple[str, int]] = []
 
     # --- event_bus.subscribe_topics / event_bus.publish_topics (new-style) ---
     event_bus = data.get("event_bus")
@@ -223,12 +239,12 @@ def _extract_raw_topics_from_contract(
             if isinstance(topics_list, list):
                 for item in topics_list:
                     if isinstance(item, str) and item:
-                        raw_topics.append(item)
+                        raw_topics.append((item, 100))
                     elif isinstance(item, dict):
                         # topic: "..." format inside subscribe_topics list
                         topic_val = item.get("topic")
                         if isinstance(topic_val, str) and topic_val:
-                            raw_topics.append(topic_val)
+                            raw_topics.append((topic_val, _topic_priority(item)))
 
     # --- consumed_events / published_events / produced_events ---
     for section_key in _EVENT_SECTION_KEYS:
@@ -241,11 +257,11 @@ def _extract_raw_topics_from_contract(
             # new-style: topic key
             topic_val = item.get("topic")
             if isinstance(topic_val, str) and topic_val:
-                raw_topics.append(topic_val)
+                raw_topics.append((topic_val, _topic_priority(item)))
             # old-style: name key — extract both if both present
             name_val = item.get("name")
             if isinstance(name_val, str) and name_val:
-                raw_topics.append(name_val)
+                raw_topics.append((name_val, _topic_priority(item)))
 
     return raw_topics
 
@@ -441,11 +457,14 @@ class ContractTopicExtractor:
 
             raw_topics = _extract_raw_topics_from_contract(raw_yaml, contract_path)
 
-            for raw in raw_topics:
+            for raw, provisioning_priority in raw_topics:
                 entry = _parse_topic(raw, contract_path)
                 if entry is None:
                     # Warned inside _parse_topic; skip
                     continue
+                entry = entry.model_copy(
+                    update={"provisioning_priority": provisioning_priority}
+                )
 
                 if raw in accumulated:
                     existing = accumulated[raw]
@@ -709,10 +728,13 @@ class ContractTopicExtractor:
 
                 raw_topics = _extract_raw_topics_from_contract(raw_yaml, contract_path)
 
-                for raw in raw_topics:
+                for raw, provisioning_priority in raw_topics:
                     entry = _parse_topic(raw, contract_path)
                     if entry is None:
                         continue
+                    entry = entry.model_copy(
+                        update={"provisioning_priority": provisioning_priority}
+                    )
 
                     if raw in accumulated:
                         existing = accumulated[raw]

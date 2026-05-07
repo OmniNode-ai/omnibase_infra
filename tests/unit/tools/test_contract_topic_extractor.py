@@ -85,6 +85,50 @@ def test_extract_new_style_published_events(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_extract_legacy_event_priority(tmp_path: Path) -> None:
+    """Legacy event sections preserve provisioning priority metadata."""
+    write_contract(
+        tmp_path,
+        "node_legacy_priority",
+        """
+        published_events:
+          - topic: "onex.evt.platform.node-introspection.v1"
+            provisioning_priority: 10
+          - name: "onex.evt.omnibase-infra.runtime-health-check.v1"
+            priority: 0
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = {entry.topic: entry for entry in extractor.extract(tmp_path)}
+
+    assert (
+        results["onex.evt.platform.node-introspection.v1"].provisioning_priority == 10
+    )
+    assert (
+        results["onex.evt.omnibase-infra.runtime-health-check.v1"].provisioning_priority
+        == 0
+    )
+
+
+@pytest.mark.unit
+def test_extract_event_priority_rejects_bool(tmp_path: Path) -> None:
+    """YAML booleans are not accepted as integer provisioning priorities."""
+    write_contract(
+        tmp_path,
+        "node_bool_priority",
+        """
+        published_events:
+          - topic: "onex.evt.platform.node-introspection.v1"
+            provisioning_priority: false
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = extractor.extract(tmp_path)
+
+    assert results[0].provisioning_priority == 100
+
+
+@pytest.mark.unit
 def test_extract_new_style_produced_events(tmp_path: Path) -> None:
     """New-style produced_events[].topic entries are extracted."""
     write_contract(

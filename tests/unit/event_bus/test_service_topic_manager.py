@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -56,6 +57,10 @@ def _make_provisioner(
     )
 
 
+def _topic_spec(manager: TopicProvisioner, suffix: str) -> ModelTopicSpec:
+    return next(spec for spec in manager._topic_specs if spec.suffix == suffix)
+
+
 class TestTopicProvisioner:
     """Tests for TopicProvisioner."""
 
@@ -80,11 +85,101 @@ class TestTopicProvisioner:
         assert manager._bootstrap_servers == "kafka1:9092,kafka2:9092"
         assert manager._request_timeout_ms == 5000
 
+    def test_topic_partition_cap_from_env(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Local brokers can cap contract topic partition creation."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
+
+        manager = _make_provisioner(contracts_root)
+
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 1
+
+    def test_invalid_topic_partition_cap_is_ignored(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid partition caps do not override contract topic specs."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "nope")
+
+        manager = _make_provisioner(contracts_root)
+
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
+
+    def test_empty_topic_partition_cap_is_disabled(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Empty partition cap values leave contract topic specs unchanged."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "")
+
+        manager = _make_provisioner(contracts_root)
+
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
+
+    def test_zero_topic_partition_cap_is_disabled(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Zero partition cap values disable the cap without warnings."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "0")
+
+        manager = _make_provisioner(contracts_root)
+
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
+        assert not [
+            record
+            for record in caplog.records
+            if "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS" in record.message
+        ]
+
     def test_init_missing_contracts_root_raises(self, tmp_path: Path) -> None:
         """Constructing with a non-existent contracts_root raises immediately."""
         bad_path = tmp_path / "does_not_exist"
         with pytest.raises(FileNotFoundError, match="contracts_root"):
             TopicProvisioner(contracts_root=bad_path)
+
+    def test_contract_priority_topics_are_ordered_first(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Contract-declared provisioning priority controls creation order."""
+        node_dir = tmp_path / "node_example"
+        node_dir.mkdir()
+        (node_dir / "contract.yaml").write_text(
+            "name: node_example\n"
+            "event_bus:\n"
+            "  publish_topics:\n"
+            "    - onex.cmd.omnimarket.build-loop-start.v1\n"
+            "    - topic: onex.evt.platform.node-introspection.v1\n"
+            "      provisioning_priority: 10\n"
+            "    - topic: onex.evt.omnibase-infra.runtime-health-check.v1\n"
+            "      provisioning_priority: 0\n",
+            encoding="utf-8",
+        )
+
+        manager = _make_provisioner(tmp_path)
+
+        ordered_suffixes = [spec.suffix for spec in manager._topic_specs]
+        health_idx = ordered_suffixes.index(
+            "onex.evt.omnibase-infra.runtime-health-check.v1"
+        )
+        introspection_idx = ordered_suffixes.index(
+            "onex.evt.platform.node-introspection.v1"
+        )
+        default_idx = ordered_suffixes.index("onex.cmd.omnimarket.build-loop-start.v1")
+
+        assert health_idx < introspection_idx < default_idx
 
     async def test_ensure_provisioned_topics_all_created(
         self, contracts_root: Path
