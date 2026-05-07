@@ -61,6 +61,7 @@ _STARTUP_TOPIC_PREFIXES: tuple[str, ...] = (
 )
 """Topics required for runtime boot, health, and registration must be first."""
 
+
 def _topic_partition_cap_from_env() -> int | None:
     raw_value = os.environ.get(ENV_TOPIC_PARTITION_CAP)
     if raw_value is None or raw_value.strip() == "":
