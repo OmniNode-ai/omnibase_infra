@@ -59,9 +59,12 @@ def _topic_partition_cap_from_env() -> int | None:
         )
         return None
 
-    if cap <= 0:
+    if cap == 0:
+        return None
+
+    if cap < 0:
         logger.warning(
-            "Ignoring invalid %s=%r; expected a positive integer",
+            "Ignoring invalid %s=%r; expected zero or a positive integer",
             ENV_TOPIC_PARTITION_CAP,
             raw_value,
         )

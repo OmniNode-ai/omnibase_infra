@@ -88,11 +88,11 @@ workflow_coordination:
           contract_ref: runtime/contract_loader_effect.yaml
           metadata:
             contracts_dir: "${env.ONEX_CONTRACTS_DIR:./contracts}"
-            pattern: "**/*.yaml"
+            pattern: "**/*.y*ml"
             exclude_patterns:
               # Internal/partial contracts not meant for direct instantiation.
               # These are fragments or templates included by other contracts.
-              - "**/_*.yaml"
+              - "**/_*.y*ml"
             reload_exclude_patterns:
               # CRITICAL: Runtime contracts must be excluded from hot reload
               # to prevent circular dependency. Initial load must still scan

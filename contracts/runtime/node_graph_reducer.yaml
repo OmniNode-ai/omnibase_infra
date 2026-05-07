@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
----
 node_type: REDUCER_GENERIC
 contract_version: {major: 1, minor: 1, patch: 0}
 # Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
@@ -260,8 +259,7 @@ state_transitions:
       version: {major: 1, minor: 0, patch: 0}
   terminal_states:
     - stopped
-  error_states:
-    - stopped
+  error_states: []
   persistence_enabled: true
   recovery_enabled: true
   operations:
@@ -300,7 +298,6 @@ state_transitions:
           trigger: undo_rewire
       version: {major: 1, minor: 0, patch: 0}
       operation_type: administrative
-
 # v1.1.0 Required Fields
 # NOTE: The `handlers` section defines protocol-based dependencies injected via DI container.
 # This is SEPARATE from FSM action types (event, logging, data_capture, persistence, alert, cleanup)
@@ -325,13 +322,11 @@ handlers:
       version: {major: 1, minor: 0, patch: 0}
     - type: ProtocolEventBus
       version: {major: 1, minor: 0, patch: 0}
-
 profile_tags:
   - runtime
   - reducer
   - node-graph
   - lifecycle
-
 metadata:
   version: {major: 1, minor: 1, patch: 0}
   author: ONEX Framework Team
@@ -344,7 +339,6 @@ metadata:
     - runtime
     - lifecycle
   documentation_url: https://docs.onex.ai/reducers/node-graph
-
 # Testing Guidance: Wildcard Transitions (from_state: '*')
 # Wildcards bypass normal flow; stopped entry_actions MUST be idempotent.
 testing_guidance:

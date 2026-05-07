@@ -287,6 +287,16 @@ class TestServiceOverrideRequired:
 
 class TestCmdOnboardRepoServiceKeys:
     @pytest.mark.unit
+    def test_services_reject_invalid_transport_segments(self) -> None:
+        rr = _module
+        data: dict[str, object] = {
+            "services": {"omnimarket": {"../llm": ["LLM_CODER_URL"]}},
+        }
+
+        with pytest.raises(ValueError, match="invalid path characters"):
+            rr._services_keys(data)  # type: ignore[attr-defined]
+
+    @pytest.mark.unit
     def test_dry_run_includes_declared_service_keys(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

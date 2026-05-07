@@ -361,6 +361,11 @@ def _services_keys(
                 raise ValueError(
                     f"[ERROR] registry 'services.{repo}' keys must be strings (transports) in {_REGISTRY_PATH}"
                 )
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", transport):
+                raise ValueError(
+                    f"[ERROR] registry 'services.{repo}' transport {transport!r} "
+                    f"contains invalid path characters in {_REGISTRY_PATH}"
+                )
             if not isinstance(keys, list):
                 raise ValueError(
                     f"Expected 'services.{repo}.{transport}' in {_REGISTRY_PATH} to be a list, "
