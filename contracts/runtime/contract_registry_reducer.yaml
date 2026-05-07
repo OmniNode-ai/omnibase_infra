@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
----
 node_type: REDUCER_GENERIC
 contract_version: {major: 1, minor: 1, patch: 0}
 # Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
@@ -202,8 +201,7 @@ state_transitions:
       # When retry_count reaches 3, the retry_loading transition condition fails
       # and the FSM remains in the error state without automatic recovery.
       description: >-
-        When retry_count reaches maximum (3), automatic recovery via retry_loading transition is blocked.
-        The FSM remains in error state awaiting manual intervention.
+        When retry_count reaches maximum (3), automatic recovery via retry_loading transition is blocked. The FSM remains in error state awaiting manual intervention.
       detection:
         # How to detect this condition in monitoring systems
         - condition: retry_count >= 3 AND current_state == error
@@ -217,13 +215,11 @@ state_transitions:
         - step: 2
           action: Identify and fix invalid contract files
           details: >-
-            Review emit_error_event and log_validation_errors output to identify which contracts failed
-            validation and why
+            Review emit_error_event and log_validation_errors output to identify which contracts failed validation and why
         - step: 3
           action: Use force_reload operation after fixing issues
           details: >-
-            The force_reload operation (defined in operations section) bypasses the retry_count check
-            and directly transitions to loading state
+            The force_reload operation (defined in operations section) bypasses the retry_count check and directly transitions to loading state
         - step: 4
           action: Monitor runtime.contracts.reload events for success
           details: Subscribe to event bus for reload confirmation
@@ -241,8 +237,7 @@ state_transitions:
     recovery_from_error:
       # Documents the relationship between error state and recovery mechanisms
       description: >-
-        The error state has is_terminal: false, allowing recovery transitions. This is intentional to
-        support both automatic retry and manual recovery paths.
+        The error state has is_terminal: false, allowing recovery transitions. This is intentional to support both automatic retry and manual recovery paths.
       automatic_recovery:
         mechanism: retry_loading transition
         max_attempts: 3
@@ -253,8 +248,7 @@ state_transitions:
         requires_permission: true
         bypasses_retry_limit: true
         description: >-
-          Operators can invoke force_reload to reset the loading process regardless of retry_count. This
-          is the primary recovery path when automatic retries are exhausted.
+          Operators can invoke force_reload to reset the loading process regardless of retry_count. This is the primary recovery path when automatic retries are exhausted.
   operations:
     # Primary manual recovery operation when automatic retries are exhausted.
     # Bypasses retry_count check by directly targeting loading state.
@@ -285,7 +279,6 @@ state_transitions:
           trigger: undo_clear
       version: {major: 1, minor: 0, patch: 0}
       operation_type: administrative
-
 # v1.1.0 Required Fields
 # NOTE: The `handlers` section defines protocol-based dependencies injected via DI container.
 # This is SEPARATE from FSM action types (event, logging, data_capture, persistence) which are
@@ -308,18 +301,15 @@ handlers:
       version: {major: 1, minor: 0, patch: 0}
     - type: ProtocolEventBus
       version: {major: 1, minor: 0, patch: 0}
-
 profile_tags:
   - runtime
   - reducer
   - contracts
   - registry
-
 metadata:
   version: {major: 1, minor: 1, patch: 0}
   author: ONEX Framework Team
-  description: Declarative contract registry reducer using FSM pattern for managing loaded and compiled
-    ONEX contracts
+  description: Declarative contract registry reducer using FSM pattern for managing loaded and compiled ONEX contracts
   tags:
     - reducer
     - fsm
