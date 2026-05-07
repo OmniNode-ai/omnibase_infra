@@ -45,6 +45,24 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "register-repo.py"
+
+
+def _load_omnibase_env_into_process() -> None:
+    """Load local OmniBase env defaults before module-level infra probes."""
+    omnibase_env = Path.home() / ".omnibase" / ".env"
+    if not omnibase_env.is_file():
+        return
+    for line in omnibase_env.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip()
+
+
+_load_omnibase_env_into_process()
 _INFISICAL_ADDR = os.environ.get("INFISICAL_ADDR", "http://192.168.86.201:8880")
 
 # ---------------------------------------------------------------------------
@@ -200,21 +218,13 @@ def test_dry_run_invalid_repo_name_rejected(tmp_path: Path) -> None:
 
 def _build_execute_env() -> dict[str, str]:
     """Build a subprocess env that inherits the shell env plus any .omnibase/.env values."""
+    _load_omnibase_env_into_process()
     env = dict(os.environ)
-    omnibase_env = Path.home() / ".omnibase" / ".env"
-    if omnibase_env.is_file():
-        for line in omnibase_env.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, _, value = stripped.partition("=")
-            key = key.strip().removeprefix("export ").strip()
-            if key and key not in env:
-                env[key] = value.strip()
     return env
 
 
 @pytest.mark.integration
+@pytest.mark.serial
 @_requires_infisical
 def test_execute_first_run_exits_zero(tmp_path: Path) -> None:
     """First --execute run must exit 0 for a clean onboard."""
@@ -241,6 +251,7 @@ def test_execute_first_run_exits_zero(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.serial
 @_requires_infisical
 def test_execute_second_run_is_idempotent(tmp_path: Path) -> None:
     """Second --execute run must exit 0 with zero errors and only 'skipped' outcomes.
