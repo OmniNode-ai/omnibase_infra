@@ -380,3 +380,46 @@ class TestMixedDoDChecks:
         result = delta(gate_input)
         assert result.passed is True
         assert result.fail_category == "pass"
+
+
+class TestUnsupportedDoDChecks:
+    """Unsupported DoD check names must fail closed (CodeRabbit OMN-10616)."""
+
+    def test_unknown_deterministic_check_fails_deterministic(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="def ok():\n    return 1\n",
+            dod_deterministic=("typoed_check_name",),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+        assert any(
+            "MALFORMED" in r and "typoed_check_name" in r
+            for r in result.failure_reasons
+        )
+
+    def test_unknown_heuristic_check_fails_deterministic(self) -> None:
+        gate_input = _input(
+            task_type="test",
+            content="def ok():\n    return 1\n",
+            dod_heuristic=("min_length_chars",),  # missing _<N> suffix
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+        assert any(
+            "MALFORMED" in r and "min_length_chars" in r for r in result.failure_reasons
+        )
+
+    def test_known_checks_still_pass_alongside_unknown(self) -> None:
+        """Known checks evaluate normally; only unknown ones inject MALFORMED."""
+        gate_input = _input(
+            task_type="test",
+            content="def ok():\n    return 1\n",
+            dod_deterministic=("output_parses", "bogus_check"),
+        )
+        result = delta(gate_input)
+        assert result.passed is False
+        assert result.fail_category == "fail_deterministic"
+        assert any("bogus_check" in r for r in result.failure_reasons)

@@ -121,6 +121,10 @@ def _run_contract_checks(
         elif check == "signature_preserved":
             if reason := _check_signature_preserved(content):
                 det_failures.append(reason)
+        else:
+            det_failures.append(
+                f"MALFORMED: unsupported deterministic DoD check '{check}'"
+            )
 
     for check in dod_heuristic:
         if check == "no_refusal":
@@ -132,6 +136,10 @@ def _run_contract_checks(
                 threshold = int(m.group(1))
                 if reason := _check_min_length(content, threshold):
                     heuristic_failures.append(reason)
+            else:
+                det_failures.append(
+                    f"MALFORMED: unsupported heuristic DoD check '{check}'"
+                )
 
     return det_failures, heuristic_failures
 
