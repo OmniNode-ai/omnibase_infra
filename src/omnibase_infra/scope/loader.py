@@ -71,7 +71,7 @@ from typing import cast
 
 import yaml
 
-from omnibase_core.models.scope.model_enforcement_scope import ModelEnforcementScope
+from omnibase_infra.scope.models import ModelEnforcementScope
 from omnibase_infra.utils import sanitize_error_message, sanitize_secret_path
 
 _DEFAULT_OVERLAY_PATH = Path.home() / ".omninode" / "overlay.yaml"

@@ -25,11 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_core.models.scope.model_artifact_enforcement import (
-    ModelArtifactEnforcement,
-)
-from omnibase_core.models.scope.model_enforcement_scope import ModelEnforcementScope
 from omnibase_infra.scope.loader import ScopeCache, load_scope
+from omnibase_infra.scope.models import ModelArtifactEnforcement, ModelEnforcementScope
 
 # ---------------------------------------------------------------------------
 # Helpers
