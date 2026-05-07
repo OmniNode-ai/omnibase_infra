@@ -143,6 +143,25 @@ class TestTopicProvisioner:
             if "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS" in record.message
         ]
 
+    def test_negative_one_topic_partition_cap_is_disabled(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """-1 partition cap values disable the cap without warnings."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "-1")
+
+        manager = _make_provisioner(contracts_root)
+
+        spec = _topic_spec(manager, "onex.evt.test-producer.example-event.v1")
+        assert manager._creation_partitions(spec) == 6
+        assert not [
+            record
+            for record in caplog.records
+            if "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS" in record.message
+        ]
+
     def test_init_missing_contracts_root_raises(self, tmp_path: Path) -> None:
         """Constructing with a non-existent contracts_root raises immediately."""
         bad_path = tmp_path / "does_not_exist"
