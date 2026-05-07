@@ -26,12 +26,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
-from omnibase_infra.topics.platform_topic_suffixes import (
-    SUFFIX_NODE_INTROSPECTION,
-    SUFFIX_REGISTRATION_COMPLETED,
-    SUFFIX_RUNTIME_HEALTH_CHECK,
-    SUFFIX_RUNTIME_TICK,
-)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -48,18 +42,6 @@ ENV_TOPIC_PARTITION_CAP = "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"
 # Default partition and replication settings for standard event topics
 DEFAULT_EVENT_TOPIC_PARTITIONS = 6
 DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR = 1
-
-_CRITICAL_STARTUP_TOPICS: tuple[str, ...] = (
-    SUFFIX_RUNTIME_HEALTH_CHECK,
-    SUFFIX_NODE_INTROSPECTION,
-    SUFFIX_REGISTRATION_COMPLETED,
-)
-
-_STARTUP_TOPIC_PREFIXES: tuple[str, ...] = (
-    SUFFIX_NODE_INTROSPECTION.removesuffix("node-introspection.v1"),
-    SUFFIX_RUNTIME_TICK.removesuffix("runtime-tick.v1"),
-)
-"""Topics required for runtime boot, health, and registration must be first."""
 
 
 def _topic_partition_cap_from_env() -> int | None:

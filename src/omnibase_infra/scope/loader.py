@@ -182,7 +182,7 @@ def _load_overlay_entries(overlay_path: Path | None) -> list[OverlayEntry]:
     try:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         _logger.warning(
             "Failed to parse overlay file %s: %s",
             sanitize_secret_path(str(path)),

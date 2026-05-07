@@ -516,6 +516,26 @@ def test_malformed_overlay_yaml_returns_base(
 
 
 @pytest.mark.unit
+def test_overlay_file_read_error_returns_base(
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """OS read errors are ignored without mutating the base scope."""
+    base = ModelEnforcementScope(enforcement=ModelArtifactEnforcement(default="block"))
+
+    with caplog.at_level(WARNING, logger="omnibase_infra.scope.loader"):
+        result = load_scope(
+            "pre_tool_use_bash_guard",
+            base=base,
+            overlay_path=tmp_path,
+            cache=fresh_cache(),
+        )
+
+    assert result == base
+    assert "Failed to parse overlay file" in caplog.text
+
+
+@pytest.mark.unit
 def test_non_dict_overlay_item_is_ignored(tmp_path: Path) -> None:
     """Scalar/list overlay entries are ignored instead of raising."""
     overlay = write_overlay(
