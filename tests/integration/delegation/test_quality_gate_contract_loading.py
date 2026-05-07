@@ -60,7 +60,9 @@ def quality_gate_contract() -> dict[str, object]:
         "a contract.yaml co-located with the node module"
     )
     with CONTRACT_PATH.open(encoding="utf-8") as fh:
-        return cast("dict[str, object]", yaml.safe_load(fh))
+        payload = yaml.safe_load(fh)
+    assert isinstance(payload, dict), "quality-gate contract must parse to a mapping"
+    return cast("dict[str, object]", payload)
 
 
 def _input_with_contract_dod(
