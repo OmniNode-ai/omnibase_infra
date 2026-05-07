@@ -43,3 +43,9 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "uv run mypy src/ --strict"
+  - id: "dod-005"
+    description: "Deploy smoke: runtime_profile module importable post-merge; no live deploy or .201 restart performed by this PR."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.runtime_profile import load_runtime_profile, ModelRuntimeProfile; p = load_runtime_profile(); assert isinstance(p, ModelRuntimeProfile)\""
