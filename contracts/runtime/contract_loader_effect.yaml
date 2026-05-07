@@ -19,8 +19,8 @@ node_type: EFFECT_GENERIC
 # - Retry policy for robustness
 
 contract_version: {major: 1, minor: 1, patch: 0}
-# Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
-# See docs/architecture/CONTRACT_STABILITY_SPEC.md for normalization specification.
+# Fingerprint: <version>:<SHA-256-prefix-12> of canonical normalized contract content
+# excluding the fingerprint field itself. Full spec: docs/architecture/CONTRACT_STABILITY_SPEC.md.
 fingerprint: "1.1.0:423f8598810c"
 # Effect Subcontract
 # NOTE: This contract uses `effect_operations` (multi-operation schema) rather than
@@ -42,7 +42,6 @@ effect_operations:
     jitter_factor: 0.1
     retryable_errors:
       - ENOENT
-      - EACCES
       - ETIMEDOUT
       - ECONNRESET
   # Operations
@@ -189,11 +188,11 @@ effect_operations:
     trace_propagation: true
 # v1.1.0 Required Fields
 handlers:
-  required: []
+  required:
+    - type: ProtocolFileSystem
+      version: {major: 1, minor: 0, patch: 0}
   optional:
     - type: ProtocolLogger
-      version: {major: 1, minor: 0, patch: 0}
-    - type: ProtocolFileSystem
       version: {major: 1, minor: 0, patch: 0}
 profile_tags:
   - runtime
