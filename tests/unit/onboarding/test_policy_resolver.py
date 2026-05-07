@@ -103,11 +103,12 @@ class TestLoadBuiltinPolicies:
 
     def test_loads_three_policies(self) -> None:
         policies = load_builtin_policies()
-        assert len(policies) == 4
+        assert len(policies) == 5
         assert "standalone_quickstart" in policies
         assert "contributor_local" in policies
         assert "full_platform" in policies
         assert "new_employee" in policies
+        assert "interactive_onboarding" in policies
 
     def test_standalone_targets(self) -> None:
         policies = load_builtin_policies()
