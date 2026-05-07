@@ -4,6 +4,7 @@
 # deploy-gate evidence for the Bifrost delegation routing config.
 schema_version: '1.0.0'
 ticket_id: OMN-10637
+title: 'feat(OMN-10637): Bifrost delegation routing rules config for task classes'
 summary: 'Bifrost delegation routing rules config + Pydantic schema + loader for task classes'
 is_seam_ticket: false
 interface_change: false
