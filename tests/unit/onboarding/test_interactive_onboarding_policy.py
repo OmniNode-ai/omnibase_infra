@@ -11,6 +11,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 POLICY_PATH = (
     Path(__file__).parent.parent.parent.parent
     / "src"

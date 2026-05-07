@@ -14,6 +14,8 @@ from omnibase_infra.onboarding.policy_resolver import (
     resolve_policy,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def canonical_graph():
