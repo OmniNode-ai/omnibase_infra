@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _ALLOWED_IMPORT_PATTERNS: frozenset[str] = frozenset(
     {
         "omnibase_infra.handlers.",  # Handlers can use adapters
+        "omnibase_infra.secret_stores.",  # ProtocolSecretStore wrappers (OMN-10557)
         "tests.",  # Test modules can use adapters
     }
 )

@@ -57,6 +57,16 @@ class TestNoDirectAdapterRule:
         violations = check_no_direct_adapter_usage(temp_src)
         assert len(violations) == 0
 
+    def test_secret_stores_allowed(self, temp_src: Path) -> None:
+        """Test secret_stores wrappers are allowed to import adapters (OMN-10557)."""
+        secret_stores_dir = temp_src / "secret_stores"
+        secret_stores_dir.mkdir()
+        (secret_stores_dir / "infisical_secret_store.py").write_text(
+            "from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical\n"
+        )
+        violations = check_no_direct_adapter_usage(temp_src)
+        assert len(violations) == 0
+
     def test_test_dir_files_allowed(self, temp_src: Path) -> None:
         """Test files inside a tests/ directory are allowed to import adapters."""
         tests_dir = temp_src / "tests" / "unit"
