@@ -1,0 +1,191 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Interactive branching onboarding policy.
+# The generic reducer interprets the transition table to drive step selection.
+# No Python branching logic — all routing is declared here.
+#
+# Deployment modes:
+#   local   — Redpanda + Postgres + Valkey running locally via Docker
+#   cloud   — AWS or GCP managed services (no local Docker required)
+#   hybrid  — Local inference + cloud managed data services
+#
+# Terminal steps per path:
+#   local  -> write_config_local
+#   cloud  -> write_config_cloud
+#   hybrid -> write_config_hybrid
+policy_name: "interactive_onboarding"
+description: "Branching onboarding that adapts to local, cloud, or hybrid deployment modes"
+version: {major: 1, minor: 0, patch: 0}
+policy_type: "interactive"
+target_capabilities:
+  - "onboarding_config_written"
+max_estimated_minutes: 30
+# All interactive steps in declaration order.
+# The reducer uses the transition table below — step order here is for
+# human readability only; execution order is determined by transitions.
+steps:
+  - id: choose_deployment_mode
+    prompt: "How will you deploy ONEX?"
+    type: choice
+    options: [local, cloud, hybrid]
+    required: true
+  - id: configure_local_services
+    prompt: "Which local services do you need?"
+    type: multi_choice
+    options: [kafka, postgres, valkey, llm_inference]
+    condition: "deployment_mode in [local, hybrid]"
+    required: true
+  - id: configure_cloud_provider
+    prompt: "Which cloud provider?"
+    type: choice
+    options: [aws, gcp]
+    condition: "deployment_mode in [cloud, hybrid]"
+    required: true
+  - id: configure_aws_region
+    prompt: "Which AWS region? (e.g. us-east-1)"
+    type: text
+    condition: "cloud_provider == aws"
+    required: true
+  - id: configure_gcp_project
+    prompt: "Enter your GCP project ID"
+    type: text
+    condition: "cloud_provider == gcp"
+    required: true
+  - id: configure_llm_endpoint
+    prompt: "LLM inference endpoint URL (leave blank to skip)"
+    type: text
+    condition: "llm_inference in selected_local_services"
+    required: false
+  - id: write_config_local
+    prompt: "Writing local .env configuration"
+    type: action
+    action: "write_env"
+    condition: "deployment_mode == local"
+    produces_capabilities: ["onboarding_config_written"]
+  - id: write_config_cloud
+    prompt: "Writing cloud .env configuration"
+    type: action
+    action: "write_env"
+    condition: "deployment_mode == cloud"
+    produces_capabilities: ["onboarding_config_written"]
+  - id: write_config_hybrid
+    prompt: "Writing hybrid .env configuration"
+    type: action
+    action: "write_env"
+    condition: "deployment_mode == hybrid"
+    produces_capabilities: ["onboarding_config_written"]
+# Transition table — the reducer pattern-matches on (current_step, response)
+# and advances state. Every step must appear here; every valid response must
+# map to a next step. Missing entries are a contract violation.
+transitions:
+  - from: choose_deployment_mode
+    responses:
+      local:
+        next: configure_local_services
+        set_state:
+          deployment_mode: local
+      cloud:
+        next: configure_cloud_provider
+        set_state:
+          deployment_mode: cloud
+      hybrid:
+        next: configure_local_services
+        set_state:
+          deployment_mode: hybrid
+  - from: configure_local_services
+    # multi_choice — any selection is accepted; next depends on deployment_mode
+    on_submit:
+      - condition: "deployment_mode == local and llm_inference not in response"
+        next: write_config_local
+        set_state:
+          selected_local_services: "{response}"
+      - condition: "deployment_mode == local and llm_inference in response"
+        next: configure_llm_endpoint
+        set_state:
+          selected_local_services: "{response}"
+      - condition: "deployment_mode == hybrid"
+        next: configure_cloud_provider
+        set_state:
+          selected_local_services: "{response}"
+  - from: configure_cloud_provider
+    responses:
+      aws:
+        next: configure_aws_region
+        set_state:
+          cloud_provider: aws
+      gcp:
+        next: configure_gcp_project
+        set_state:
+          cloud_provider: gcp
+  - from: configure_aws_region
+    on_submit:
+      - condition: "deployment_mode == cloud"
+        next: write_config_cloud
+        set_state:
+          aws_region: "{response}"
+      - condition: "deployment_mode == hybrid and llm_inference in selected_local_services"
+        next: configure_llm_endpoint
+        set_state:
+          aws_region: "{response}"
+      - condition: "deployment_mode == hybrid and llm_inference not in selected_local_services"
+        next: write_config_hybrid
+        set_state:
+          aws_region: "{response}"
+  - from: configure_gcp_project
+    on_submit:
+      - condition: "deployment_mode == cloud"
+        next: write_config_cloud
+        set_state:
+          gcp_project: "{response}"
+      - condition: "deployment_mode == hybrid and llm_inference in selected_local_services"
+        next: configure_llm_endpoint
+        set_state:
+          gcp_project: "{response}"
+      - condition: "deployment_mode == hybrid and llm_inference not in selected_local_services"
+        next: write_config_hybrid
+        set_state:
+          gcp_project: "{response}"
+  - from: configure_llm_endpoint
+    on_submit:
+      - condition: "deployment_mode == local"
+        next: write_config_local
+        set_state:
+          llm_endpoint: "{response}"
+      - condition: "deployment_mode == hybrid"
+        next: write_config_hybrid
+        set_state:
+          llm_endpoint: "{response}"
+  # Terminal steps — no outgoing transitions
+  - from: write_config_local
+    terminal: true
+  - from: write_config_cloud
+    terminal: true
+  - from: write_config_hybrid
+    terminal: true
+# env_output declares what each terminal step writes to .env
+env_output:
+  write_config_local:
+    ONEX_DEPLOYMENT_MODE: "local"
+    KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
+    POSTGRES_HOST: "localhost"
+    POSTGRES_PORT: "5436"
+    VALKEY_HOST: "localhost"
+    VALKEY_PORT: "16379"
+    LLM_CODER_URL: "{state.llm_endpoint|}"
+  write_config_cloud:
+    ONEX_DEPLOYMENT_MODE: "cloud"
+    CLOUD_PROVIDER: "{state.cloud_provider}"
+    AWS_REGION: "{state.aws_region|}"
+    GCP_PROJECT: "{state.gcp_project|}"
+  write_config_hybrid:
+    ONEX_DEPLOYMENT_MODE: "hybrid"
+    CLOUD_PROVIDER: "{state.cloud_provider}"
+    AWS_REGION: "{state.aws_region|}"
+    GCP_PROJECT: "{state.gcp_project|}"
+    KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
+    POSTGRES_HOST: "localhost"
+    POSTGRES_PORT: "5436"
+    VALKEY_HOST: "localhost"
+    VALKEY_PORT: "16379"
+    LLM_CODER_URL: "{state.llm_endpoint|}"
