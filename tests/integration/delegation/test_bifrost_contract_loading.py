@@ -69,32 +69,67 @@ def test_bifrost_endpoints_load_from_source_contract_when_deployed_absent(
     tmp_path: Path,
 ) -> None:
     """When deployed contract is absent, handler falls back to source bifrost contract."""
-    # Point BIFROST_CONTRACT_PATH to a non-existent path to simulate absent deployed contract.
-    nonexistent = tmp_path / "nonexistent.yaml"
-    monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(nonexistent))
-    # Override the source fallback path to point to the real source contract.
-    monkeypatch.setattr(
-        _handler_mod,
-        "_SOURCE_BIFROST_CONTRACT_PATH",
-        SOURCE_BIFROST_PATH,
+    # Write a sentinel source contract with a known populated backend.
+    sentinel_source = tmp_path / "sentinel_source.yaml"
+    sentinel_source.write_text(
+        "config_version: '1.1.0'\n"
+        "schema_version: bifrost_delegation.v1\n"
+        "backends:\n"
+        "  - backend_id: sentinel-fallback-backend\n"
+        '    endpoint_url: "http://sentinel-fallback:8000"\n'
+        "    model_name: sentinel-model\n"
+        "    tier: local\n"
+        "    timeout_ms: 30000\n"
+        "    capabilities: []\n"
     )
+    # Absent deployed contract triggers fallback to the sentinel source.
+    # No BIFROST_CONTRACT_PATH env var, and _DEFAULT_BIFROST_CONTRACT_PATH points nowhere.
+    monkeypatch.delenv("BIFROST_CONTRACT_PATH", raising=False)
+    monkeypatch.setattr(
+        _handler_mod, "_DEFAULT_BIFROST_CONTRACT_PATH", tmp_path / "absent.yaml"
+    )
+    monkeypatch.setattr(_handler_mod, "_SOURCE_BIFROST_CONTRACT_PATH", sentinel_source)
 
     backends = _handler_mod._load_bifrost_endpoints()
-    # Source contract has empty endpoint_url fields — no backends resolve to non-empty URLs.
-    # But the function should not raise, and should return a dict.
     assert isinstance(backends, dict)
+    assert "sentinel-fallback-backend" in backends, (
+        "Fallback to source bifrost contract did not load sentinel backend"
+    )
+    assert (
+        backends["sentinel-fallback-backend"].endpoint_url
+        == "http://sentinel-fallback:8000"
+    )
 
 
 def test_bifrost_endpoints_load_from_env_override(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """BIFROST_CONTRACT_PATH env var redirects loading to the chosen file."""
-    monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(SOURCE_BIFROST_PATH))
+    # Write a sentinel override contract with a known populated backend.
+    sentinel_override = tmp_path / "sentinel_override.yaml"
+    sentinel_override.write_text(
+        "config_version: '1.1.0'\n"
+        "schema_version: bifrost_delegation.v1\n"
+        "backends:\n"
+        "  - backend_id: sentinel-override-backend\n"
+        '    endpoint_url: "http://sentinel-override:9000"\n'
+        "    model_name: sentinel-override-model\n"
+        "    tier: cloud\n"
+        "    timeout_ms: 10000\n"
+        "    capabilities: []\n"
+    )
+    monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(sentinel_override))
 
     backends = _handler_mod._load_bifrost_endpoints()
     assert isinstance(backends, dict)
-    # Source contract has empty endpoint_url fields — backends with empty URLs are excluded.
-    # Verify the function completed without raising.
+    assert "sentinel-override-backend" in backends, (
+        "BIFROST_CONTRACT_PATH env override did not load sentinel backend"
+    )
+    assert (
+        backends["sentinel-override-backend"].endpoint_url
+        == "http://sentinel-override:9000"
+    )
 
 
 def test_bifrost_contract_schema_version_is_correct() -> None:
