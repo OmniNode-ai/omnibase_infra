@@ -11,8 +11,8 @@
 # See model_registry.yaml for model capabilities and hardware assignments.
 # See routing_tiers.yaml for tier escalation ladder.
 #
-# Tickets: OMN-10637
-config_version: "1.0.0"
+# Tickets: OMN-10637, OMN-10638
+config_version: "1.1.0"
 schema_version: "bifrost_delegation.v1"
 # Backend definitions — URLs resolved from env vars at runtime.
 # IP addresses annotated per aislop-sweep rule (OMN-8573).
@@ -147,3 +147,14 @@ circuit_breaker:
 failover:
   max_attempts: 3
   backoff_base_ms: 500
+# Shadow mode for delegation A/B testing (OMN-10638).
+# Disabled by default — prevents accidental learned-policy activation during demo.
+# To enable: set enabled: true and provide a policy_version identifier.
+# Shadow decisions are emitted as comparison events only and NEVER affect
+# live routing output. Dashboard/eval must label them SHADOW (shadow_label field).
+shadow_mode:
+  enabled: false
+  policy_version: "unknown"
+  log_sample_rate: 1.0
+  comparison_logging_enabled: true
+  max_shadow_latency_ms: 5.0

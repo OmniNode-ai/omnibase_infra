@@ -10,13 +10,68 @@ the matched rule_id and config_version for audit provenance (OMN-10637).
 
 Related:
     - OMN-10637: Bifrost routing rules for delegation task classes
+    - OMN-10638: Shadow mode for delegation A/B testing
 """
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ModelDelegationShadowConfig(BaseModel):
+    """Shadow mode configuration for bifrost delegation routing.
+
+    Controls whether a learned routing policy runs in parallel with static
+    delegation rules. Shadow decisions are emitted as comparison events only
+    and NEVER affect the live routing outcome.
+
+    The ``shadow_label`` field is always ``"SHADOW"`` — it is the canonical
+    label required by dashboard and eval systems to distinguish shadow
+    recommendations from live routing selections.
+
+    Shadow mode is disabled by default to prevent accidental learned-policy
+    activation during demo (OMN-10638 safety constraint).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    enabled: bool = Field(
+        default=False,
+        description="Whether shadow mode is active. Disabled by default.",
+    )
+    policy_version: str = Field(
+        default="unknown",
+        max_length=128,
+        description="Human-readable version of the loaded shadow policy checkpoint.",
+    )
+    log_sample_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of requests to log shadow decisions for (1.0 = 100%).",
+    )
+    comparison_logging_enabled: bool = Field(
+        default=True,
+        description="Whether to emit comparison events for shadow decisions.",
+    )
+    max_shadow_latency_ms: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=100.0,
+        description="Maximum allowed latency for shadow policy evaluation (ms).",
+    )
+    # shadow_label is a read-only constant — always "SHADOW" for dashboard labeling.
+    shadow_label: Literal["SHADOW"] = Field(
+        default="SHADOW",
+        description=(
+            "Label applied to all shadow comparison events. "
+            "Always 'SHADOW' — required by dashboard/eval to distinguish "
+            "shadow recommendations from live routing selections."
+        ),
+    )
 
 
 class ModelDelegationFallbackPolicy(BaseModel):
@@ -218,6 +273,13 @@ class ModelBifrostDelegationConfig(BaseModel):
         default_factory=ModelDelegationFailoverConfig,
         description="Gateway-level failover settings.",
     )
+    shadow_mode: ModelDelegationShadowConfig = Field(
+        default_factory=ModelDelegationShadowConfig,
+        description=(
+            "Shadow mode configuration for delegation A/B testing. "
+            "Disabled by default — explicit config enables it (OMN-10638)."
+        ),
+    )
 
 
 __all__: list[str] = [
@@ -227,4 +289,5 @@ __all__: list[str] = [
     "ModelDelegationFailoverConfig",
     "ModelDelegationFallbackPolicy",
     "ModelDelegationRoutingRule",
+    "ModelDelegationShadowConfig",
 ]
