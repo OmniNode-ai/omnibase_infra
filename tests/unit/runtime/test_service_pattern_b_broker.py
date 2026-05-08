@@ -324,6 +324,43 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_runtime_host_process_skips_pattern_b_broker_for_disallowed_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNTIME_PROFILE", "effects")
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        lambda _packages: pytest.fail("effects profile must not discover routes"),
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        lambda *_args, **_kwargs: pytest.fail(
+            "effects profile must not start Pattern B broker"
+        ),
+    )
+
+    process = RuntimeHostProcess(
+        event_bus=EventBusInmemory(environment="test", group="pattern-b"),
+        config={
+            "service_name": "test-service",
+            "node_name": "test-node",
+            "env": "test",
+            "version": "v1",
+            "pattern_b_broker": {
+                "enabled": True,
+                "enabled_profiles": ["main"],
+                "package_names": ["omnibase_infra", "omnimarket"],
+            },
+        },
+        dispatch_engine=AsyncMock(),
+    )
+
+    await process._start_pattern_b_broker()
+
+    assert process._pattern_b_broker is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_host_process_broker_package_names_ignore_active_runtime_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

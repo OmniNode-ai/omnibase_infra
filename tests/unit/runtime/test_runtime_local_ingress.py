@@ -119,10 +119,40 @@ def test_parse_active_runtime_packages_honors_env_override() -> None:
 
 def test_local_runtime_ingress_config_accepts_yaml_list_package_names() -> None:
     config = ModelLocalRuntimeIngressConfig.model_validate(
-        {"package_names": ["omnibase_infra", "omnimarket"]}
+        {
+            "package_names": ["omnibase_infra", "omnimarket"],
+            "enabled_profiles": ["main"],
+        }
     )
 
     assert config.package_names == ("omnibase_infra", "omnimarket")
+    assert config.enabled_profiles == ("main",)
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_skips_local_ingress_for_disallowed_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNTIME_PROFILE", "effects")
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        lambda _packages: pytest.fail("effects profile must not discover routes"),
+    )
+
+    process = RuntimeHostProcess(
+        config=make_runtime_config(
+            local_ingress={
+                "enabled": True,
+                "enabled_profiles": ["main"],
+            }
+        ),
+        dispatch_engine=AsyncMock(),
+    )
+
+    await process._start_local_ingress()
+
+    assert process._local_ingress_routes == {}
+    assert process._local_ingress_active_packages == ()
 
 
 def test_discover_runtime_local_ingress_routes_registers_aliases(

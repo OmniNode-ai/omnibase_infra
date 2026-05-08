@@ -114,6 +114,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${ONEX_LOCAL_RUNTIME_SOCKET_DIR:-/data/omninode/runtime-local-ingress}:/run/onex-runtime
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
