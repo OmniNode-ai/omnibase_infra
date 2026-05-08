@@ -7,19 +7,21 @@
 # Every gateway response MUST include the selected rule_id and config_version
 # to make provenance auditable (OMN-10637 requirement R1).
 #
-# Backend URLs are resolved from env vars at runtime — never hardcoded here.
-# See model_registry.yaml for model capabilities and hardware assignments.
+# Backend endpoint URLs are declared here and populated by the installer
+# (install-delegation.sh --apply). The source version has empty endpoint_url
+# fields; the deployed copy at ~/.omninode/delegation/bifrost_delegation.yaml
+# has actual URLs written by the installer.
+#
 # See routing_tiers.yaml for tier escalation ladder.
 #
-# Tickets: OMN-10637, OMN-10638
+# Tickets: OMN-10637, OMN-10638, OMN-10657
 config_version: "1.1.0"
 schema_version: "bifrost_delegation.v1"
-# Backend definitions — URLs resolved from env vars at runtime.
-# IP addresses annotated per aislop-sweep rule (OMN-8573).
+# Backend definitions — endpoint_url populated by installer at deploy time.
 backends:
-  # Local backends on 192.168.86.201 (AIPC)  # onex-allow-internal-ip
+  # Local backends (AIPC)
   - backend_id: local-qwen-coder-30b
-    base_url_env: LLM_CODER_URL
+    endpoint_url: ""
     # cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit — RTX 5090, 112K ctx
     model_name: cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit
     tier: local
@@ -29,7 +31,7 @@ backends:
       - refactoring
       - documentation
   - backend_id: local-deepseek-r1-14b
-    base_url_env: LLM_CODER_FAST_URL
+    endpoint_url: ""
     # Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ — RTX 4090, 24K ctx
     model_name: Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ
     tier: local
@@ -40,6 +42,7 @@ backends:
       - classification
   # Cloud fallback backends
   - backend_id: cloud-sonnet
+    endpoint_url: ""
     # Claude Sonnet via OAuth — no API key required (Claude Code uses OAuth)
     model_name: claude-sonnet-4-6
     tier: frontier_api
@@ -50,6 +53,7 @@ backends:
       - documentation
       - research
   - backend_id: cloud-haiku
+    endpoint_url: ""
     # Claude Haiku — cheapest frontier model for documentation/simple tasks
     model_name: claude-haiku-4-5-20251001
     tier: frontier_api
@@ -58,6 +62,41 @@ backends:
       - documentation
       - summarization
       - simple_tasks
+  - backend_id: cloud-glm
+    endpoint_url: ""
+    model_name: glm-z-ai
+    tier: cheap_cloud
+    timeout_ms: 60000
+    capabilities:
+      - code_generation
+      - reasoning
+      - research
+  - backend_id: cloud-gemini-flash
+    endpoint_url: ""
+    model_name: gemini-flash
+    tier: cheap_cloud
+    timeout_ms: 60000
+    capabilities:
+      - summarization
+      - simple_tasks
+      - document
+  # CLI agent backends — dispatched via subprocess, not HTTP.
+  - backend_id: cli-claude
+    endpoint_url: ""
+    model_name: claude-cli
+    tier: cli_agents
+    timeout_ms: 300000
+    capabilities:
+      - agent_delegation
+      - complex_reasoning
+  - backend_id: cli-opencode
+    endpoint_url: ""
+    model_name: opencode-cli
+    tier: cli_agents
+    timeout_ms: 300000
+    capabilities:
+      - agent_delegation
+      - code_generation
 # Routing rules — evaluated in ascending priority order.
 # First matching rule wins. Each rule maps a task_class to an ordered
 # list of backends to try.

@@ -14,7 +14,10 @@ class ModelTierModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str = Field(..., description="Model identifier.")
-    env_var: str = Field(..., description="Env var name for endpoint URL or API key.")
+    backend_ref: str = Field(
+        ...,
+        description="Backend key in the deployed bifrost contract (bifrost_delegation.yaml).",
+    )
     max_context_tokens: int = Field(..., description="Max context window in tokens.")
     use_for: tuple[str, ...] = Field(
         default_factory=tuple,

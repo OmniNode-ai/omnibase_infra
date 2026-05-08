@@ -158,6 +158,13 @@ jobs:
       - name: Check published_events consistency (OMN-4885)
         run: uv run python scripts/validation/check_published_events_consistency.py
 
+      - name: Batch-validate all node contracts via model_validate() (OMN-9752)
+        run: |
+          echo "================================================================"
+          echo "Batch contract node_type validation (OMN-9752)"
+          echo "================================================================"
+          uv run python scripts/batch_validate_node_contracts.py --verbose
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:

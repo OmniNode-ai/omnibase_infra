@@ -14,6 +14,7 @@ Tests cover:
 
 Related:
     - OMN-10615: Wire routing reducer to read task-class contracts
+    - OMN-10657: Contract-driven endpoint resolution
 """
 
 from __future__ import annotations
@@ -70,18 +71,44 @@ def _make_tier(name: str) -> ModelRoutingTier:
     return ModelRoutingTier(name=name, models=())
 
 
+def _write_bifrost(tmp_path: Path, backends: dict[str, str]) -> str:
+    """Write a bifrost contract YAML with given backend_id -> endpoint_url mappings."""
+    entries = []
+    for bid, url in backends.items():
+        entries.append(
+            f"  - backend_id: {bid}\n"
+            f'    endpoint_url: "{url}"\n'
+            f"    model_name: "
+            "\n"
+            f"    tier: local\n"
+            f"    timeout_ms: 30000\n"
+            f"    capabilities: []"
+        )
+    backends_block = "\n".join(entries) if entries else "  []"
+    content = (
+        "config_version: '1.1.0'\n"
+        "schema_version: bifrost_delegation.v1\n"
+        "backends:\n" + backends_block + "\n"
+    )
+    path = tmp_path / "bifrost.yaml"
+    path.write_text(content)
+    return str(path)
+
+
 @pytest.fixture(autouse=True)
-def reset_singletons() -> None:
+def reset_singletons():  # type: ignore[no-untyped-def]
     """Reset module-level singletons before each test."""
     _handler_mod._config = None
     _handler_mod._get_task_class_contract.cache_clear()
+    _handler_mod._load_bifrost_endpoints.cache_clear()
     yield
     _handler_mod._config = None
     _handler_mod._get_task_class_contract.cache_clear()
+    _handler_mod._load_bifrost_endpoints.cache_clear()
 
 
 class TestGracefulDegradation:
-    """No contract file → tier routing unchanged."""
+    """No contract file -> tier routing unchanged."""
 
     def test_absent_contract_path_returns_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -95,7 +122,6 @@ class TestGracefulDegradation:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("TASK_CLASS_CONTRACT_PATH", raising=False)
-        # Point default path to a non-existent location by monkeypatching the module attr.
         monkeypatch.setattr(
             _handler_mod,
             "_DEFAULT_TASK_CLASS_CONTRACT_PATH",
@@ -105,10 +131,15 @@ class TestGracefulDegradation:
         assert contract is None
 
     def test_routing_works_without_contract(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
+        bifrost = _write_bifrost(
+            tmp_path,
+            {
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
+            },  # onex-allow-internal-ip
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
         monkeypatch.delenv("TASK_CLASS_CONTRACT_PATH", raising=False)
         monkeypatch.setattr(
             _handler_mod,
@@ -161,13 +192,11 @@ class TestCloudBlockedPolicy:
         contract_path.write_text(contract_yaml)
         monkeypatch.setenv("TASK_CLASS_CONTRACT_PATH", str(contract_path))
 
-        # No local tier endpoints → should raise (not route to claude)
-        monkeypatch.delenv("LLM_CODER_URL", raising=False)
-        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
-        monkeypatch.delenv("LLM_DEEPSEEK_R1_URL", raising=False)
-        monkeypatch.delenv("LLM_GLM_URL", raising=False)
-        monkeypatch.delenv("LLM_GEMINI_FLASH_URL", raising=False)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        # No local tier endpoints + cloud blocked -> should raise
+        bifrost = _write_bifrost(
+            tmp_path, {"cloud-sonnet": "https://api.anthropic.com"}
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
 
         req = _request(task_type="test")
         with pytest.raises(ProtocolConfigurationError, match="No tier"):
@@ -194,8 +223,13 @@ class TestCloudBlockedPolicy:
         contract_path = tmp_path / "contract.yaml"
         contract_path.write_text(contract_yaml)
         monkeypatch.setenv("TASK_CLASS_CONTRACT_PATH", str(contract_path))
-        monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
+        bifrost = _write_bifrost(
+            tmp_path,
+            {
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
+            },  # onex-allow-internal-ip
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
 
         req = _request(task_type="test", prompt="x" * 200000)
         decision = delta(req)
@@ -215,7 +249,6 @@ class TestPricingCeiling:
         assert _tier_allowed_by_contract(_make_tier("claude"), entry) is False
 
     def test_ceiling_blocks_cheap_cloud_when_tight(self) -> None:
-        # cheap_cloud ≈ 0.002; ceiling of 0.001 should block it
         entry = {"pricing_ceiling_per_1k_tokens": 0.001}
         assert _tier_allowed_by_contract(_make_tier("cheap_cloud"), entry) is False
 
@@ -249,12 +282,11 @@ class TestPricingCeiling:
         contract_path = tmp_path / "contract.yaml"
         contract_path.write_text(contract_yaml)
         monkeypatch.setenv("TASK_CLASS_CONTRACT_PATH", str(contract_path))
-        monkeypatch.delenv("LLM_CODER_URL", raising=False)
-        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
-        monkeypatch.delenv("LLM_DEEPSEEK_R1_URL", raising=False)
-        monkeypatch.delenv("LLM_GLM_URL", raising=False)
-        monkeypatch.delenv("LLM_GEMINI_FLASH_URL", raising=False)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        # Only cloud-sonnet available but ceiling blocks it
+        bifrost = _write_bifrost(
+            tmp_path, {"cloud-sonnet": "https://api.anthropic.com"}
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
 
         req = _request(task_type="test")
         with pytest.raises(ProtocolConfigurationError, match="No tier"):
@@ -268,15 +300,11 @@ class TestEscalationTierOrder:
         from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_delegation_config import (
             ModelDelegationConfig,
         )
-        from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_tier_model import (
-            ModelTierModel,
-        )
 
         local = ModelRoutingTier(name="local", models=())
         cheap = ModelRoutingTier(name="cheap_cloud", models=())
         claude = ModelRoutingTier(name="claude", models=())
 
-        # Minimal config — use real class with only tuple field accessible
         config = ModelDelegationConfig(tiers=(local, cheap, claude))
         entry = {
             "escalation_policy": {"tier_order": ["claude", "local", "cheap_cloud"]}
@@ -410,8 +438,13 @@ class TestRationaleContractAnnotation:
         contract_path = tmp_path / "contract.yaml"
         contract_path.write_text(contract_yaml)
         monkeypatch.setenv("TASK_CLASS_CONTRACT_PATH", str(contract_path))
-        monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
+        bifrost = _write_bifrost(
+            tmp_path,
+            {
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
+            },  # onex-allow-internal-ip
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
 
         req = _request(task_type="test", prompt="x" * 200000)
         decision = delta(req)

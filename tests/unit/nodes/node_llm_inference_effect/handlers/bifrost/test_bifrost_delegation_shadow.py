@@ -388,9 +388,8 @@ class TestShadowDoesNotAlterLiveRouting:
 
         callback.assert_called_once()
         log_entry: ModelShadowDecisionLog = callback.call_args[0][0]
-        # policy_version is the shadow label carrier — "SHADOW" is embedded via
-        # ModelDelegationShadowConfig.shadow_label in the delegation context
         assert log_entry.policy_version == "v1-test"
+        assert log_entry.shadow_label == ModelDelegationShadowConfig().shadow_label
 
     @pytest.mark.asyncio
     async def test_multiple_requests_shadow_never_bleeds_into_live(self) -> None:

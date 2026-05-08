@@ -230,6 +230,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "git+https://github.com/OmniNode-ai/omnimarket.git@main#egg=omnimarket"
 
+# The runtime image still installs legacy packages for import compatibility while
+# market migrations finish, but their ONEX discovery metadata must not advertise
+# non-market packages or domain plugins to the runtime kernel.
+RUN /app/.venv/bin/python -m omnibase_infra.runtime.strip_runtime_entry_points
+
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
 # --no-deps prevents torch from pulling its own transitive deps (already

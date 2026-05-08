@@ -15,10 +15,9 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-test-pass
-    type: test_pass
     description: >-
       Test proving shadow decision does not alter live routing output. test_bifrost_delegation_shadow.py::TestShadowDoesNotAlterLiveRouting::test_shadow_does_not_alter_live_routing_output passes: shadow policy recommends backend-b while static routing selects backend-a; response.backend_selected == "backend-a" is asserted. 16 new tests added in test_bifrost_delegation_shadow.py, all passing.
-    source: automated
+    source: manual
     checks:
       - check_type: command
         check_value: >-

@@ -512,6 +512,7 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
                 shadow_confidence=confidence,
                 shadow_latency_ms=shadow_latency_ms,
                 policy_version=self._shadow_config.policy_version,
+                shadow_label="SHADOW",
                 shadow_action_distribution=distribution,
                 tenant_id=request.tenant_id,
             )

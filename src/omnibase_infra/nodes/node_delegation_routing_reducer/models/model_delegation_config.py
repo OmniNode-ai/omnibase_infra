@@ -44,7 +44,7 @@ class ModelDelegationConfig(BaseModel):
                 models.append(
                     ModelTierModel(
                         id=m["id"],
-                        env_var=m["env_var"],
+                        backend_ref=m["backend_id"],
                         max_context_tokens=m["max_context_tokens"],
                         use_for=tuple(m.get("use_for", [])),
                         fast_path_threshold_tokens=m.get("fast_path_threshold_tokens"),
