@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "contributor_cloud"
+description: "Cloud deployment with managed services (~30 min)"
+target_capabilities:
+  - "cloud_deployed"
+max_estimated_minutes: 30

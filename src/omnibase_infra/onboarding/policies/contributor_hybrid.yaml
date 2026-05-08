@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "contributor_hybrid"
+description: "Hybrid deployment — local inference + cloud managed data services (~30 min)"
+target_capabilities:
+  - "hybrid_deployed"
+max_estimated_minutes: 30
