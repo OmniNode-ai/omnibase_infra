@@ -9,6 +9,8 @@
 #                                              \-> start_docker_infra -> start_event_bus -> connect_node_to_bus
 #                                                                    \-> configure_secrets
 #                                                                                        \-> start_omnidash
+#                                                                                        \-> configure_cloud_credentials -> deploy_to_cloud
+#                                                                                                                       \-> configure_hybrid_split -> deploy_hybrid
 title: "onex_onboarding_canonical"
 description: "Canonical onboarding graph for the ONEX platform"
 version: {major: 1, minor: 0, patch: 0}
@@ -195,3 +197,59 @@ steps:
       target: "uv run python -m omnimarket.cli register-node --dry-run"
       timeout_seconds: 30
       description: "omnimarket register-node dry-run exits 0"
+  - step_key: "configure_cloud_credentials"
+    name: "Configure Cloud Credentials"
+    step_type: "action"
+    description: "Set up cloud provider credentials for remote deployment"
+    depends_on: ["configure_secrets"]
+    required_capabilities: ["secrets_configured"]
+    produces_capabilities: ["cloud_credentials_configured"]
+    tags: ["cloud", "infrastructure"]
+    estimated_duration_seconds: 120
+    verification:
+      check_type: "file_exists"
+      target: "~/.omnibase/cloud-config.yaml"
+      timeout_seconds: 5
+      description: "Cloud configuration file exists"
+  - step_key: "deploy_to_cloud"
+    name: "Deploy to Cloud"
+    step_type: "action"
+    description: "Deploy ONEX runtime to cloud provider"
+    depends_on: ["configure_cloud_credentials", "connect_node_to_bus"]
+    required_capabilities: ["cloud_credentials_configured", "event_bus_connected"]
+    produces_capabilities: ["cloud_deployed"]
+    tags: ["cloud", "deployment"]
+    estimated_duration_seconds: 300
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -m omnibase_infra.cli cloud-health-check"
+      timeout_seconds: 60
+      description: "Cloud deployment responds to health check"
+  - step_key: "configure_hybrid_split"
+    name: "Configure Hybrid Service Split"
+    step_type: "action"
+    description: "Declare which services run locally and which run in the cloud"
+    depends_on: ["configure_cloud_credentials", "start_docker_infra"]
+    required_capabilities: ["cloud_credentials_configured", "docker_infra_running"]
+    produces_capabilities: ["hybrid_split_configured"]
+    tags: ["hybrid", "infrastructure"]
+    estimated_duration_seconds: 60
+    verification:
+      check_type: "file_exists"
+      target: "~/.omnibase/hybrid-split.yaml"
+      timeout_seconds: 5
+      description: "Hybrid split configuration file exists"
+  - step_key: "deploy_hybrid"
+    name: "Deploy Hybrid Topology"
+    step_type: "action"
+    description: "Deploy ONEX runtime in hybrid topology (local + cloud services)"
+    depends_on: ["configure_hybrid_split", "connect_node_to_bus"]
+    required_capabilities: ["hybrid_split_configured", "event_bus_connected"]
+    produces_capabilities: ["hybrid_deployed"]
+    tags: ["hybrid", "deployment"]
+    estimated_duration_seconds: 240
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -m omnibase_infra.cli hybrid-health-check"
+      timeout_seconds: 60
+      description: "Hybrid deployment responds to health check"
