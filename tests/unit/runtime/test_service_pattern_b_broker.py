@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -122,6 +123,125 @@ async def test_service_pattern_b_broker_round_trips_terminal_event() -> None:
 
     await broker.stop()
     await bus.close()
+
+
+@pytest.mark.asyncio
+async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route()
+    created_consumers: list[FakeAIOKafkaConsumer] = []
+
+    class FakeAIOKafkaConsumer:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+            self.seeked_to_end = False
+            self.started = False
+            self.stopped = False
+            created_consumers.append(self)
+
+        async def start(self) -> None:
+            self.started = True
+
+        def assignment(self) -> set[str]:
+            return {"partition-0"} if self.started else set()
+
+        async def seek_to_end(self, *_assignment: object) -> None:
+            self.seeked_to_end = True
+
+        async def getone(self) -> SimpleNamespace:
+            return await self.messages.get()
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    class FakeKafkaTransport:
+        config = SimpleNamespace(
+            session_timeout_ms=45000,
+            heartbeat_interval_ms=15000,
+            max_poll_interval_ms=300000,
+            reconnect_backoff_ms=2000,
+        )
+        _bootstrap_servers = "redpanda:9092"
+
+        def _build_auth_kwargs(self) -> dict[str, object]:
+            return {}
+
+        async def publish(
+            self,
+            _topic: str,
+            _key: bytes | None,
+            value: bytes,
+            _headers: object | None = None,
+        ) -> None:
+            assert created_consumers
+            assert created_consumers[-1].seeked_to_end is True
+            command_envelope = ModelEventEnvelope[object].model_validate_json(value)
+            terminal_envelope = ModelEventEnvelope[object](
+                payload={"status": "complete", "dispatch_count": 5},
+                correlation_id=command_envelope.correlation_id,
+                envelope_timestamp=datetime.now(UTC),
+                event_type=route.terminal_event,
+                source_tool="session_orchestrator",
+            )
+            await created_consumers[-1].messages.put(
+                SimpleNamespace(value=terminal_envelope.model_dump_json().encode())
+            )
+
+        async def subscribe(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ) -> object:
+            pytest.fail("Kafka-backed terminal waits should use a direct consumer")
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
+        FakeAIOKafkaConsumer,
+    )
+
+    broker = RuntimePatternBBroker(
+        FakeKafkaTransport(),
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
+
+    resolved_route, result = await broker.dispatch_request(command)
+
+    assert resolved_route == route
+    assert result.status == "completed"
+    assert result.payload == {"status": "complete", "dispatch_count": 5}
+    assert created_consumers[0].stopped is True
+
+
+def test_service_pattern_b_broker_decodes_target_runtime_address_during_core_skew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(
+        ModelDispatchBusCommand.model_fields,
+        "target_runtime_address",
+        raising=False,
+    )
+    command = RuntimePatternBBroker._decode_dispatch_command_payload(
+        {
+            "command_name": "session_orchestrator",
+            "requester": "codex",
+            "payload": {"dry_run": True},
+            "response_topic": "onex.evt.pattern-b.dispatch-completed.v1",
+            "timeout_seconds": 1,
+            "target_runtime_address": "runtime://omninode-pc/stability-test/main",
+        }
+    )
+
+    assert command.command_name == "session_orchestrator"
+    assert command.requester == "codex"
 
 
 @pytest.mark.asyncio
