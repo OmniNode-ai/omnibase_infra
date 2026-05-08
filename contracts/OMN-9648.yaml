@@ -8,7 +8,7 @@ interfaces_touched: []
 evidence_requirements:
   - kind: tests
     description: "Focused unit and integration coverage for runtime health monitor profile filtering passes."
-    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
+    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_live_event_bus.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
   - kind: manual
     description: "Stability runtime hotfix reaches healthy after redeploy and one-shot monitor proof records remaining real subscription gaps."
     command: "deploy: docker exec omninode-stability-test-runtime python -c 'from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor; print(ServiceRuntimeHealthMonitor.__name__)'"
@@ -22,7 +22,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
+        check_value: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_live_event_bus.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
   - id: dod-deploy
     description: "Deploy gate evidence: stability runtime hotfix was deployed and validated on .201."
     source: manual

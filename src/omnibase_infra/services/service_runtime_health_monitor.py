@@ -24,10 +24,12 @@ cycle is logged and the next cycle proceeds normally.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import math
 import os
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -219,6 +221,55 @@ def _expected_consumer_groups_from_manifest(
     return expected
 
 
+def _expected_consumer_groups_from_event_bus(
+    event_bus: ProtocolEventBusLike | None,
+) -> list[ExpectedConsumerGroup]:
+    """Return live expected groups from the runtime event bus, when available.
+
+    ``discover_contracts()`` sees every installed contract, including contracts
+    skipped by auto-wiring because they lack handler routing or are superseded by
+    dedicated runtime wiring. The event bus registry is the authoritative source
+    for subscriptions that this runtime actually attempted to start.
+    """
+    if event_bus is None:
+        return []
+
+    get_consumer_groups = getattr(event_bus, "get_consumer_groups", None)
+    if not callable(get_consumer_groups):
+        return []
+
+    groups = get_consumer_groups()
+    if inspect.isawaitable(groups):
+        close = getattr(groups, "close", None)
+        if callable(close):
+            close()
+        return []
+    if not isinstance(groups, Mapping):
+        return []
+
+    expected: list[ExpectedConsumerGroup] = []
+    for key, effective_group_id in groups.items():
+        if (
+            not isinstance(key, tuple)
+            or len(key) != 2
+            or not isinstance(effective_group_id, str)
+            or not effective_group_id
+        ):
+            continue
+        topic, base_group_id = key
+        if not isinstance(topic, str) or not isinstance(base_group_id, str):
+            continue
+        expected.append(
+            ExpectedConsumerGroup(
+                topic=topic,
+                group_id=effective_group_id,
+                node_name=base_group_id,
+                package_name="event_bus",
+            )
+        )
+    return expected
+
+
 def _topic_is_covered_by_legacy_group(topic: str, group_id: str) -> bool:
     """Best-effort coverage check for manifests without contract records."""
     return (
@@ -375,6 +426,12 @@ class ServiceRuntimeHealthMonitor:
             expected_groups = _expected_consumer_groups_from_manifest(
                 manifest, os.environ.get("KAFKA_INSTANCE_ID")
             )
+            live_expected_groups = _expected_consumer_groups_from_event_bus(
+                self._event_bus
+            )
+            if live_expected_groups:
+                expected_groups = live_expected_groups
+                subscribe_topics = {expected.topic for expected in live_expected_groups}
 
             if discovery_error_count > 0:
                 dimensions.append(
@@ -422,14 +479,17 @@ class ServiceRuntimeHealthMonitor:
                 consumer_group_count = len(all_group_ids)
 
                 empty_states = {"DEAD", "EMPTY", "UNKNOWN"}
-                empty_groups = {
+                empty_group_ids = {
                     g.group_id for g in group_snapshots if g.state in empty_states
                 }
-                empty_consumer_group_count = len(empty_groups)
 
                 # Check which subscribe topics have a matching non-empty group.
-                non_empty_groups = set(all_group_ids) - empty_groups
+                non_empty_groups = set(all_group_ids) - empty_group_ids
                 if expected_groups:
+                    expected_group_ids = {
+                        expected.group_id for expected in expected_groups
+                    }
+                    empty_groups = empty_group_ids & expected_group_ids
                     missing_expected = [
                         expected
                         for expected in expected_groups
@@ -441,6 +501,7 @@ class ServiceRuntimeHealthMonitor:
                         for expected in missing_expected
                     ]
                 else:
+                    empty_groups = empty_group_ids
                     # Test doubles and older manifest protocols may only expose
                     # topic names. Keep a bounded fallback, but production
                     # manifests use exact expected group IDs above.
@@ -454,6 +515,7 @@ class ServiceRuntimeHealthMonitor:
                             uncovered_topics.append(topic)
                     uncovered_topic_count = len(uncovered_topics)
                     uncovered_details = uncovered_topics
+                empty_consumer_group_count = len(empty_groups)
 
                 if empty_consumer_group_count > 0:
                     dimensions.append(
