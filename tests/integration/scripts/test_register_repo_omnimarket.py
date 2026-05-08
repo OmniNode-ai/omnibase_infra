@@ -35,7 +35,6 @@ Tests 2 and 3 are skipped when Infisical is unreachable (CI-safe).
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
