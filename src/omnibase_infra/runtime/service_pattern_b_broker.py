@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Protocol, cast
+from typing import cast
 from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer
@@ -50,13 +50,6 @@ def _error_result(
         error_message=error_message,
         completed_at=datetime.now(UTC),
     )
-
-
-class KafkaBrokerTransportProtocol(Protocol):
-    config: object
-    _bootstrap_servers: str
-
-    def _build_auth_kwargs(self) -> Mapping[str, object]: ...
 
 
 class RuntimePatternBBroker:
@@ -223,7 +216,7 @@ class RuntimePatternBBroker:
         config = getattr(kafka_event_bus, "config", SimpleNamespace())
         consumer = AIOKafkaConsumer(
             route.terminal_event,
-            bootstrap_servers=kafka_event_bus._bootstrap_servers,
+            bootstrap_servers=self._kafka_bootstrap_servers(),
             group_id=_terminal_group_id(command.correlation_id),
             auto_offset_reset="latest",
             enable_auto_commit=False,
@@ -275,12 +268,27 @@ class RuntimePatternBBroker:
         )
 
     def _direct_kafka_auth_kwargs(self) -> dict[str, object]:
-        build_auth_kwargs = self._kafka_event_bus()._build_auth_kwargs
-        auth_kwargs = build_auth_kwargs()
+        build_auth_kwargs = getattr(  # noqa: B009
+            self._kafka_event_bus(),
+            "_build_auth_kwargs",
+        )
+        auth_kwargs = cast(
+            "Callable[[], Mapping[str, object] | None]",
+            build_auth_kwargs,
+        )()
         return dict(auth_kwargs or {})
 
-    def _kafka_event_bus(self) -> KafkaBrokerTransportProtocol:
-        return cast("KafkaBrokerTransportProtocol", self._event_bus)
+    def _kafka_bootstrap_servers(self) -> str:
+        bootstrap_servers = getattr(  # noqa: B009
+            self._kafka_event_bus(),
+            "_bootstrap_servers",
+        )
+        if not isinstance(bootstrap_servers, str):
+            raise RuntimeError("Kafka event bus bootstrap servers are not configured")
+        return bootstrap_servers
+
+    def _kafka_event_bus(self) -> object:
+        return self._event_bus
 
     async def _publish_worker_command(
         self,
