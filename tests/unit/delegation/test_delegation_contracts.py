@@ -100,19 +100,18 @@ class TestRoutingReducerContract:
         data = self._load()
         assert data["node_type"] == "REDUCER_GENERIC"
 
-    def test_config_dependencies_include_llm_endpoints(self) -> None:
+    def test_config_dependencies_include_bifrost_contract_path(self) -> None:
         data = self._load()
         dep_keys = {d["key"] for d in data["config_dependencies"]}
-        assert "LLM_CODER_URL" in dep_keys
-        assert "LLM_DEEPSEEK_R1_URL" in dep_keys
+        assert "BIFROST_CONTRACT_PATH" in dep_keys
 
-    def test_llm_coder_fast_url_is_optional(self) -> None:
+    def test_bifrost_contract_path_is_optional(self) -> None:
         data = self._load()
         deps = {d["key"]: d for d in data["config_dependencies"]}
-        assert "LLM_CODER_FAST_URL" in deps, (
-            "LLM_CODER_FAST_URL missing from config_dependencies"
+        assert "BIFROST_CONTRACT_PATH" in deps, (
+            "BIFROST_CONTRACT_PATH missing from config_dependencies"
         )
-        assert deps["LLM_CODER_FAST_URL"]["required"] is False
+        assert deps["BIFROST_CONTRACT_PATH"]["required"] is False
 
 
 @pytest.mark.unit
