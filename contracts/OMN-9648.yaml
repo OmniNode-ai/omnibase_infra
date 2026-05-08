@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-9648
+title: "Runtime health monitor profile-aware coverage"
+summary: "Filter runtime health monitor expected consumer groups by runtime profile and keep the expensive sweep out of pre-health startup."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused unit and integration coverage for runtime health monitor profile filtering passes."
+    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
+  - kind: manual
+    description: "Stability runtime hotfix reaches healthy after redeploy and one-shot monitor proof records remaining real subscription gaps."
+    command: "deploy: docker exec omninode-stability-test-runtime python -c 'from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor; print(ServiceRuntimeHealthMonitor.__name__)'"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-tests
+    description: "Focused health monitor tests cover profile filtering and non-blocking startup."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py tests/integration/test_runtime_health_monitor_profile_filter.py -q"
+  - id: dod-deploy
+    description: "Deploy gate evidence: stability runtime hotfix was deployed and validated on .201."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: docker exec omninode-stability-test-runtime python -c 'from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor; print(ServiceRuntimeHealthMonitor.__name__)'"

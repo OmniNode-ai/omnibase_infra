@@ -71,6 +71,34 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     return discover_contracts()  # type: ignore[return-value]
 
 
+def _filter_manifest_for_runtime_profile(
+    manifest: ProtocolAutoWiringManifestLike,
+) -> ProtocolAutoWiringManifestLike:
+    """Apply the same runtime-profile ownership filter used by service startup."""
+    from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
+        ModelAutoWiringManifest,
+    )
+    from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+        filter_manifest_for_runtime_profile,
+    )
+
+    if not isinstance(manifest, ModelAutoWiringManifest):
+        return manifest
+
+    ownership_result = filter_manifest_for_runtime_profile(
+        manifest=manifest,
+        runtime_profile=os.environ.get("RUNTIME_PROFILE", "main"),
+    )
+    if ownership_result.skipped_contracts:
+        logger.debug(
+            "Runtime health monitor profile ownership: profile=%s owned=%d skipped=%d",
+            ownership_result.runtime_profile,
+            ownership_result.manifest.total_discovered,
+            len(ownership_result.skipped_contracts),
+        )
+    return ownership_result.manifest
+
+
 class ConsumerGroupSnapshot(NamedTuple):
     """Minimal consumer group state used by runtime health checks."""
 
@@ -285,8 +313,11 @@ class ServiceRuntimeHealthMonitor:
     async def start(self) -> None:
         """Start the background health check loop. Idempotent.
 
-        Runs the first health check immediately before entering the periodic loop
-        so callers get an initial signal without waiting one full interval.
+        The first full health check is intentionally deferred to the background
+        loop. Contract discovery and Kafka group inspection are expensive on the
+        full runtime image; running them synchronously here delays health-server
+        binding and can make a healthy runtime appear stuck in Docker
+        ``starting``.
         """
         if self._running:
             return
@@ -297,13 +328,6 @@ class ServiceRuntimeHealthMonitor:
             logger.info(
                 "ServiceRuntimeHealthMonitor boot grace active for %.1fs",
                 self._boot_grace_seconds,
-            )
-        # Run the first check immediately so callers get an initial health signal.
-        try:
-            await self.run_once()
-        except Exception:  # noqa: BLE001 — best-effort; don't block startup
-            logger.warning(
-                "ServiceRuntimeHealthMonitor: initial check failed", exc_info=True
             )
         self._task = asyncio.create_task(self._loop(), name="runtime-health-monitor")
         logger.info(
@@ -344,7 +368,7 @@ class ServiceRuntimeHealthMonitor:
         subscribe_topics: set[str] = set()
         expected_groups: list[ExpectedConsumerGroup] = []
         try:
-            manifest = _discover_contracts()
+            manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
             contract_count = manifest.total_discovered
             discovery_error_count = manifest.total_errors
             subscribe_topics = set(manifest.all_subscribe_topics())
