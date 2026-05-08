@@ -20,6 +20,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from omnibase_core.normalization.batch_validator import run_batch_validation
 from omnibase_infra.cli.artifact_reconcile import artifact_reconcile_cmd
 
 logger = logging.getLogger(__name__)
@@ -62,14 +63,46 @@ def validate_architecture_cmd(directory: str, max_violations: int | None) -> Non
 
 @validate.command("contracts")
 @click.argument("directory", default="src/omnibase_infra/nodes/")
-def validate_contracts_cmd(directory: str) -> None:
-    """Validate YAML contracts."""
-    from omnibase_infra.validation.infra_validators import validate_infra_contracts
+@click.option(
+    "--mode",
+    default="strict",
+    type=click.Choice(["strict", "migration_audit"], case_sensitive=False),
+    help="Validation mode: strict (default) or migration_audit for legacy corpus sweeps.",
+)
+def validate_contracts_cmd(directory: str, mode: str) -> None:
+    """Validate YAML contracts using batch validator with mode selection.
 
-    console.print(f"[bold blue]Validating contracts in {directory}...[/bold blue]")
-    result = validate_infra_contracts(directory)
-    _print_result("Contracts", result)
-    raise SystemExit(0 if result.is_valid else 1)
+    STRICT mode (default): enforces all required fields; fails on legacy shapes.
+    MIGRATION_AUDIT mode: normalizes legacy contracts before validating; used
+    for batch sweeps over the corpus to inventory substantive failures.
+    """
+    from pathlib import Path
+
+    from omnibase_core.enums.enum_validator_mode import EnumValidatorMode
+
+    validator_mode = EnumValidatorMode(mode.lower())
+    root = Path(directory)
+    console.print(
+        f"[bold blue]Validating contracts in {directory} "
+        f"(mode={validator_mode.value})...[/bold blue]"
+    )
+    summary = run_batch_validation(root, mode=validator_mode)
+
+    if summary.failed > 0:
+        console.print("[bold red]Contracts: FAIL[/bold red]")
+        for report in summary.reports:
+            if not report.passed:
+                console.print(f"  [red]{report.path}[/red]")
+                for err in report.errors:
+                    console.print(f"    [red]{err}[/red]")
+    else:
+        console.print("[bold green]Contracts: PASS[/bold green]")
+
+    console.print(
+        f"[bold]Summary: {summary.passed}/{summary.total} passed "
+        f"(mode={validator_mode.value})[/bold]"
+    )
+    raise SystemExit(0 if summary.failed == 0 else 1)
 
 
 @validate.command("patterns")
