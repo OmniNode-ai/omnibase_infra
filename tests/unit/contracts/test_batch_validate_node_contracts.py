@@ -12,9 +12,11 @@ Validates that the batch validator:
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
@@ -61,6 +63,17 @@ def _run(directory: Path, *, verbose: bool = False) -> subprocess.CompletedProce
     if verbose:
         cmd.append("--verbose")
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+
+
+def _load_script_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "batch_validate_node_contracts", SCRIPT
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestBatchValidateAllPass:
@@ -179,6 +192,38 @@ class TestBatchValidateCLI:
         nonexistent = tmp_path / "does_not_exist"
         result = _run(nonexistent)
         assert result.returncode == 2
+        assert "not found or not a directory" in result.stderr
+
+    def test_file_directory_argument_exits_2(self, tmp_path: Path) -> None:
+        file_path = tmp_path / "not_a_directory"
+        file_path.write_text("not a directory", encoding="utf-8")
+
+        result = _run(file_path)
+
+        assert result.returncode == 2
+        assert "not found or not a directory" in result.stderr
+
+    def test_import_error_exits_2(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _write_contract(tmp_path, "node_import_error", "COMPUTE_GENERIC")
+        module = _load_script_module()
+
+        def fail_import(_path: Path) -> str:
+            raise ImportError("missing dependency")
+
+        monkeypatch.setattr(module, "_validate_contract_node_type", fail_import)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [str(SCRIPT), "--directory", str(tmp_path)],
+        )
+
+        assert module.main() == 2
+        assert "Import failure" in capsys.readouterr().err
 
     def test_verbose_flag_shows_paths(self, tmp_path: Path) -> None:
         _write_contract(tmp_path, "node_verbose_test", "EFFECT_GENERIC")

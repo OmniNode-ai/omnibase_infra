@@ -4,9 +4,9 @@
 """Batch-validate all node contract.yaml files via model_validate().
 
 Walks all nodes/*/contract.yaml files under a given directory and runs
-load_and_validate_contract_yaml() (the OMN-9746 choke-point that uses
-model_validate()) on each one. Any contract that fails node_type validation,
-YAML parsing, or structure checks causes a non-zero exit.
+ModelNodeTypeProbe.model_validate() (the OMN-9746 choke-point for node_type)
+on each one. Any contract that fails node_type validation, YAML parsing, or
+structure checks causes a non-zero exit.
 
 Usage:
     uv run python scripts/batch_validate_node_contracts.py
@@ -112,6 +112,8 @@ def run_batch_validation(
             passed += 1
             if verbose:
                 print(f"  PASS  {path}  (node_type={node_type})")
+        except ImportError:
+            raise
         except Exception as exc:  # noqa: BLE001
             failures.append((path, str(exc)))
             if verbose:
@@ -151,8 +153,11 @@ def main() -> int:
     args = parser.parse_args()
 
     directory = Path(args.directory)
-    if not directory.exists():
-        print(f"ERROR: Directory not found: {directory}", file=sys.stderr)
+    if not directory.is_dir():
+        print(
+            f"ERROR: Directory not found or not a directory: {directory}",
+            file=sys.stderr,
+        )
         return 2
 
     try:
