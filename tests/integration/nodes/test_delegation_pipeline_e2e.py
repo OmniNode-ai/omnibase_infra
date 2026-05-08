@@ -24,6 +24,7 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -67,16 +68,35 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_deleg
 
 
 @pytest.fixture(autouse=True)
-def _set_llm_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provide LLM endpoint env vars required by the routing reducer."""
+def _set_bifrost_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide a deployed bifrost contract required by the routing reducer."""
     import omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing as _h
 
     _h._config = None
-    monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-    monkeypatch.setenv("LLM_CODER_FAST_URL", "http://192.168.86.201:8001")
-    monkeypatch.setenv("LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101")
+    _h._load_bifrost_endpoints.cache_clear()
+    contract_path = tmp_path / "bifrost_delegation.yaml"
+    contract_path.write_text(
+        "config_version: '1.1.0'\n"
+        "schema_version: bifrost_delegation.v1\n"
+        "backends:\n"
+        "  - backend_id: local-qwen-coder-30b\n"
+        '    endpoint_url: "http://192.168.86.201:8000"\n'
+        "    model_name: \n"
+        "    tier: local\n"
+        "    timeout_ms: 30000\n"
+        "    capabilities: []\n"
+        "  - backend_id: local-deepseek-r1-14b\n"
+        '    endpoint_url: "http://192.168.86.201:8001"\n'
+        "    model_name: \n"
+        "    tier: local\n"
+        "    timeout_ms: 30000\n"
+        "    capabilities: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(contract_path))
     yield
     _h._config = None
+    _h._load_bifrost_endpoints.cache_clear()
 
 
 def _simulate_inference(
