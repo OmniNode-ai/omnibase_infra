@@ -119,6 +119,10 @@ class ModelDelegationBackendConfig(BaseModel):
         default=None,
         description="Env var name holding the backend base URL (local backends).",
     )
+    endpoint_url: str = Field(
+        default="",
+        description="Deployed full endpoint URL populated by install-delegation.sh.",
+    )
     # ONEX_EXCLUDE: pattern_validator - model_name is a model identifier string
     # (e.g. "claude-sonnet-4-6"), not an entity reference requiring ID + display_name pattern.
     model_name: str = Field(
@@ -199,7 +203,7 @@ class ModelBifrostDelegationConfig(BaseModel):
     backends: tuple[ModelDelegationBackendConfig, ...] = Field(
         ...,
         min_length=1,
-        description="Backend definitions — URLs resolved from env vars at runtime.",
+        description="Backend definitions with deployed endpoint URLs.",
     )
     routing_rules: tuple[ModelDelegationRoutingRule, ...] = Field(
         ...,

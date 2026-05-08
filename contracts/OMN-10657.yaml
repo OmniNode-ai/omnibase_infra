@@ -1,0 +1,25 @@
+# OMN-10657 contract file for omnibase_infra deploy-gate (OMN-8912).
+# This repo-local contract carries deploy-gate evidence for resolving
+# delegation routing endpoints from the deployed bifrost contract.
+schema_version: '1.0.0'
+ticket_id: OMN-10657
+title: 'Resolve delegation endpoints from deployed contract, not env vars'
+summary: >
+  NodeDelegationRoutingReducer now reads endpoint URLs from the deployed bifrost contract at ~/.omninode/delegation/bifrost_delegation.yaml instead of os.environ.get() calls. ModelTierModel.env_var renamed to backend_ref. routing_tiers.yaml updated with backend_ref keys matching bifrost backend IDs. The handler change is dormant until the delegation orchestrator routes through this reducer in production — deploy of omninode-runtime not required for this PR.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-deploy
+    description: >-
+      deploy-gate: handler_delegation_routing.py change is dormant — the routing reducer is not yet invoked by the runtime kernel for delegation requests. The bifrost contract path (BIFROST_CONTRACT_PATH or ~/.omninode/delegation/bifrost_delegation.yaml) defaults to a location that does not exist in production runtime containers until install-delegation.sh --apply is run by the operator. No omninode-runtime container behavior changes from this PR; no Docker restart required. Wiring will activate once the delegation orchestrator is plumbed through this reducer in a follow-up ticket.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: routing reducer endpoint resolution change is dormant. Bifrost contract loading activates only when BIFROST_CONTRACT_PATH is set or ~/.omninode/delegation/bifrost_delegation.yaml exists, neither of which is present in the production runtime container by default.

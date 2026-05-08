@@ -20,8 +20,8 @@ Related:
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -73,11 +73,37 @@ class TestDelegationChainE2E:
     """End-to-end delegation chain tests using in-memory event bus."""
 
     @pytest.fixture(autouse=True)
-    def _setup_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Set required LLM endpoint env vars for routing reducer."""
-        monkeypatch.setenv("LLM_CODER_URL", "http://test-coder:8000")
-        monkeypatch.setenv("LLM_CODER_FAST_URL", "http://test-fast:8001")
-        monkeypatch.setenv("LLM_DEEPSEEK_R1_URL", "http://test-deepseek:8101")
+    def _setup_bifrost_contract(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Set the bifrost contract path used by the routing reducer."""
+        import omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing as _h
+
+        _h._config = None
+        _h._load_bifrost_endpoints.cache_clear()
+        contract_path = tmp_path / "bifrost_delegation.yaml"
+        contract_path.write_text(
+            "config_version: '1.1.0'\n"
+            "schema_version: bifrost_delegation.v1\n"
+            "backends:\n"
+            "  - backend_id: local-qwen-coder-30b\n"
+            '    endpoint_url: "http://test-coder:8000"\n'
+            '    model_name: "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"\n'
+            "    tier: local\n"
+            "    timeout_ms: 30000\n"
+            "    capabilities: []\n"
+            "  - backend_id: local-deepseek-r1-14b\n"
+            '    endpoint_url: "http://test-fast:8001"\n'
+            '    model_name: "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ"\n'
+            "    tier: local\n"
+            "    timeout_ms: 30000\n"
+            "    capabilities: []\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(contract_path))
+        yield
+        _h._config = None
+        _h._load_bifrost_endpoints.cache_clear()
 
     @pytest.fixture
     def handler(self) -> HandlerDelegationWorkflow:
@@ -131,6 +157,10 @@ class TestDelegationChainE2E:
         assert isinstance(decision, ModelRoutingDecision)
         assert decision.correlation_id == cid
         assert decision.task_type == "research"
+        assert decision.selected_model in {
+            "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit",
+            "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ",
+        }
 
         # Step 3: Handle routing decision -> get inference intents
         inference_intents = handler.handle_routing_decision(decision)
