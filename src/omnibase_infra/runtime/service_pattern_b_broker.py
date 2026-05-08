@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -27,6 +28,8 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
 )
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _broker_group_id(command_topic: str) -> str:
@@ -247,7 +250,13 @@ class RuntimePatternBBroker:
                 if terminal_envelope.correlation_id == command.correlation_id:
                     return terminal_envelope.payload
         finally:
-            await consumer.stop()
+            try:
+                await consumer.stop()
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Failed to stop Pattern B terminal Kafka consumer: %s",
+                    sanitize_error_message(exc),
+                )
 
     async def _wait_for_kafka_assignment(
         self,

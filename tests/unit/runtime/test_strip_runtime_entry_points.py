@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from omnibase_infra.runtime.strip_runtime_entry_points import (
     DEFAULT_STRIPPED_GROUPS,
     normalize_distribution_name,
@@ -24,6 +26,7 @@ def _dist_info(
     return dist_info
 
 
+@pytest.mark.unit
 def test_strips_onex_runtime_groups_from_non_market_distribution(
     tmp_path: Path,
 ) -> None:
@@ -79,6 +82,7 @@ node_market = omnimarket.nodes.node_market
     assert report.stripped_distributions[0].removed_file is False
 
 
+@pytest.mark.unit
 def test_removes_entry_points_file_when_only_runtime_groups_remain(
     tmp_path: Path,
 ) -> None:
@@ -99,6 +103,7 @@ intelligence = omniintelligence.plugin:PluginIntelligence
     assert report.stripped_distributions[0].removed_file is True
 
 
+@pytest.mark.unit
 def test_distribution_name_normalization_handles_underscores_and_dots() -> None:
     assert normalize_distribution_name("omninode_intelligence") == (
         "omninode-intelligence"
