@@ -52,7 +52,6 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifro
     ModelBifrostBackendConfig,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_delegation_config import (
-    ModelBifrostDelegationConfig,
     ModelDelegationShadowConfig,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
