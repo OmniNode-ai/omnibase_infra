@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -97,7 +97,7 @@ class TestValidateContractsModeFlag:
             ["validate", "contracts", str(tmp_path)],
         )
         assert result.exit_code == 0, result.output
-        assert "strict" in result.output.lower() or result.exit_code == 0
+        assert "mode=strict" in result.output.lower()
 
     def test_validate_contracts_uses_batch_validator(self, tmp_path: Path) -> None:
         _write_node_contract(tmp_path, _clean_effect_contract())
