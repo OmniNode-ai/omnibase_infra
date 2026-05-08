@@ -1,0 +1,130 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: 1
+# scripts/ci/test_selection_adjacency.yaml
+# Static adjacency map from src/omnibase_infra/<module> to dependent modules.
+# When a key module changes, every module in `reverse_deps` ALSO has its tests run.
+# Treated as CI contract data — manually curated, reviewed in PRs that change it.
+
+# `shared_modules` is a FULL-SUITE ESCALATION POLICY, not an architectural ontology.
+# Listing a module here means "if this module changes, run the full suite" — it does
+# NOT claim the module is fundamentally more important than others, nor does it map
+# to a permanent layering invariant. Curate based on operational risk + import fan-out.
+# Removing a module from this list is allowed once we have shadow data showing its
+# changes don't surface broad regressions.
+#
+# Selected based on grep import counts (>100 files importing each module):
+#   nodes:   1342 imports  (highest absolute count — many handlers import node contracts)
+#   models:   886 imports  (widest structural fan-out)
+#   enums:    660 imports
+#   runtime:  635 imports
+#   errors:   300 imports
+#   topics:   103 imports  (Kafka contract wiring — any drift has broad impact)
+shared_modules:
+  - models
+  - enums
+  - runtime
+  - errors
+  - nodes
+  - topics
+# Per-repo full-suite escalation thresholds.
+# Infra has ~40 source modules; 6 changed at once indicates a broad cross-cutting change.
+thresholds:
+  modules_changed_for_full_suite: 6
+# Test infrastructure — any change forces the full suite.
+test_infrastructure_paths:
+  - tests/conftest.py
+  - tests/fixtures/
+  - tests/helpers/
+  - pytest.ini
+  - pyproject.toml
+# Reverse dependency edges. Key = changed module; value = modules that import it.
+# When `models` changes, also run tests for everything in `models.reverse_deps`.
+# Note: shared_modules entries here are not consulted at runtime
+# (they trigger full suite first), but kept for completeness/documentation.
+#
+# Discovery method: grep -r "from omnibase_infra.<module>" src/omnibase_infra/ --include="*.py" -l
+# | sed 's|src/omnibase_infra/||' | cut -d'/' -f1 | sort -u
+adjacency:
+  # --- shared modules (full-suite escalation; reverse_deps kept for documentation) ---
+  models:
+    reverse_deps: [adapters, capabilities, cli, dlq, errors, event_bus, handlers, mixins, nodes, observability, probes, projectors, protocols, runtime, services, sinks, topics, utils, validation, verification]
+  enums:
+    reverse_deps: [adapters, cli, dlq, errors, event_bus, gateway, handlers, idempotency, mixins, nodes, observability, projectors, protocols, runtime, services, sinks, topics, types, utils, validation, verification]
+  runtime:
+    reverse_deps: [adapters, cli, dlq, models, nodes, protocols, services, validation]
+  errors:
+    reverse_deps: [adapters, cli, dlq, event_bus, gateway, handlers, idempotency, mixins, nodes, observability, projectors, secret_stores, services, topics, utils, validation]
+  nodes:
+    reverse_deps: [adapters, cli, handlers, models, onboarding, runtime, services, validation]
+  topics:
+    reverse_deps: [adapters, cli, event_bus, handlers, mixins, models, observability, runtime, services, tui, validation]
+  # --- high-impact non-shared modules ---
+  services:
+    reverse_deps: [adapters, dlq, handlers, protocols, runtime]
+  protocols:
+    reverse_deps: [adapters, models, observability, plugins, runtime, services]
+  event_bus:
+    reverse_deps: [adapters, backends, cli, observability, protocols, runtime, services]
+  mixins:
+    reverse_deps: [adapters, dlq, event_bus, handlers, observability, plugins, projectors, runtime, services, utils]
+  utils:
+    reverse_deps: [adapters, cli, dlq, errors, event_bus, handlers, idempotency, observability, onboarding, projectors, runtime, scope, services, verification]
+  handlers:
+    reverse_deps: [adapters, observability, runtime, services]
+  observability:
+    reverse_deps: [event_bus, runtime]
+  adapters:
+    reverse_deps: [handlers, runtime, secret_stores, services]
+  types:
+    reverse_deps: [errors, event_bus, mixins, models, runtime, utils, validation]
+  projectors:
+    reverse_deps: [cli, protocols, runtime, services]
+  validation:
+    reverse_deps: [cli, runtime]
+  idempotency:
+    reverse_deps: [runtime]
+  gateway:
+    reverse_deps: [gateways, runtime]
+  diagnostics:
+    reverse_deps: []
+  dlq:
+    reverse_deps: [runtime]
+  backends:
+    reverse_deps: [runtime]
+  capabilities:
+    reverse_deps: [mixins]
+  onboarding:
+    reverse_deps: []
+  plugins:
+    reverse_deps: [protocols]
+  probes:
+    reverse_deps: []
+  registry:
+    reverse_deps: []
+  tools:
+    reverse_deps: [event_bus, topics]
+  # --- leaf / near-leaf modules ---
+  cli: {reverse_deps: []}
+  clients: {reverse_deps: []}
+  configs: {reverse_deps: []}
+  contracts: {reverse_deps: []}
+  decorators: {reverse_deps: []}
+  docker: {reverse_deps: []}
+  gateways: {reverse_deps: []}
+  hooks: {reverse_deps: []}
+  infrastructure: {reverse_deps: []}
+  migrations: {reverse_deps: []}
+  resources: {reverse_deps: []}
+  schemas: {reverse_deps: []}
+  scope: {reverse_deps: []}
+  scripts: {reverse_deps: []}
+  secret_stores: {reverse_deps: []}
+  sinks: {reverse_deps: []}
+  test_utils: {reverse_deps: []}
+  testing: {reverse_deps: []}
+  tui: {reverse_deps: []}
+  verification: {reverse_deps: []}
+  validators: {reverse_deps: []}
+  shared: {reverse_deps: []}
+  workflows: {reverse_deps: []}
