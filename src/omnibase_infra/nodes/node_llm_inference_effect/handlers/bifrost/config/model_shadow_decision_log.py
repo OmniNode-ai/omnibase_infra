@@ -25,6 +25,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,7 @@ class ModelShadowDecisionLog(BaseModel):
         shadow_confidence: Confidence score from the learned policy (0.0-1.0).
         shadow_latency_ms: Time taken for the shadow policy evaluation.
         policy_version: Version of the shadow policy that produced this recommendation.
+        shadow_label: Canonical dashboard/eval label for shadow recommendations.
         shadow_action_distribution: Full action probability distribution from policy.
         static_backend_estimated_cost: Estimated cost for the static selection.
         shadow_backend_estimated_cost: Estimated cost for the shadow recommendation.
@@ -134,6 +136,10 @@ class ModelShadowDecisionLog(BaseModel):
         ...,
         max_length=128,
         description="Version of the shadow policy that produced this recommendation.",
+    )
+    shadow_label: Literal["SHADOW"] = Field(
+        default="SHADOW",
+        description="Canonical dashboard/eval label for shadow recommendations.",
     )
     shadow_action_distribution: dict[str, float] = Field(
         default_factory=dict,

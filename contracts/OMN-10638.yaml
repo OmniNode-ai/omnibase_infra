@@ -1,0 +1,32 @@
+# OMN-10638 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical ticket contract lives in onex_change_control. This repo-local
+# contract carries deploy-gate evidence for the Bifrost delegation shadow mode.
+schema_version: '1.0.0'
+ticket_id: OMN-10638
+title: 'feat(OMN-10638): Shadow mode for delegation A/B testing'
+summary: >-
+  Adds ModelDelegationShadowConfig to model_bifrost_delegation_config.py and shadow_mode field to ModelBifrostDelegationConfig. Extends bifrost_delegation.yaml with a shadow_mode section (disabled by default). Shadow decisions NEVER affect live routing output.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-test-pass
+    description: >-
+      Test proving shadow decision does not alter live routing output. test_bifrost_delegation_shadow.py::TestShadowDoesNotAlterLiveRouting::test_shadow_does_not_alter_live_routing_output passes: shadow policy recommends backend-b while static routing selects backend-a; response.backend_selected == "backend-a" is asserted. 16 new tests added in test_bifrost_delegation_shadow.py, all passing.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_delegation_shadow.py -v
+  - id: dod-deploy
+    description: >-
+      deploy-gate: shadow mode additions are dormant — ModelDelegationShadowConfig is a new Pydantic model and bifrost_delegation.yaml has shadow_mode.enabled=false. No handler imports the delegation config yet (wiring is a follow-up). No omninode-runtime container behaviour changes; no Docker restart required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: shadow_mode config additions are dormant. bifrost_delegation.yaml shadow_mode.enabled=false by default. No runtime path imports ModelDelegationShadowConfig.

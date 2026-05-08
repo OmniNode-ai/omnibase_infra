@@ -138,3 +138,13 @@ def test_bifrost_contract_schema_version_is_correct() -> None:
     assert isinstance(raw, dict)
     assert raw.get("schema_version") == "bifrost_delegation.v1"
     assert raw.get("config_version") == "1.1.0"
+
+
+def test_source_bifrost_contract_declares_dormant_shadow_mode() -> None:
+    """Source bifrost contract must keep shadow mode present and disabled."""
+    raw = yaml.safe_load(SOURCE_BIFROST_PATH.read_text())
+    assert isinstance(raw, dict)
+    shadow_mode = raw.get("shadow_mode")
+    assert isinstance(shadow_mode, dict)
+    assert shadow_mode.get("enabled") is False
+    assert shadow_mode.get("comparison_logging_enabled") is True
