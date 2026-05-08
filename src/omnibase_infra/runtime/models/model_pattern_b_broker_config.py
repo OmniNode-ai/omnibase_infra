@@ -34,6 +34,13 @@ class ModelPatternBBrokerConfig(BaseModel):
         default=("omnibase_infra",),
         description="Package roots scanned for broker-addressable node contracts.",
     )
+    enabled_profiles: tuple[str, ...] = Field(
+        default=("main", "default", "local-dev", "test"),
+        description=(
+            "Runtime profiles allowed to start the Pattern B broker when enabled "
+            "is true. Use '*' to allow every profile."
+        ),
+    )
 
     @field_validator("command_topic")
     @classmethod
@@ -50,12 +57,27 @@ class ModelPatternBBrokerConfig(BaseModel):
             return tuple(value)
         return value
 
+    @field_validator("enabled_profiles", mode="before")
+    @classmethod
+    def _coerce_enabled_profiles(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
     @field_validator("package_names")
     @classmethod
     def _validate_package_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(part.strip() for part in value if part.strip())
         if not normalized:
             raise ValueError("package_names must contain at least one package name")
+        return normalized
+
+    @field_validator("enabled_profiles")
+    @classmethod
+    def _validate_enabled_profiles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(part.strip().lower() for part in value if part.strip())
+        if not normalized:
+            raise ValueError("enabled_profiles must contain at least one profile")
         return normalized
 
 

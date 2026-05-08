@@ -88,6 +88,27 @@ class TestLoadRuntimeConfig:
         assert config.output_topic == "test-responses"
         assert config.consumer_group == "test-group"
 
+    def test_repo_runtime_config_enables_main_profile_ingress(self) -> None:
+        """The shipped runtime config enables the main-profile skill ingress path."""
+        repo_root = Path(__file__).resolve().parents[3]
+
+        config = load_runtime_config(repo_root / "contracts")
+
+        assert config.local_ingress.enabled is True
+        assert config.local_ingress.socket_path == "/run/onex-runtime/onex-runtime.sock"
+        assert config.local_ingress.package_names == ("omnibase_infra", "omnimarket")
+        assert config.local_ingress.enabled_profiles == ("main",)
+        assert config.pattern_b_broker.enabled is True
+        assert (
+            config.pattern_b_broker.command_topic
+            == "onex.cmd.omnimarket.pattern-b-dispatch.v1"
+        )
+        assert config.pattern_b_broker.package_names == (
+            "omnibase_infra",
+            "omnimarket",
+        )
+        assert config.pattern_b_broker.enabled_profiles == ("main",)
+
     def test_load_config_file_not_found_uses_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

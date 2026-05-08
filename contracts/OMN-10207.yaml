@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-10207
+title: "Host-live Pattern B broker proof"
+summary: "Enable the main runtime profile's local ingress and Pattern B broker path so host-live market skill dispatch can be proven through the runtime-owned command surface."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - topics
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: "Focused runtime config, local ingress, Pattern B broker, and serialization coverage passes."
+    command: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run pytest tests/integration/test_runtime_pattern_b_ingress_config.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_pattern_b_broker.py tests/unit/runtime/test_kernel.py::TestLoadRuntimeConfig::test_repo_runtime_config_enables_main_profile_ingress tests/unit/models/test_model_serialization_roundtrip.py -q"
+  - kind: tests
+    description: "Runtime config loader validates the shipped local ingress and Pattern B broker contract settings."
+    command: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run python -c \"from pathlib import Path; from omnibase_infra.runtime.service_kernel import load_runtime_config; c=load_runtime_config(Path('contracts')); print(c.local_ingress.enabled, c.pattern_b_broker.command_topic)\""
+  - kind: manual
+    description: "Deploy-gate proof: after rebuilding/recreating the stability runtime, the live container reports enabled local ingress and can consume the OmniMarket Pattern B command topic."
+    command: >-
+      deploy: docker exec omninode-stability-test-runtime python -c "import json, urllib.request; h=json.loads(urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=5).read()); print(h['local_ingress'])" && printf '%s\n' '{"command_name":"runtime_sweep","requester":"deploy-gate","payload":{"dry_run":true},"correlation_id":"00000000-0000-0000-0000-000000000000","response_topic":"onex.evt.omnimarket.pattern-b-dispatch-completed.v1","timeout_seconds":5}' | docker exec -i omnibase-infra-stability-test-redpanda rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-focused-tests
+    description: "Focused unit tests cover runtime config loading, profile-gated ingress startup, broker startup, and model serialization."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run pytest tests/integration/test_runtime_pattern_b_ingress_config.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_pattern_b_broker.py tests/unit/runtime/test_kernel.py::TestLoadRuntimeConfig::test_repo_runtime_config_enables_main_profile_ingress tests/unit/models/test_model_serialization_roundtrip.py -q"
+  - id: dod-runtime-config-loader
+    description: "The runtime config loader accepts the shipped ingress/broker settings."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run python -c \"from pathlib import Path; from omnibase_infra.runtime.service_kernel import load_runtime_config; c=load_runtime_config(Path('contracts')); print(c.local_ingress.model_dump(mode='json')); print(c.pattern_b_broker.model_dump(mode='json'))\""
+  - id: dod-compose-config
+    description: "Stability compose render includes the host-visible local runtime socket mount on the main runtime service."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "POSTGRES_PASSWORD=postgres LINEAR_API_KEY=dummy docker compose --profile runtime -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml config"
+  - id: dod-deploy-proof
+    description: "Post-deploy live proof must show the stability runtime socket ingress running and the OmniMarket Pattern B topic accepting commands."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy: docker exec omninode-stability-test-runtime python -c "import json, urllib.request; h=json.loads(urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=5).read()); print(h['local_ingress'])" && printf '%s\n' '{"command_name":"runtime_sweep","requester":"deploy-gate","payload":{"dry_run":true},"correlation_id":"00000000-0000-0000-0000-000000000000","response_topic":"onex.evt.omnimarket.pattern-b-dispatch-completed.v1","timeout_seconds":5}' | docker exec -i omnibase-infra-stability-test-redpanda rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1

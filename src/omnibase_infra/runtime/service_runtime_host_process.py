@@ -238,6 +238,20 @@ _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
 )
 
 
+def _current_runtime_profile_name() -> str:
+    raw_profile = os.getenv("RUNTIME_PROFILE")
+    if raw_profile is None:
+        return "default"
+    profile = raw_profile.strip()
+    return profile.lower() if profile else "default"
+
+
+def _runtime_profile_is_enabled(enabled_profiles: tuple[str, ...]) -> bool:
+    current_profile = _current_runtime_profile_name()
+    normalized_profiles = {profile.strip().lower() for profile in enabled_profiles}
+    return "*" in normalized_profiles or current_profile in normalized_profiles
+
+
 def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
     """Normalize and validate the runtime config prefetch policy."""
     policy = value.strip().lower()
@@ -2236,7 +2250,7 @@ class RuntimeHostProcess:
 
     async def _start_local_ingress(self) -> None:
         """Start the runtime-owned local command ingress when enabled."""
-        if not self._local_ingress_config.enabled:
+        if not self._is_local_ingress_effectively_enabled():
             self._local_ingress_routes.clear()
             self._local_ingress_active_packages = ()
             return
@@ -2271,10 +2285,14 @@ class RuntimeHostProcess:
 
     async def _start_pattern_b_broker(self) -> None:
         """Start the runtime-owned Pattern B broker when enabled."""
-        if not self._pattern_b_broker_config.enabled:
-            if self._local_ingress_config.enabled:
+        local_ingress_enabled = self._is_local_ingress_effectively_enabled()
+        if not self._is_pattern_b_broker_effectively_enabled():
+            if local_ingress_enabled:
                 raise ProtocolConfigurationError(
-                    "local runtime ingress requires pattern_b_broker.enabled=true",
+                    "local runtime ingress requires pattern_b_broker to be "
+                    "effectively enabled: pattern_b_broker.enabled=true and "
+                    "current RUNTIME_PROFILE allowed by "
+                    "pattern_b_broker.enabled_profiles",
                     context=ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="pattern_b_broker.start",
@@ -2283,7 +2301,7 @@ class RuntimeHostProcess:
             self._pattern_b_broker = None
             return
 
-        if self._local_ingress_config.enabled:
+        if local_ingress_enabled:
             routes = dict(self._local_ingress_routes)
         else:
             package_names = tuple(
@@ -2298,6 +2316,16 @@ class RuntimeHostProcess:
             routes=routes,
         )
         await self._pattern_b_broker.start()
+
+    def _is_local_ingress_effectively_enabled(self) -> bool:
+        return self._local_ingress_config.enabled and _runtime_profile_is_enabled(
+            self._local_ingress_config.enabled_profiles
+        )
+
+    def _is_pattern_b_broker_effectively_enabled(self) -> bool:
+        return self._pattern_b_broker_config.enabled and _runtime_profile_is_enabled(
+            self._pattern_b_broker_config.enabled_profiles
+        )
 
     async def _dispatch_local_ingress_request(
         self,
@@ -5044,18 +5072,15 @@ class RuntimeHostProcess:
 
     def _build_local_ingress_health(self) -> ModelLocalRuntimeIngressHealth:
         """Build typed health details for local runtime ingress."""
+        enabled = self._is_local_ingress_effectively_enabled()
         return ModelLocalRuntimeIngressHealth(
-            enabled=self._local_ingress_config.enabled,
+            enabled=enabled,
             running=(
                 self._local_ingress_server.is_running
                 if self._local_ingress_server is not None
                 else False
             ),
-            socket_path=(
-                self._local_ingress_config.socket_path
-                if self._local_ingress_config.enabled
-                else None
-            ),
+            socket_path=(self._local_ingress_config.socket_path if enabled else None),
             route_count=len(self._local_ingress_routes),
             active_packages=self._local_ingress_active_packages,
         )

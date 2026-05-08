@@ -76,6 +76,26 @@ contract_registry:
   # [ACTIVE] tick_interval_seconds controls periodic staleness check frequency
   # The registry will check for stale contracts at this interval (in seconds)
   tick_interval_seconds: 60
+# Local runtime ingress configuration [ACTIVE - used by RuntimeHostProcess]
+# Enables the runtime-owned Unix-socket ingress for host-local clients.
+local_ingress:
+  enabled: true
+  socket_path: "/run/onex-runtime/onex-runtime.sock"
+  package_names:
+    - omnibase_infra
+    - omnimarket
+  enabled_profiles:
+    - main
+# Pattern B broker configuration [ACTIVE - used by RuntimeHostProcess]
+# The command topic is aligned with the OmniMarket Codex runtime adapter.
+pattern_b_broker:
+  enabled: true
+  command_topic: "onex.cmd.omnimarket.pattern-b-dispatch.v1"
+  package_names:
+    - omnibase_infra
+    - omnimarket
+  enabled_profiles:
+    - main
 # Handler configuration [RESERVED - not currently used]
 # Future: Will be used for dynamic protocol loading and configuration
 handlers:
