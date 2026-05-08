@@ -354,6 +354,42 @@ class TestRunOnceWithKafka:
         )
 
     @pytest.mark.asyncio
+    async def test_live_event_bus_groups_override_stale_discovered_contracts(self):
+        stale_contract = _make_discovered_contract(name="node_superseded_projection")
+        manifest = ModelAutoWiringManifest(contracts=(stale_contract,), errors=())
+        topic = stale_contract.event_bus.subscribe_topics[0]
+        live_group = f"runtime.projection.consume.v1.__i.instance-1.__t.{topic}"
+        stale_empty_group = f"old.projection.consume.v1.__i.instance-1.__t.{topic}"
+        snapshots = self._mock_admin(
+            [live_group, stale_empty_group],
+            empty_groups={stale_empty_group},
+        )
+        bus = MagicMock()
+        bus.get_consumer_groups.return_value = {
+            (topic, "runtime.projection.consume.v1"): live_group
+        }
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=bus,
+            bootstrap_servers="localhost:9092",
+        )
+
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.uncovered_topic_count == 0
+        assert event.empty_consumer_group_count == 0
+        assert event.status == "HEALTHY"
+
+    @pytest.mark.asyncio
     async def test_topic_coverage_uses_runtime_profile_ownership_filter(self):
         main_contract = _make_discovered_contract(
             name="node_main_owner",
