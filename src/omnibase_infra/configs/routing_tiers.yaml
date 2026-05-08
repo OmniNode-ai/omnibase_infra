@@ -11,13 +11,18 @@
 # Tier evaluation order: local → cheap_cloud → claude
 # The handler iterates tiers top-to-bottom, stopping at the first accepted result.
 #
+# Endpoint URLs are resolved from the deployed bifrost contract at
+# ~/.omninode/delegation/bifrost_delegation.yaml. The backend_id field maps
+# each model to a backend entry in the bifrost contract. See OMN-10657.
+#
 # Related Tickets:
 #   - OMN-8029: Delegation pipeline — local→cheap-cloud→claude routing
+#   - OMN-10657: Endpoint resolution from deployed contract, not env vars
 tiers:
   - name: local
     models:
       - id: qwen3-coder-30b
-        env_var: LLM_CODER_URL
+        backend_id: local-qwen-coder-30b
         max_context_tokens: 65536
         use_for:
           - code_generation
@@ -26,7 +31,7 @@ tiers:
           - test
           - research
       - id: deepseek-r1-14b
-        env_var: LLM_CODER_FAST_URL
+        backend_id: local-deepseek-r1-14b
         max_context_tokens: 24576
         use_for:
           - test
@@ -42,14 +47,14 @@ tiers:
   - name: cheap_cloud
     models:
       - id: glm-z-ai
-        env_var: LLM_GLM_URL
+        backend_id: cloud-glm
         max_context_tokens: 128000
         use_for:
           - code_generation
           - reasoning
           - research
       - id: gemini-flash
-        env_var: LLM_GEMINI_FLASH_URL
+        backend_id: cloud-gemini-flash
         max_context_tokens: 1000000
         use_for:
           - summarization
@@ -61,7 +66,7 @@ tiers:
   - name: claude
     models:
       - id: claude-sonnet-4-6
-        env_var: ANTHROPIC_API_KEY
+        backend_id: cloud-sonnet
         max_context_tokens: 200000
         use_for:
           - escalation
@@ -81,13 +86,13 @@ tiers:
   - name: cli_agents
     models:
       - id: claude-cli
-        env_var: CLAUDE_CLI_AVAILABLE
+        backend_id: cli-claude
         max_context_tokens: 200000
         use_for:
           - agent_delegation
           - complex_reasoning
       - id: opencode-cli
-        env_var: OPENCODE_CLI_AVAILABLE
+        backend_id: cli-opencode
         max_context_tokens: 200000
         use_for:
           - agent_delegation

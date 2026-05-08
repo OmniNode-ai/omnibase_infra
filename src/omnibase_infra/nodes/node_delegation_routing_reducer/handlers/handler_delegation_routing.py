@@ -9,6 +9,12 @@ and returns the first tier that has a configured endpoint for the given task typ
 All tier order, model assignments, and retry counts come from the YAML config —
 no constants are hardcoded here.
 
+Endpoint URLs are resolved from the deployed bifrost contract at
+~/.omninode/delegation/bifrost_delegation.yaml — NOT from environment variables.
+The installer (install-delegation.sh --apply) populates endpoint_url fields in
+the deployed contract. Each model in routing_tiers.yaml has a backend_id that
+maps to a backend entry in the bifrost contract.
+
 Task-class contracts (task_class_contracts.v1.yaml) augment tier routing with
 per-class pricing ceilings and cloud routing policies. When the contract file is
 present (via TASK_CLASS_CONTRACT_PATH env var or the default location), routing
@@ -23,6 +29,7 @@ Related:
     - OMN-7040: Node-based delegation pipeline
     - OMN-8029: Delegation pipeline — local→cheap-cloud→claude routing
     - OMN-10615: Wire routing reducer to read task-class contracts
+    - OMN-10657: Endpoint resolution from deployed contract, not env vars
 """
 
 from __future__ import annotations
@@ -153,36 +160,30 @@ def _select_model_for_task(
     tier_models: tuple[ModelTierModel, ...],
     task_type: str,
     estimated_tokens: int,
+    bifrost_backends: dict[str, BifrostBackendRef],
 ) -> ModelTierModel | None:
     """Select the best model from a tier for the given task and token count.
 
     Prefers fast-path models when prompt fits within their threshold.
     Falls back to any model that declares the task type in use_for.
+    Endpoint availability is checked via the bifrost_backends dict (keyed by backend_id).
     """
-    # Fast-path check: prefer model with threshold if tokens fit within both the
-    # fast-path threshold and the model's declared max context window.
     for model in tier_models:
-        endpoint = os.environ.get(
-            model.env_var, ""
-        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
+        backend = bifrost_backends.get(model.backend_ref)
         if (
             task_type in model.use_for
             and estimated_tokens <= model.max_context_tokens
             and model.fast_path_threshold_tokens is not None
             and estimated_tokens <= model.fast_path_threshold_tokens
-            and endpoint
+            and backend
         ):
             return model
 
-    # Standard selection: first model that handles this task, has endpoint set,
-    # and whose context window can accommodate the estimated token count.
     for model in tier_models:
-        endpoint = os.environ.get(
-            model.env_var, ""
-        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
+        backend = bifrost_backends.get(model.backend_ref)
         if (
             task_type in model.use_for
-            and endpoint
+            and backend
             and estimated_tokens <= model.max_context_tokens
         ):
             return model
@@ -200,6 +201,14 @@ _DEFAULT_TASK_CLASS_CONTRACT_PATH = (
     / "task_class_contracts.v1.yaml"
 )
 
+_DEFAULT_BIFROST_CONTRACT_PATH = (
+    Path.home() / ".omninode" / "delegation" / "bifrost_delegation.yaml"
+)
+
+_SOURCE_BIFROST_CONTRACT_PATH = (
+    Path(__file__).parent.parent.parent.parent / "configs" / "bifrost_delegation.yaml"
+)
+
 # Module-level config singletons — loaded once on first call.
 # Tests can override by replacing these variables before calling delta().
 _config: ModelDelegationConfig | None = None
@@ -208,10 +217,60 @@ _config: ModelDelegationConfig | None = None
 def _get_config() -> ModelDelegationConfig:
     global _config  # noqa: PLW0603
     if _config is None:
-        # I/O is performed here in the handler (EFFECT boundary), not in the pure model.
         yaml_text = _DEFAULT_CONFIG_PATH.read_text()
         _config = ModelDelegationConfig.from_yaml_text(yaml_text)
     return _config
+
+
+class BifrostBackendRef:
+    """Resolved backend from the deployed bifrost contract."""
+
+    __slots__ = ("endpoint_url", "model_name")
+
+    def __init__(self, endpoint_url: str, model_name: str) -> None:
+        self.endpoint_url = endpoint_url
+        self.model_name = model_name
+
+
+@lru_cache(maxsize=1)
+def _load_bifrost_endpoints() -> dict[str, BifrostBackendRef]:
+    """Load backend info from the deployed bifrost contract.
+
+    Resolution order:
+      1. BIFROST_CONTRACT_PATH env var (test/override)
+      2. ~/.omninode/delegation/bifrost_delegation.yaml (installed by installer)
+      3. Source configs/bifrost_delegation.yaml (development fallback)
+
+    Returns a dict mapping backend_id → BifrostBackendRef (endpoint_url + model_name).
+    """
+    env_path = os.environ.get(
+        "BIFROST_CONTRACT_PATH", ""
+    )  # ONEX_EXCLUDE: env_access - contract path configuration
+    if env_path:
+        contract_path = Path(env_path)
+    elif _DEFAULT_BIFROST_CONTRACT_PATH.exists():
+        contract_path = _DEFAULT_BIFROST_CONTRACT_PATH
+    else:
+        contract_path = _SOURCE_BIFROST_CONTRACT_PATH
+
+    if not contract_path.exists():
+        return {}
+
+    raw = yaml.safe_load(contract_path.read_text())
+    if not isinstance(raw, dict):
+        return {}
+
+    backends: dict[str, BifrostBackendRef] = {}
+    for backend in raw.get("backends", []):
+        if not isinstance(backend, dict):
+            continue
+        bid = backend.get("backend_id", "")
+        url = backend.get("endpoint_url", "")
+        model_name = backend.get("model_name", "")
+        if bid and url:
+            backends[bid] = BifrostBackendRef(endpoint_url=url, model_name=model_name)
+
+    return backends
 
 
 @lru_cache(maxsize=1)
@@ -358,6 +417,8 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
     task type, and satisfies task-class contract constraints (cloud routing policy
     and pricing ceiling).
 
+    Endpoint URLs are resolved from the deployed bifrost contract, not env vars.
+
     Args:
         request: The delegation request to route.
 
@@ -368,6 +429,7 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
         ProtocolConfigurationError: If no tier has a configured endpoint for the task type.
     """
     config = _get_config()
+    bifrost_backends = _load_bifrost_endpoints()
     task_type = request.task_type
     estimated_tokens = _estimate_prompt_tokens(request.prompt)
 
@@ -379,20 +441,27 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
         if not _tier_allowed_by_contract(tier, entry):
             continue
 
-        selected = _select_model_for_task(tier.models, task_type, estimated_tokens)
+        selected = _select_model_for_task(
+            tier.models,
+            task_type,
+            estimated_tokens,
+            bifrost_backends,
+        )
         if selected is None:
             continue
 
-        endpoint_url = os.environ.get(
-            selected.env_var, ""
-        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
-        if not endpoint_url:
+        backend = bifrost_backends.get(selected.backend_ref)
+        if not backend:
             continue
 
         system_prompt = _SYSTEM_PROMPTS.get(
             task_type,
             f"You are a helpful assistant completing a {task_type} task.",
         )
+
+        # Use the bifrost model_name (full vLLM model ID) when available,
+        # fall back to the routing_tiers short ID.
+        model_name = backend.model_name or selected.id
 
         rationale = (
             f"Task '{task_type}' (~{estimated_tokens} tokens) routed to "
@@ -411,16 +480,15 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
                 f" Contract-driven: task_class='{task_type}' policy='{policy_str}'."
             )
 
-        # Map cost tier from tier name
         cost_tier_map = {"local": "low", "cheap_cloud": "medium", "claude": "high"}
         cost_tier = cost_tier_map.get(tier.name, tier.name)
 
         return ModelRoutingDecision(
             correlation_id=request.correlation_id,
             task_type=task_type,
-            selected_model=selected.id,
+            selected_model=model_name,
             selected_backend_id=_backend_id_for_model(selected.id),
-            endpoint_url=endpoint_url,
+            endpoint_url=backend.endpoint_url,
             cost_tier=cost_tier,
             max_context_tokens=selected.max_context_tokens,
             system_prompt=system_prompt,
@@ -434,8 +502,8 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
     )
     msg = (
         f"No tier has a configured endpoint for task_type='{task_type}'. "
-        f"Set at least one of the required env vars in routing_tiers.yaml "
-        f"(e.g., LLM_CODER_URL for local tier, ANTHROPIC_API_KEY for claude tier)."
+        f"Deploy a bifrost contract with endpoint URLs via install-delegation.sh --apply, "
+        f"or set BIFROST_CONTRACT_PATH to a contract with populated endpoint_url fields."
     )
     raise ProtocolConfigurationError(msg, context=context)
 
