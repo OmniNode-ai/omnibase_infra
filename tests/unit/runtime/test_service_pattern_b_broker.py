@@ -360,6 +360,29 @@ async def test_runtime_host_process_skips_pattern_b_broker_for_disallowed_profil
     assert process._pattern_b_broker is None
 
 
+def test_runtime_host_process_treats_blank_runtime_profile_as_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNTIME_PROFILE", "   ")
+
+    process = RuntimeHostProcess(
+        event_bus=EventBusInmemory(environment="test", group="pattern-b"),
+        config={
+            "service_name": "test-service",
+            "node_name": "test-node",
+            "env": "test",
+            "version": "v1",
+            "pattern_b_broker": {
+                "enabled": True,
+                "enabled_profiles": ["default"],
+            },
+        },
+        dispatch_engine=AsyncMock(),
+    )
+
+    assert process._is_pattern_b_broker_effectively_enabled() is True
+
+
 @pytest.mark.asyncio
 async def test_runtime_host_process_broker_package_names_ignore_active_runtime_env(
     monkeypatch: pytest.MonkeyPatch,
@@ -477,6 +500,6 @@ async def test_runtime_host_process_rejects_enabled_ingress_without_pattern_b_br
 
     with pytest.raises(
         ProtocolConfigurationError,
-        match=r"local runtime ingress requires pattern_b_broker\.enabled=true",
+        match=r"local runtime ingress requires pattern_b_broker to be effectively enabled",
     ):
         await process._start_pattern_b_broker()

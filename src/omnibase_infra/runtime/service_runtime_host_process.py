@@ -239,7 +239,11 @@ _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
 
 
 def _current_runtime_profile_name() -> str:
-    return (os.getenv("RUNTIME_PROFILE") or "default").strip().lower()
+    raw_profile = os.getenv("RUNTIME_PROFILE")
+    if raw_profile is None:
+        return "default"
+    profile = raw_profile.strip()
+    return profile.lower() if profile else "default"
 
 
 def _runtime_profile_is_enabled(enabled_profiles: tuple[str, ...]) -> bool:
@@ -2285,7 +2289,10 @@ class RuntimeHostProcess:
         if not self._is_pattern_b_broker_effectively_enabled():
             if local_ingress_enabled:
                 raise ProtocolConfigurationError(
-                    "local runtime ingress requires pattern_b_broker.enabled=true",
+                    "local runtime ingress requires pattern_b_broker to be "
+                    "effectively enabled: pattern_b_broker.enabled=true and "
+                    "current RUNTIME_PROFILE allowed by "
+                    "pattern_b_broker.enabled_profiles",
                     context=ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="pattern_b_broker.start",
