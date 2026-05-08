@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -35,6 +36,7 @@ def _contract(name: str, topic: str, profile: str) -> ModelDiscoveredContract:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_runtime_health_monitor_uses_profile_filtered_contracts() -> None:
     main_contract = _contract(
         "node_main_profile",
@@ -53,7 +55,9 @@ async def test_runtime_health_monitor_uses_profile_filtered_contracts() -> None:
     expected = _expected_consumer_groups_from_manifest(
         ModelAutoWiringManifest(contracts=(main_contract,), errors=())
     )[0]
-    monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="redpanda:9092")
+    monitor = ServiceRuntimeHealthMonitor(
+        bootstrap_servers=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "redpanda:9092")
+    )
 
     with (
         patch.dict("os.environ", {"RUNTIME_PROFILE": "main"}),
