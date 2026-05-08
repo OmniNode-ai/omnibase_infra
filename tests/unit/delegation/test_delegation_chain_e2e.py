@@ -88,13 +88,13 @@ class TestDelegationChainE2E:
             "backends:\n"
             "  - backend_id: local-qwen-coder-30b\n"
             '    endpoint_url: "http://test-coder:8000"\n'
-            "    model_name: \n"
+            '    model_name: "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"\n'
             "    tier: local\n"
             "    timeout_ms: 30000\n"
             "    capabilities: []\n"
             "  - backend_id: local-deepseek-r1-14b\n"
             '    endpoint_url: "http://test-fast:8001"\n'
-            "    model_name: \n"
+            '    model_name: "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ"\n'
             "    tier: local\n"
             "    timeout_ms: 30000\n"
             "    capabilities: []\n",
@@ -157,6 +157,10 @@ class TestDelegationChainE2E:
         assert isinstance(decision, ModelRoutingDecision)
         assert decision.correlation_id == cid
         assert decision.task_type == "research"
+        assert decision.selected_model in {
+            "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit",
+            "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ",
+        }
 
         # Step 3: Handle routing decision -> get inference intents
         inference_intents = handler.handle_routing_decision(decision)

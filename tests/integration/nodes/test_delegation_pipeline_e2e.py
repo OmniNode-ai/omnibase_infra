@@ -81,13 +81,13 @@ def _set_bifrost_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         "backends:\n"
         "  - backend_id: local-qwen-coder-30b\n"
         '    endpoint_url: "http://192.168.86.201:8000"\n'
-        "    model_name: \n"
+        '    model_name: "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"\n'
         "    tier: local\n"
         "    timeout_ms: 30000\n"
         "    capabilities: []\n"
         "  - backend_id: local-deepseek-r1-14b\n"
         '    endpoint_url: "http://192.168.86.201:8001"\n'
-        "    model_name: \n"
+        '    model_name: "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ"\n'
         "    tier: local\n"
         "    timeout_ms: 30000\n"
         "    capabilities: []\n",
@@ -222,8 +222,11 @@ class TestDelegationPipelineHappyPath:
         )
 
         routing_decision = routing_delta(request)
-        # document tasks route to deepseek-r1-14b (LLM_CODER_FAST_URL) in the local tier
-        assert routing_decision.selected_model == "deepseek-r1-14b"
+        # document tasks route to the deployed DeepSeek model in the local tier
+        assert (
+            routing_decision.selected_model
+            == "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ"
+        )
         assert routing_decision.endpoint_url == "http://192.168.86.201:8001"
 
         orchestrator = HandlerDelegationWorkflow()
