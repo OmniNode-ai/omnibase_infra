@@ -251,6 +251,8 @@ event_bus:
         idempotent: true
       provisioning_priority: 10
   publish_topics:
+    - topic: onex.runtime.subscriptions
+      description: Runtime subscription commands emitted by the wiring effect
     - topic: onex.evt.runtime.ready.v1
       description: Runtime is fully initialized with all subscriptions wired
       payload_schema: ModelRuntimeReadyEvent

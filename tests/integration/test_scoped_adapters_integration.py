@@ -5,16 +5,18 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
-    AdapterLlmProviderOpenai,
-)
 from omnibase_infra.adapters.llm.model_llm_adapter_request import ModelLlmAdapterRequest
 from omnibase_infra.adapters.overseer import AdapterLlmProviderScoped
 from omnibase_infra.errors import InvariantViolation
+
+if TYPE_CHECKING:
+    from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
+        AdapterLlmProviderOpenai,
+    )
 
 pytestmark = pytest.mark.integration
 
