@@ -106,12 +106,30 @@ def test_reducer_honors_env_override_path(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_routing_with_contract_loaded_picks_local_tier(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """End-to-end: loaded contract + local tier endpoint → routes to local model."""
+    """End-to-end: loaded task-class contract + bifrost endpoint → routes to local model.
+
+    Endpoint URLs are now resolved from the bifrost contract (OMN-10657), not env vars.
+    This test writes a temp bifrost YAML with a populated endpoint for local-qwen-coder-30b
+    and verifies the reducer picks the local tier.
+    """
+    # Write a minimal bifrost contract with the local backend endpoint populated.
+    bifrost_yaml = tmp_path / "bifrost.yaml"
+    bifrost_yaml.write_text(
+        "config_version: '1.1.0'\n"
+        "schema_version: bifrost_delegation.v1\n"
+        "backends:\n"
+        "  - backend_id: local-qwen-coder-30b\n"
+        '    endpoint_url: "http://192.168.86.201:8000"\n'
+        "    model_name: cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit\n"
+        "    tier: local\n"
+        "    timeout_ms: 30000\n"
+        "    capabilities: []\n"
+    )
     monkeypatch.setenv("TASK_CLASS_CONTRACT_PATH", str(DEFAULT_CONTRACT_PATH))
-    monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-    monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
+    monkeypatch.setenv("BIFROST_CONTRACT_PATH", str(bifrost_yaml))
 
     decision = delta(_request(task_type="test", prompt="x" * 200000))
-    assert decision.selected_model == "qwen3-coder-30b"
+    assert decision.selected_model == "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
     assert decision.cost_tier == "low"

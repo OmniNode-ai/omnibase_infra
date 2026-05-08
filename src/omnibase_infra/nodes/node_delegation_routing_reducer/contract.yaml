@@ -16,15 +16,15 @@ contract_name: "node_delegation_routing_reducer"
 node_name: "node_delegation_routing_reducer"
 contract_version:
   major: 0
-  minor: 2
+  minor: 3
   patch: 0
 node_version:
   major: 0
-  minor: 2
+  minor: 3
   patch: 0
 node_type: "REDUCER_GENERIC"
 description: >
-  Deterministic routing reducer for the delegation pipeline. Maps task type and prompt token count to a routing decision: which model, endpoint, cost tier, and system prompt to use. Pure function, no I/O. Reads endpoint URLs from environment via contract config dependencies. Loads task-class contracts from configs/task_class_contracts.v1.yaml (overrideable via TASK_CLASS_CONTRACT_PATH) and enforces per-task-class cloud_routing_policy, pricing_ceiling_per_1k_tokens, and escalation_policy.tier_order constraints (OMN-10615).
+  Deterministic routing reducer for the delegation pipeline. Maps task type and prompt token count to a routing decision: which model, endpoint, cost tier, and system prompt to use. Pure function, no I/O. Resolves endpoint URLs from the deployed bifrost contract at ~/.omninode/delegation/bifrost_delegation.yaml (overrideable via BIFROST_CONTRACT_PATH) — not from environment variables (OMN-10657). Loads task-class contracts from configs/task_class_contracts.v1.yaml (overrideable via TASK_CLASS_CONTRACT_PATH) and enforces per-task-class cloud_routing_policy, pricing_ceiling_per_1k_tokens, and escalation_policy.tier_order constraints (OMN-10615).
 
 input_model:
   name: "ModelDelegationRequest"
@@ -69,15 +69,9 @@ config_dependencies:
   - key: "DEBT_SCOUT_BASE_URL"
     description: "A2A endpoint URL for the ADK type debt scout agent"
     required: true
-  - key: "LLM_CODER_URL"
-    description: "Endpoint URL for Qwen3-Coder-30B-A3B (port 8000)"
-    required: true
-  - key: "LLM_CODER_FAST_URL"
-    description: "Endpoint URL for DeepSeek-R1-14B (port 8001)"
+  - key: "BIFROST_CONTRACT_PATH"
+    description: "Override path for the deployed bifrost delegation contract (default: ~/.omninode/delegation/bifrost_delegation.yaml). Used in tests and staging environments."
     required: false
-  - key: "LLM_DEEPSEEK_R1_URL"
-    description: "Endpoint URL for DeepSeek-R1-14B AWQ (port 8001, .201)"
-    required: true
 error_handling:
   retry_policy:
     max_retries: 0
@@ -112,3 +106,5 @@ metadata:
     - llm
   related_tickets:
     - "OMN-7040"
+    - "OMN-10615"
+    - "OMN-10657"
