@@ -63,6 +63,7 @@ def _make_discovered_contract(
     name: str = "node_contract_sweep",
     package_name: str = "omnimarket",
     topic: str = "onex.cmd.omnimarket.contract-sweep-start.v1",
+    runtime_profiles: tuple[str, ...] = (),
 ) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
@@ -71,6 +72,7 @@ def _make_discovered_contract(
         contract_path=__file__,
         entry_point_name=name,
         package_name=package_name,
+        runtime_profiles=runtime_profiles,
         event_bus=ModelEventBusWiring(subscribe_topics=(topic,), publish_topics=()),
     )
 
@@ -351,6 +353,45 @@ class TestRunOnceWithKafka:
             degraded_dims[0].detail
         )
 
+    @pytest.mark.asyncio
+    async def test_topic_coverage_uses_runtime_profile_ownership_filter(self):
+        main_contract = _make_discovered_contract(
+            name="node_main_owner",
+            topic="onex.cmd.omnimarket.main-owned.v1",
+            runtime_profiles=("main",),
+        )
+        effects_contract = _make_discovered_contract(
+            name="node_effects_owner",
+            topic="onex.cmd.omnimarket.effects-owned.v1",
+            runtime_profiles=("effects",),
+        )
+        manifest = ModelAutoWiringManifest(
+            contracts=(main_contract, effects_contract),
+            errors=(),
+        )
+        expected_main = _expected_consumer_groups_from_manifest(
+            ModelAutoWiringManifest(contracts=(main_contract,), errors=())
+        )[0]
+        snapshots = self._mock_admin([expected_main.group_id], empty_groups=set())
+        monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
+
+        with (
+            patch.dict("os.environ", {"RUNTIME_PROFILE": "main"}),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.contract_count == 1
+        assert event.uncovered_topic_count == 0
+        assert event.status == "HEALTHY"
+
 
 # =============================================================================
 # ServiceRuntimeHealthMonitor — event emission
@@ -447,6 +488,18 @@ class TestLifecycle:
             task_before = monitor._task
             await monitor.start()  # second call — should not re-run initial check
         assert monitor._task is task_before
+        await monitor.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_run_health_check_synchronously(self):
+        monitor = ServiceRuntimeHealthMonitor(
+            bootstrap_servers="", check_interval_seconds=9999.0
+        )
+
+        with patch.object(monitor, "run_once", new=AsyncMock()) as run_once:
+            await monitor.start()
+            run_once.assert_not_called()
+
         await monitor.stop()
 
     @pytest.mark.asyncio
