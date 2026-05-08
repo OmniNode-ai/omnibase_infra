@@ -658,11 +658,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Parallel test execution - 15 splits for ~618 tests each
-  # Split strategy: 9265 tests / 15 = ~618 tests per split (~2-3 min each)
-  # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
-  test-parallel:
-    name: Tests (Split ${{ matrix.split }}/15)
+  # ---------------------------------------------------------------------------
+  # Phase 1.6 - Detect Changes (OMN-10715)
+  # ---------------------------------------------------------------------------
+  # Runs detect_test_paths and emits outputs for dynamic matrix shaping.
+  # When ENABLE_SMART_TESTS is off (default), emits a 15-shard matrix with
+  # full_suite_reason=FEATURE_FLAG_OFF so the full-suite pytest step runs.
+  # When the flag is on and the change set is small, emits a smaller matrix
+  # and selected_paths, activating the smart-selection pytest step instead.
+
+  detect-changes:
+    name: Detect Changes
     needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -672,11 +678,12 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        split: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    outputs:
+      is_full_suite: ${{ steps.detect.outputs.is_full_suite }}
+      full_suite_reason: ${{ steps.detect.outputs.full_suite_reason }}
+      split_count: ${{ steps.detect.outputs.split_count }}
+      matrix: ${{ steps.detect.outputs.matrix }}
+      selected_paths: ${{ steps.detect.outputs.selected_paths }}
 
     steps:
       - name: Checkout code
@@ -692,12 +699,110 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
-      - name: Run test split ${{ matrix.split }}/15
+      - name: Compute changed files
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            git fetch --no-tags --depth=1 origin "$base" || true
+            git diff --name-only "$base"...HEAD > changed.txt
+          else
+            git diff --name-only HEAD~1 HEAD > changed.txt || echo "" > changed.txt
+          fi
+          echo "Changed files:"
+          cat changed.txt
+
+      - name: Resolve test selection
+        id: detect
+        env:
+          FLAG: ${{ vars.ENABLE_SMART_TESTS == 'true' && 'on' || 'off' }}
+        run: |
+          uv run python -m scripts.ci.detect_test_paths \
+            --changed-files-from changed.txt \
+            --ref-name "${{ github.ref_name }}" \
+            --event-name "${{ github.event_name }}" \
+            --feature-flag "$FLAG" \
+            > selection.json
+          cat selection.json
+          is_full=$(jq -r '.is_full_suite' selection.json)
+          reason=$(jq -r '.full_suite_reason // ""' selection.json)
+          split_count=$(jq -r '.split_count' selection.json)
+          matrix=$(jq -c '.matrix' selection.json)
+          paths=$(jq -c '.selected_paths' selection.json)
+          echo "is_full_suite=$is_full" >> "$GITHUB_OUTPUT"
+          echo "full_suite_reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "split_count=$split_count" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "selected_paths=$paths" >> "$GITHUB_OUTPUT"
+
+      - name: Upload selection artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-selection
+          path: selection.json
+          retention-days: 7
+
+  # Parallel test execution — matrix shape driven by detect-changes output (OMN-10715).
+  # When ENABLE_SMART_TESTS is off (default), detect-changes emits a 15-shard matrix
+  # with full_suite_reason=FEATURE_FLAG_OFF so the full-suite pytest step runs.
+  # When the flag is on and the change set is small, detect-changes emits a smaller
+  # matrix and selected_paths, activating the smart-selection pytest step instead.
+  #
+  # Split strategy: 9265 tests / 15 = ~618 tests per split (~2-3 min each)
+  # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
+  test-parallel:
+    name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        split: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run pytest (smart selection)
+        if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
+        run: |
+          paths=$(echo '${{ needs.detect-changes.outputs.selected_paths }}' | jq -r '.[]')
+          uv run pytest $paths \
+            --ignore=tests/integration/docker \
+            -m "not slow and not chaos and not kafka and not performance" \
+            --splits ${{ needs.detect-changes.outputs.split_count }} \
+            --group ${{ matrix.split }} \
+            -n 2 --dist loadgroup \
+            --timeout=60 \
+            --timeout-method=thread \
+            --tb=short \
+            --junitxml=junit-${{ matrix.split }}.xml
+
+      - name: Run pytest (full suite)
+        if: vars.ENABLE_SMART_TESTS != 'true' || needs.detect-changes.outputs.is_full_suite == 'true'
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
             -m "not slow and not chaos and not kafka and not performance" \
-            --splits 15 \
+            --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
             --timeout=60 \
@@ -862,18 +967,19 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: test-parallel
+    needs: [test-parallel, detect-changes]
     if: always()
     steps:
       - name: Check test matrix results
         env:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
+          SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
         run: |
           if [ "$TESTS_RESULT" != "success" ]; then
             echo "::error::Test matrix failed (result: $TESTS_RESULT)"
             exit 1
           fi
-          echo "All 15 test splits passed"
+          echo "All ${SPLIT_COUNT} test splits passed"
 
   # ============================================================================
   # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
