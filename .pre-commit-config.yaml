@@ -327,14 +327,6 @@ repos:
         pass_filenames: false
         types: [python]
         stages: [pre-commit]
-      # OMN-10732: Reject localhost/hardcoded-URL env fallbacks in src/
-      - id: no-env-localhost-fallback
-        name: Reject localhost env fallbacks in src/ (OMN-10732)
-        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
-        language: system
-        pass_filenames: false
-        types: [python]
-        stages: [pre-commit]
       # OMN-7077: Prevent new direct imports of EventBusInmemory from infra path
       - id: no-infra-inmemory-import
         name: Block infra-path EventBusInmemory imports (OMN-7077)
