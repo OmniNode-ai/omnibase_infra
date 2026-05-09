@@ -129,10 +129,10 @@ class TestInfraValidatorConstants:
         - 131 (2026-03-01): OMN-3202 graph handler signature fix (+1 union)
           - HandlerGraph.initialize(): dict[str, object] | str
 
-        Current: 148 (as of LINEAR_API_KEY OMN-6489). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 149 (as of interactive onboarding models OMN-10771). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 148, (
-            "INFRA_MAX_UNIONS should be 148 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 149, (
+            "INFRA_MAX_UNIONS should be 149 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
