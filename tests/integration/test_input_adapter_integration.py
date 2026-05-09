@@ -20,7 +20,7 @@ async def test_fake_input_adapter_satisfies_protocol_for_step_sequence() -> None
         {
             "choose_mode": "local",
             "choose_services": "kafka, postgres",
-            "enter_name": "demo",
+            "enter_name": "  demo  ",
         }
     )
 
@@ -48,3 +48,20 @@ async def test_fake_input_adapter_satisfies_protocol_for_step_sequence() -> None
     assert await adapter.collect_multi_choice(multi_step) == ["kafka", "postgres"]
     assert await adapter.collect_text(text_step) == "demo"
     await adapter.notify_action(text_step)
+
+
+@pytest.mark.asyncio
+async def test_fake_input_adapter_normalizes_list_multi_choice() -> None:
+    adapter = AdapterFakeInput(
+        {
+            "choose_services": [" kafka ", "", "postgres "],
+        }
+    )
+    step = ModelInteractiveStep(
+        id="choose_services",
+        prompt="Choose services",
+        type="multi_choice",
+        options=["kafka", "postgres"],
+    )
+
+    assert await adapter.collect_multi_choice(step) == ["kafka", "postgres"]

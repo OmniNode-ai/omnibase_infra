@@ -27,7 +27,7 @@ class AdapterFakeInput:
     async def collect_multi_choice(self, step: ModelInteractiveStep) -> list[str]:
         value = self._responses[step.id]
         if isinstance(value, list):
-            return value
+            return [v.strip() for v in value if v.strip()]
         return [v.strip() for v in str(value).split(",") if v.strip()]
 
     async def collect_text(self, step: ModelInteractiveStep) -> str:
@@ -36,7 +36,7 @@ class AdapterFakeInput:
             raise TypeError(
                 f"Expected str response for step {step.id!r}, got {type(value)}"
             )
-        return value
+        return value.strip()
 
     async def notify_action(self, step: ModelInteractiveStep) -> None:  # stub-ok
         pass
