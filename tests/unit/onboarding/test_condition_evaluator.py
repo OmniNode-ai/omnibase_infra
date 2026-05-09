@@ -70,6 +70,24 @@ class TestNotIn:
         with pytest.raises(ConditionEvaluationError, match="env"):
             evaluate_condition("env not in [local, dev]", {})
 
+    def test_not_in_literal_list_true(self) -> None:
+        assert (
+            evaluate_condition(
+                "deployment_mode not in [local, hybrid]",
+                {"deployment_mode": "cloud"},
+            )
+            is True
+        )
+
+    def test_not_in_literal_list_false(self) -> None:
+        assert (
+            evaluate_condition(
+                "deployment_mode not in [local, hybrid]",
+                {"deployment_mode": "local"},
+            )
+            is False
+        )
+
 
 class TestInStateKey:
     def test_in_state_key_match(self) -> None:
