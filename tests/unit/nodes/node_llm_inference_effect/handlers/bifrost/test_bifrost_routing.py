@@ -565,8 +565,7 @@ class TestBifrostRoutingHandleEndToEnd:
         request = _make_chat_request()
         result = await gateway.handle(request)
 
-        assert result.correlation_id != ""
-        assert result.correlation_id is not None
+        assert result.correlation_id == request.correlation_id
 
     @pytest.mark.asyncio
     async def test_bifrost_routing_n_synthetic_requests_select_expected_backends(
