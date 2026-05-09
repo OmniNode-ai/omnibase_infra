@@ -457,7 +457,10 @@ class PostgresErrorEmitter:
         try:
             import redis
 
-            valkey_host = os.environ.get("VALKEY_HOST", "localhost")
+            valkey_host = os.environ.get(
+                "VALKEY_HOST",
+                "localhost",  # fallback-ok: ops script, env overrideable
+            )
             valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
             valkey_db = int(os.environ.get("VALKEY_DB", "0"))
             valkey_password = os.environ.get("VALKEY_PASSWORD")
@@ -821,7 +824,10 @@ class RuntimeErrorEmitter:
         try:
             import redis
 
-            valkey_host = os.environ.get("VALKEY_HOST", "localhost")
+            valkey_host = os.environ.get(
+                "VALKEY_HOST",
+                "localhost",  # fallback-ok: ops script, env overrideable
+            )
             valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
             valkey_db = int(os.environ.get("VALKEY_DB", "0"))
             valkey_password = os.environ.get("VALKEY_PASSWORD")

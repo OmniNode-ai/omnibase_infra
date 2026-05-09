@@ -485,7 +485,10 @@ async def _emit_to_kafka(
 async def _run(dry_run: bool = False) -> int:
     """Main entry point."""
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "").strip()
-    kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092").strip()
+    kafka_servers = os.environ.get(
+        "KAFKA_BOOTSTRAP_SERVERS",
+        "localhost:19092",  # fallback-ok: ops script, env overrideable
+    ).strip()
 
     # Build snapshot payload
     if db_url:

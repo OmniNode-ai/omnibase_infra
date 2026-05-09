@@ -24,7 +24,10 @@ import click
 _MACHINES_YAML_DEFAULT = Path(__file__).parents[4] / "config" / "machines.yaml"
 
 # Fleet-wide constants — read from environment with fleet defaults
-_INFRA_HOST = os.environ.get("OMNI_INFRA_HOST", "192.168.86.201")
+_INFRA_HOST = os.environ.get(
+    "OMNI_INFRA_HOST",
+    "192.168.86.201",  # fallback-ok: lab-fixed IP
+)
 _KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", f"{_INFRA_HOST}:19092")
 _POSTGRES_HOST = os.environ.get("POSTGRES_HOST", _INFRA_HOST)
 _POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5436")

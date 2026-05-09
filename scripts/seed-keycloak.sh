@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-KC_URL="${KC_URL:-http://localhost:28080}"
+KC_URL="${KC_URL:-http://localhost:28080}"  # fallback-ok: local Keycloak seed default
 KC_REALM="${KC_REALM:-omninode}"
 OMNIBASE_ENV_FILE="${OMNIBASE_ENV_FILE:-${HOME}/.omnibase/.env}"
 KC_READY_TIMEOUT="${KC_READY_TIMEOUT:-90}"

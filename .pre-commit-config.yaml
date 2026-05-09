@@ -308,19 +308,21 @@ repos:
         pass_filenames: false
         files: contract\.yaml$
         stages: [pre-commit]
+      # OMN-10741: Unified localhost/hardcoded-endpoint fallback validator
+      # Covers all 6 pattern types from OMN-10658 enforcement sweep.
+      # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
+      - id: no-env-fallbacks
+        name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
+        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
+        language: system
+        pass_filenames: true
+        types_or: [python, shell]
+        stages: [pre-commit]
       # OMN-3554: Reject hardcoded Kafka broker address fallbacks
       # Detects os.getenv("KAFKA_*", non-empty) and private-IP Kafka broker ports
       - id: kafka-no-hardcoded-fallback
         name: Reject hardcoded Kafka broker address fallbacks
         entry: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
-        language: system
-        pass_filenames: false
-        types: [python]
-        stages: [pre-commit]
-      # OMN-10732: Reject localhost/hardcoded-URL env fallbacks in src/
-      - id: no-env-localhost-fallback
-        name: Reject localhost env fallbacks in src/ (OMN-10732)
-        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
         language: system
         pass_filenames: false
         types: [python]

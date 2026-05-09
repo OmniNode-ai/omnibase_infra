@@ -420,7 +420,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--addr",
-        default=os.environ.get("INFISICAL_ADDR", "http://localhost:8880"),
+        default=os.environ.get(
+            "INFISICAL_ADDR",
+            "http://localhost:8880",  # fallback-ok: local provisioning default
+        ),
         help="Infisical server address (default: http://localhost:8880)",
     )
     parser.add_argument(

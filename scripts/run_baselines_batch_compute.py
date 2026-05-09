@@ -93,7 +93,10 @@ async def _run() -> int:
         logger.error("OMNIBASE_INFRA_DB_URL is required but not set")
         return 1
 
-    kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092").strip()
+    kafka_servers = os.environ.get(
+        "KAFKA_BOOTSTRAP_SERVERS",
+        "localhost:19092",  # fallback-ok: ops script, env overrideable
+    ).strip()
     use_kafka = bool(kafka_servers)
 
     correlation_id = uuid4()

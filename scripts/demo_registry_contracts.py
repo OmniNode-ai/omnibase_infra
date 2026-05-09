@@ -248,7 +248,7 @@ def main() -> None:
         print(f"\n[ERROR] Cannot connect to Consul: {e}")
         print("        Check CONSUL_HOST and CONSUL_PORT environment variables")
         print(
-            f"        Current: CONSUL_HOST={os.environ.get('CONSUL_HOST', 'localhost')}"
+            f"        Current: CONSUL_HOST={os.environ.get('CONSUL_HOST', 'localhost')}"  # fallback-ok: error-diagnostic display only
         )
         print(f"                 CONSUL_PORT={os.environ.get('CONSUL_PORT', '8500')}")
         sys.exit(1)

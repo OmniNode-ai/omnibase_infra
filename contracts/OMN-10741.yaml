@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10741"
+title: "Unified no-env-fallback validator for omnibase_infra"
+summary: "Ship the canonical fallback validator, wire pre-commit enforcement, and annotate justified local/dev defaults."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-validator-clean"
+    description: "Unified fallback validator reports zero unhandled violations across src/ and scripts/."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --frozen python scripts/validate_no_env_fallbacks.py"
+  - id: "dod-integration-coverage"
+    description: "Integration coverage proves the validator remains clean for runtime roots."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_validate_no_env_fallbacks_integration.py -q"
+  - id: "dod-deploy"
+    description: "No runtime deploy required; changes are validator tooling and fallback-ok annotations only."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "printf '%s\n' 'No deploy required for OMN-10741 validator and fallback annotation changes'"

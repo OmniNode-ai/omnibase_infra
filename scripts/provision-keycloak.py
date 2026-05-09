@@ -765,7 +765,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--kc-url",
-        default="http://localhost:28080",
+        default="http://localhost:28080",  # fallback-ok: local Keycloak provisioning default
         help=(
             "External base URL for Keycloak (no path prefix). "
             "Default: http://localhost:28080.  "
