@@ -22,11 +22,11 @@ node_name: "node_ledger_write_effect"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
