@@ -1,0 +1,39 @@
+schema_version: '1.0.0'
+ticket_id: OMN-8065
+title: 'Scoped wrapper adapters for TicketService, EventBus, LLMProvider'
+summary: 'Add scoped wrapper adapters that enforce allowed actions before protocol I/O.'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Scoped adapter tests and invariant violation tests pass
+    command: uv run pytest tests/unit/adapters/test_scoped_adapters.py tests/unit/test_invariant_violation.py tests/integration/test_invariant_violation.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1504 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Scoped adapter unit tests prove denied actions raise before delegated I/O
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/adapters/test_scoped_adapters.py -q'
+  - id: dod-002
+    description: InvariantViolation tests prove structured CONTRACT_VIOLATION context and exported error behavior
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/test_invariant_violation.py tests/integration/test_invariant_violation.py -q'
+  - id: dod-deploy
+    description: Deploy preflight evidence for runtime-adjacent adapter/error changes without live runtime restart
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/adapters/test_scoped_adapters.py tests/unit/test_invariant_violation.py tests/integration/test_invariant_violation.py -q'

@@ -6,7 +6,7 @@ ticket_id: OMN-10534
 title: 'Harden local runtime topic bootstrap'
 summary: 'fix(OMN-10534): harden local runtime topic bootstrap'
 is_seam_ticket: false
-interface_change: false
+interface_change: true
 interfaces_touched:
   - topics
 evidence_requirements:
@@ -15,7 +15,7 @@ evidence_requirements:
     command: uv run pytest tests/ci/test_env_parity.py tests/unit/event_bus/test_service_topic_manager.py tests/integration/event_bus/test_topic_provisioner_integration.py -q
   - kind: ci
     description: CI pipeline green on PR
-    command: gh pr checks 1505 --repo OmniNode-ai/omnibase_infra
+    command: gh pr checks 1504 --repo OmniNode-ai/omnibase_infra
 emergency_bypass:
   enabled: false
   justification: ''
