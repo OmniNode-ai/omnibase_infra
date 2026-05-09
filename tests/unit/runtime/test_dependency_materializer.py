@@ -175,14 +175,21 @@ class TestModelPostgresPoolConfig:
     """Tests for PostgreSQL pool configuration."""
 
     def test_default_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "db.test")
         config = ModelPostgresPoolConfig(database="testdb")
-        assert config.host == "localhost"
+        assert config.host == "db.test"
         assert config.port == 5432
         assert config.user == "postgres"
         assert config.database == "testdb"
         assert config.min_size == 2
         assert config.max_size == 10
+
+    def test_default_values_missing_host_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        with pytest.raises(KeyError):
+            ModelPostgresPoolConfig(database="testdb")
 
     def test_from_env(self) -> None:
         with patch.dict(
@@ -199,7 +206,7 @@ class TestModelPostgresPoolConfig:
             assert config.database == "envdb"
 
     def test_frozen(self) -> None:
-        config = ModelPostgresPoolConfig(database="testdb")
+        config = ModelPostgresPoolConfig(host="myhost", database="testdb")
         with pytest.raises(Exception):
             config.host = "other"  # type: ignore[misc]
 

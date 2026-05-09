@@ -105,7 +105,7 @@ class ModelMetricsHandlerConfig(BaseModel):
     """
 
     host: str = Field(
-        default="127.0.0.1",
+        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
         description=(
             "Bind address for the HTTP metrics server. "
             "Default is localhost (127.0.0.1) for security. "

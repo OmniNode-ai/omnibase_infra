@@ -191,7 +191,7 @@ def probe_postgres(
     """
     backend_name = "state_postgres"
 
-    effective_host: str = host or os.getenv("PGHOST", "localhost") or "localhost"
+    effective_host: str = host or os.environ["PGHOST"]
     try:
         effective_port = port or int(os.getenv("PGPORT", "5436"))
     except ValueError:

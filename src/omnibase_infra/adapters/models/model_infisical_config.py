@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -32,7 +33,7 @@ class ModelInfisicalAdapterConfig(BaseModel):
     )
 
     host: str = Field(
-        default="https://app.infisical.com",
+        default_factory=lambda: os.environ["INFISICAL_ADDR"],
         description="Infisical server URL.",
     )
     client_id: SecretStr = Field(
