@@ -36,6 +36,7 @@ def _make_compose_ps_result(
     return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
 
 
+@pytest.mark.unit
 def test_all_running_returns_true() -> None:
     """Returns (True, []) immediately when all containers are running."""
     containers = ["postgres", "redpanda", "valkey"]
@@ -51,6 +52,7 @@ def test_all_running_returns_true() -> None:
     assert mock_run.call_count == 1
 
 
+@pytest.mark.unit
 def test_created_state_detected_as_missing() -> None:
     """Containers in Created state are treated as not running (the OMN-8668 bug)."""
     containers = ["postgres", "redpanda"]
@@ -76,6 +78,7 @@ def test_created_state_detected_as_missing() -> None:
     assert "postgres" not in stuck
 
 
+@pytest.mark.unit
 def test_recovery_on_second_poll() -> None:
     """Returns (True, []) when container transitions to running on second poll."""
     containers = ["postgres", "redpanda"]
@@ -96,6 +99,7 @@ def test_recovery_on_second_poll() -> None:
     assert stuck == []
 
 
+@pytest.mark.unit
 def test_docker_ps_failure_skips_iteration() -> None:
     """When docker ps returns non-zero, loop retries rather than crashing."""
     containers = ["postgres"]
@@ -114,6 +118,7 @@ def test_docker_ps_failure_skips_iteration() -> None:
     assert stuck == []
 
 
+@pytest.mark.unit
 def test_empty_expected_list_returns_true() -> None:
     """Empty expected list means nothing to wait for — return True immediately."""
     ps_output = _make_compose_ps_result([])
@@ -125,6 +130,7 @@ def test_empty_expected_list_returns_true() -> None:
     assert stuck == []
 
 
+@pytest.mark.unit
 def test_timeout_returns_false_with_stuck_list() -> None:
     """When timeout expires, returns (False, <stuck containers>)."""
     containers = ["postgres", "omninode-runtime"]
@@ -146,6 +152,7 @@ def test_timeout_returns_false_with_stuck_list() -> None:
     assert "postgres" not in stuck
 
 
+@pytest.mark.unit
 def test_completed_one_shot_service_is_satisfied() -> None:
     """Successful one-shot services do not need to remain running."""
     containers = ["intelligence-migration", "omninode-runtime"]

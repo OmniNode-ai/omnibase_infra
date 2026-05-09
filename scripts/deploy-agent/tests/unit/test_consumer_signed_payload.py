@@ -7,9 +7,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
 from deploy_agent.consumer import DeployConsumer
 
 
+@pytest.mark.unit
 def test_signed_payload_strips_signature_before_command_validation() -> None:
     consumer = DeployConsumer.__new__(DeployConsumer)
     consumer.consumer = Mock()

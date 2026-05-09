@@ -111,11 +111,13 @@ import os
 secret         = os.environ["DEPLOY_AGENT_HMAC_SECRET"]
 correlation_id = os.environ["_TRIGGER_CORRELATION_ID"]
 git_ref        = os.environ["_TRIGGER_GIT_REF"]
+reason         = os.environ["_TRIGGER_REASON"]
 requested_by   = os.environ["_TRIGGER_REQUESTED_BY"]
 
 envelope = {
     "correlation_id": correlation_id,
     "git_ref":        git_ref,
+    "reason":         reason,
     "requested_by":   requested_by,
     "scope":          "runtime",
     "services":       [],

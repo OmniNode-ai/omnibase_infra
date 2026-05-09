@@ -137,9 +137,11 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
 
 def _compose_env() -> dict[str, str]:
     env = dict(os.environ)
+    postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
+    postgres_port = env.get("POSTGRES_PORT", "5436")
     postgres_dsn = env.get("OMNIDASH_ANALYTICS_DB_URL") or (
         "postgresql://postgres:"
-        f"{env.get('POSTGRES_PASSWORD', 'postgres')}@127.0.0.1:5436/omnidash_analytics"
+        f"{env.get('POSTGRES_PASSWORD', 'postgres')}@{postgres_host}:{postgres_port}/omnidash_analytics"
     )
     defaults = {
         "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
