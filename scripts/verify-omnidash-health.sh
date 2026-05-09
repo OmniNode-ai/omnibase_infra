@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-OMNIDASH_URL="${OMNIDASH_URL:-http://localhost:3000}"
+OMNIDASH_URL="${OMNIDASH_URL:-http://localhost:3000}"  # fallback-ok: local dashboard health check
 EXPECTED_LIVE="${EXPECTED_LIVE:-3}"
 
 # ── Check if omnidash is running ──────────────────────────────────────────

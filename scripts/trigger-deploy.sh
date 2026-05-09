@@ -19,12 +19,12 @@ LOG_DIR="${OMNI_HOME}/.onex_state/logs"
 LOG_FILE="${LOG_DIR}/deploy-$(date +%Y%m%d-%H%M%S).log"
 
 # .201 server (dev target)
-DEV_HOST="${DEV_HOST:-192.168.1.201}"
+DEV_HOST="${DEV_HOST:-192.168.1.201}"  # fallback-ok: dev deploy target
 DEV_USER="${DEV_USER:-jonah}"
 DEV_OMNI_HOME="${DEV_OMNI_HOME:-/home/${DEV_USER}/Code/omni_home}"
 
 # Health check
-HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8085/health}"
+HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8085/health}"  # fallback-ok: local health check target
 HEALTH_CHECK_RETRIES=15
 HEALTH_CHECK_INTERVAL=4
 

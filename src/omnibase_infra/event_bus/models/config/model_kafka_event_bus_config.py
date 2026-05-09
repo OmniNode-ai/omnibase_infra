@@ -956,7 +956,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            bootstrap_servers="localhost:19092",
+            bootstrap_servers="localhost:19092",  # fallback-ok: local-dev default factory
             environment="local",
             timeout_seconds=30,
             max_retry_attempts=3,

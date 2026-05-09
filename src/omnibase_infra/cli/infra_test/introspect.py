@@ -82,7 +82,7 @@ def _build_introspection_payload(
         "discovered_capabilities": {},
         "contract_capabilities": None,
         "endpoints": {
-            "health": f"{os.environ.get('ONEX_RUNTIME_URL', 'http://localhost:8080')}/{nid}/health"
+            "health": f"{os.environ.get('ONEX_RUNTIME_URL', 'http://localhost:8080')}/{nid}/health"  # fallback-ok: local dev
         },
         "reason": "STARTUP",
         "correlation_id": cid,

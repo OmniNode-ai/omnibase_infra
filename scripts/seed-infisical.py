@@ -199,7 +199,10 @@ def _load_infisical_credentials() -> tuple[str, str, str, str]:
     Raises:
         SystemExit: If required credentials are missing.
     """
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    infisical_addr = os.environ.get(
+        "INFISICAL_ADDR",
+        "http://localhost:8880",  # fallback-ok: local seed default
+    )
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
