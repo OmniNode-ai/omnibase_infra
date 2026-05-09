@@ -148,3 +148,11 @@ omnidash:
     - core
   inject_required_env:
     - OMNIDASH_ANALYTICS_DB_URL
+canary:
+  description: "ONEX canary runtime — loads contracts with runtime_profiles=[canary] for ADR canary orchestrator demo path (OMN-10729). Use `onex up canary` to bring up alongside core."
+  services:
+    - runtime-canary
+  includes:
+    - core
+  inject_env: {}
+  inject_required_env: []
