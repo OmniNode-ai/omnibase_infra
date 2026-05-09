@@ -605,6 +605,32 @@ class DeployExecutor:
         self._compose_up(phase, scope, services, on_phase_update)
         return services if services else services_for_scope(scope)
 
+    @staticmethod
+    def _resolve_plugin_ref(repo_dir: str) -> str:
+        """Return the HEAD SHA of a plugin repo for uv cache busting (OMN-10728).
+
+        BuildKit's uv cache mount is keyed on the install URL, not the resolved
+        git HEAD. Passing @main always hits the stale cache entry. Passing the
+        full SHA forces a cache miss and a fresh fetch every time main advances.
+
+        Falls back to "main" so manual docker builds without omni_home still work.
+        """
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        logger.warning(
+            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to 'main'",
+            repo_dir,
+            result.returncode,
+            result.stderr[:200],
+        )
+        return "main"
+
     def _compose_build(
         self,
         scope: Scope,
@@ -618,11 +644,31 @@ class DeployExecutor:
 
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
+
+        Also passes OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF as full commit
+        SHAs so the uv cache mount (keyed on URL) misses and fetches fresh code
+        every time main advances (OMN-10728).
         """
         timeout = PHASE_TIMEOUTS.get(
             Phase.CORE if scope == Scope.CORE else Phase.RUNTIME, 300
         )
         profile = "core" if scope == Scope.CORE else "runtime"
+
+        omni_home = os.environ.get("OMNI_HOME", "").strip()
+        omnimarket_ref = (
+            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "main"
+        )
+        occ_ref = (
+            self._resolve_plugin_ref(f"{omni_home}/onex_change_control")
+            if omni_home
+            else "main"
+        )
+        logger.info(
+            "_compose_build: OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            omnimarket_ref[:12],
+            occ_ref[:12],
+        )
+
         cmd = [
             "docker",
             "compose",
@@ -635,6 +681,10 @@ class DeployExecutor:
             "build",
             "--build-arg",
             f"GIT_SHA={git_sha}",
+            "--build-arg",
+            f"OMNIMARKET_REF={omnimarket_ref}",
+            "--build-arg",
+            f"ONEX_CHANGE_CONTROL_REF={occ_ref}",
         ]
         cmd.extend(
             _build_source_build_args(

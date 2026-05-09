@@ -218,17 +218,25 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install onex_change_control before omnimarket — omnimarket's node_overseer_verifier
 # imports it at module level but omnimarket is installed --no-deps, so it must
 # be present first. Pinned to git main until PyPI publishing is automated.
+# OMN-10728: ONEX_CHANGE_CONTROL_REF must be the full commit SHA so that the
+# install URL itself changes when main advances — this busts the uv cache mount
+# (keyed on URL, not on resolved HEAD) and forces a fresh fetch.
+ARG ONEX_CHANGE_CONTROL_REF=main
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/onex_change_control.git@main#egg=onex-change-control"
+    "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"
 
 # Install omnimarket from git main until PyPI releases are automated (OMN-7980).
 # Pinned to main so every image rebuild picks up the latest merged nodes.
 # Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
 # is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
+# OMN-10728: OMNIMARKET_REF must be the full commit SHA so that the install URL
+# itself changes when main advances — this busts the uv cache mount (keyed on
+# URL, not on resolved HEAD) and forces a fresh fetch.
+ARG OMNIMARKET_REF=main
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/omnimarket.git@main#egg=omnimarket"
+    "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"
 
 # The runtime image still installs legacy packages for import compatibility while
 # market migrations finish, but their ONEX discovery metadata must not advertise
