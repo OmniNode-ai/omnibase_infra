@@ -3377,6 +3377,17 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Repo Invariants - contracts are source of truth)
     ticket: OMN-10237
+  # ==========================================================================
+  # ModelInteractivePolicy policy_name Field Exemption (OMN-10768)
+  # ==========================================================================
+  - file_pattern: 'model_interactive_policy\.py'
+    violation_pattern: "Field 'policy_name' might reference an entity"
+    reason: >
+      policy_name is the canonical string identifier of the interactive onboarding policy (e.g., "interactive_onboarding"), read directly from the YAML contract. It is not an entity reference requiring ID + display_name pattern — it IS the primary identifier used to select the policy by name.
+
+    documentation:
+      - src/omnibase_infra/onboarding/policies/interactive_onboarding.yaml
+    ticket: OMN-10768
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
