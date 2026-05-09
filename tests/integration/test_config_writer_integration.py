@@ -13,7 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.onboarding.config_writer import ConfigWriter, ConfigWriterError
+from omnibase_infra.onboarding.config_writer import (
+    ConfigWriter,
+    ConfigWriterError,
+    write_env_file,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -85,3 +89,17 @@ class TestConfigWriterIntegration:
             writer.write({"BAD=KEY": "value\nINJECTED=evil"}, target)
 
         assert target.read_text(encoding="utf-8") == original
+
+    def test_write_env_file_wrapper_merges_on_real_filesystem(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "omnibase.env"
+        target.write_text("KEEP=existing\nMODE=old\n", encoding="utf-8")
+
+        returned = write_env_file({"MODE": "interactive"}, target)
+
+        assert returned == target.read_text(encoding="utf-8")
+        assert "KEEP=existing" in returned
+        assert "MODE=interactive" in returned
+        assert "MODE=old" not in returned

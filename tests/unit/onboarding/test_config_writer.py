@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for ConfigWriter (OMN-10783)."""
+"""Tests for ConfigWriter and write_env_file."""
 
 from __future__ import annotations
 
@@ -9,11 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.onboarding.config_writer import ConfigWriter, ConfigWriterError
+from omnibase_infra.onboarding.config_writer import (
+    ConfigWriter,
+    ConfigWriterError,
+    write_env_file,
+)
+
+pytestmark = pytest.mark.unit
 
 
 class TestConfigWriterRender:
-    """Tests for the pure render method (no I/O)."""
+    """Tests for the pure render method."""
 
     def test_render_empty_dict_no_existing(self) -> None:
         writer = ConfigWriter()
@@ -53,23 +59,12 @@ class TestConfigWriterRender:
         writer = ConfigWriter()
         existing = "# This is a comment\nKEY=value\n"
         result = writer.render({"KEY": "value"}, existing_content=existing)
-        # Comments are not preserved in the merged output (pure key=value format)
         assert "# This is a comment" not in result
         assert "KEY=value" in result
 
-    def test_render_none_existing_content(self) -> None:
-        writer = ConfigWriter()
-        result = writer.render({"A": "1"}, existing_content=None)
-        assert "A=1" in result
-
-    def test_render_returns_string(self) -> None:
-        writer = ConfigWriter()
-        result = writer.render({"X": "y"})
-        assert isinstance(result, str)
-
 
 class TestConfigWriterWrite:
-    """Tests for the write method (file I/O with atomicity guarantees)."""
+    """Tests for file I/O with atomicity guarantees."""
 
     def test_write_creates_file(self, tmp_path: Path) -> None:
         writer = ConfigWriter()
@@ -113,7 +108,6 @@ class TestConfigWriterWrite:
         writer = ConfigWriter()
         target = tmp_path / "test.env"
         writer.write({"KEY": "value"}, target)
-        # No .tmp. files should remain after successful write
         tmp_files = list(tmp_path.glob(f".{target.name}.tmp.*"))
         assert not tmp_files, f"Leftover tmp files: {tmp_files}"
 
@@ -133,8 +127,27 @@ class TestConfigWriterWrite:
         assert "B=2" in content
 
 
+class TestWriteEnvFile:
+    """Tests for the convenience function retained by OMN-10773."""
+
+    def test_write_env_file_uses_config_writer_semantics(self, tmp_path: Path) -> None:
+        target = tmp_path / "test.env"
+        target.write_text("EXISTING=old\nKEY=old\n", encoding="utf-8")
+
+        content = write_env_file({"KEY": "new"}, target)
+
+        assert "EXISTING=old" in content
+        assert "KEY=new" in content
+        assert "old\nKEY=old" not in content
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_write_env_file_rejects_unsafe_pairs(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigWriterError, match="newline"):
+            write_env_file({"KEY": "value\nINJECTED=evil"}, tmp_path / "test.env")
+
+
 class TestConfigWriterSafety:
-    """Safety assertions — tests must never write under real ~/.omnibase/."""
+    """Safety assertions: tests must never write under real ~/.omnibase/."""
 
     def test_real_home_omnibase_untouched(self, tmp_path: Path) -> None:
         real_omnibase = Path.home() / ".omnibase"
@@ -142,23 +155,14 @@ class TestConfigWriterSafety:
         target = tmp_path / "safe.env"
         writer.write({"SAFE": "yes"}, target)
 
-        # Assert the real .omnibase dir was not created by this test
-        # (it may exist from prior system state, but we verify no .env was modified)
         if real_omnibase.exists():
-            # If it already exists, verify target was written to tmp_path, not home
             assert target.parent == tmp_path
         else:
-            # If it doesn't exist, confirm we didn't create it
-            assert not real_omnibase.exists(), (
-                "ConfigWriter must never write under ~/.omnibase/; "
-                "all test targets must use tmp_path"
-            )
+            assert not real_omnibase.exists()
 
     def test_tmp_path_is_not_under_home_omnibase(self, tmp_path: Path) -> None:
         real_omnibase = Path.home() / ".omnibase"
-        assert not str(tmp_path).startswith(str(real_omnibase)), (
-            "tmp_path must not resolve under ~/.omnibase/"
-        )
+        assert not str(tmp_path).startswith(str(real_omnibase))
 
 
 class TestConfigWriterValidation:

@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Config writer for onboarding-generated env files (OMN-10783).
+"""Config writer for onboarding-generated env files.
 
-Separate, explicit invocation only — never called automatically.
+Separate, explicit invocation only: callers choose when to write, and dry-run
+paths should call ``ConfigWriter.render`` instead of touching the filesystem.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 
 
 class ConfigWriterError(ValueError):
-    """Raised when a key or value contains characters that would corrupt the env format."""
+    """Raised when a key or value contains characters that would corrupt env output."""
 
 
 def _validate_env_pair(key: str, value: str) -> None:
@@ -36,7 +37,7 @@ def _validate_env_pair(key: str, value: str) -> None:
 class ConfigWriter:
     """Writes env key=value files with merge-and-preserve semantics.
 
-    Explicit invocation only. Never write to ~/.omnibase/ from tests.
+    Explicit invocation only. Never write to ``~/.omnibase/`` from tests.
     """
 
     def render(
@@ -44,18 +45,7 @@ class ConfigWriter:
         env_dict: dict[str, str],
         existing_content: str | None = None,
     ) -> str:
-        """Pure render — no file I/O.
-
-        Merges env_dict into existing_content (if any), preserving keys not
-        present in env_dict and overwriting keys that are.
-
-        Args:
-            env_dict: New key=value pairs to write.
-            existing_content: Existing file content to merge with, or None.
-
-        Returns:
-            Merged content as a string.
-        """
+        """Return merged env content without writing to disk."""
         merged: dict[str, str] = {}
 
         if existing_content:
@@ -67,27 +57,16 @@ class ConfigWriter:
                     key, _, value = stripped.partition("=")
                     merged[key.strip()] = value.strip()
 
-        for k, v in {**merged, **env_dict}.items():
-            _validate_env_pair(k, v)
+        for key, value in {**merged, **env_dict}.items():
+            _validate_env_pair(key, value)
 
         merged.update(env_dict)
 
-        lines = [f"{k}={v}" for k, v in sorted(merged.items())]
+        lines = [f"{key}={value}" for key, value in sorted(merged.items())]
         return "\n".join(lines) + ("\n" if lines else "")
 
     def write(self, env_dict: dict[str, str], target_path: Path) -> str:
-        """Merge env_dict with existing file and atomically write result.
-
-        Preserves keys not in env_dict; overwrites keys that are.
-        Uses tmp-file + rename for atomicity.
-
-        Args:
-            env_dict: New key=value pairs to write.
-            target_path: Destination path.
-
-        Returns:
-            Merged content as a string.
-        """
+        """Merge env_dict with an existing file and atomically write the result."""
         existing_content: str | None = None
         if target_path.exists():
             existing_content = target_path.read_text(encoding="utf-8")
@@ -101,8 +80,8 @@ class ConfigWriter:
             prefix=f".{target_path.name}.tmp.",
         )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(content)
+            with os.fdopen(fd, "w", encoding="utf-8") as file_handle:
+                file_handle.write(content)
             Path(tmp_path).replace(target_path)
         except Exception:
             with suppress(OSError):
@@ -112,4 +91,9 @@ class ConfigWriter:
         return content
 
 
-__all__ = ["ConfigWriter", "ConfigWriterError"]
+def write_env_file(env_dict: dict[str, str], target_path: Path) -> str:
+    """Explicit convenience wrapper for callers that do not need a writer instance."""
+    return ConfigWriter().write(env_dict, target_path)
+
+
+__all__ = ["ConfigWriter", "ConfigWriterError", "write_env_file"]
