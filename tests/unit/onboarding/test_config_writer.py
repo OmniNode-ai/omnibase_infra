@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.onboarding.config_writer import ConfigWriter
+from omnibase_infra.onboarding.config_writer import ConfigWriter, ConfigWriterError
 
 
 class TestConfigWriterRender:
@@ -159,3 +159,32 @@ class TestConfigWriterSafety:
         assert not str(tmp_path).startswith(str(real_omnibase)), (
             "tmp_path must not resolve under ~/.omnibase/"
         )
+
+
+class TestConfigWriterValidation:
+    """Tests for key/value validation in render()."""
+
+    def test_render_rejects_newline_in_key(self) -> None:
+        writer = ConfigWriter()
+        with pytest.raises(ConfigWriterError, match="newline"):
+            writer.render({"KEY\nINJECT": "value"})
+
+    def test_render_rejects_carriage_return_in_key(self) -> None:
+        writer = ConfigWriter()
+        with pytest.raises(ConfigWriterError, match="carriage return"):
+            writer.render({"KEY\rINJECT": "value"})
+
+    def test_render_rejects_equals_sign_in_key(self) -> None:
+        writer = ConfigWriter()
+        with pytest.raises(ConfigWriterError, match="equals sign"):
+            writer.render({"KEY=INJECT": "value"})
+
+    def test_render_rejects_newline_in_value(self) -> None:
+        writer = ConfigWriter()
+        with pytest.raises(ConfigWriterError, match="newline"):
+            writer.render({"KEY": "value\nINJECTED=evil"})
+
+    def test_render_rejects_carriage_return_in_value(self) -> None:
+        writer = ConfigWriter()
+        with pytest.raises(ConfigWriterError, match="carriage return"):
+            writer.render({"KEY": "value\rINJECTED=evil"})

@@ -10,7 +10,27 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import suppress
 from pathlib import Path
+
+
+class ConfigWriterError(ValueError):
+    """Raised when a key or value contains characters that would corrupt the env format."""
+
+
+def _validate_env_pair(key: str, value: str) -> None:
+    """Reject keys or values that would corrupt KEY=value env lines."""
+    if "=" in key:
+        msg = f"env key {key!r} contains an equals sign"
+        raise ConfigWriterError(msg)
+
+    for char, label in (("\n", "newline"), ("\r", "carriage return")):
+        if char in key:
+            msg = f"env key {key!r} contains a {label} character"
+            raise ConfigWriterError(msg)
+        if char in value:
+            msg = f"env value for key {key!r} contains a {label} character"
+            raise ConfigWriterError(msg)
 
 
 class ConfigWriter:
@@ -47,6 +67,9 @@ class ConfigWriter:
                     key, _, value = stripped.partition("=")
                     merged[key.strip()] = value.strip()
 
+        for k, v in {**merged, **env_dict}.items():
+            _validate_env_pair(k, v)
+
         merged.update(env_dict)
 
         lines = [f"{k}={v}" for k, v in sorted(merged.items())]
@@ -82,13 +105,11 @@ class ConfigWriter:
                 fh.write(content)
             Path(tmp_path).replace(target_path)
         except Exception:
-            try:
+            with suppress(OSError):
                 Path(tmp_path).unlink(missing_ok=True)
-            except OSError:
-                pass
             raise
 
         return content
 
 
-__all__ = ["ConfigWriter"]
+__all__ = ["ConfigWriter", "ConfigWriterError"]
