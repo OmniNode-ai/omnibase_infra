@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for condition_evaluator — OMN-10779."""
+"""Tests for condition_evaluator — OMN-10779, OMN-10769."""
 
 from __future__ import annotations
 
@@ -198,6 +198,28 @@ class TestCanonicalGraphConditions:
         )
 
 
+class TestInteractiveOnboardingConditions:
+    """Tests from OMN-10769 covering interactive onboarding-specific patterns."""
+
+    def test_compound_deployment_and_service_not_in(self) -> None:
+        state = {"deployment_mode": "local", "selected_local_services": ["kafka"]}
+        assert (
+            evaluate_condition(
+                "deployment_mode == local and llm_inference not in selected_local_services",
+                state,
+            )
+            is True
+        )
+
+    def test_response_membership_check(self) -> None:
+        state = {
+            "selected_local_services": ["kafka", "postgres"],
+            "response": ["kafka", "postgres"],
+        }
+        assert evaluate_condition("llm_inference in response", state) is False
+        assert evaluate_condition("kafka in response", state) is True
+
+
 class TestUnknownKeyErrors:
     def test_unknown_key_message_includes_key_name(self) -> None:
         with pytest.raises(ConditionEvaluationError, match="my_missing_key"):
@@ -211,3 +233,7 @@ class TestUnknownKeyErrors:
             exc = e
         assert exc is not None
         assert not isinstance(exc, SyntaxError)
+
+    def test_unknown_key_in_membership_raises(self) -> None:
+        with pytest.raises(ConditionEvaluationError, match="nonexistent_list"):
+            evaluate_condition("llm_inference in nonexistent_list", {})
