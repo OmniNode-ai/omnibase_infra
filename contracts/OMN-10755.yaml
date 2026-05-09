@@ -1,0 +1,33 @@
+# OMN-10755 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical ticket contract lives in onex_change_control; this file carries
+# deploy-gate evidence for the HandlerLedgerAppend null-correlation_id warning gate.
+schema_version: '1.0.0'
+ticket_id: OMN-10755
+title: "Remove stale event_bus_events references and add correlation_id forward gate"
+summary: >
+  Adds a WARNING-level log gate in HandlerLedgerAppend when correlation_id is None. Ledger never drops events; the warning makes envelope-contract violations observable. Bumps node_ledger_write_effect contract_version to 0.1.1. Adds 2 integration tests.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-infra-integration-tests
+    description: >-
+      2 integration tests pass against live PostgreSQL: test_null_correlation_id_emits_warning and test_null_correlation_id_auto_generates_for_db.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/integration/ledger/test_ledger_append_null_correlation.py -v
+  - id: dod-deploy
+    description: >-
+      No runtime deploy required — change is a logger.warning addition and contract version bump. No new Kafka topics, no schema changes, no new node topology. Deploy-agent inactive per OMN-8841.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: HandlerLedgerAppend change is a logger.warning addition only. No new behaviour deployed, no Docker restart required. Contract version bumped from 0.1.0 to 0.1.1 to satisfy Contract Sync Gate.
