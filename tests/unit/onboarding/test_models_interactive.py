@@ -3,6 +3,8 @@
 
 """Tests for interactive onboarding policy Pydantic models."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -82,7 +84,7 @@ def test_duplicate_step_ids_rejected() -> None:
 
     raw = yaml.safe_load(POLICY_PATH.read_text())
     raw["steps"].append(raw["steps"][0])
-    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
+    with pytest.raises((ValueError, ValidationError), match=r"[Dd]uplicate"):
         ModelInteractivePolicy.model_validate(raw)
 
 
@@ -93,7 +95,7 @@ def test_transition_to_unknown_step_rejected() -> None:
 
     raw = yaml.safe_load(POLICY_PATH.read_text())
     raw["transitions"][0]["responses"]["local"]["next"] = "nonexistent_step"
-    with pytest.raises(ValueError, match="unknown step"):
+    with pytest.raises((ValueError, ValidationError), match="unknown step"):
         ModelInteractivePolicy.model_validate(raw)
 
 
@@ -104,7 +106,7 @@ def test_missing_terminal_env_output_rejected() -> None:
 
     raw = yaml.safe_load(POLICY_PATH.read_text())
     del raw["env_output"]["write_config_local"]
-    with pytest.raises(ValueError, match="env_output"):
+    with pytest.raises((ValueError, ValidationError), match="env_output"):
         ModelInteractivePolicy.model_validate(raw)
 
 
@@ -113,3 +115,22 @@ def test_extra_fields_rejected() -> None:
 
     with pytest.raises(ValidationError):
         ModelInteractiveStep(id="x", prompt="x", type="choice", bogus_field="y")
+
+
+def test_set_state_typed_as_json_type() -> None:
+    from omnibase_infra.onboarding.model_transition_branch import ModelTransitionBranch
+
+    branch = ModelTransitionBranch(
+        next="some_step", set_state={"key": "value", "flag": True, "count": 42}
+    )
+    assert branch.set_state["key"] == "value"
+    assert branch.set_state["flag"] is True
+    assert branch.set_state["count"] == 42
+
+
+def test_transition_from_field_alias() -> None:
+    from omnibase_infra.onboarding.model_transition import ModelTransition
+
+    t = ModelTransition.model_validate({"from": "some_step", "terminal": True})
+    assert t.from_step == "some_step"
+    assert t.terminal is True
