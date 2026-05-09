@@ -1,0 +1,27 @@
+# OMN-10728 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control
+# (contracts/OMN-10728.yaml in OmniNode-ai/onex_change_control).
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: OMN-10728
+summary: "Fix BuildKit uv-cache silently serving stale omnimarket on runtime deploys"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "Dockerfile.runtime uses ARG OMNIMARKET_REF and ARG ONEX_CHANGE_CONTROL_REF in install URLs so uv cache mount misses on SHA change."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "grep -q 'ARG OMNIMARKET_REF' docker/Dockerfile.runtime"
+  - id: dod-deploy
+    description: "Post-deploy verification: docker exec into omninode-runtime confirms import omnimarket.adapters.adr succeeds, proving stale-cache bug is resolved."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "docker exec omninode-runtime python -c 'import omnimarket.adapters.adr; print(\"ok\")'"
