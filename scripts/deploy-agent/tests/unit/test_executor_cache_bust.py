@@ -4,12 +4,15 @@
 
 Without this, Docker's layer cache silently serves stale COPY src/ layers even when
 git is at the correct SHA (root cause of PR #1231 verification failure).
+
+Also covers OMN-10728: OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF must be passed as
+full commit SHAs so the uv cache mount (keyed on URL) misses when main advances.
 """
 
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from deploy_agent.events import Phase, PhaseStatus, Scope
 from deploy_agent.executor import DeployExecutor
@@ -119,4 +122,148 @@ class TestCacheBust:
         assert git_sha_seen_in_build == [sentinel_sha], (
             f"Expected git_sha={sentinel_sha!r} forwarded to _compose_build, "
             f"got {git_sha_seen_in_build}"
+        )
+
+
+class TestUvCacheBustPluginRefs:
+    """OMN-10728: _compose_build must pass OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF
+    as full commit SHAs so the BuildKit uv cache mount (keyed on URL) misses when
+    main advances — preventing stale plugin sdists from being served.
+    """
+
+    def _fake_run_ok(
+        self, cmd: list[str], timeout: int, **kwargs
+    ) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    def test_compose_build_passes_omnimarket_ref_build_arg(self) -> None:
+        """_compose_build must include --build-arg OMNIMARKET_REF=<sha>."""
+        executor = DeployExecutor()
+        sentinel_sha = "cafe1234abcd5678"
+
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        with (
+            patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(
+                DeployExecutor, "_resolve_plugin_ref", return_value=sentinel_sha
+            ),
+        ):
+            executor._compose_build(Scope.RUNTIME, "abc123", _noop_phase_update)
+
+        build_cmds = [c for c in captured_cmds if "build" in c]
+        assert build_cmds, "Expected at least one 'docker compose build' call"
+        build_cmd = build_cmds[0]
+
+        # Collect all --build-arg values from the command
+        build_args = {
+            build_cmd[i + 1]
+            for i, tok in enumerate(build_cmd)
+            if tok == "--build-arg" and i + 1 < len(build_cmd)
+        }
+        assert f"OMNIMARKET_REF={sentinel_sha}" in build_args, (
+            f"Expected OMNIMARKET_REF={sentinel_sha!r} in build args; got {build_args}"
+        )
+
+    def test_compose_build_passes_onex_change_control_ref_build_arg(self) -> None:
+        """_compose_build must include --build-arg ONEX_CHANGE_CONTROL_REF=<sha>."""
+        executor = DeployExecutor()
+        sentinel_sha = "dead0000beef1111"
+
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        with (
+            patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(
+                DeployExecutor, "_resolve_plugin_ref", return_value=sentinel_sha
+            ),
+        ):
+            executor._compose_build(Scope.RUNTIME, "abc123", _noop_phase_update)
+
+        build_cmds = [c for c in captured_cmds if "build" in c]
+        assert build_cmds, "Expected at least one 'docker compose build' call"
+        build_cmd = build_cmds[0]
+
+        build_args = {
+            build_cmd[i + 1]
+            for i, tok in enumerate(build_cmd)
+            if tok == "--build-arg" and i + 1 < len(build_cmd)
+        }
+        assert f"ONEX_CHANGE_CONTROL_REF={sentinel_sha}" in build_args, (
+            f"Expected ONEX_CHANGE_CONTROL_REF={sentinel_sha!r} in build args; got {build_args}"
+        )
+
+    def test_resolve_plugin_ref_returns_sha_from_git(self) -> None:
+        """_resolve_plugin_ref must return the SHA from git rev-parse HEAD."""
+        expected_sha = "abcdef1234567890abcdef1234567890abcdef12"
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=f"{expected_sha}\n", stderr=""
+        )
+        with patch("subprocess.run", return_value=mock_result):
+            sha = DeployExecutor._resolve_plugin_ref("/fake/repo")
+        assert sha == expected_sha
+
+    def test_resolve_plugin_ref_falls_back_to_main_on_git_failure(self) -> None:
+        """_resolve_plugin_ref must return 'main' when git rev-parse fails."""
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=128, stdout="", stderr="fatal: not a git repo"
+        )
+        with patch("subprocess.run", return_value=mock_result):
+            sha = DeployExecutor._resolve_plugin_ref("/nonexistent/repo")
+        assert sha == "main"
+
+    def test_compose_build_uses_main_fallback_when_omni_home_unset(self) -> None:
+        """When OMNI_HOME is not set, OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF default to 'main'."""
+        executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        import os
+
+        env_without_omni_home = {
+            k: v for k, v in os.environ.items() if k != "OMNI_HOME"
+        }
+
+        with (
+            patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.dict("os.environ", env_without_omni_home, clear=True),
+        ):
+            executor._compose_build(Scope.RUNTIME, "abc123", _noop_phase_update)
+
+        build_cmds = [c for c in captured_cmds if "build" in c]
+        assert build_cmds
+        build_cmd = build_cmds[0]
+        build_args = {
+            build_cmd[i + 1]
+            for i, tok in enumerate(build_cmd)
+            if tok == "--build-arg" and i + 1 < len(build_cmd)
+        }
+        assert "OMNIMARKET_REF=main" in build_args, (
+            f"Expected OMNIMARKET_REF=main when OMNI_HOME unset; got {build_args}"
+        )
+        assert "ONEX_CHANGE_CONTROL_REF=main" in build_args, (
+            f"Expected ONEX_CHANGE_CONTROL_REF=main when OMNI_HOME unset; got {build_args}"
         )
