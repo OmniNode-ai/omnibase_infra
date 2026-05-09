@@ -155,6 +155,7 @@ class TestUvCacheBustPluginRefs:
             )
 
         with (
+            patch.dict("os.environ", {"OMNI_HOME": "/workspace/omni_home"}),
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(
                 DeployExecutor, "_resolve_plugin_ref", return_value=sentinel_sha
@@ -192,6 +193,7 @@ class TestUvCacheBustPluginRefs:
             )
 
         with (
+            patch.dict("os.environ", {"OMNI_HOME": "/workspace/omni_home"}),
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(
                 DeployExecutor, "_resolve_plugin_ref", return_value=sentinel_sha
