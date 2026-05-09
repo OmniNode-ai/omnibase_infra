@@ -3,6 +3,7 @@
 # This file is the per-repo deploy-evidence carrier only.
 schema_version: "1.0.0"
 ticket_id: "OMN-9713"
+title: "fix(OMN-9713): harden deploy-agent runtime redeploy — single Kafka bus, SASL_SSL support"
 summary: "fix(deploy-agent): use one explicit Kafka control bus for consume and publish"
 is_seam_ticket: false
 interface_change: false

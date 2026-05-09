@@ -31,8 +31,6 @@ def _sign_like_trigger_sh(envelope: dict, secret: str) -> dict:
 _SAMPLE_ENVELOPE = {
     "correlation_id": "aaaaaaaa-0000-0000-0000-000000000001",
     "git_ref": "origin/main",
-    "reason": "manual trigger by operator",
-    "requested_at": "2026-04-21T12:00:00+00:00",
     "requested_by": "operator-manual",
     "scope": "runtime",
     "services": [],
@@ -83,8 +81,6 @@ def test_sort_keys_order_is_canonical() -> None:
         "services": [],
         "scope": "runtime",
         "requested_by": "operator-manual",
-        "requested_at": "2026-04-21T12:00:00+00:00",
-        "reason": "manual trigger by operator",
         "git_ref": "origin/main",
         "correlation_id": "aaaaaaaa-0000-0000-0000-000000000001",
     }

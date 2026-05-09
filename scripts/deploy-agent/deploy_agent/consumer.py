@@ -78,9 +78,11 @@ class DeployConsumer:
             self.consumer.commit()
             return None, "invalid_signature"
 
-        # Step 3: Validate payload
+        # Step 3: Validate payload. The signature is transport metadata, not
+        # part of the command contract itself.
         try:
-            cmd = ModelRebuildRequested.model_validate(payload)
+            command_payload = {k: v for k, v in payload.items() if k != "_signature"}
+            cmd = ModelRebuildRequested.model_validate(command_payload)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Invalid payload (correlation_id=%s): %s",
@@ -105,7 +107,7 @@ class DeployConsumer:
         # Step 6: Persist job state
         self.job_store.accept(
             correlation_id=cmd.correlation_id,
-            command=payload,
+            command=command_payload,
         )
 
         # Step 7: Commit offset

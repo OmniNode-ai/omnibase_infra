@@ -133,9 +133,7 @@ class TestConsumerMetrics:
     def test_record_received_increments(self) -> None:
         """record_received increments messages_received and sets last_poll_at."""
         metrics = ConsumerMetrics()
-        asyncio.get_event_loop().run_until_complete(
-            metrics.record_received(count=3, topic="topic-a")
-        )
+        asyncio.run(metrics.record_received(count=3, topic="topic-a"))
 
         assert metrics.messages_received == 3
         assert metrics.last_poll_at is not None
@@ -145,9 +143,7 @@ class TestConsumerMetrics:
     def test_record_processed_increments(self) -> None:
         """record_processed increments messages_processed and sets last_successful_write_at."""
         metrics = ConsumerMetrics()
-        asyncio.get_event_loop().run_until_complete(
-            metrics.record_processed(count=2, topic="topic-b")
-        )
+        asyncio.run(metrics.record_processed(count=2, topic="topic-b"))
 
         assert metrics.messages_processed == 2
         assert metrics.last_successful_write_at is not None
@@ -157,9 +153,7 @@ class TestConsumerMetrics:
     def test_record_failed_increments(self) -> None:
         """record_failed increments messages_failed."""
         metrics = ConsumerMetrics()
-        asyncio.get_event_loop().run_until_complete(
-            metrics.record_failed(count=1, topic="topic-c")
-        )
+        asyncio.run(metrics.record_failed(count=1, topic="topic-c"))
 
         assert metrics.messages_failed == 1
         assert metrics.per_topic_failed.get("topic-c") == 1
@@ -168,9 +162,7 @@ class TestConsumerMetrics:
     def test_record_batch_processed_increments(self) -> None:
         """record_batch_processed increments batches_processed."""
         metrics = ConsumerMetrics()
-        asyncio.get_event_loop().run_until_complete(
-            metrics.record_batch_processed(latency_ms=42.0)
-        )
+        asyncio.run(metrics.record_batch_processed(latency_ms=42.0))
 
         assert metrics.batches_processed == 1
         assert metrics.batch_latency_ms == [42.0]
@@ -179,7 +171,7 @@ class TestConsumerMetrics:
     def test_snapshot_contains_expected_keys(self) -> None:
         """Snapshot dict contains all expected metric keys."""
         metrics = ConsumerMetrics()
-        snapshot = asyncio.get_event_loop().run_until_complete(metrics.snapshot())
+        snapshot = asyncio.run(metrics.snapshot())
 
         expected_keys = {
             "messages_received",
@@ -204,9 +196,8 @@ class TestConsumerMetrics:
         """Latency ring buffer is capped at MAX_LATENCY_SAMPLES."""
         metrics = ConsumerMetrics()
 
-        loop = asyncio.get_event_loop()
         for i in range(ConsumerMetrics.MAX_LATENCY_SAMPLES + 10):
-            loop.run_until_complete(metrics.record_batch_processed(latency_ms=float(i)))
+            asyncio.run(metrics.record_batch_processed(latency_ms=float(i)))
 
         assert len(metrics.batch_latency_ms) == ConsumerMetrics.MAX_LATENCY_SAMPLES
 

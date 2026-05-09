@@ -32,8 +32,10 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
 
 logger = logging.getLogger(__name__)
 
-REPO_DIR = "/data/omninode/omnibase_infra"
-DEPLOY_AGENT_DIR = f"{REPO_DIR}/scripts/deploy-agent"
+REPO_DIR = os.environ.get(
+    "DEPLOY_AGENT_REPO_DIR", "/data/omninode/omni_home/omnibase_infra"
+)
+DEPLOY_AGENT_DIR = os.environ.get("DEPLOY_AGENT_DIR", "/data/omninode/deploy-agent")
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 
@@ -133,6 +135,26 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
+def _compose_env() -> dict[str, str]:
+    env = dict(os.environ)
+    postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
+    postgres_port = env.get("POSTGRES_PORT", "5436")
+    postgres_dsn = env.get("OMNIDASH_ANALYTICS_DB_URL") or (
+        "postgresql://postgres:"
+        f"{env.get('POSTGRES_PASSWORD', 'postgres')}@{postgres_host}:{postgres_port}/omnidash_analytics"
+    )
+    defaults = {
+        "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
+        "LINEAR_WEBHOOK_SECRET": "deploy-agent-compose-parse-only",
+        "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN": "deploy-agent-compose-parse-only",
+        "WAITLIST_NOTIFIER_SLACK_CHANNEL_ID": "deploy-agent-compose-parse-only",
+        "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN": postgres_dsn,
+    }
+    for key, value in defaults.items():
+        env.setdefault(key, value)
+    return env
+
+
 def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
     """Return whether a runtime /health response proves deploy readiness."""
     if result.returncode != 0:
@@ -153,51 +175,84 @@ def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
     )
 
 
+def _compose_service_states() -> dict[str, tuple[str, int | None]]:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            COMPOSE_FILE,
+            "-p",
+            COMPOSE_PROJECT,
+            "ps",
+            "-a",
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_compose_env(),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[:200])
+    states: dict[str, tuple[str, int | None]] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        service = str(payload.get("Service") or "")
+        if not service:
+            continue
+        exit_code = payload.get("ExitCode")
+        states[service] = (
+            str(payload.get("State") or ""),
+            exit_code if isinstance(exit_code, int) else None,
+        )
+    return states
+
+
+def _service_satisfied(state: str, exit_code: int | None) -> bool:
+    if state == "running":
+        return True
+    return state == "exited" and exit_code == 0
+
+
 def verify_containers_up(
     expected_containers: list[str], timeout_s: int = 120
 ) -> tuple[bool, list[str]]:
-    """Poll docker ps until all expected containers are running or timeout expires."""
+    """Poll compose until services are running or completed successfully."""
     deadline = time.monotonic() + timeout_s
+    last_states: dict[str, tuple[str, int | None]] = {}
     while time.monotonic() < deadline:
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}\t{{.State}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "verify_containers_up: docker ps failed: %s", result.stderr[:200]
-            )
+        try:
+            last_states = _compose_service_states()
+        except RuntimeError as exc:
+            logger.warning("verify_containers_up: docker compose ps failed: %s", exc)
             time.sleep(2)
             continue
-        states = {
-            parts[0]: parts[1]
-            for line in result.stdout.strip().splitlines()
-            if (parts := line.split("\t", 1)) and len(parts) == 2
-        }
-        missing = [c for c in expected_containers if states.get(c) != "running"]
+        missing = [
+            service
+            for service in expected_containers
+            if not _service_satisfied(*last_states.get(service, ("missing", None)))
+        ]
         if not missing:
             return True, []
         logger.info(
-            "verify_containers_up: waiting for %d container(s): %s",
+            "verify_containers_up: waiting for %d service(s): %s",
             len(missing),
             missing,
         )
         time.sleep(2)
-    # Final check to report exactly what is still not running
-    result = subprocess.run(
-        ["docker", "ps", "--format", "{{.Names}}\t{{.State}}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    states = {
-        parts[0]: parts[1]
-        for line in result.stdout.strip().splitlines()
-        if (parts := line.split("\t", 1)) and len(parts) == 2
-    }
-    missing = [c for c in expected_containers if states.get(c) != "running"]
+    try:
+        last_states = _compose_service_states()
+    except RuntimeError:
+        last_states = {}
+    missing = [
+        service
+        for service in expected_containers
+        if not _service_satisfied(*last_states.get(service, ("missing", None)))
+    ]
     return False, missing
 
 
@@ -445,7 +500,7 @@ class DeployExecutor:
             COMPOSE_FILE,
         ]
 
-        result = _run(cmd, timeout=timeout, cwd=REPO_DIR)
+        result = _run(cmd, timeout=timeout, cwd=REPO_DIR, env=_compose_env())
         if result.returncode != 0:
             logger.warning(
                 "compose_gen returned non-zero (exit=%d) — continuing with existing compose file. stderr: %s",
@@ -506,7 +561,7 @@ class DeployExecutor:
         result = _run(
             cmd,
             timeout=timeout,
-            env={**__import__("os").environ, "PYTHONPATH": f"{REPO_DIR}/src"},
+            env={**_compose_env(), "PYTHONPATH": f"{REPO_DIR}/src"},
         )
         if result.returncode != 0:
             logger.warning(
@@ -587,9 +642,23 @@ class DeployExecutor:
                 expected_build_source=expected_build_source,
             )
         )
-        result = _run(cmd, timeout=timeout)
+        result = _run(cmd, timeout=timeout, env=_compose_env())
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")
+        if scope == Scope.RUNTIME:
+            tag_result = _run(
+                [
+                    "docker",
+                    "tag",
+                    "omnibase-infra-omninode-runtime:latest",
+                    "runtime:latest",
+                ],
+                timeout=30,
+            )
+            if tag_result.returncode != 0:
+                raise RuntimeError(
+                    f"Docker runtime image tag failed: {tag_result.stderr}"
+                )
 
     def _compose_up(
         self,
@@ -616,7 +685,7 @@ class DeployExecutor:
             "-d",
             "--force-recreate",
             "--pull",
-            "always",
+            "never" if scope == Scope.RUNTIME else "always",
         ]
         # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
         # the core infra services (postgres/redpanda/valkey/infisical) declared
@@ -626,9 +695,13 @@ class DeployExecutor:
         if requested_services:
             cmd.extend(requested_services)
 
-        result = _run(cmd, timeout=timeout)
-        if result.returncode != 0:
-            raise RuntimeError(f"Docker compose up failed: {result.stderr}")
+        result = _run(cmd, timeout=timeout, env=_compose_env())
+        compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
+        if compose_up_error:
+            logger.warning(
+                "Docker compose up returned non-zero; verifying live service state before failing: %s",
+                compose_up_error[:500],
+            )
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
@@ -651,10 +724,22 @@ class DeployExecutor:
             )
             for name in stuck:
                 start_result = subprocess.run(
-                    ["docker", "start", name],
+                    [
+                        "docker",
+                        "compose",
+                        "-f",
+                        COMPOSE_FILE,
+                        "-p",
+                        COMPOSE_PROJECT,
+                        "up",
+                        "-d",
+                        "--no-deps",
+                        name,
+                    ],
                     capture_output=True,
                     text=True,
                     check=False,
+                    env=_compose_env(),
                 )
                 if start_result.returncode == 0:
                     logger.info("docker start %s: ok", name)
@@ -664,9 +749,12 @@ class DeployExecutor:
                     )
             ok, stuck = verify_containers_up(expected, timeout_s=60)
             if not ok:
-                raise RuntimeError(
+                detail = (
                     f"Containers still not running after docker start recovery: {stuck}"
                 )
+                if compose_up_error:
+                    detail = f"Docker compose up failed: {compose_up_error}; {detail}"
+                raise RuntimeError(detail)
             logger.info("Recovery succeeded — all containers now running")
 
         on_phase_update(phase, PhaseStatus.SUCCESS)

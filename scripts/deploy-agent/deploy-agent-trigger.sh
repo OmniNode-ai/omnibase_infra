@@ -83,8 +83,10 @@ if command -v kcat &>/dev/null; then
     _publish_tool="kcat"
 elif command -v rpk &>/dev/null; then
     _publish_tool="rpk"
+elif command -v docker &>/dev/null && docker exec omnibase-infra-redpanda rpk version &>/dev/null; then
+    _publish_tool="docker-rpk"
 elif [[ $DRY_RUN -eq 0 ]]; then
-    echo "ERROR: kcat (or rpk) not found. Install kcat: brew install kcat" >&2
+    echo "ERROR: kcat, rpk, or dockerized redpanda rpk not found." >&2
     exit 1
 fi
 
@@ -106,8 +108,6 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import UTC, datetime
-
 secret         = os.environ["DEPLOY_AGENT_HMAC_SECRET"]
 correlation_id = os.environ["_TRIGGER_CORRELATION_ID"]
 git_ref        = os.environ["_TRIGGER_GIT_REF"]
@@ -118,7 +118,6 @@ envelope = {
     "correlation_id": correlation_id,
     "git_ref":        git_ref,
     "reason":         reason,
-    "requested_at":   datetime.now(UTC).isoformat(),
     "requested_by":   requested_by,
     "scope":          "runtime",
     "services":       [],
@@ -172,8 +171,7 @@ if [[ "$_publish_tool" == "kcat" ]]; then
     fi
     # SIGNED_JSON piped via stdin — not passed as a shell argument
     echo "manual-${CORRELATION_ID}/${SIGNED_JSON}" | kcat "${KCAT_ARGS[@]}"
-else
-    # rpk fallback — used on .201 where rpk is available inside/outside containers
+elif [[ "$_publish_tool" == "rpk" ]]; then
     RPK_ARGS=(--brokers "${KAFKA_BOOTSTRAP_SERVERS}" --key "manual-${CORRELATION_ID}")
     if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
         RPK_ARGS+=(
@@ -184,6 +182,10 @@ else
         )
     fi
     rpk topic produce "${TOPIC}" "${RPK_ARGS[@]}" <<< "${SIGNED_JSON}"
+else
+    docker exec -i omnibase-infra-redpanda \
+        rpk topic produce "${TOPIC}" --brokers localhost:9092 \
+        --key "manual-${CORRELATION_ID}" <<< "${SIGNED_JSON}"
 fi
 
 echo "Published. correlation_id=${CORRELATION_ID}"
