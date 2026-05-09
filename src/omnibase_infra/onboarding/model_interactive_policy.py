@@ -16,7 +16,7 @@ from omnibase_infra.onboarding.model_transition import ModelTransition
 class ModelInteractivePolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    policy_name: str
+    policy_name: str  # ONEX_EXCLUDE: pattern_validator - policy_name is the policy's own identifier, not an entity reference
     description: str
     version: dict[str, int]
     policy_type: Literal["interactive"]
