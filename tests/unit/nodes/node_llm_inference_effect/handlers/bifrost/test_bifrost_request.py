@@ -9,7 +9,6 @@ from uuid import UUID
 
 import pytest
 
-from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_request import (
     ModelBifrostRequest,
