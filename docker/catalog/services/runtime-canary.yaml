@@ -57,9 +57,9 @@ volumes:
   - canary_data:/app/data
   - ../contracts:/app/contracts:ro
 depends_on:
-  - service: omninode-runtime
-    condition: service_healthy
   - service: redpanda
+    condition: service_healthy
+  - service: postgres
     condition: service_healthy
 restart: unless-stopped
 resources:
