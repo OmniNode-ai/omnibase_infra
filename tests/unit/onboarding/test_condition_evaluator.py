@@ -12,6 +12,8 @@ from omnibase_infra.onboarding.condition_evaluator import (
     evaluate_condition,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestNoneCondition:
     def test_none_returns_true(self) -> None:
@@ -133,6 +135,15 @@ class TestAnd:
     def test_and_unknown_key_raises(self) -> None:
         with pytest.raises(ConditionEvaluationError):
             evaluate_condition("env == local and missing_key == x", {"env": "local"})
+
+    def test_and_inside_quoted_value_is_not_clause_split(self) -> None:
+        assert (
+            evaluate_condition(
+                'mode == "research and development" and env == local',
+                {"mode": "research and development", "env": "local"},
+            )
+            is True
+        )
 
 
 class TestCanonicalGraphConditions:

@@ -37,6 +37,39 @@ def _strip_quotes(value: str) -> str:
     return value.strip().strip('"').strip("'")
 
 
+def _split_and_clauses(expr: str) -> list[str]:
+    """Split an expression on whitespace-bounded ``and`` outside quotes."""
+    clauses: list[str] = []
+    start = 0
+    quote: str | None = None
+    index = 0
+
+    while index < len(expr):
+        char = expr[index]
+        if char in {"'", '"'}:
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+            index += 1
+            continue
+
+        if quote is None and expr.startswith("and", index):
+            before_is_space = index > 0 and expr[index - 1].isspace()
+            after_index = index + len("and")
+            after_is_space = after_index < len(expr) and expr[after_index].isspace()
+            if before_is_space and after_is_space:
+                clauses.append(expr[start:index].strip())
+                start = after_index
+                index = after_index
+                continue
+
+        index += 1
+
+    clauses.append(expr[start:].strip())
+    return [clause for clause in clauses if clause]
+
+
 def _evaluate_single(expr: str, state: dict[str, object]) -> bool:
     expr = expr.strip()
 
@@ -103,8 +136,7 @@ def evaluate_condition(expr: str | None, state: dict[str, object]) -> bool:
     if expr is None:
         return True
 
-    # Split on ' and ' (space-bounded to avoid partial matches inside values)
-    clauses = re.split(r"\s+and\s+", expr)
+    clauses = _split_and_clauses(expr)
     return all(_evaluate_single(clause, state) for clause in clauses)
 
 
