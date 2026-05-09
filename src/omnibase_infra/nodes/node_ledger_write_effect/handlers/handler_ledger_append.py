@@ -185,6 +185,15 @@ class HandlerLedgerAppend:
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
         """
+        if payload.correlation_id is None:
+            logger.warning(
+                "Event appended to ledger without correlation_id — emitting source "
+                "is violating the envelope contract; trace chain will be broken for "
+                "topic=%s partition=%d offset=%d",
+                payload.topic,
+                payload.partition,
+                payload.kafka_offset,
+            )
         correlation_id = payload.correlation_id or uuid4()
 
         if not self._initialized:
