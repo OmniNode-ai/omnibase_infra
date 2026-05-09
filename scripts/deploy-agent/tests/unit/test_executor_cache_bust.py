@@ -14,7 +14,10 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
 from deploy_agent.events import Phase, PhaseStatus, Scope
+
+pytestmark = pytest.mark.unit
 from deploy_agent.executor import DeployExecutor
 
 

@@ -20,6 +20,8 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "grep -q 'ARG OMNIMARKET_REF' docker/Dockerfile.runtime"
+      - check_type: command
+        check_value: "grep -q 'ARG ONEX_CHANGE_CONTROL_REF' docker/Dockerfile.runtime"
   - id: dod-deploy
     description: "Post-deploy verification: docker exec into omninode-runtime confirms import omnimarket.adapters.adr succeeds, proving stale-cache bug is resolved."
     source: generated
