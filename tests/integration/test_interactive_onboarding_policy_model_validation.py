@@ -47,3 +47,19 @@ def test_interactive_policy_rejects_unknown_explicit_start_step() -> None:
 
     with pytest.raises(ValidationError, match="start_step references unknown step"):
         ModelInteractivePolicy.model_validate(raw)
+
+
+def test_interactive_models_reexport_validates_policy_graph() -> None:
+    from omnibase_infra.onboarding.models_interactive import (
+        ModelInteractivePolicy as ReexportedInteractivePolicy,
+    )
+
+    raw = deepcopy(_load_policy_raw())
+    raw["start_step"] = None
+
+    policy = ReexportedInteractivePolicy.model_validate(raw)
+
+    assert policy.start_step == policy.steps[0].id
+    assert {step.id for step in policy.steps} >= {
+        transition.from_step for transition in policy.transitions
+    }
