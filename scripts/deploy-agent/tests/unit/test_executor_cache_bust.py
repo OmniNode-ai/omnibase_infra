@@ -12,7 +12,7 @@ full commit SHAs so the uv cache mount (keyed on URL) misses when main advances.
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from deploy_agent.events import Phase, PhaseStatus, Scope
