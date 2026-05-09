@@ -29,14 +29,19 @@ class ModelInteractivePolicy(BaseModel):
 
     @model_validator(mode="after")
     def _validate_graph_integrity(self) -> ModelInteractivePolicy:
-        if self.start_step is None:
-            object.__setattr__(self, "start_step", self.steps[0].id)
-
         step_ids = [s.id for s in self.steps]
+        if not step_ids:
+            raise ValueError("Interactive policy must define at least one step")
+
         step_id_set = set(step_ids)
 
         if len(step_id_set) != len(step_ids):
             raise ValueError("Duplicate step IDs found")
+
+        if self.start_step is None:
+            object.__setattr__(self, "start_step", step_ids[0])
+        elif self.start_step not in step_id_set:
+            raise ValueError(f"start_step references unknown step '{self.start_step}'")
 
         terminal_steps: set[str] = set()
         for t in self.transitions:
