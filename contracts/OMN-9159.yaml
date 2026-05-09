@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: OMN-9159
+title: "Extend ModelBifrostRequest with session and run identity"
+summary: >
+  Add session_id and run_id to ModelBifrostRequest, require caller-provided correlation_id, and preserve these identity fields through Bifrost request validation for downstream dispatch correlation.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Bifrost request identity unit and integration tests pass
+    command: uv run pytest tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_request.py tests/integration/test_bifrost_request_session_fields.py -q
+  - kind: manual
+    description: Changed Bifrost request model and tests pass ruff
+    command: uv run ruff check src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_request.py tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_request.py tests/integration/test_bifrost_request_session_fields.py
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-unit-integration-tests
+    description: Bifrost request identity unit and integration tests pass
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_request.py tests/integration/test_bifrost_request_session_fields.py -q
+  - id: dod-integration-coverage
+    description: Integration coverage proves session_id, run_id, and required correlation_id on the Bifrost request contract
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/test_bifrost_request_session_fields.py -q
+  - id: dod-ruff
+    description: Changed Bifrost request model and tests pass ruff
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run ruff check src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_request.py tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_request.py tests/integration/test_bifrost_request_session_fields.py
+  - id: dod-deploy
+    description: Deploy preflight for runtime-adjacent Bifrost request contract changes; no live runtime restart performed in this PR
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy validation plan: after merge, verify the runtime container can import ModelBifrostRequest and instantiate it with ONEX_SESSION_ID/ONEX_RUN_ID identity fields using docker exec ${RUNTIME_CONTAINER:-omninode-runtime}"

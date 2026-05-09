@@ -55,8 +55,12 @@ class ModelBifrostRequest(BaseModel):
         system_prompt: Optional system prompt prepended to messages.
         max_tokens: Maximum tokens to generate.
         temperature: Sampling temperature.
-        correlation_id: Optional correlation ID for distributed tracing.
-            Auto-generated if not provided.
+        correlation_id: Correlation ID for distributed tracing. Required —
+            callers must supply a stable UUID; the gateway does not auto-generate.
+        session_id: Optional session identity string (e.g. ONEX_SESSION_ID)
+            grouping all requests from one orchestration session.
+        run_id: Optional run identity string (e.g. ONEX_RUN_ID) identifying
+            the specific dispatch invocation within a session.
 
     Example:
         >>> from uuid import UUID
@@ -68,6 +72,7 @@ class ModelBifrostRequest(BaseModel):
         ...     cost_tier=EnumCostTier.LOW,
         ...     tenant_id=UUID("12345678-1234-5678-1234-567812345678"),
         ...     messages=[{"role": "user", "content": "Hello"}],
+        ...     correlation_id=UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
         ... )
     """
 
@@ -122,9 +127,31 @@ class ModelBifrostRequest(BaseModel):
         le=2.0,
         description="Sampling temperature.",
     )
-    correlation_id: UUID | None = Field(
+    correlation_id: UUID = Field(
+        ...,
+        description=(
+            "Correlation ID for distributed tracing. "
+            "Identity Invariant: callers must supply a stable UUID; "
+            "the gateway does not auto-generate one."
+        ),
+    )
+    session_id: str | None = Field(
         default=None,
-        description="Correlation ID for distributed tracing (auto-generated if None).",
+        max_length=255,
+        description=(
+            "Session identity string (e.g. ONEX_SESSION_ID) grouping all "
+            "requests from a single orchestration session. "
+            "Identity Invariant: set by the dispatch layer, preserved through routing."
+        ),
+    )
+    run_id: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Run identity string (e.g. ONEX_RUN_ID) identifying the specific "
+            "dispatch invocation within a session. "
+            "Identity Invariant: set by the dispatch layer, preserved through routing."
+        ),
     )
 
     @field_validator("capabilities", mode="before")

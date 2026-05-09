@@ -145,6 +145,7 @@ def _make_chat_request(
     capabilities: tuple[str, ...] = (),
     max_latency_ms: int = 10_000,
     tenant_id: UUID | None = None,
+    correlation_id: UUID | None = None,
 ) -> ModelBifrostRequest:
     """Build a minimal valid ModelBifrostRequest."""
     return ModelBifrostRequest(
@@ -154,6 +155,7 @@ def _make_chat_request(
         max_latency_ms=max_latency_ms,
         tenant_id=tenant_id or UUID("00000000-0000-0000-0000-000000000001"),
         messages=[{"role": "user", "content": "Hello"}],
+        correlation_id=correlation_id or uuid4(),
     )
 
 
@@ -551,8 +553,8 @@ class TestBifrostRoutingHandleEndToEnd:
         assert result.correlation_id == my_corr_id
 
     @pytest.mark.asyncio
-    async def test_bifrost_routing_handle_auto_generates_correlation_id(self) -> None:
-        """handle() auto-generates correlation_id when request has none."""
+    async def test_bifrost_routing_handle_propagates_correlation_id(self) -> None:
+        """handle() propagates correlation_id from the request to the response."""
         config = _make_two_backend_config(
             routing_rules=(),
             default_backends=("backend-a",),
@@ -560,11 +562,10 @@ class TestBifrostRoutingHandleEndToEnd:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        request = _make_chat_request()  # No correlation_id
+        request = _make_chat_request()
         result = await gateway.handle(request)
 
-        assert result.correlation_id != ""
-        assert result.correlation_id is not None
+        assert result.correlation_id == request.correlation_id
 
     @pytest.mark.asyncio
     async def test_bifrost_routing_n_synthetic_requests_select_expected_backends(

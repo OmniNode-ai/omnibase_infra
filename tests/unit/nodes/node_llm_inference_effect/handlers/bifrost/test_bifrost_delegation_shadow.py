@@ -316,6 +316,7 @@ class TestShadowDoesNotAlterLiveRouting:
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             tenant_id=_TENANT_ID,
             messages=({"role": "user", "content": "test"},),
+            correlation_id=uuid4(),
         )
 
         response = await gateway.handle(request)
@@ -357,6 +358,7 @@ class TestShadowDoesNotAlterLiveRouting:
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             tenant_id=_TENANT_ID,
             messages=({"role": "user", "content": "test"},),
+            correlation_id=uuid4(),
         )
 
         response = await gateway.handle(request)
@@ -380,6 +382,7 @@ class TestShadowDoesNotAlterLiveRouting:
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             tenant_id=_TENANT_ID,
             messages=({"role": "user", "content": "test"},),
+            correlation_id=uuid4(),
         )
 
         await gateway.handle(request)
@@ -406,6 +409,7 @@ class TestShadowDoesNotAlterLiveRouting:
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             tenant_id=_TENANT_ID,
             messages=({"role": "user", "content": "test"},),
+            correlation_id=uuid4(),
         )
 
         responses = [await gateway.handle(request) for _ in range(5)]
