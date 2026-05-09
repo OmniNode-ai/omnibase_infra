@@ -4,6 +4,7 @@
 # This file is the per-repo deploy-evidence carrier only.
 schema_version: "1.0.0"
 ticket_id: OMN-10728
+title: "Fix BuildKit uv-cache silently serving stale omnimarket on runtime deploys"
 summary: "Fix BuildKit uv-cache silently serving stale omnimarket on runtime deploys"
 is_seam_ticket: false
 interface_change: false
