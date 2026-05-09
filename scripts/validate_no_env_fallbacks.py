@@ -44,6 +44,8 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
         except (OSError, UnicodeDecodeError):
             continue
         for lineno, line in enumerate(lines, start=1):
+            if "# fallback-ok" in line:
+                continue
             for pattern in VIOLATIONS_PATTERNS:
                 if pattern.search(line):
                     violations.append((str(py_file), lineno, line.strip()))

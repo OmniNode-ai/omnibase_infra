@@ -123,7 +123,8 @@ class ConfigConsumerHealthProjection(BaseSettings):
         default=8094, ge=1024, le=65535, description="Port for HTTP health check"
     )
     health_check_host: str = Field(
-        default="127.0.0.1", description="Host for health check server"
+        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
+        description="Host for health check server",
     )
     health_check_staleness_seconds: int = Field(
         default=300,

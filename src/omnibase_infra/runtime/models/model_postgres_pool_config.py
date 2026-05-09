@@ -27,7 +27,7 @@ class ModelPostgresPoolConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     host: str = Field(
-        default_factory=lambda: os.environ.get("POSTGRES_HOST", "localhost"),
+        default_factory=lambda: os.environ["POSTGRES_HOST"],
         description="PostgreSQL host",
     )
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
@@ -208,18 +208,15 @@ class ModelPostgresPoolConfig(BaseModel):
         # NOTE: Credentials are stored *decoded* (unquote). If a DSN is later
         # reconstructed from these fields, the values must be re-encoded with
         # urllib.parse.quote_plus() to produce a valid connection string.
-        # NOTE: parsed.hostname returns None for Unix-socket DSNs
-        # (e.g., "postgresql:///dbname"). The fallback to "localhost" means
-        # Unix-socket DSNs are silently rewritten to TCP connections.
         hostname = parsed.hostname
         if hostname is None:
-            logger.warning(
-                "DSN has no hostname (Unix-socket?); falling back to TCP localhost:5432. "
-                "Original DSN scheme: %s",
-                parsed.scheme,
+            msg = (
+                "DSN has no hostname — Unix-socket DSNs are not supported. "
+                f"Provide a TCP DSN: postgresql://user:pass@host:port/dbname (scheme: {parsed.scheme})"
             )
+            raise ValueError(msg)
         return cls(
-            host=hostname or "localhost",
+            host=hostname,
             port=parsed.port or 5432,
             user=unquote(parsed.username) if parsed.username else "postgres",
             password=unquote(parsed.password) if parsed.password else "",

@@ -183,7 +183,7 @@ class ConfigContextAuditConsumer(BaseSettings):
         description="Port for HTTP health check endpoint",
     )
     health_check_host: str = Field(
-        default="127.0.0.1",
+        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
         description=(
             "Host/IP for health check server binding. Default '127.0.0.1' restricts "
             "to localhost-only access for security. For container/Kubernetes deployments, "
