@@ -121,6 +121,7 @@ def scan_python_file(path: Path) -> list[tuple[int, str]]:
 
     for lineno, line in enumerate(content.splitlines(), start=1):
         stripped = line.strip()
+        skip_line = False
 
         # Track triple-quoted docstrings
         for delim in ('"""', "'''"):
@@ -129,6 +130,7 @@ def scan_python_file(path: Path) -> list[tuple[int, str]]:
                 if count >= 1:
                     in_docstring = False
                     docstring_delim = None
+                    skip_line = True
                 break
             if not in_docstring and count == 1:
                 in_docstring = True
@@ -136,9 +138,10 @@ def scan_python_file(path: Path) -> list[tuple[int, str]]:
                 break
             if count >= 2:
                 # Opens and closes on the same line — skip as a docstring line
+                skip_line = True
                 break
 
-        if in_docstring:
+        if in_docstring or skip_line:
             continue
         if _is_pure_comment(line):
             continue

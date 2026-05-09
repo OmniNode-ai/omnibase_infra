@@ -313,7 +313,7 @@ repos:
       # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
       - id: no-env-fallbacks
         name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
-        entry: uv run python scripts/validate_no_env_fallbacks.py
+        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
         language: system
         pass_filenames: true
         types_or: [python, shell]

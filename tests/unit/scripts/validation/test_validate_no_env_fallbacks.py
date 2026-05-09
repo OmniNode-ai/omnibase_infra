@@ -137,6 +137,11 @@ class TestDocstringSkipping:
         p = _py(tmp_path, content)
         assert scan_python_file(p) == []
 
+    def test_skips_localhost_in_same_line_docstring(self, tmp_path: Path) -> None:
+        content = '"""Example: os.getenv("HOST", "localhost")"""\n'
+        p = _py(tmp_path, content)
+        assert scan_python_file(p) == []
+
     def test_skips_pure_comment_lines(self, tmp_path: Path) -> None:
         p = _py(tmp_path, '# host = os.environ.get("HOST", "localhost")\n')
         assert scan_python_file(p) == []
