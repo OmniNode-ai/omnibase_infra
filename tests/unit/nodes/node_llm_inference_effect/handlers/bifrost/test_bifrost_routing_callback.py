@@ -87,6 +87,7 @@ def _make_request() -> ModelBifrostRequest:
         cost_tier=EnumCostTier.MID,
         tenant_id=uuid4(),
         messages=({"role": "user", "content": "test"},),
+        correlation_id=uuid4(),
     )
 
 

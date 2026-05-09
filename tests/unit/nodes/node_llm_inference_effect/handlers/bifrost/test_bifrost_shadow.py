@@ -91,6 +91,7 @@ def _make_request(
         operation_type=operation_type,
         tenant_id=_TENANT_ID,
         messages=({"role": "user", "content": "Hello"},),
+        correlation_id=uuid4(),
     )
 
 

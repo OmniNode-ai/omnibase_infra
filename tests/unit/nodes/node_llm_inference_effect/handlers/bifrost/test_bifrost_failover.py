@@ -119,6 +119,7 @@ def _make_request() -> ModelBifrostRequest:
         operation_type=EnumLlmOperationType.CHAT_COMPLETION,
         tenant_id=_TEST_TENANT_ID,
         messages=[{"role": "user", "content": "Hello"}],
+        correlation_id=uuid4(),
     )
 
 
@@ -245,6 +246,7 @@ class TestBifrostFailoverBackendADown:
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             tenant_id=_specific_tenant_id,
             messages=[{"role": "user", "content": "Hello"}],
+            correlation_id=uuid4(),
         )
         result = await gateway.handle(request)
 
