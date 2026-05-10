@@ -155,6 +155,33 @@ class TestDocstringSkipping:
         assert len(viols) == 1
         assert viols[0][0] == 3
 
+    def test_embedded_triple_quotes_do_not_start_docstring(
+        self, tmp_path: Path
+    ) -> None:
+        content = (
+            'marker = """not a docstring opener"""\nurl = os.getenv("X", "localhost")\n'
+        )
+        p = _py(tmp_path, content)
+        assert scan_python_file(p) == [(2, 'url = os.getenv("X", "localhost")')]
+
+    def test_embedded_triple_quotes_on_fallback_line_still_scans(
+        self, tmp_path: Path
+    ) -> None:
+        content = 'url = os.getenv("X", "localhost") + """suffix"""\n'
+        p = _py(tmp_path, content)
+        assert scan_python_file(p) == [
+            (1, 'url = os.getenv("X", "localhost") + """suffix"""')
+        ]
+
+    def test_line_start_triple_quote_with_trailing_fallback_still_scans(
+        self, tmp_path: Path
+    ) -> None:
+        content = '"""prefix"""; url = os.getenv("X", "localhost")\n'
+        p = _py(tmp_path, content)
+        assert scan_python_file(p) == [
+            (1, '"""prefix"""; url = os.getenv("X", "localhost")')
+        ]
+
 
 @pytest.mark.unit
 class TestShellPatternBashVarDefault:

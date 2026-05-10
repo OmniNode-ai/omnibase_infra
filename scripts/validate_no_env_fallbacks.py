@@ -94,6 +94,7 @@ EXEMPT_MARKERS: tuple[str, ...] = (
 )
 
 _COMMENT_RE = re.compile(r"^\s*#")
+_TRIPLE_QUOTE_DELIMS = ('"""', "'''")
 
 
 def _is_pure_comment(line: str) -> bool:
@@ -102,6 +103,14 @@ def _is_pure_comment(line: str) -> bool:
 
 def _has_exempt_marker(line: str) -> bool:
     return any(marker in line for marker in EXEMPT_MARKERS)
+
+
+def _has_executable_suffix_after_closing_delim(line: str, delim: str) -> bool:
+    close_index = line.find(delim, len(delim))
+    if close_index == -1:
+        return False
+    suffix = line[close_index + len(delim) :].strip()
+    return bool(suffix and not suffix.startswith("#"))
 
 
 # ---------------------------------------------------------------------------
@@ -123,8 +132,9 @@ def scan_python_file(path: Path) -> list[tuple[int, str]]:
         stripped = line.strip()
         skip_line = False
 
-        # Track triple-quoted docstrings
-        for delim in ('"""', "'''"):
+        # Track triple-quoted docstrings that begin a stripped line. Embedded
+        # triple quotes in executable code must not hide fallback violations.
+        for delim in _TRIPLE_QUOTE_DELIMS:
             count = stripped.count(delim)
             if in_docstring and docstring_delim == delim:
                 if count >= 1:
@@ -132,13 +142,13 @@ def scan_python_file(path: Path) -> list[tuple[int, str]]:
                     docstring_delim = None
                     skip_line = True
                 break
-            if not in_docstring and count == 1:
-                in_docstring = True
-                docstring_delim = delim
-                break
-            if count >= 2:
-                # Opens and closes on the same line — skip as a docstring line
-                skip_line = True
+            if not in_docstring and stripped.startswith(delim):
+                if count == 1:
+                    in_docstring = True
+                    docstring_delim = delim
+                elif not _has_executable_suffix_after_closing_delim(stripped, delim):
+                    # Opens and closes on the same line with no executable tail.
+                    skip_line = True
                 break
 
         if in_docstring or skip_line:
