@@ -1,0 +1,61 @@
+# OMN-10784 contract file — wire interactive executor into onboarding handler.
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for dod_evidence items.
+schema_version: '1.0.0'
+ticket_id: OMN-10784
+title: 'feat(OMN-10784): wire interactive executor into onboarding handler'
+summary: >
+  Extend handle_onboarding to detect policy_type: interactive and dispatch to InteractiveExecutor. Adds policy_name, dry_run, env_output_path to ModelOnboardingInput and provenance fields to ModelOnboardingOutput. DI outside models: input_adapter is a function parameter, not in Pydantic model.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Unit tests for interactive handler integration and DAG regression
+    command: uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding_interactive.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-10784.yaml'
+  - id: dod-002
+    description: Interactive handler produces correct output with FakeInputAdapter for local and cloud paths
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding_interactive.py::TestHandlerInteractivePath -v'
+  - id: dod-003
+    description: dry_run=True prevents ConfigWriter invocation; dry_run=False calls ConfigWriter correctly
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding_interactive.py -v -k "dry_run"'
+  - id: dod-004
+    description: DAG path regression — existing behavior unchanged by handler modifications
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding_interactive.py::TestHandlerDAGPathRegression -v'
+  - id: dod-005
+    description: Original handler tests still pass without modification
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding.py -v'
+  - id: dod-006
+    description: Integration test exercising interactive handler end-to-end via deploy-equivalent FakeInputAdapter path (handler is local-deploy library code; verified via in-process import + pytest integration suite, no Docker rebuild required since onboarding orchestrator is a library handler not a container service)
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/onboarding/test_handler_onboarding_interactive_integration.py -v # local deploy verification — handler is in-process library code'
