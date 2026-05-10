@@ -12,11 +12,13 @@ import pytest
 import yaml
 
 from omnibase_infra.onboarding.adapter_fake_input import AdapterFakeInput
-from omnibase_infra.onboarding.interactive_executor import InteractiveExecutor
+from omnibase_infra.onboarding.interactive_executor import (
+    InteractiveExecutor,
+    InteractiveExecutorError,
+)
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
 from omnibase_infra.onboarding.model_interactive_result import ModelInteractiveResult
 from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveStep
-from omnibase_infra.onboarding.transition_reducer import TransitionError
 
 pytestmark = pytest.mark.unit
 
@@ -347,11 +349,10 @@ class TestRealPolicyHybrid:
 class TestErrorCases:
     @pytest.mark.asyncio
     async def test_missing_start_step_raises(self) -> None:
-        """Policy with no start_step raises at construction time.
+        """Policy with no start_step raises InteractiveExecutorError at construction.
 
-        The TransitionReducer validates graph integrity at __init__ and
-        raises TransitionError when start_step is None.  This is defense-
-        in-depth — the Pydantic validator normally prevents this state.
+        The executor wraps TransitionError from the reducer into
+        InteractiveExecutorError to present a consistent error surface.
         """
         raw: dict[str, Any] = {
             "policy_name": "broken",
@@ -372,6 +373,6 @@ class TestErrorCases:
 
         adapter = AdapterFakeInput(responses={})
 
-        # TransitionReducer catches the invalid graph at construction time
-        with pytest.raises(TransitionError, match="no start_step"):
+        # Executor wraps TransitionError into InteractiveExecutorError
+        with pytest.raises(InteractiveExecutorError, match="no start_step"):
             InteractiveExecutor(policy, adapter)

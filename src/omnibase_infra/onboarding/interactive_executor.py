@@ -18,7 +18,10 @@ from omnibase_infra.onboarding.model_interactive_result import (
 )
 from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveStep
 from omnibase_infra.onboarding.protocol_input_adapter import ProtocolInputAdapter
-from omnibase_infra.onboarding.transition_reducer import TransitionReducer
+from omnibase_infra.onboarding.transition_reducer import (
+    TransitionError,
+    TransitionReducer,
+)
 
 
 class InteractiveExecutorError(Exception):
@@ -35,6 +38,10 @@ class InteractiveExecutor:
     Args:
         policy: The interactive onboarding policy to execute.
         adapter: Input adapter for collecting user responses.
+
+    Raises:
+        InteractiveExecutorError: If the policy graph is invalid
+            (wraps ``TransitionError`` from the reducer).
     """
 
     def __init__(
@@ -44,7 +51,10 @@ class InteractiveExecutor:
     ) -> None:
         self._policy = policy
         self._adapter = adapter
-        self._reducer = TransitionReducer(policy)
+        try:
+            self._reducer = TransitionReducer(policy)
+        except TransitionError as exc:
+            raise InteractiveExecutorError(str(exc)) from exc
         self._steps_by_id: dict[str, ModelInteractiveStep] = {
             s.id: s for s in policy.steps
         }
