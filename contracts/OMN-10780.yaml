@@ -12,13 +12,13 @@ evidence_requirements:
 dod_evidence:
   - id: "dod-001"
     description: "Unit tests for transition reducer pass."
-    source: "ci"
+    source: "generated"
     checks:
       - check_type: "test-pass"
         check_value: "tests/unit/onboarding/test_transition_reducer.py"
   - id: "dod-002"
     description: "Integration tests for transition reducer pass."
-    source: "ci"
+    source: "generated"
     checks:
       - check_type: "test-pass"
         check_value: "tests/integration/onboarding/test_transition_reducer_integration.py"
