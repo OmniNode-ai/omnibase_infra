@@ -3,7 +3,7 @@
 
 """Input model for the onboarding orchestrator node."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelOnboardingInput(BaseModel):
@@ -17,6 +17,8 @@ class ModelOnboardingInput(BaseModel):
     The ``input_adapter`` is injected via handler function parameter,
     NOT in this model (DI outside models — OMN-10784 GPT #1).
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     target_capabilities: list[str] = Field(
         default_factory=list,

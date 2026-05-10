@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input import (
     ModelOnboardingInput,
 )
@@ -68,7 +70,11 @@ def _load_interactive_policy(policy_name: str) -> ModelInteractivePolicy:
         )
         raise OnboardingHandlerError(msg)
 
-    return ModelInteractivePolicy.model_validate(raw)
+    try:
+        return ModelInteractivePolicy.model_validate(raw)
+    except ValidationError as exc:
+        msg = f"Built-in policy '{policy_name}' is invalid"
+        raise OnboardingHandlerError(msg) from exc
 
 
 async def _handle_interactive(
@@ -95,7 +101,7 @@ async def _handle_interactive(
         ModelStepResult(
             step_key=sr.step_key,
             passed=True,
-            message=f"Response: {sr.response}",
+            message="Response captured",
         )
         for sr in result.step_results
     ]
