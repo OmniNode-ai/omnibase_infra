@@ -14,6 +14,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+from omnimarket.nodes.node_budget_policy_compute.models.model_budget_limits import (
+    ModelBudgetLimits,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -28,6 +31,13 @@ class ModelDelegationRequest(BaseModel):
         correlation_id: Unique identifier for tracking through the pipeline.
         max_tokens: Maximum tokens for the LLM response.
         emitted_at: Timestamp when the request was created.
+        output_schema_key: When set, activates the compliance loop — the
+            orchestrator validates each LLM response against the schema
+            registered under this key in omnimarket's output schema registry
+            and emits repair prompts on failure (OMN-10794).
+        compliance_budget: Token / cost / time ceilings the compliance loop
+            enforces between attempts. Required when ``output_schema_key`` is
+            set, ignored otherwise.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -59,6 +69,23 @@ class ModelDelegationRequest(BaseModel):
     emitted_at: datetime = Field(
         ...,
         description="Timestamp when the request was created.",
+    )
+    output_schema_key: str | None = Field(
+        default=None,
+        description=(
+            "When set, the orchestrator runs the schema-compliance loop: it "
+            "validates each inference response against the registry-resolved "
+            "schema and emits repair prompts on validation failure. None = "
+            "legacy single-attempt path."
+        ),
+    )
+    compliance_budget: ModelBudgetLimits | None = Field(
+        default=None,
+        description=(
+            "Budget ceilings (tokens, cost, elapsed time) the compliance loop "
+            "enforces between repair attempts. Required when "
+            "``output_schema_key`` is set."
+        ),
     )
 
 
