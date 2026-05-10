@@ -483,7 +483,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 146 (2026-04-01): Delegation pipeline dispatchers (OMN-7040: 3 dispatchers + wiring, each with
 #                     ModelEventEnvelope[object] | dict[str, object] handle() signature)
 # - 148 (2026-04-05): LINEAR_API_KEY :? required-env addition (OMN-6489)
-INFRA_MAX_UNIONS = 148
+# - 149 (2026-05-09): interactive onboarding models — ModelTransition alias + ModelTransitionBranch JsonType (OMN-10771)
+INFRA_MAX_UNIONS = 149
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
