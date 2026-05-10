@@ -14,6 +14,9 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection import (
+    HandlerBuildLoopProjection,
+)
 from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
     subscribe_wired_contract_topics,
@@ -121,12 +124,17 @@ async def test_raw_event_projection_dispatches_model_event_message_to_applier() 
     run_id = f"unit-build-loop-{uuid4().hex[:8]}"
     correlation_id = uuid4()
 
+    mock_container = MagicMock()
+    handler_instance = HandlerBuildLoopProjection(container=mock_container)
+    mock_container.get_service_async = AsyncMock(return_value=handler_instance)
+
     try:
         report = await wire_from_manifest(
             manifest=manifest,
             dispatch_engine=engine,
             event_bus=event_bus,
             environment="test",
+            container=mock_container,
             subscribe_immediately=False,
             result_appliers_by_contract={
                 "node_build_loop_projection_compute": applier,
