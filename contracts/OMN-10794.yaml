@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10794"
+title: "feat(OMN-10794): wire HandlerComplianceLoop into HandlerDelegationWorkflow"
+summary: >
+  Wave 3 / Task 5 of the tokens-to-compliance epic. Adds output_schema_key and compliance_budget to ModelDelegationRequest, threads the schema-compliance loop into HandlerDelegationWorkflow.handle_inference_response, allows the ROUTED -> ROUTED self-loop for repair re-prompts, and accumulates tokens_to_compliance + compliance_attempts onto the terminal ModelDelegationResult and ModelTaskDelegatedEvent. Backwards compatible: legacy callers that omit output_schema_key get the single-attempt path with compliance_attempts=1 and tokens_to_compliance equal to the single attempt's total_tokens. Bumps node_delegation_orchestrator contract to 0.3.0 and updates the FSM transition table.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: 9 new unit tests prove the compliance-loop wiring — first-try compliance, repair-on-failure, two-attempt token accumulation, budget ABORT, and FSM ROUTED-to-ROUTED self-loop legality.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_delegation_orchestrator/test_compliance_loop_wiring.py -v'
+  - id: dod-002
+    description: Existing 32 orchestrator tests pass — legacy single-attempt path semantics are preserved.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/delegation/test_delegation_orchestrator.py -v'
+  - id: dod-003
+    description: Pyright/mypy strict pass for the modified handler and request model.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run mypy src/omnibase_infra/nodes/node_delegation_orchestrator/handlers/handler_delegation_workflow.py src/omnibase_infra/nodes/node_delegation_orchestrator/models/model_delegation_request.py --strict'
+  - id: dod-deploy
+    description: Deployable runtime change — the orchestrator's behavior is contract-driven, the new code path is opt-in via output_schema_key, and downstream consumers (HandlerProjectionDelegation, sqlite_adapter) are already wired for the new fields. Rolling restart is the only deploy step required.
+    source: manual
+    checks:
+      - check_type: behavior_proven
+        check_value: 'opt-in compliance-loop wiring; legacy callers unchanged; downstream projection already accepts the new fields with safe defaults — deploy gate compat'

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
@@ -98,10 +99,15 @@ _CLAUDE_INPUT_PRICE_PER_TOKEN: float = 3.0 / 1_000_000
 _CLAUDE_OUTPUT_PRICE_PER_TOKEN: float = 15.0 / 1_000_000
 
 # Valid state transitions: from_state -> set of valid to_states
+# Note: ROUTED -> ROUTED self-loop (OMN-10794) supports the schema-compliance
+# loop's repair re-prompts — when an inference response fails validation and
+# the budget allows another attempt, the orchestrator stays in ROUTED while
+# emitting a fresh ModelInferenceIntent carrying the repair prompt.
 _VALID_TRANSITIONS: dict[EnumDelegationState, frozenset[EnumDelegationState]] = {
     EnumDelegationState.RECEIVED: frozenset({EnumDelegationState.ROUTED}),
     EnumDelegationState.ROUTED: frozenset(
         {
+            EnumDelegationState.ROUTED,  # OMN-10794 — schema-repair re-prompt
             EnumDelegationState.EXECUTING,
             EnumDelegationState.INFERENCE_COMPLETED,
             EnumDelegationState.COMPLETED,
@@ -122,6 +128,87 @@ _VALID_TRANSITIONS: dict[EnumDelegationState, frozenset[EnumDelegationState]] = 
 }
 
 
+def _record_inference_response(
+    workflow: DelegationWorkflowState,
+    response: ModelInferenceResponseData,
+) -> None:
+    """Persist a single inference attempt's data onto the workflow."""
+    workflow.inference_content = response.content
+    workflow.inference_model_used = response.model_used
+    workflow.inference_latency_ms = response.latency_ms
+    workflow.inference_prompt_tokens = response.prompt_tokens
+    workflow.inference_completion_tokens = response.completion_tokens
+    workflow.inference_total_tokens = response.total_tokens
+    workflow.inference_llm_call_id = response.llm_call_id
+
+
+def _evaluate_compliance(
+    workflow: DelegationWorkflowState,
+    response: ModelInferenceResponseData,
+    transition: Callable[[DelegationWorkflowState, EnumDelegationState], None],
+) -> list[BaseModel]:
+    """Run one compliance-loop iteration; emit repair intent or accept (OMN-10794).
+
+    Pre: workflow.state == ROUTED and workflow.request.output_schema_key
+    is not None and workflow.request.compliance_budget is not None.
+    """
+    # Local import to keep the cold path off the legacy boot path.
+    from omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_compliance_loop import (
+        HandlerComplianceLoop,
+    )
+
+    assert workflow.request is not None
+    assert workflow.request.output_schema_key is not None
+    assert workflow.request.compliance_budget is not None
+    assert workflow.routing_decision is not None
+
+    loop = HandlerComplianceLoop()
+    result = loop.evaluate(
+        candidate_output=response.content,
+        schema_key=workflow.request.output_schema_key,
+        original_prompt=workflow.request.prompt,
+        attempt_number=workflow.compliance_attempts,
+        cumulative_tokens=workflow.accumulated_tokens,
+        attempt_tokens=response.total_tokens,
+        budget_limits=workflow.request.compliance_budget,
+        run_id=str(workflow.correlation_id),
+    )
+
+    # Always update the running token total.
+    workflow.accumulated_tokens = result.tokens_to_compliance
+
+    if result.compliant or result.repair_prompt == "":
+        # Compliant or budget ABORT — record this attempt and forward to gate.
+        transition(workflow, EnumDelegationState.INFERENCE_COMPLETED)
+        _record_inference_response(workflow, response)
+        return [
+            ModelQualityGateIntent(
+                payload=ModelQualityGateInput(
+                    correlation_id=response.correlation_id,
+                    task_type=workflow.request.task_type,
+                    llm_response_content=response.content,
+                )
+            )
+        ]
+
+    # Non-compliant, budget allows another attempt — emit repair prompt.
+    # ROUTED -> ROUTED self-loop: stay in ROUTED, increment attempt counter.
+    transition(workflow, EnumDelegationState.ROUTED)
+    workflow.compliance_attempts += 1
+    temperature = _TASK_TEMPERATURE.get(workflow.request.task_type, 0.3)
+    return [
+        ModelInferenceIntent(
+            base_url=workflow.routing_decision.endpoint_url,
+            model=workflow.routing_decision.selected_model,
+            system_prompt=workflow.routing_decision.system_prompt,
+            prompt=result.repair_prompt,
+            max_tokens=workflow.request.max_tokens,
+            temperature=temperature,
+            correlation_id=workflow.correlation_id,
+        )
+    ]
+
+
 @dataclass
 class DelegationWorkflowState:
     """Mutable workflow state for a single delegation correlation_id."""
@@ -140,6 +227,13 @@ class DelegationWorkflowState:
     inference_llm_call_id: str = ""
     gate_result: ModelQualityGateResult | None = None
     started_at_ns: int = field(default_factory=time.monotonic_ns)
+    # Compliance-loop counters (OMN-10794). The orchestrator owns the loop,
+    # ``compliance_attempts`` counts the inference attempts it has issued so
+    # far (1 = first attempt) and ``accumulated_tokens`` is the running sum
+    # of tokens across all attempts. Both are forwarded onto the terminal
+    # ModelDelegationResult / ModelTaskDelegatedEvent.
+    compliance_attempts: int = 0
+    accumulated_tokens: int = 0
 
 
 class HandlerDelegationWorkflow:
@@ -217,6 +311,7 @@ class HandlerDelegationWorkflow:
         """Handle routing decision from the routing reducer.
 
         Transitions RECEIVED -> ROUTED, then emits intent to LLM inference.
+        This is attempt #1 of the compliance loop (OMN-10794).
         """
         cid = decision.correlation_id
         workflow = self._workflows.get(cid)
@@ -228,6 +323,7 @@ class HandlerDelegationWorkflow:
 
         self._transition(workflow, EnumDelegationState.ROUTED)
         workflow.routing_decision = decision
+        workflow.compliance_attempts = 1
 
         assert workflow.request is not None
         temperature = _TASK_TEMPERATURE.get(workflow.request.task_type, 0.3)
@@ -246,11 +342,21 @@ class HandlerDelegationWorkflow:
     def handle_inference_response(
         self,
         response: ModelInferenceResponseData,
-    ) -> list[ModelQualityGateIntent]:
+    ) -> list[BaseModel]:
         """Handle LLM inference response.
 
-        Transitions ROUTED -> INFERENCE_COMPLETED, then emits intent to
-        the quality gate reducer.
+        Two paths:
+
+        1. **Legacy** (request.output_schema_key is None) — accept the response
+           on the first attempt and forward to the quality gate. Transitions
+           ROUTED -> INFERENCE_COMPLETED.
+
+        2. **Compliance loop** (request.output_schema_key is set, OMN-10794) —
+           validate the response against the registered schema. On success or
+           budget-abort, accumulate tokens and forward to the quality gate
+           (ROUTED -> INFERENCE_COMPLETED). On non-compliant + budget CONTINUE,
+           emit a fresh ModelInferenceIntent with the repair prompt and stay
+           in ROUTED (self-loop).
         """
         workflow = self._workflows.get(response.correlation_id)
         if workflow is None:
@@ -259,23 +365,26 @@ class HandlerDelegationWorkflow:
         if workflow.state != EnumDelegationState.ROUTED:
             return []
 
-        self._transition(workflow, EnumDelegationState.INFERENCE_COMPLETED)
-        workflow.inference_content = response.content
-        workflow.inference_model_used = response.model_used
-        workflow.inference_latency_ms = response.latency_ms
-        workflow.inference_prompt_tokens = response.prompt_tokens
-        workflow.inference_completion_tokens = response.completion_tokens
-        workflow.inference_total_tokens = response.total_tokens
-        workflow.inference_llm_call_id = response.llm_call_id
-
         assert workflow.request is not None
-        gate_input = ModelQualityGateInput(
-            correlation_id=response.correlation_id,
-            task_type=workflow.request.task_type,
-            llm_response_content=response.content,
-        )
+        assert workflow.routing_decision is not None
 
-        return [ModelQualityGateIntent(payload=gate_input)]
+        # Legacy path: no compliance loop, single attempt.
+        if workflow.request.output_schema_key is None:
+            self._transition(workflow, EnumDelegationState.INFERENCE_COMPLETED)
+            _record_inference_response(workflow, response)
+            workflow.accumulated_tokens = response.total_tokens
+            return [
+                ModelQualityGateIntent(
+                    payload=ModelQualityGateInput(
+                        correlation_id=response.correlation_id,
+                        task_type=workflow.request.task_type,
+                        llm_response_content=response.content,
+                    )
+                )
+            ]
+
+        # Compliance-loop path.
+        return _evaluate_compliance(workflow, response, self._transition)
 
     def handle_gate_result(
         self,
@@ -307,6 +416,14 @@ class HandlerDelegationWorkflow:
 
         elapsed_ms = (time.monotonic_ns() - workflow.started_at_ns) // 1_000_000
 
+        # Compliance counters (OMN-10794): defaults preserve legacy single-attempt
+        # semantics (1 attempt, total_tokens of that attempt) when the request
+        # didn't opt into the compliance loop.
+        compliance_attempts = workflow.compliance_attempts or 1
+        tokens_to_compliance = (
+            workflow.accumulated_tokens or workflow.inference_total_tokens
+        )
+
         delegation_result = ModelDelegationResult(
             correlation_id=cid,
             task_type=workflow.request.task_type,
@@ -323,6 +440,8 @@ class HandlerDelegationWorkflow:
             failure_reason="; ".join(result.failure_reasons)
             if not result.passed
             else "",
+            tokens_to_compliance=tokens_to_compliance,
+            compliance_attempts=compliance_attempts,
         )
 
         # Estimate Claude cost for savings comparison (Task 11)
@@ -346,6 +465,8 @@ class HandlerDelegationWorkflow:
             cost_savings_usd=round(estimated_claude_cost, 6),
             delegation_latency_ms=elapsed_ms,
             llm_call_id=workflow.inference_llm_call_id,
+            tokens_to_compliance=tokens_to_compliance,
+            compliance_attempts=compliance_attempts,
         )
 
         events: list[BaseModel] = []

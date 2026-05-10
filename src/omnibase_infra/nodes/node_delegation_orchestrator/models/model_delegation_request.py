@@ -11,10 +11,13 @@ to a local LLM via the ONEX runtime event bus.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from omnimarket.nodes.node_budget_policy_compute.models.model_budget_limits import (
+    ModelBudgetLimits,
+)
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelDelegationRequest(BaseModel):
@@ -28,6 +31,13 @@ class ModelDelegationRequest(BaseModel):
         correlation_id: Unique identifier for tracking through the pipeline.
         max_tokens: Maximum tokens for the LLM response.
         emitted_at: Timestamp when the request was created.
+        output_schema_key: When set, activates the compliance loop — the
+            orchestrator validates each LLM response against the schema
+            registered under this key in omnimarket's output schema registry
+            and emits repair prompts on failure (OMN-10794).
+        compliance_budget: Token / cost / time ceilings the compliance loop
+            enforces between attempts. Required when ``output_schema_key`` is
+            set, ignored otherwise.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -60,6 +70,40 @@ class ModelDelegationRequest(BaseModel):
         ...,
         description="Timestamp when the request was created.",
     )
+    output_schema_key: str | None = Field(
+        default=None,
+        description=(
+            "When set, the orchestrator runs the schema-compliance loop: it "
+            "validates each inference response against the registry-resolved "
+            "schema and emits repair prompts on validation failure. None = "
+            "legacy single-attempt path."
+        ),
+    )
+    compliance_budget: ModelBudgetLimits | None = Field(
+        default=None,
+        description=(
+            "Budget ceilings (tokens, cost, elapsed time) the compliance loop "
+            "enforces between repair attempts. Required when "
+            "``output_schema_key`` is set."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_compliance_loop_config(self) -> Self:
+        """Reject ``output_schema_key`` set without ``compliance_budget``.
+
+        The compliance loop's evaluator requires both. Catching this at model
+        construction time prevents a runtime assertion in the workflow handler
+        when the orchestrator first sees the inference response.
+        """
+        if self.output_schema_key is not None and self.compliance_budget is None:
+            msg = (
+                "compliance_budget is required when output_schema_key is set "
+                "(the compliance loop has nothing to evaluate against without "
+                "token / cost / time ceilings)"
+            )
+            raise ValueError(msg)
+        return self
 
 
 __all__: list[str] = ["ModelDelegationRequest"]
