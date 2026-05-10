@@ -19,7 +19,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-001
     description: "terminal_event declared in delegation orchestrator contract — Pattern-B broker can route delegation dispatches"
-    source: ci
+    source: generated
     checks:
       - check_type: command
         check_value: "uv run pytest tests/unit/delegation/test_delegation_contracts.py -v"
@@ -27,7 +27,7 @@ dod_evidence:
     description: >
       Deploy verification: terminal_event contract field addition is a pure metadata change with no code-path side effects. Pattern-B broker reads this field at route-discovery time; adding it unblocks delegation dispatch without requiring a container restart. Rolling restart on .201 runtime is the only required deploy step.
 
-    source: ci
+    source: generated
     checks:
       - check_type: command
         check_value: "deploy: gh pr checks 1563 --repo OmniNode-ai/omnibase_infra --watch"
