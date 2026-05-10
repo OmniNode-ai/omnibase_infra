@@ -162,6 +162,12 @@ dev = [
 [tool.uv]
 override-dependencies = [
     "omnibase-core>=0.40.1,<0.41.0",
+    # OMN-10792: omnimarket pins onex-change-control by SHA, omnibase_infra pins
+    # by branch=main; uv treats these as conflicting URLs. The override forces
+    # the latter to win so we can pull in newer omnimarket features (schema
+    # registry / repair / budget policy nodes) without waiting for omnimarket
+    # to re-pin OCC by branch.
+    "onex-change-control",
 ]
 
 [tool.uv.sources]
