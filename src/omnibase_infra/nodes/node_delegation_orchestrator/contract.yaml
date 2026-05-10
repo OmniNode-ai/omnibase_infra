@@ -18,15 +18,15 @@ contract_name: "node_delegation_orchestrator"
 node_name: "node_delegation_orchestrator"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_type: "ORCHESTRATOR_GENERIC"
 description: >
-  Orchestrator node that coordinates delegation through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, dispatch typed invocation commands to the selected effect lane, react to remote agent lifecycle events or the legacy inference and quality-gate path, then emit delegation-completed or delegation-failed.
+  Orchestrator node that coordinates delegation through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, dispatch typed invocation commands to the selected effect lane, react to remote agent lifecycle events or the legacy inference and quality-gate path, then emit delegation-completed or delegation-failed. As of 0.2.0 (OMN-10792), exposes HandlerComplianceLoop as an in-process helper that the workflow handler can invoke per inference attempt to enforce schema-compliance of LLM outputs and emit tokens_to_compliance + compliance_attempts metrics on the terminal event.
 
 input_model:
   name: "ModelDelegationRequest"
