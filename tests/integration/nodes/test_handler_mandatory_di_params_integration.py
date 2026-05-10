@@ -14,6 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = [pytest.mark.integration]
+
 
 def _make_container() -> MagicMock:
     container = MagicMock()

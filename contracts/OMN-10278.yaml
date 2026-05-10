@@ -22,13 +22,13 @@ emergency_bypass:
 dod_evidence:
   - id: dod-001
     description: "= None defaults removed from injectable handler params; ServiceHandlerResolver injects them via multi-param path"
-    source: ci
+    source: generated
     checks:
       - check_type: command
         check_value: "uv run pytest tests/unit/nodes/test_handler_mandatory_di_params.py -v"
   - id: dod-002
     description: "event_bus wired into HandlerRuntimeErrorTriage via service_kernel"
-    source: ci
+    source: generated
     checks:
       - check_type: command
         check_value: "uv run pytest tests/unit/nodes/test_handler_runtime_error_triage.py -v"
@@ -36,7 +36,7 @@ dod_evidence:
     description: >
       Deploy verification: removing = None defaults from handler init signatures is a backwards-compatible change once the resolver (omnibase_core PR #1057) is merged. No new topics, no schema changes, no migration required. Rolling restart on .201 runtime after omnibase_core PR #1057 merges is the only required deploy step.
 
-    source: ci
+    source: generated
     checks:
       - check_type: command
         check_value: "deploy: gh pr checks 1562 --repo OmniNode-ai/omnibase_infra --watch"
