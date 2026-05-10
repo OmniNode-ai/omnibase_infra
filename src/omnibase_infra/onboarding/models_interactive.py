@@ -8,13 +8,19 @@ This module re-exports all four for convenient single-import access.
 """
 
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
+from omnibase_infra.onboarding.model_interactive_result import (
+    ModelInteractiveResult,
+    ModelStepResult,
+)
 from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveStep
 from omnibase_infra.onboarding.model_transition import ModelTransition
 from omnibase_infra.onboarding.model_transition_branch import ModelTransitionBranch
 
 __all__ = [
     "ModelInteractivePolicy",
+    "ModelInteractiveResult",
     "ModelInteractiveStep",
+    "ModelStepResult",
     "ModelTransition",
     "ModelTransitionBranch",
 ]

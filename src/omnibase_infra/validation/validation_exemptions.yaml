@@ -3388,6 +3388,17 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/onboarding/policies/interactive_onboarding.yaml
     ticket: OMN-10768
+  # ==========================================================================
+  # ModelInteractiveResult policy_name Field Exemption (OMN-10782)
+  # ==========================================================================
+  - file_pattern: 'model_interactive_result\.py'
+    violation_pattern: "Field 'policy_name' might reference an entity"
+    reason: >
+      policy_name is a provenance field recording which interactive onboarding policy was executed. It mirrors ModelInteractivePolicy.policy_name and is not an entity reference requiring ID + display_name pattern.
+
+    documentation:
+      - src/omnibase_infra/onboarding/model_interactive_policy.py
+    ticket: OMN-10782
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
