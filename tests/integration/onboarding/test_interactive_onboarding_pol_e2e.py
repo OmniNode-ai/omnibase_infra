@@ -127,6 +127,7 @@ def policy() -> ModelInteractivePolicy:
 
 
 @pytest.mark.asyncio
+@pytest.mark.serial
 @pytest.mark.parametrize(
     "spec",
     [_LOCAL, _CLOUD, _HYBRID],
