@@ -252,6 +252,66 @@ class TestInteractiveOnboardingConditions:
         assert evaluate_condition("item in response", state_kafka) is True
 
 
+class TestQuotedLiteralLhs:
+    """OMN-10779 followup — LHS may be a quoted literal (not a state key).
+
+    Required by interactive onboarding policy syntax such as
+    ``"llm_inference" in selected_local_services`` where the LHS is a value to
+    test for membership rather than a state key to resolve.
+    """
+
+    def test_double_quoted_literal_in_state_list_true(self) -> None:
+        assert (
+            evaluate_condition(
+                '"llm_inference" in selected_local_services',
+                {"selected_local_services": ["llm_inference", "kafka"]},
+            )
+            is True
+        )
+
+    def test_double_quoted_literal_in_state_list_false(self) -> None:
+        assert (
+            evaluate_condition(
+                '"llm_inference" in selected_local_services',
+                {"selected_local_services": ["kafka", "postgres"]},
+            )
+            is False
+        )
+
+    def test_single_quoted_literal_not_in_state_list_true(self) -> None:
+        assert (
+            evaluate_condition(
+                "'llm_inference' not in response",
+                {"response": ["kafka", "postgres"]},
+            )
+            is True
+        )
+
+    def test_quoted_literal_does_not_resolve_state(self) -> None:
+        # The literal must NOT be looked up as a state key, even if a state key
+        # of that name exists.
+        assert (
+            evaluate_condition(
+                '"llm_inference" in selected_local_services',
+                {
+                    "llm_inference": "this_should_be_ignored",
+                    "selected_local_services": ["kafka"],
+                },
+            )
+            is False
+        )
+
+    def test_quoted_literal_compound_with_state_key(self) -> None:
+        # The exact pattern from interactive_onboarding.yaml.
+        assert (
+            evaluate_condition(
+                'deployment_mode == local and "llm_inference" not in response',
+                {"deployment_mode": "local", "response": ["kafka", "postgres"]},
+            )
+            is True
+        )
+
+
 class TestUnknownKeyErrors:
     def test_unknown_key_message_includes_key_name(self) -> None:
         with pytest.raises(ConditionEvaluationError, match="my_missing_key"):

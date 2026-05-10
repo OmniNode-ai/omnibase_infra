@@ -345,7 +345,8 @@ class TestHybridPath:
             b
             for b in t3["on_submit"]
             if "deployment_mode == hybrid" in b.get("condition", "")
-            and "llm_inference in" in b.get("condition", "")
+            and "llm_inference" in b.get("condition", "")
+            and "not in" not in b.get("condition", "")
         )
         assert hybrid_llm["next"] == "configure_llm_endpoint"
 

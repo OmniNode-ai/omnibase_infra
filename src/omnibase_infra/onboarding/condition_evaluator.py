@@ -5,11 +5,23 @@
 
 Evaluates boolean guard expressions against a state dict without eval().
 Supported operators: ==, in [...], not in [...], in <state_key>, and.
+
+LHS may be either a bareword (resolved as a state key) or a quoted string
+literal (e.g. ``"llm_inference" in selected_local_services``). RHS supports
+quoted literals for ``==``, inline lists for ``in [..]`` / ``not in [..]``,
+and bareword state keys resolving to collections.
 """
 
 from __future__ import annotations
 
 import re
+
+# A LHS token is either a bareword (\w+) or a single/double-quoted string.
+_LHS_TOKEN = r"""(?:"[^"]*"|'[^']*'|\w+)"""
+
+_NOT_IN_RE = re.compile(rf"^({_LHS_TOKEN})\s+not\s+in\s+(.+)$")
+_IN_RE = re.compile(rf"^({_LHS_TOKEN})\s+in\s+(.+)$")
+_EQ_RE = re.compile(rf"^({_LHS_TOKEN})\s*==\s*(.+)$")
 
 
 class ConditionEvaluationError(Exception):
@@ -21,6 +33,25 @@ def _resolve_key(key: str, state: dict[str, object]) -> object:
         msg = f"Unknown state key: '{key}'"
         raise ConditionEvaluationError(msg)
     return state[key]
+
+
+def _is_quoted(token: str) -> bool:
+    token = token.strip()
+    return len(token) >= 2 and (
+        (token[0] == '"' and token[-1] == '"') or (token[0] == "'" and token[-1] == "'")
+    )
+
+
+def _resolve_lhs(token: str, state: dict[str, object]) -> str:
+    """Resolve a LHS token to its string value.
+
+    Quoted tokens (``"foo"`` / ``'foo'``) are literal values; bareword tokens
+    are resolved as state keys.
+    """
+    token = token.strip()
+    if _is_quoted(token):
+        return token[1:-1]
+    return str(_resolve_key(token, state))
 
 
 def _parse_inline_list(raw: str) -> list[str]:
@@ -73,12 +104,11 @@ def _split_and_clauses(expr: str) -> list[str]:
 def _evaluate_single(expr: str, state: dict[str, object]) -> bool:
     expr = expr.strip()
 
-    # Pattern: key not in [list] or key not in state_key
-    not_in_match = re.match(r"^(\w+)\s+not\s+in\s+(.+)$", expr)
+    not_in_match = _NOT_IN_RE.match(expr)
     if not_in_match:
-        lhs_key = not_in_match.group(1)
+        lhs_token = not_in_match.group(1)
         rhs_raw = not_in_match.group(2).strip()
-        lhs_val = str(_resolve_key(lhs_key, state))
+        lhs_val = _resolve_lhs(lhs_token, state)
         if rhs_raw.startswith("["):
             items = _parse_inline_list(rhs_raw)
         else:
@@ -90,12 +120,11 @@ def _evaluate_single(expr: str, state: dict[str, object]) -> bool:
             items = [str(x) for x in rhs_obj]
         return lhs_val not in items
 
-    # Pattern: key in [list] or key in state_key
-    in_match = re.match(r"^(\w+)\s+in\s+(.+)$", expr)
+    in_match = _IN_RE.match(expr)
     if in_match:
-        lhs_key = in_match.group(1)
+        lhs_token = in_match.group(1)
         rhs_raw = in_match.group(2).strip()
-        lhs_val = str(_resolve_key(lhs_key, state))
+        lhs_val = _resolve_lhs(lhs_token, state)
         if rhs_raw.startswith("["):
             items = _parse_inline_list(rhs_raw)
         else:
@@ -107,12 +136,11 @@ def _evaluate_single(expr: str, state: dict[str, object]) -> bool:
             items = [str(x) for x in rhs_obj]
         return lhs_val in items
 
-    # Pattern: key == value
-    eq_match = re.match(r"^(\w+)\s*==\s*(.+)$", expr)
+    eq_match = _EQ_RE.match(expr)
     if eq_match:
-        lhs_key = eq_match.group(1)
+        lhs_token = eq_match.group(1)
         rhs_val = _strip_quotes(eq_match.group(2))
-        lhs_val = str(_resolve_key(lhs_key, state))
+        lhs_val = _resolve_lhs(lhs_token, state)
         return lhs_val == rhs_val
 
     msg = f"Unrecognised condition syntax: {expr!r}"

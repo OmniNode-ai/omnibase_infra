@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10797"
+title: "fix(OMN-10797): condition evaluator supports quoted-literal LHS"
+summary: >
+  OMN-10779 followup. The interactive onboarding policy uses LHS literals such as `"llm_inference" in selected_local_services`; the evaluator was treating every LHS as a state key and raising. Extend the LHS grammar to accept quoted literals; quote the affected policy conditions.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: Condition evaluator unit tests pass (49 tests, includes new TestQuotedLiteralLhs class).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/onboarding/test_condition_evaluator.py -v'
+  - id: dod-002
+    description: Condition evaluator integration tests pass against real policy YAML.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/onboarding/test_condition_evaluator_policy_integration.py -v'
+  - id: dod-003
+    description: Interactive onboarding policy structural tests still pass after policy YAML quoted-literal updates (243 onboarding tests total).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/onboarding/test_interactive_onboarding_policy.py -v'
+  - id: dod-deploy
+    description: Non-deployable pure compute module + static policy YAML — no runtime artifact changes, no side effects, no I/O.
+    source: manual
+    checks:
+      - check_type: behavior_proven
+        check_value: 'condition_evaluator is pure compute (no env reads, no fs, no network, no time); policy YAML is static config consumed by reducer at runtime — deploy gate compat'
