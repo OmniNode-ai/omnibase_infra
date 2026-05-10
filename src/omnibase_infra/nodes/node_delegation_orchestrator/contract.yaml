@@ -128,6 +128,14 @@ handler_routing:
         name: "ModelDelegationRequest"
         module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
         description: "Delegation request to orchestrate."
+    - operation: "delegation.evaluate_compliance"
+      handler_class: "HandlerComplianceLoop"
+      handler_module: "omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_compliance_loop"
+      description: "Per-attempt schema-compliance evaluator (OMN-10792). Composes omnimarket schema-registry, schema-repair, and budget-policy nodes; returns compliant=True, repair_prompt+CONTINUE, or ABORT. Invoked in-process by HandlerDelegationWorkflow per inference attempt — not routed via the bus."
+      input_model:
+        name: "ModelComplianceLoopResult"
+        module: "omnibase_infra.nodes.node_delegation_orchestrator.models.model_compliance_loop_result"
+        description: "Per-attempt directive emitted by the compliance loop."
 error_handling:
   retry_policy:
     max_retries: 1
