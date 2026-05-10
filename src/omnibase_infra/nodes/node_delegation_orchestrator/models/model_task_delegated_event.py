@@ -75,10 +75,12 @@ class ModelTaskDelegatedEvent(BaseModel):
     )
     tokens_to_compliance: int = Field(
         default=0,
+        ge=0,
         description="Total tokens across all compliance attempts.",
     )
     compliance_attempts: int = Field(
         default=1,
+        ge=1,
         description="Number of LLM invocations to reach compliance.",
     )
 
