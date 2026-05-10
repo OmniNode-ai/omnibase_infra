@@ -98,6 +98,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolReducer": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolEffect": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolPartialRetryRequest": "nodes/node_registry_effect/handlers/handler_partial_retry.py",
+    # [NODE] OMN-10771/OMN-10784 input adapter boundary for InteractiveExecutor — injected via handler param
+    "ProtocolInputAdapter": "onboarding/protocol_input_adapter.py",
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
