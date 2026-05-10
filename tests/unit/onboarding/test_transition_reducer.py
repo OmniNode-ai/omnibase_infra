@@ -236,6 +236,58 @@ class TestGraphValidation:
         with pytest.raises(TransitionError, match=r"[Uu]nreachable"):
             TransitionReducer(policy)
 
+    def test_unknown_from_step_rejected(self) -> None:
+        """A transition referencing a non-existent from_step is rejected.
+
+        The Pydantic model validator catches this before TransitionReducer,
+        so we verify the error surfaces at model construction time.
+        """
+        raw = yaml.safe_load(POLICY_PATH.read_text())
+        raw["transitions"].append({"from": "does_not_exist", "terminal": True})
+        with pytest.raises(Exception, match=r"unknown step.*does_not_exist"):
+            ModelInteractivePolicy.model_validate(raw)
+
+    def test_duplicate_from_step_raises(self) -> None:
+        """Duplicate transition definitions for the same from_step are rejected.
+
+        This is caught by TransitionReducer._validate_graph (defense-in-depth
+        beyond the Pydantic model validator).
+        """
+        raw = yaml.safe_load(POLICY_PATH.read_text())
+        # Duplicate an existing transition — Pydantic allows it, reducer catches it
+        first_transition = raw["transitions"][0].copy()
+        raw["transitions"].append(first_transition)
+        policy = ModelInteractivePolicy.model_validate(raw)
+        with pytest.raises(TransitionError, match=r"[Dd]uplicate"):
+            TransitionReducer(policy)
+
+    def test_unknown_target_step_rejected(self) -> None:
+        """A branch targeting a non-existent step is rejected.
+
+        The Pydantic model validator catches this before TransitionReducer.
+        """
+        raw = yaml.safe_load(POLICY_PATH.read_text())
+        for t in raw["transitions"]:
+            if t.get("responses"):
+                first_key = next(iter(t["responses"]))
+                t["responses"][first_key]["next"] = "nonexistent_target"
+                break
+        with pytest.raises(Exception, match=r"unknown step.*nonexistent_target"):
+            ModelInteractivePolicy.model_validate(raw)
+
+    def test_terminal_without_env_output_rejected(self) -> None:
+        """A terminal step missing its env_output entry is rejected.
+
+        The Pydantic model validator catches this before TransitionReducer.
+        """
+        raw = yaml.safe_load(POLICY_PATH.read_text())
+        terminal_steps = [t["from"] for t in raw["transitions"] if t.get("terminal")]
+        assert terminal_steps, "Test requires at least one terminal step"
+        removed_step = terminal_steps[0]
+        del raw["env_output"][removed_step]
+        with pytest.raises(Exception, match=r"missing.*env_output"):
+            ModelInteractivePolicy.model_validate(raw)
+
 
 # ------------------------------------------------------------------
 # is_terminal

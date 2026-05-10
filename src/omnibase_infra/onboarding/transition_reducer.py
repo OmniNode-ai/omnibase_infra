@@ -77,10 +77,45 @@ class TransitionReducer:
 
         Checks:
         - Every transition ``from_step`` references a declared step.
+        - No duplicate ``from_step`` entries.
         - Every branch ``next`` references a declared step.
         - Every terminal step has a matching ``env_output`` entry.
-        - At least one step is reachable from the start step.
+        - All steps are reachable from the start step.
         """
+        # Structural checks before reachability.
+        seen_from_steps: set[str] = set()
+        for transition in self._policy.transitions:
+            if transition.from_step not in self._step_ids:
+                msg = f"Transition from unknown step '{transition.from_step}'"
+                raise TransitionError(msg)
+            if transition.from_step in seen_from_steps:
+                msg = (
+                    f"Duplicate transition definition for step '{transition.from_step}'"
+                )
+                raise TransitionError(msg)
+            seen_from_steps.add(transition.from_step)
+
+            targets: list[str] = []
+            if transition.responses:
+                targets.extend(branch.next for branch in transition.responses.values())
+            if transition.on_submit:
+                targets.extend(branch.next for branch in transition.on_submit)
+
+            for target in targets:
+                if target not in self._step_ids:
+                    msg = (
+                        f"Transition from '{transition.from_step}' targets "
+                        f"unknown step '{target}'"
+                    )
+                    raise TransitionError(msg)
+
+            if (
+                transition.terminal
+                and transition.from_step not in self._policy.env_output
+            ):
+                msg = f"Terminal step '{transition.from_step}' missing env_output"
+                raise TransitionError(msg)
+
         # Reachability: BFS from start_step through all branch targets.
         start = self._policy.start_step
         if start is None:
