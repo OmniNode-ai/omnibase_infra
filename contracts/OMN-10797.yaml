@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10797"
+title: "Condition evaluator: support quoted-string literal LHS"
+summary: "OMN-10779 followup. The interactive onboarding policy uses LHS literals such as `\"llm_inference\" in selected_local_services`; the evaluator was treating every LHS as a state key and raising. Extend the LHS grammar to accept quoted literals; quote the affected policy conditions."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Condition evaluator unit + integration tests pass."
+    command: "uv run pytest tests/unit/onboarding/test_condition_evaluator.py tests/integration/onboarding/test_condition_evaluator_policy_integration.py -q"
+  - kind: "tests"
+    description: "Interactive onboarding policy tests pass."
+    command: "uv run pytest tests/unit/onboarding/test_interactive_onboarding_policy.py -q"
+dod_evidence:
+  - id: "dod-001"
+    description: "Unit tests for condition evaluator (incl. new TestQuotedLiteralLhs class) pass."
+    source: "generated"
+    checks:
+      - check_type: "test-pass"
+        check_value: "tests/unit/onboarding/test_condition_evaluator.py"
+  - id: "dod-002"
+    description: "Integration tests for condition evaluator against real policy YAML pass."
+    source: "generated"
+    checks:
+      - check_type: "test-pass"
+        check_value: "tests/integration/onboarding/test_condition_evaluator_policy_integration.py"
+  - id: "dod-003"
+    description: "Interactive onboarding policy tests still pass after policy YAML quoted-literal updates."
+    source: "generated"
+    checks:
+      - check_type: "test-pass"
+        check_value: "tests/unit/onboarding/test_interactive_onboarding_policy.py"
+  - id: "dod-deploy"
+    description: "Non-deployable pure compute module + static policy YAML — no runtime deploy required."
+    source: "manual"
+    checks:
+      - check_type: "deploy"
+        check_value: "non-deployable pure compute + static policy — deploy gate compat"

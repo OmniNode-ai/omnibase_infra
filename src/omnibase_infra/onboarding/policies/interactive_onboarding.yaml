@@ -55,7 +55,7 @@ steps:
   - id: configure_llm_endpoint
     prompt: "LLM inference endpoint URL (leave blank to skip)"
     type: text
-    condition: "llm_inference in selected_local_services"
+    condition: '"llm_inference" in selected_local_services'
     required: false
   - id: write_config_local
     prompt: "Writing local .env configuration"
@@ -96,11 +96,11 @@ transitions:
   - from: configure_local_services
     # multi_choice — any selection is accepted; next depends on deployment_mode
     on_submit:
-      - condition: "deployment_mode == local and llm_inference not in response"
+      - condition: 'deployment_mode == local and "llm_inference" not in response'
         next: write_config_local
         set_state:
           selected_local_services: "{response}"
-      - condition: "deployment_mode == local and llm_inference in response"
+      - condition: 'deployment_mode == local and "llm_inference" in response'
         next: configure_llm_endpoint
         set_state:
           selected_local_services: "{response}"
@@ -124,11 +124,11 @@ transitions:
         next: write_config_cloud
         set_state:
           aws_region: "{response}"
-      - condition: "deployment_mode == hybrid and llm_inference in selected_local_services"
+      - condition: 'deployment_mode == hybrid and "llm_inference" in selected_local_services'
         next: configure_llm_endpoint
         set_state:
           aws_region: "{response}"
-      - condition: "deployment_mode == hybrid and llm_inference not in selected_local_services"
+      - condition: 'deployment_mode == hybrid and "llm_inference" not in selected_local_services'
         next: write_config_hybrid
         set_state:
           aws_region: "{response}"
@@ -138,11 +138,11 @@ transitions:
         next: write_config_cloud
         set_state:
           gcp_project: "{response}"
-      - condition: "deployment_mode == hybrid and llm_inference in selected_local_services"
+      - condition: 'deployment_mode == hybrid and "llm_inference" in selected_local_services'
         next: configure_llm_endpoint
         set_state:
           gcp_project: "{response}"
-      - condition: "deployment_mode == hybrid and llm_inference not in selected_local_services"
+      - condition: 'deployment_mode == hybrid and "llm_inference" not in selected_local_services'
         next: write_config_hybrid
         set_state:
           gcp_project: "{response}"
