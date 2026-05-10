@@ -42,14 +42,14 @@ class HandlerRuntimeLifecycle:
 
     def __init__(
         self,
-        container: ModelONEXContainer | None = None,
+        container: ModelONEXContainer,
         *,
         steps: tuple[BootStep, ...] | None = None,
     ) -> None:
-        """Initialize with either container or explicit step callables.
+        """Initialize with container and optional explicit step callables.
 
         Args:
-            container: ONEX container (stored for future resolution).
+            container: ONEX container (required).
             steps: Optional explicit step callables in boot order.
                 If provided, used directly. If None, steps must be
                 provided via execute_startup(steps=...).

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,6 +36,7 @@ async def test_boot_sequence_ordering() -> None:
     mock_event_bus_wiring = AsyncMock(side_effect=lambda: call_order.append("wiring"))
 
     handler = HandlerRuntimeLifecycle(
+        MagicMock(),
         steps=(
             mock_contract_loader,
             mock_contract_registry,
@@ -67,6 +68,7 @@ async def test_fail_fast_on_step_failure() -> None:
     mock_event_bus_wiring = AsyncMock()
 
     handler = HandlerRuntimeLifecycle(
+        MagicMock(),
         steps=(
             mock_contract_loader,
             mock_contract_registry,
@@ -92,6 +94,6 @@ async def test_no_steps_raises() -> None:
         HandlerRuntimeLifecycle,
     )
 
-    handler = HandlerRuntimeLifecycle()
+    handler = HandlerRuntimeLifecycle(MagicMock())
     with pytest.raises(ValueError, match="No boot steps"):
         await handler.execute_startup()

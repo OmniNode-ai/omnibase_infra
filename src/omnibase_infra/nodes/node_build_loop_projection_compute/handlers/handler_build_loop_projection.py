@@ -46,7 +46,7 @@ HANDLER_ID_BUILD_LOOP_PROJECTION: str = "build-loop-projection-handler"
 class HandlerBuildLoopProjection:
     """COMPUTE handler that projects terminal events into write intents."""
 
-    def __init__(self, container: ModelONEXContainer | None = None) -> None:
+    def __init__(self, container: ModelONEXContainer) -> None:
         self._container = container
         self._initialized: bool = False
 
