@@ -18,8 +18,8 @@ node_name: "node_build_loop_projection_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "0.1.0"
+  patch: 1
+node_version: "0.1.1"
 node_type: "COMPUTE_GENERIC"
 runtime_profiles:
   - "effects"
