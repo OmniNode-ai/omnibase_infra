@@ -1,0 +1,44 @@
+# OMN-10782 contract file — interactive executor for onboarding.
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for dod_evidence items.
+schema_version: '1.0.0'
+ticket_id: OMN-10782
+summary: 'feat(OMN-10782): interactive executor — drives onboarding flow via adapter + reducer'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Unit and integration tests for interactive executor
+    command: uv run pytest tests/unit/onboarding/test_interactive_executor.py tests/integration/onboarding/test_interactive_executor_integration.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-10782.yaml'
+  - id: dod-002
+    description: Unit tests prove executor drives 2-step policy, produces env dict, records step results, handles action and multi-choice steps
+    source: generated
+    checks:
+      - check_type: unit_test
+        check_value: 'uv run pytest tests/unit/onboarding/test_interactive_executor.py -v'
+  - id: dod-003
+    description: Integration tests prove full traversal of local, cloud, and hybrid paths through real policy with correct env output and step ordering
+    source: generated
+    checks:
+      - check_type: integration_test
+        check_value: 'uv run pytest tests/integration/onboarding/test_interactive_executor_integration.py -v'
+  - id: dod-004
+    description: Deploy-compatible — no file writes, no side effects, pure executor composable with handler layer
+    source: manual
+    checks:
+      - check_type: deploy-compat
+        check_value: 'interactive executor is pure except for adapter I/O — no file writes, no config mutations, no runtime side effects'
