@@ -85,7 +85,12 @@ async def test_wire_from_manifest_main_profile_no_crash() -> None:
 
 
 def test_manifest_includes_omnimarket_contracts() -> None:
-    """The main-profile boot gate is not vacuous: omnimarket is present."""
+    """The main-profile boot gate is not vacuous: omnimarket is present.
+
+    Asserts a representative slice of well-known omnimarket workflow nodes.
+    `merge_sweep` was split into `merge_sweep_compute` + state-reducer + arm-effect
+    in OMN-10791 wave; this assertion was updated to match the new node layout.
+    """
     manifest = _main_profile_manifest()
 
     omnimarket_contracts = {
@@ -97,7 +102,7 @@ def test_manifest_includes_omnimarket_contracts() -> None:
     assert omnimarket_contracts
     assert {
         "build_loop",
-        "merge_sweep",
+        "merge_sweep_compute",
         "runtime_sweep",
     }.issubset(omnimarket_contracts)
 

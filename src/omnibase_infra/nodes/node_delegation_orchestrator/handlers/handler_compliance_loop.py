@@ -46,6 +46,7 @@ from omnimarket.nodes.node_schema_repair_compute.models.model_repair_request imp
     ModelSchemaRepairRequest,
 )
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_compliance_loop_result import (
     ModelComplianceLoopResult,
 )
@@ -74,6 +75,14 @@ class HandlerComplianceLoop:
         # alternates via constructor (no module-level mocking required).
         self._schema_repair = schema_repair or HandlerSchemaRepair()
         self._budget_policy = budget_policy or HandlerBudgetPolicy()
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
     def evaluate(
         self,
