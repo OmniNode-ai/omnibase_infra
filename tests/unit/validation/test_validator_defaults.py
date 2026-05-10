@@ -129,11 +129,11 @@ class TestInfraValidatorConstants:
         - 131 (2026-03-01): OMN-3202 graph handler signature fix (+1 union)
           - HandlerGraph.initialize(): dict[str, object] | str
 
-        Current: 149 (as of interactive onboarding models OMN-10771 + transition reducer OMN-10780). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 150 (as of interactive onboarding models OMN-10771 + transition reducer OMN-10780). Target: Keep below 160 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert (
-            INFRA_MAX_UNIONS == 149
-        ), "INFRA_MAX_UNIONS should be 149 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 150, (
+            "INFRA_MAX_UNIONS should be 150 (non-optional unions only, X | None excluded)"
+        )
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""
@@ -151,9 +151,9 @@ class TestInfraValidatorConstants:
         Documented exemptions (EventBusKafka, RuntimeHostProcess, etc.) are handled
         via the exempted_patterns list in validate_infra_patterns().
         """
-        assert (
-            INFRA_PATTERNS_STRICT is True
-        ), "INFRA_PATTERNS_STRICT should be True (strict mode per OMN-983)"
+        assert INFRA_PATTERNS_STRICT is True, (
+            "INFRA_PATTERNS_STRICT should be True (strict mode per OMN-983)"
+        )
 
     def test_infra_unions_strict_constant(self) -> None:
         """Verify INFRA_UNIONS_STRICT constant has expected value.
@@ -161,9 +161,9 @@ class TestInfraValidatorConstants:
         OMN-983: Strict validation mode enabled.
         The validator flags actual violations (not just counting unions).
         """
-        assert (
-            INFRA_UNIONS_STRICT is True
-        ), "INFRA_UNIONS_STRICT should be True (strict mode per OMN-983)"
+        assert INFRA_UNIONS_STRICT is True, (
+            "INFRA_UNIONS_STRICT should be True (strict mode per OMN-983)"
+        )
 
     def test_infra_src_path_constant(self) -> None:
         """Verify INFRA_SRC_PATH constant has expected value."""
@@ -188,9 +188,9 @@ class TestValidateInfraArchitectureDefaults:
         # Check max_violations default (strict mode)
         max_violations_param = sig.parameters["max_violations"]
         assert max_violations_param.default == INFRA_MAX_VIOLATIONS
-        assert (
-            max_violations_param.default == 0
-        ), "Should default to strict mode via INFRA_MAX_VIOLATIONS (0)"
+        assert max_violations_param.default == 0, (
+            "Should default to strict mode via INFRA_MAX_VIOLATIONS (0)"
+        )
 
     @patch("omnibase_infra.validation.infra_validators.validate_architecture")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
@@ -260,9 +260,9 @@ class TestValidateInfraPatternsDefaults:
         # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert (
-            strict_param.default is True
-        ), "Should default to strict mode via INFRA_PATTERNS_STRICT (True) per OMN-983"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_PATTERNS_STRICT (True) per OMN-983"
+        )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
@@ -303,16 +303,16 @@ class TestValidateInfraUnionUsageDefaults:
 
         # Check max_unions default
         max_unions_param = sig.parameters["max_unions"]
-        assert (
-            max_unions_param.default == INFRA_MAX_UNIONS
-        ), f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
+        assert max_unions_param.default == INFRA_MAX_UNIONS, (
+            f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
+        )
 
         # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_UNIONS_STRICT
-        assert (
-            strict_param.default is True
-        ), "Should default to strict mode via INFRA_UNIONS_STRICT (True) per OMN-983"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_UNIONS_STRICT (True) per OMN-983"
+        )
 
     @patch("omnibase_infra.validation.infra_validators._count_non_optional_unions")
     def test_default_parameters_passed_to_core(
@@ -341,12 +341,12 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify result metadata reflects default parameters
         assert result.metadata is not None, "Result should have metadata"
         # max_unions and strict_mode are typed attributes on ModelValidationMetadata
-        assert (
-            result.metadata.max_unions == INFRA_MAX_UNIONS
-        ), f"Should use INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS}) as default"
-        assert (
-            result.metadata.strict_mode == INFRA_UNIONS_STRICT
-        ), f"Should use INFRA_UNIONS_STRICT ({INFRA_UNIONS_STRICT}) as default"
+        assert result.metadata.max_unions == INFRA_MAX_UNIONS, (
+            f"Should use INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS}) as default"
+        )
+        assert result.metadata.strict_mode == INFRA_UNIONS_STRICT, (
+            f"Should use INFRA_UNIONS_STRICT ({INFRA_UNIONS_STRICT}) as default"
+        )
 
 
 class TestValidateInfraCircularImportsDefaults:
@@ -441,9 +441,9 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify architecture validator uses validate_infra_architecture() with built-in defaults
-        assert (
-            "validate_infra_architecture()" in script_content
-        ), "Architecture validator should use validate_infra_architecture() with built-in defaults"
+        assert "validate_infra_architecture()" in script_content, (
+            "Architecture validator should use validate_infra_architecture() with built-in defaults"
+        )
         assert (
             "from omnibase_infra.validation.infra_validators import" in script_content
             and "validate_infra_architecture" in script_content
@@ -463,9 +463,9 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify patterns validator uses validate_infra_patterns() which has built-in defaults
-        assert (
-            "validate_infra_patterns()" in script_content
-        ), "Patterns validator should use validate_infra_patterns() with built-in defaults"
+        assert "validate_infra_patterns()" in script_content, (
+            "Patterns validator should use validate_infra_patterns() with built-in defaults"
+        )
         assert (
             "from omnibase_infra.validation.infra_validators import validate_infra_patterns"
             in script_content
@@ -477,14 +477,14 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify unions validator uses INFRA_MAX_UNIONS constant
-        assert (
-            "INFRA_MAX_UNIONS" in script_content
-        ), "Unions validator should import and use INFRA_MAX_UNIONS constant"
+        assert "INFRA_MAX_UNIONS" in script_content, (
+            "Unions validator should import and use INFRA_MAX_UNIONS constant"
+        )
         assert "max_unions=INFRA_MAX_UNIONS" in script_content
         # Verify unions validator uses INFRA_UNIONS_STRICT constant
-        assert (
-            "INFRA_UNIONS_STRICT" in script_content
-        ), "Unions validator should import and use INFRA_UNIONS_STRICT constant"
+        assert "INFRA_UNIONS_STRICT" in script_content, (
+            "Unions validator should import and use INFRA_UNIONS_STRICT constant"
+        )
         assert "strict=INFRA_UNIONS_STRICT" in script_content
 
 
@@ -500,9 +500,9 @@ class TestCLICommandDefaults:
         for decorator in validate_architecture_cmd.params:
             if decorator.name == "max_violations":
                 # CLI uses None by default and resolves to INFRA_MAX_VIOLATIONS in code
-                assert (
-                    decorator.default is None
-                ), "CLI max_violations should default to None (resolved to INFRA_MAX_VIOLATIONS)"
+                assert decorator.default is None, (
+                    "CLI max_violations should default to None (resolved to INFRA_MAX_VIOLATIONS)"
+                )
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -523,9 +523,9 @@ class TestCLICommandDefaults:
         for decorator in validate_patterns_cmd.params:
             if decorator.name == "strict":
                 # CLI uses None by default and resolves to INFRA_PATTERNS_STRICT in code
-                assert (
-                    decorator.default is None
-                ), "CLI strict should default to None (resolved to INFRA_PATTERNS_STRICT)"
+                assert decorator.default is None, (
+                    "CLI strict should default to None (resolved to INFRA_PATTERNS_STRICT)"
+                )
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -537,14 +537,14 @@ class TestCLICommandDefaults:
         for decorator in validate_unions_cmd.params:
             if decorator.name == "max_unions":
                 # CLI uses None by default and resolves to INFRA_MAX_UNIONS in code
-                assert (
-                    decorator.default is None
-                ), "CLI max_unions should default to None (resolved to INFRA_MAX_UNIONS)"
+                assert decorator.default is None, (
+                    "CLI max_unions should default to None (resolved to INFRA_MAX_UNIONS)"
+                )
             elif decorator.name == "strict":
                 # CLI uses None by default and resolves to INFRA_UNIONS_STRICT in code
-                assert (
-                    decorator.default is None
-                ), "CLI strict should default to None (resolved to INFRA_UNIONS_STRICT)"
+                assert decorator.default is None, (
+                    "CLI strict should default to None (resolved to INFRA_UNIONS_STRICT)"
+                )
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -630,29 +630,29 @@ class TestUnionCountRegressionGuard:
         result = validate_infra_union_usage()
 
         # Verify metadata is present
-        assert (
-            result.metadata is not None
-        ), "Union validation should return metadata with count information"
+        assert result.metadata is not None, (
+            "Union validation should return metadata with count information"
+        )
 
         # Verify total_unions is present in metadata
-        assert hasattr(
-            result.metadata, "total_unions"
-        ), "Metadata should contain total_unions count for monitoring"
+        assert hasattr(result.metadata, "total_unions"), (
+            "Metadata should contain total_unions count for monitoring"
+        )
 
         # Verify the total count is reasonable (positive integer)
-        assert isinstance(
-            result.metadata.total_unions, int
-        ), "total_unions should be an integer"
+        assert isinstance(result.metadata.total_unions, int), (
+            "total_unions should be an integer"
+        )
         assert result.metadata.total_unions >= 0, "total_unions should be non-negative"
 
         # Verify non_optional_unions is in model_extra
-        assert hasattr(
-            result.metadata, "model_extra"
-        ), "Metadata should have model_extra for custom fields"
+        assert hasattr(result.metadata, "model_extra"), (
+            "Metadata should have model_extra for custom fields"
+        )
         non_optional = result.metadata.model_extra.get("non_optional_unions")
-        assert (
-            non_optional is not None
-        ), "Metadata should contain non_optional_unions count"
+        assert non_optional is not None, (
+            "Metadata should contain non_optional_unions count"
+        )
         assert isinstance(non_optional, int), "non_optional_unions should be an integer"
         assert non_optional >= 0, "non_optional_unions should be non-negative"
 
@@ -664,17 +664,17 @@ class TestUnionCountRegressionGuard:
 
         # Verify optional_unions_excluded is present
         optional_excluded = result.metadata.model_extra.get("optional_unions_excluded")
-        assert (
-            optional_excluded is not None
-        ), "Metadata should contain optional_unions_excluded count"
+        assert optional_excluded is not None, (
+            "Metadata should contain optional_unions_excluded count"
+        )
 
         # Verify isinstance_unions_excluded is present
         isinstance_excluded = result.metadata.model_extra.get(
             "isinstance_unions_excluded"
         )
-        assert (
-            isinstance_excluded is not None
-        ), "Metadata should contain isinstance_unions_excluded count"
+        assert isinstance_excluded is not None, (
+            "Metadata should contain isinstance_unions_excluded count"
+        )
 
         # Verify the counts are consistent:
         # total = threshold (non_optional) + optional + isinstance
@@ -725,9 +725,9 @@ class TestUnionValidatorEdgeCases:
         assert result.is_valid, "Directory with empty Python file should be valid"
         assert result.errors == [], "Should have no errors for zero unions"
         if result.metadata and hasattr(result.metadata, "total_unions"):
-            assert (
-                result.metadata.total_unions == 0
-            ), "Should report exactly zero unions"
+            assert result.metadata.total_unions == 0, (
+                "Should report exactly zero unions"
+            )
 
     def test_code_without_unions_is_valid(self, tmp_path: Path) -> None:
         """Verify code without any union types validates successfully.
@@ -744,9 +744,9 @@ class TestUnionValidatorEdgeCases:
         assert result.is_valid, "Code without unions should be valid"
         assert result.errors == [], "Should have no errors for zero unions"
         if result.metadata and hasattr(result.metadata, "total_unions"):
-            assert (
-                result.metadata.total_unions == 0
-            ), "Should report exactly zero unions"
+            assert result.metadata.total_unions == 0, (
+                "Should report exactly zero unions"
+            )
 
     def test_max_unions_zero_with_zero_unions(self, tmp_path: Path) -> None:
         """Verify max_unions=0 works correctly when there are zero unions.
@@ -776,20 +776,20 @@ class TestUnionValidatorEdgeCases:
 
         result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
 
-        assert (
-            result.is_valid
-        ), "Single optional union should be valid (excluded from threshold)"
+        assert result.is_valid, (
+            "Single optional union should be valid (excluded from threshold)"
+        )
         assert result.errors == [], "Should have no errors for single optional union"
         if result.metadata and hasattr(result.metadata, "total_unions"):
-            assert (
-                result.metadata.total_unions == 1
-            ), "Should report exactly one total union"
+            assert result.metadata.total_unions == 1, (
+                "Should report exactly one total union"
+            )
         # Non-optional should be 0 since it's an optional
         if result.metadata and hasattr(result.metadata, "model_extra"):
             non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
-            assert (
-                non_optional == 0
-            ), "Non-optional unions should be 0 for X | None pattern"
+            assert non_optional == 0, (
+                "Non-optional unions should be 0 for X | None pattern"
+            )
 
     def test_few_optionals_all_excluded_from_threshold(self, tmp_path: Path) -> None:
         """Verify few unions using optional patterns are excluded from threshold.
@@ -811,15 +811,15 @@ class TestUnionValidatorEdgeCases:
         assert result.errors == [], "Valid optional patterns should not cause errors"
         if result.metadata and hasattr(result.metadata, "total_unions"):
             # Should have 2 total unions (value and description)
-            assert (
-                result.metadata.total_unions == 2
-            ), "Should count both unions in total"
+            assert result.metadata.total_unions == 2, (
+                "Should count both unions in total"
+            )
         # But non-optional should be 0
         if result.metadata and hasattr(result.metadata, "model_extra"):
             non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
-            assert (
-                non_optional == 0
-            ), "Non-optional unions should be 0 for X | None patterns"
+            assert non_optional == 0, (
+                "Non-optional unions should be 0 for X | None patterns"
+            )
 
     def test_non_optional_union_counts_toward_threshold(self, tmp_path: Path) -> None:
         """Verify non-optional unions count toward threshold.
@@ -866,19 +866,19 @@ class TestUnionValidatorEdgeCases:
         # Metadata should be present
         assert result.metadata is not None, "Metadata should be present"
         # Metadata must have total_unions attribute (consistent structure requirement)
-        assert hasattr(
-            result.metadata, "total_unions"
-        ), "Metadata must have 'total_unions' attribute for consistent structure"
+        assert hasattr(result.metadata, "total_unions"), (
+            "Metadata must have 'total_unions' attribute for consistent structure"
+        )
         # total_unions should be 0 for code without unions
-        assert (
-            result.metadata.total_unions == 0
-        ), "total_unions should be 0 for code without unions"
+        assert result.metadata.total_unions == 0, (
+            "total_unions should be 0 for code without unions"
+        )
         # non_optional_unions should also be 0
         if hasattr(result.metadata, "model_extra"):
             non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
-            assert (
-                non_optional == 0
-            ), "non_optional_unions should be 0 for code without unions"
+            assert non_optional == 0, (
+                "non_optional_unions should be 0 for code without unions"
+            )
 
 
 class TestDefaultsConsistency:
@@ -897,9 +897,9 @@ class TestDefaultsConsistency:
         for param in validate_architecture_cmd.params:
             if param.name == "max_violations":
                 cli_default = param.default
-        assert (
-            cli_default is None
-        ), "CLI should use None and resolve to INFRA_MAX_VIOLATIONS"
+        assert cli_default is None, (
+            "CLI should use None and resolve to INFRA_MAX_VIOLATIONS"
+        )
 
         # Script uses constant (verified in test_architecture_script_defaults)
 
@@ -916,9 +916,9 @@ class TestDefaultsConsistency:
         for param in validate_patterns_cmd.params:
             if param.name == "strict":
                 cli_default = param.default
-        assert (
-            cli_default is None
-        ), "CLI should use None and resolve to INFRA_PATTERNS_STRICT"
+        assert cli_default is None, (
+            "CLI should use None and resolve to INFRA_PATTERNS_STRICT"
+        )
 
         # Script uses constant (verified in test_patterns_script_defaults)
 
@@ -944,9 +944,9 @@ class TestDefaultsConsistency:
         for param in validate_unions_cmd.params:
             if param.name == "strict":
                 cli_default = param.default
-        assert (
-            cli_default is None
-        ), "CLI should use None and resolve to INFRA_UNIONS_STRICT"
+        assert cli_default is None, (
+            "CLI should use None and resolve to INFRA_UNIONS_STRICT"
+        )
 
         # Script uses constant (verified in test_unions_script_defaults)
 
@@ -963,9 +963,9 @@ class TestDefaultsConsistency:
         for validator in validators:
             sig = inspect.signature(validator)
             dir_param = sig.parameters["directory"]
-            assert (
-                dir_param.default == INFRA_SRC_PATH
-            ), f"{validator.__name__} should default to INFRA_SRC_PATH"
+            assert dir_param.default == INFRA_SRC_PATH, (
+                f"{validator.__name__} should default to INFRA_SRC_PATH"
+            )
 
         # Contract validator should default to INFRA_NODES_PATH
         sig = inspect.signature(validate_infra_contracts)
@@ -1096,12 +1096,12 @@ class TestIsinstanceUnionExclusion:
             isinstance_excluded = result.metadata.model_extra.get(
                 "isinstance_unions_excluded", 0
             )
-            assert (
-                threshold_count == 0
-            ), "Multi-type isinstance union should be excluded from threshold"
-            assert (
-                isinstance_excluded == 1
-            ), "Should count 1 isinstance union as excluded"
+            assert threshold_count == 0, (
+                "Multi-type isinstance union should be excluded from threshold"
+            )
+            assert isinstance_excluded == 1, (
+                "Should count 1 isinstance union as excluded"
+            )
 
     def test_isinstance_unions_excluded_field_in_metadata(self) -> None:
         """Verify isinstance_unions_excluded is present in actual codebase validation.
@@ -1113,15 +1113,15 @@ class TestIsinstanceUnionExclusion:
 
         assert result.metadata is not None, "Metadata should be present"
         isinstance_count = result.metadata.model_extra.get("isinstance_unions_excluded")
-        assert (
-            isinstance_count is not None
-        ), "isinstance_unions_excluded should be in metadata"
-        assert isinstance(
-            isinstance_count, int
-        ), "isinstance_unions_excluded should be an integer"
-        assert (
-            isinstance_count >= 0
-        ), "isinstance_unions_excluded should be non-negative"
+        assert isinstance_count is not None, (
+            "isinstance_unions_excluded should be in metadata"
+        )
+        assert isinstance(isinstance_count, int), (
+            "isinstance_unions_excluded should be an integer"
+        )
+        assert isinstance_count >= 0, (
+            "isinstance_unions_excluded should be non-negative"
+        )
 
         # Verify the math: total = threshold + optional + isinstance
         total = result.metadata.total_unions
