@@ -98,7 +98,7 @@ class HandlerRuntimeErrorTriage:
         rules: list[ModelTriageRule] | None = None,
         slack_handler: Callable[[str], Awaitable[None]] | None = None,
         linear_handler: Callable[..., Awaitable[None]] | None = None,
-        event_bus: ProtocolEventBusLike,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize the triage handler.
 
@@ -108,7 +108,8 @@ class HandlerRuntimeErrorTriage:
             rules: Triage rules in priority order. Defaults to DEFAULT_TRIAGE_RULES.
             slack_handler: Async callable accepting a message string.
             linear_handler: Async callable accepting title and description kwargs.
-            event_bus: Event bus for emitting error-triaged events (required).
+            event_bus: Event bus for emitting error-triaged events. None when
+                auto-wired by runtime (triage event emission skipped).
         """
         self._db_pool = db_pool
         self._rules = sorted(rules or DEFAULT_TRIAGE_RULES, key=lambda r: r.priority)
@@ -274,6 +275,11 @@ class HandlerRuntimeErrorTriage:
         )
 
         try:
+            if self._event_bus is None:
+                logger.debug(
+                    "event_bus not configured, skipping error-triaged event emission"
+                )
+                return
             topic = self._resolve_triage_topic()
             await self._event_bus.publish_envelope(
                 envelope,  # type: ignore[arg-type]
