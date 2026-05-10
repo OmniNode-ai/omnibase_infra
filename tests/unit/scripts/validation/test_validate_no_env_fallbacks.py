@@ -173,6 +173,15 @@ class TestDocstringSkipping:
             (1, 'url = os.getenv("X", "localhost") + """suffix"""')
         ]
 
+    def test_line_start_triple_quote_with_trailing_fallback_still_scans(
+        self, tmp_path: Path
+    ) -> None:
+        content = '"""prefix"""; url = os.getenv("X", "localhost")\n'
+        p = _py(tmp_path, content)
+        assert scan_python_file(p) == [
+            (1, '"""prefix"""; url = os.getenv("X", "localhost")')
+        ]
+
 
 @pytest.mark.unit
 class TestShellPatternBashVarDefault:
