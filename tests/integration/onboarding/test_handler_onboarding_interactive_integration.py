@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding import (
-    OnboardingHandlerError,
     handle_onboarding,
 )
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input import (
