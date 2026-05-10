@@ -190,19 +190,19 @@ class TestHandlerInteractivePath:
         assert output.env_output_path_written == str(target)
         assert output.dry_run is False
 
-    @pytest.mark.asyncio
     async def test_dry_run_false_without_env_output_path_raises(
         self,
         local_no_llm_adapter: AdapterFakeInput,
     ) -> None:
-        """dry_run=False without env_output_path raises OnboardingHandlerError."""
-        input_model = ModelOnboardingInput(
-            policy_name="interactive_onboarding",
-            dry_run=False,
-            env_output_path=None,
-        )
-        with pytest.raises(OnboardingHandlerError, match="env_output_path is required"):
-            await handle_onboarding(input_model, input_adapter=local_no_llm_adapter)
+        """dry_run=False without env_output_path is rejected at model construction."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="env_output_path is required"):
+            ModelOnboardingInput(
+                policy_name="interactive_onboarding",
+                dry_run=False,
+                env_output_path=None,
+            )
 
     @pytest.mark.asyncio
     async def test_interactive_without_adapter_raises(self) -> None:

@@ -3,7 +3,9 @@
 
 """Input model for the onboarding orchestrator node."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelOnboardingInput(BaseModel):
@@ -44,6 +46,16 @@ class ModelOnboardingInput(BaseModel):
         default=None,
         description="Explicit path for env write; required when dry_run=False",
     )
+
+    @model_validator(mode="after")
+    def _enforce_env_output_path_when_writing(self) -> ModelOnboardingInput:
+        """Reject dry_run=False with no env_output_path at construction time."""
+        if not self.dry_run and (
+            self.env_output_path is None or not self.env_output_path.strip()
+        ):
+            msg = "env_output_path is required when dry_run=False"
+            raise ValueError(msg)
+        return self
 
 
 __all__ = ["ModelOnboardingInput"]

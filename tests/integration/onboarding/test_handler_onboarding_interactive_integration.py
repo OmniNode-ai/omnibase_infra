@@ -103,23 +103,16 @@ async def test_dry_run_false_writes_to_tmp_path(tmp_path: Path) -> None:
     assert "ONEX_DEPLOYMENT_MODE=local" in contents
 
 
-@pytest.mark.asyncio
-async def test_dry_run_false_without_path_raises() -> None:
-    """dry_run=False with no env_output_path raises OnboardingHandlerError."""
-    adapter = AdapterFakeInput(
-        responses={
-            "choose_deployment_mode": "local",
-            "configure_local_services": ["kafka", "postgres"],
-        }
-    )
-    input_model = ModelOnboardingInput(
-        policy_name="interactive_onboarding",
-        dry_run=False,
-        env_output_path=None,
-    )
+def test_dry_run_false_without_path_raises_at_construction() -> None:
+    """dry_run=False with no env_output_path is rejected at model validation."""
+    from pydantic import ValidationError
 
-    with pytest.raises(OnboardingHandlerError, match="env_output_path"):
-        await handle_onboarding(input_model, input_adapter=adapter)
+    with pytest.raises(ValidationError, match="env_output_path is required"):
+        ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=None,
+        )
 
 
 @pytest.mark.asyncio
