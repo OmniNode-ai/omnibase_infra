@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10780"
+title: "Transition reducer — pure state machine for interactive onboarding"
+summary: "Pure state machine that advances through interactive onboarding steps, evaluating transitions, applying state updates, and interpolating env output."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit and integration tests for transition reducer pass."
+    command: "uv run pytest tests/unit/onboarding/test_transition_reducer.py tests/integration/onboarding/test_transition_reducer_integration.py -q"
+dod_evidence:
+  - id: "dod-001"
+    description: "Unit tests for transition reducer pass."
+    source: "generated"
+    checks:
+      - check_type: "test-pass"
+        check_value: "tests/unit/onboarding/test_transition_reducer.py"
+  - id: "dod-002"
+    description: "Integration tests for transition reducer pass."
+    source: "generated"
+    checks:
+      - check_type: "test-pass"
+        check_value: "tests/integration/onboarding/test_transition_reducer_integration.py"
+  - id: "dod-deploy"
+    description: "Non-deployable pure compute module — no runtime deploy required."
+    source: "manual"
+    checks:
+      - check_type: "deploy"
+        check_value: "non-deployable pure compute — deploy gate compat"
