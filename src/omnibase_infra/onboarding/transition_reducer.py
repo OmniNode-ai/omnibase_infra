@@ -133,15 +133,15 @@ class TransitionReducer:
             if current in reachable:
                 continue
             reachable.add(current)
-            transition = self._transitions_by_step.get(current)
-            if transition is None:
+            node = self._transitions_by_step.get(current)
+            if node is None:
                 continue
-            if transition.terminal:
+            if node.terminal:
                 continue
-            for branch in (transition.responses or {}).values():
+            for branch in (node.responses or {}).values():
                 if branch.next not in reachable:
                     frontier.append(branch.next)
-            for branch in transition.on_submit or []:
+            for branch in node.on_submit or []:
                 if branch.next not in reachable:
                     frontier.append(branch.next)
 
