@@ -159,6 +159,10 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: 'OMN-7040'
+  - path: omnibase_infra/nodes/node_delegation_orchestrator/handlers/handler_compliance_loop.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-7040'
   - path: omnibase_infra/nodes/node_delegation_quality_gate_reducer/handlers/handler_quality_gate.py
     violations:
       - missing_handler_routing

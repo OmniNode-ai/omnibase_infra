@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10792"
+title: "feat(OMN-10792): HandlerComplianceLoop — single-attempt schema-compliance evaluator"
+summary: >
+  Wave 2 of the tokens-to-compliance epic. Adds HandlerComplianceLoop in node_delegation_orchestrator: composes the omnimarket schema-registry, schema-repair, and budget-policy compute nodes into a per-attempt evaluator that the delegation orchestrator's retry loop drives. Pure compute (no I/O, no event bus, no DB) — the orchestrator owns the attempt counter and accumulated tokens; this handler returns either compliant=True, a repair prompt to feed forward, or an ABORT directive when the budget policy or schema-repair handler says no further attempts are possible. Includes ModelComplianceLoopResult.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: Unit tests for HandlerComplianceLoop pass — first-try compliance, repair-on-failure, two-attempt success, budget ABORT, unknown schema key, and result-defaults safety net (7 tests).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_delegation_orchestrator/handlers/test_handler_compliance_loop.py -v'
+  - id: dod-002
+    description: Pyright/mypy strict pass for the new handler and result model — they are pure compute and must type-check cleanly.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run mypy src/omnibase_infra/nodes/node_delegation_orchestrator/handlers/handler_compliance_loop.py src/omnibase_infra/nodes/node_delegation_orchestrator/models/model_compliance_loop_result.py --strict'
+  - id: dod-deploy
+    description: Non-deployable pure compute — no runtime I/O, no event bus subscription, no DB calls. The orchestrator wires it via constructor injection in Task 5; until then, no runtime artifact change.
+    source: manual
+    checks:
+      - check_type: behavior_proven
+        check_value: 'HandlerComplianceLoop has no I/O — instantiates only the omnimarket pure-compute handlers (HandlerSchemaRepair, HandlerBudgetPolicy) and reads from the in-memory schema registry — deploy gate compat'

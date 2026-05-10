@@ -18,15 +18,15 @@ contract_name: "node_delegation_orchestrator"
 node_name: "node_delegation_orchestrator"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_type: "ORCHESTRATOR_GENERIC"
 description: >
-  Orchestrator node that coordinates delegation through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, dispatch typed invocation commands to the selected effect lane, react to remote agent lifecycle events or the legacy inference and quality-gate path, then emit delegation-completed or delegation-failed.
+  Orchestrator node that coordinates delegation through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, dispatch typed invocation commands to the selected effect lane, react to remote agent lifecycle events or the legacy inference and quality-gate path, then emit delegation-completed or delegation-failed. As of 0.2.0 (OMN-10792), exposes HandlerComplianceLoop as an in-process helper that the workflow handler can invoke per inference attempt to enforce schema-compliance of LLM outputs and emit tokens_to_compliance + compliance_attempts metrics on the terminal event.
 
 input_model:
   name: "ModelDelegationRequest"
@@ -128,6 +128,14 @@ handler_routing:
         name: "ModelDelegationRequest"
         module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
         description: "Delegation request to orchestrate."
+    - operation: "delegation.evaluate_compliance"
+      handler_class: "HandlerComplianceLoop"
+      handler_module: "omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_compliance_loop"
+      description: "Per-attempt schema-compliance evaluator (OMN-10792). Composes omnimarket schema-registry, schema-repair, and budget-policy nodes; returns compliant=True, repair_prompt+CONTINUE, or ABORT. Invoked in-process by HandlerDelegationWorkflow per inference attempt — not routed via the bus."
+      input_model:
+        name: "ModelComplianceLoopResult"
+        module: "omnibase_infra.nodes.node_delegation_orchestrator.models.model_compliance_loop_result"
+        description: "Per-attempt directive emitted by the compliance loop."
 error_handling:
   retry_policy:
     max_retries: 1
