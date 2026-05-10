@@ -1,0 +1,46 @@
+# OMN-10796 contract — Proof of Life E2E for delegation compliance loop.
+schema_version: '1.0.0'
+ticket_id: OMN-10796
+title: 'test(OMN-10796): proof-of-life E2E for delegation compliance loop'
+summary: >
+  Integration test driving the full delegation pipeline with output_schema_key="delegation_result". Simulates LLM that returns malformed JSON on attempt 1 and valid JSON on attempt 2; asserts tokens_to_compliance equals sum of both attempts and compliance_attempts equals 2 on both ModelDelegationResult and ModelTaskDelegatedEvent (the omnidash projection-facing event). Test-only change — no source modifications.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: PoL E2E test passes
+    command: uv run pytest tests/integration/delegation/test_compliance_loop_e2e.py -v
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1561 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-10796.yaml'
+  - id: dod-002
+    description: PoL E2E test exists at expected path
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f tests/integration/delegation/test_compliance_loop_e2e.py'
+  - id: dod-003
+    description: PoL E2E test passes — full pipeline through terminal event publication
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/delegation/test_compliance_loop_e2e.py::TestComplianceLoopProofOfLife -v'
+  - id: dod-004
+    description: Test-only change verified by golden-chain field-presence assertion (deploy verification — handler library code, no Docker rebuild required since the test exercises in-process workflow handler against unmocked omnimarket compute nodes)
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/delegation/test_compliance_loop_e2e.py::TestComplianceLoopProofOfLife::test_golden_chain_field_presence_on_task_delegated_event -v # local deploy verification — test-only change'
