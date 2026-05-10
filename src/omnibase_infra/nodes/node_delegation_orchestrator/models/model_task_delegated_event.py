@@ -73,6 +73,14 @@ class ModelTaskDelegatedEvent(BaseModel):
         default="",
         description="Upstream LLM call ID for JOIN with llm_cost_aggregates.",
     )
+    tokens_to_compliance: int = Field(
+        default=0,
+        description="Total tokens across all compliance attempts.",
+    )
+    compliance_attempts: int = Field(
+        default=1,
+        description="Number of LLM invocations to reach compliance.",
+    )
 
 
 __all__: list[str] = ["ModelTaskDelegatedEvent"]
