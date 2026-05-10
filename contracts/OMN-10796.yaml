@@ -14,7 +14,7 @@ evidence_requirements:
     command: uv run pytest tests/integration/delegation/test_compliance_loop_e2e.py -v
   - kind: ci
     description: CI pipeline green on PR
-    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+    command: gh pr checks 1561 --repo OmniNode-ai/omnibase_infra
 emergency_bypass:
   enabled: false
   justification: ''
