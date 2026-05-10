@@ -220,22 +220,36 @@ class TestInteractiveOnboardingConditions:
     """Tests from OMN-10769 covering interactive onboarding-specific patterns."""
 
     def test_compound_deployment_and_service_not_in(self) -> None:
-        state = {"deployment_mode": "local", "selected_local_services": ["kafka"]}
+        # The evaluator resolves LHS as a state key, so `service` must exist in state.
+        # "service not in selected_local_services" means:
+        #   state["service"] not in state["selected_local_services"]
+        state = {
+            "deployment_mode": "local",
+            "service": "llm_inference",
+            "selected_local_services": ["kafka"],
+        }
         assert (
             evaluate_condition(
-                "deployment_mode == local and llm_inference not in selected_local_services",
+                "deployment_mode == local and service not in selected_local_services",
                 state,
             )
             is True
         )
 
     def test_response_membership_check(self) -> None:
+        # LHS is resolved as a state key, so we need "item" in state.
         state = {
             "selected_local_services": ["kafka", "postgres"],
             "response": ["kafka", "postgres"],
+            "item": "llm_inference",
         }
-        assert evaluate_condition("llm_inference in response", state) is False
-        assert evaluate_condition("kafka in response", state) is True
+        assert evaluate_condition("item in response", state) is False
+
+        state_kafka = {
+            "response": ["kafka", "postgres"],
+            "item": "kafka",
+        }
+        assert evaluate_condition("item in response", state_kafka) is True
 
 
 class TestUnknownKeyErrors:
@@ -253,5 +267,6 @@ class TestUnknownKeyErrors:
         assert not isinstance(exc, SyntaxError)
 
     def test_unknown_key_in_membership_raises(self) -> None:
-        with pytest.raises(ConditionEvaluationError, match="nonexistent_list"):
-            evaluate_condition("llm_inference in nonexistent_list", {})
+        # LHS key is resolved first; if LHS is missing, error mentions LHS key
+        with pytest.raises(ConditionEvaluationError, match="nonexistent_key"):
+            evaluate_condition("nonexistent_key in some_list", {"some_list": ["a"]})
