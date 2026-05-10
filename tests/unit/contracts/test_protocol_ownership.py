@@ -144,6 +144,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] DI boundary for A2A transport — narrows the SDK surface so the handler
     # can be unit-tested without driving the real a2a-sdk client (OMN-9634).
     "ProtocolA2ATransport": "nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py",
+    # [NODE] DI boundary for onboarding input collection — narrows interactive
+    # input surface so the handler can be tested with a fake adapter (OMN-10780).
+    "ProtocolInputAdapter": "onboarding/protocol_input_adapter.py",
     # [NODE] DI boundary for lifecycle event emission — lets the remote-agent effect
     # test lifecycle publication without coupling the handler to EventBusKafka (OMN-9637).
     "ProtocolLifecycleEventSink": "nodes/node_remote_agent_invoke_effect/services/lifecycle_event_sink.py",
