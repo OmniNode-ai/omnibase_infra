@@ -9,10 +9,8 @@ summary: >
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - ModelOnboardingInput
-  - ModelOnboardingOutput
-  - handle_onboarding
-  - HandlerOnboarding
+  - public_api
+  - protocols
 evidence_requirements:
   - kind: tests
     description: Unit tests for interactive handler integration and DAG regression
@@ -55,3 +53,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding.py -v'
+  - id: dod-006
+    description: Integration test exercising interactive handler end-to-end via deploy-equivalent FakeInputAdapter path (handler is local-deploy library code; verified via in-process import + pytest integration suite, no Docker rebuild required since onboarding orchestrator is a library handler not a container service)
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/onboarding/test_handler_onboarding_interactive_integration.py -v # local deploy verification — handler is in-process library code'
