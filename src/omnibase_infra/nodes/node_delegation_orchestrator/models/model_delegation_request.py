@@ -11,13 +11,13 @@ to a local LLM via the ONEX runtime event bus.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
 from omnimarket.nodes.node_budget_policy_compute.models.model_budget_limits import (
     ModelBudgetLimits,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelDelegationRequest(BaseModel):
@@ -87,6 +87,23 @@ class ModelDelegationRequest(BaseModel):
             "``output_schema_key`` is set."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_compliance_loop_config(self) -> Self:
+        """Reject ``output_schema_key`` set without ``compliance_budget``.
+
+        The compliance loop's evaluator requires both. Catching this at model
+        construction time prevents a runtime assertion in the workflow handler
+        when the orchestrator first sees the inference response.
+        """
+        if self.output_schema_key is not None and self.compliance_budget is None:
+            msg = (
+                "compliance_budget is required when output_schema_key is set "
+                "(the compliance loop has nothing to evaluate against without "
+                "token / cost / time ceilings)"
+            )
+            raise ValueError(msg)
+        return self
 
 
 __all__: list[str] = ["ModelDelegationRequest"]
