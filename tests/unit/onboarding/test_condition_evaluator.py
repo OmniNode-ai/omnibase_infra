@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for condition_evaluator — OMN-10779."""
+"""Tests for condition_evaluator — OMN-10779, OMN-10769."""
 
 from __future__ import annotations
 
@@ -69,6 +69,24 @@ class TestNotIn:
     def test_not_in_list_unknown_key_raises(self) -> None:
         with pytest.raises(ConditionEvaluationError, match="env"):
             evaluate_condition("env not in [local, dev]", {})
+
+    def test_not_in_literal_list_true(self) -> None:
+        assert (
+            evaluate_condition(
+                "deployment_mode not in [local, hybrid]",
+                {"deployment_mode": "cloud"},
+            )
+            is True
+        )
+
+    def test_not_in_literal_list_false(self) -> None:
+        assert (
+            evaluate_condition(
+                "deployment_mode not in [local, hybrid]",
+                {"deployment_mode": "local"},
+            )
+            is False
+        )
 
 
 class TestInStateKey:
@@ -198,6 +216,42 @@ class TestCanonicalGraphConditions:
         )
 
 
+class TestInteractiveOnboardingConditions:
+    """Tests from OMN-10769 covering interactive onboarding-specific patterns."""
+
+    def test_compound_deployment_and_service_not_in(self) -> None:
+        # The evaluator resolves LHS as a state key, so `service` must exist in state.
+        # "service not in selected_local_services" means:
+        #   state["service"] not in state["selected_local_services"]
+        state = {
+            "deployment_mode": "local",
+            "service": "llm_inference",
+            "selected_local_services": ["kafka"],
+        }
+        assert (
+            evaluate_condition(
+                "deployment_mode == local and service not in selected_local_services",
+                state,
+            )
+            is True
+        )
+
+    def test_response_membership_check(self) -> None:
+        # LHS is resolved as a state key, so we need "item" in state.
+        state = {
+            "selected_local_services": ["kafka", "postgres"],
+            "response": ["kafka", "postgres"],
+            "item": "llm_inference",
+        }
+        assert evaluate_condition("item in response", state) is False
+
+        state_kafka = {
+            "response": ["kafka", "postgres"],
+            "item": "kafka",
+        }
+        assert evaluate_condition("item in response", state_kafka) is True
+
+
 class TestUnknownKeyErrors:
     def test_unknown_key_message_includes_key_name(self) -> None:
         with pytest.raises(ConditionEvaluationError, match="my_missing_key"):
@@ -211,3 +265,8 @@ class TestUnknownKeyErrors:
             exc = e
         assert exc is not None
         assert not isinstance(exc, SyntaxError)
+
+    def test_unknown_key_in_membership_raises(self) -> None:
+        # LHS key is resolved first; if LHS is missing, error mentions LHS key
+        with pytest.raises(ConditionEvaluationError, match="nonexistent_key"):
+            evaluate_condition("nonexistent_key in some_list", {"some_list": ["a"]})
