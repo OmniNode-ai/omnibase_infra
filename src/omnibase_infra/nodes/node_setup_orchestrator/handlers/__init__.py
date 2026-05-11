@@ -7,4 +7,8 @@
 Ticket: OMN-3495
 """
 
-__all__: list[str] = []
+from omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator import (
+    HandlerSetupOrchestrator,
+)
+
+__all__: list[str] = ["HandlerSetupOrchestrator"]

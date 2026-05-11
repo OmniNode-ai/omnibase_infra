@@ -238,19 +238,19 @@ async def _run_orchestrator(
     # Import effect node implementations lazily to avoid import-time side-effects.
     # Build a minimal stub container (no services required for CLI invocation).
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup import (
+    from omnibase_infra.nodes.node_setup_infisical_effect.handlers import (
         HandlerInfisicalFullSetup,
     )
-    from omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_provision import (
+    from omnibase_infra.nodes.node_setup_local_provision_effect.handlers import (
         HandlerLocalProvision,
     )
-    from omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator import (
+    from omnibase_infra.nodes.node_setup_orchestrator.handlers import (
         HandlerSetupOrchestrator,
     )
-    from omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check import (
+    from omnibase_infra.nodes.node_setup_preflight_effect.handlers import (
         HandlerPreflightCheck,
     )
-    from omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate import (
+    from omnibase_infra.nodes.node_setup_validate_effect.handlers import (
         HandlerServiceValidate,
     )
 

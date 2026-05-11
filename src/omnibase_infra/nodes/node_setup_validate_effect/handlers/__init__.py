@@ -7,4 +7,8 @@
 Ticket: OMN-3494
 """
 
-__all__: list[str] = []
+from omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate import (
+    HandlerServiceValidate,
+)
+
+__all__: list[str] = ["HandlerServiceValidate"]
