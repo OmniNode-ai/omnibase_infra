@@ -139,13 +139,15 @@ class CatalogResolver:
 
     def resolve(self, bundles: list[str]) -> ResolvedStack:
         """Resolve selected bundles into a concrete stack."""
-        # Collect all bundle names (including transitive includes)
-        all_bundle_names: set[str] = set()
+        # Collect all bundle names preserving insertion order for deterministic
+        # compose output (OMN-9345). dict[str, None] deduplicates while keeping order.
+        all_bundle_names: dict[str, None] = {}
         for bundle_name in bundles:
-            all_bundle_names.add(bundle_name)
+            all_bundle_names[bundle_name] = None
             if bundle_name in self._bundles:
                 included = self._bundles[bundle_name].resolve_includes(self._bundles)
-                all_bundle_names.update(included)
+                for inc in included:
+                    all_bundle_names[inc] = None
 
         # Collect all entries from selected bundles
         selected_entries: dict[str, CatalogManifest] = {}

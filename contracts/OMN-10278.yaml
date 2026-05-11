@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-10278
+title: "Mandatory DI params — resolver multi-param injection + handler migration"
+summary: >
+  Declare terminal_event in node_delegation_orchestrator contract so Pattern-B broker can discover the terminal topic at route-discovery time. Also removes = None defaults from injectable handler init params across omnibase_infra.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+contract_completeness: FULL
+evidence_requirements:
+  - kind: tests
+    description: "Unit tests green for delegation contract fix"
+    command: "uv run pytest tests/unit/delegation/ -v"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "terminal_event declared in delegation orchestrator contract — Pattern-B broker can route delegation dispatches"
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/delegation/test_delegation_contracts.py -v"
+  - id: dod-deploy
+    description: >
+      Deploy verification: terminal_event contract field addition is a pure metadata change with no code-path side effects. Pattern-B broker reads this field at route-discovery time; adding it unblocks delegation dispatch without requiring a container restart. Rolling restart on .201 runtime is the only required deploy step.
+
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "deploy: gh pr checks 1563 --repo OmniNode-ai/omnibase_infra --watch"
