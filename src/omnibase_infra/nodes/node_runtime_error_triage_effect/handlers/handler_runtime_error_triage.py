@@ -98,7 +98,7 @@ class HandlerRuntimeErrorTriage:
         rules: list[ModelTriageRule] | None = None,
         slack_handler: Callable[[str], Awaitable[None]] | None = None,
         linear_handler: Callable[..., Awaitable[None]] | None = None,
-        event_bus: ProtocolEventBusLike | None = None,
+        event_bus: ProtocolEventBusLike,
     ) -> None:
         """Initialize the triage handler.
 

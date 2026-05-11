@@ -49,7 +49,7 @@ class HandlerRuntimeLifecycle:
         """Initialize with container and optional explicit step callables.
 
         Args:
-            container: ONEX container (required).
+            container: ONEX container.
             steps: Optional explicit step callables in boot order.
                 If provided, used directly. If None, steps must be
                 provided via execute_startup(steps=...).
