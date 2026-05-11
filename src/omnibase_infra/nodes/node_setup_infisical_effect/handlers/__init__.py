@@ -7,4 +7,8 @@
 Ticket: OMN-3494
 """
 
-__all__: list[str] = []
+from omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup import (
+    HandlerInfisicalFullSetup,
+)
+
+__all__: list[str] = ["HandlerInfisicalFullSetup"]

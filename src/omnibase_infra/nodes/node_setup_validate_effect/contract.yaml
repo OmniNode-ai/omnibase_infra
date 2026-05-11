@@ -7,8 +7,12 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
+changelog:
+  - version: "1.0.1"
+    ticket: "OMN-10705"
+    change: "Export HandlerServiceValidate via handlers/__init__.py public API"
 description: >
   EFFECT node that validates TCP/HTTP health for all LOCAL-mode services in the deployment topology after provisioning is complete. Services with a health_check_path use HTTP GET; others use TCP connect.
 
