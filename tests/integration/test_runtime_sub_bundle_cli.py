@@ -86,9 +86,9 @@ def _load_compose(path: Path) -> dict[str, object]:
 
 def _service_names(compose: dict[str, object]) -> set[str]:
     services = compose.get("services", {})
-    assert isinstance(
-        services, dict
-    ), f"`services` block is not a mapping: {type(services).__name__}"
+    assert isinstance(services, dict), (
+        f"`services` block is not a mapping: {type(services).__name__}"
+    )
     return set(services.keys())
 
 
@@ -129,13 +129,13 @@ def test_validate_runtime_integrations_reports_required_env(tmp_path: Path) -> N
     env["HOME"] = str(tmp_path)
 
     result = _run_cli(["validate", "runtime-integrations"], env=env)
-    assert (
-        result.returncode != 0
-    ), "validate runtime-integrations unexpectedly succeeded with required vars unset"
+    assert result.returncode != 0, (
+        "validate runtime-integrations unexpectedly succeeded with required vars unset"
+    )
     for var in _RUNTIME_INTEGRATIONS_REQUIRED_ENV:
-        assert (
-            var in result.stderr
-        ), f"expected '{var}' in validate stderr, got:\n{result.stderr}"
+        assert var in result.stderr, (
+            f"expected '{var}' in validate stderr, got:\n{result.stderr}"
+        )
 
 
 @pytest.mark.integration
@@ -157,9 +157,9 @@ def test_generate_composed_runtime_includes_all_sub_bundles(tmp_path: Path) -> N
         assert sub_result.returncode == 0, f"generate {sub} failed: {sub_result.stderr}"
         sub_services = _service_names(_load_compose(sub_output))
         missing = sub_services - runtime_services
-        assert (
-            not missing
-        ), f"composed runtime is missing services from {sub}: {sorted(missing)}"
+        assert not missing, (
+            f"composed runtime is missing services from {sub}: {sorted(missing)}"
+        )
 
     # Transitive includes: core + tracing bring these in.
     for transitively_required in ("postgres", "redpanda", "phoenix"):
@@ -206,6 +206,6 @@ def test_generate_runtime_is_deterministic_across_invocations(tmp_path: Path) ->
     assert isinstance(svcs_a, dict) and isinstance(svcs_b, dict)
     services_a = list(svcs_a.keys())
     services_b = list(svcs_b.keys())
-    assert (
-        services_a == services_b
-    ), f"service key ordering drift:\n  A: {json.dumps(services_a)}\n  B: {json.dumps(services_b)}"
+    assert services_a == services_b, (
+        f"service key ordering drift:\n  A: {json.dumps(services_a)}\n  B: {json.dumps(services_b)}"
+    )
