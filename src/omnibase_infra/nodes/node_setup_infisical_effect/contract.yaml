@@ -7,8 +7,12 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
+changelog:
+  - version: "1.0.1"
+    ticket: "OMN-10705"
+    change: "Export HandlerInfisicalFullSetup via handlers/__init__.py public API"
 description: >
   EFFECT node that bootstraps the Infisical secret store by running provision-infisical.py (identity setup) and seed-infisical.py (secret population) in sequence. Part of the setup orchestration workflow.
 

@@ -7,8 +7,12 @@ node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
+changelog:
+  - version: "1.0.1"
+    ticket: "OMN-10705"
+    change: "Export HandlerSetupOrchestrator via handlers/__init__.py public API"
 description: >
   ORCHESTRATOR node that coordinates the full platform setup workflow: cloud gate check (I8) → preflight validation → local Docker Compose provisioning → Infisical bootstrap → post-provision health validation. Emits a structured sequence of lifecycle events (SETUP_EVENT_TYPES). No result field — orchestrators emit events only (Invariant I5).
 
