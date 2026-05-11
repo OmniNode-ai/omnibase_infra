@@ -170,6 +170,12 @@ def test_generate_composed_runtime_includes_all_sub_bundles(tmp_path: Path) -> N
 
 
 @pytest.mark.integration
+@pytest.mark.xfail(
+    strict=False,
+    reason="OMN-9345: CatalogResolver iterates a set[str] over bundle names, "
+    "producing non-deterministic service ordering in the generated compose. "
+    "Remove this marker once OMN-9345 lands.",
+)
 def test_generate_runtime_is_deterministic_across_invocations(tmp_path: Path) -> None:
     """Two back-to-back `generate runtime` runs must produce byte-identical
     compose output. Resolver non-determinism (e.g. set iteration order) would

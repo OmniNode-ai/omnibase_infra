@@ -106,6 +106,10 @@ dependencies:
     type: "service"
     description: "asyncpg pool for runtime_error_triage table"
     required: true
+  - name: "event_bus"
+    type: "service"
+    description: "Event bus publisher for emitting triage result events (mandatory DI param, OMN-10278)"
+    required: true
   - name: "slack_handler"
     type: "service"
     description: "Slack webhook handler for notifications"
@@ -120,7 +124,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"
-  updated: "2026-03-19"
+  updated: "2026-05-10"
   tags:
     - effect
     - health

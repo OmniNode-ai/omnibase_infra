@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-10278
 title: "Mandatory DI params — resolver multi-param injection + handler migration"
 summary: >
-  Declare terminal_event in node_delegation_orchestrator contract so Pattern-B broker can discover the terminal topic at route-discovery time. Also removes = None defaults from injectable handler init params across omnibase_infra.
+  Extend ServiceHandlerResolver Step 4 to inject any combination of known params (event_bus, container, ownership_query); remove = None defaults from injectable handler init params across omnibase_infra. Also wires event_bus into HandlerRuntimeErrorTriage via service_kernel.
 
 is_seam_ticket: false
 interface_change: false
@@ -10,24 +10,33 @@ interfaces_touched: []
 contract_completeness: FULL
 evidence_requirements:
   - kind: tests
-    description: "Unit tests green for delegation contract fix"
-    command: "uv run pytest tests/unit/delegation/ -v"
+    description: "Handler mandatory DI params unit tests pass"
+    command: "uv run pytest tests/unit/nodes/test_handler_mandatory_di_params.py -v"
+  - kind: ci
+    description: "All CI checks pass on omnibase_infra PR #1562"
+    command: "gh pr checks 1562 --repo OmniNode-ai/omnibase_infra --watch"
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
   - id: dod-001
-    description: "terminal_event declared in delegation orchestrator contract — Pattern-B broker can route delegation dispatches"
+    description: "= None defaults removed from injectable handler params; ServiceHandlerResolver injects them via multi-param path"
     source: generated
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/delegation/test_delegation_contracts.py -v"
+        check_value: "uv run pytest tests/unit/nodes/test_handler_mandatory_di_params.py -v"
+  - id: dod-002
+    description: "event_bus wired into HandlerRuntimeErrorTriage via service_kernel"
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/test_handler_runtime_error_triage.py -v"
   - id: dod-deploy
     description: >
-      Deploy verification: terminal_event contract field addition is a pure metadata change with no code-path side effects. Pattern-B broker reads this field at route-discovery time; adding it unblocks delegation dispatch without requiring a container restart. Rolling restart on .201 runtime is the only required deploy step.
+      Deploy verification: removing = None defaults from handler init signatures is a backwards-compatible change once the resolver (omnibase_core PR #1057) is merged. No new topics, no schema changes, no migration required. Rolling restart on .201 runtime after omnibase_core PR #1057 merges is the only required deploy step.
 
     source: generated
     checks:
       - check_type: command
-        check_value: "deploy: gh pr checks 1563 --repo OmniNode-ai/omnibase_infra --watch"
+        check_value: "deploy: gh pr checks 1562 --repo OmniNode-ai/omnibase_infra --watch"

@@ -154,7 +154,10 @@ class TestHandlerRuntimeErrorTriage:
         slack_handler = AsyncMock()
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, slack_handler=slack_handler
+            db_pool=db_pool,
+            rules=rules,
+            slack_handler=slack_handler,
+            event_bus=AsyncMock(),
         )
         event = _make_error_event()
 
@@ -181,7 +184,10 @@ class TestHandlerRuntimeErrorTriage:
         slack_handler = AsyncMock()
         rules = [ModelTriageRule(name="suppress_all", priority=1, action="suppress")]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, slack_handler=slack_handler
+            db_pool=db_pool,
+            rules=rules,
+            slack_handler=slack_handler,
+            event_bus=AsyncMock(),
         )
         event = _make_error_event()
 
@@ -207,7 +213,10 @@ class TestHandlerRuntimeErrorTriage:
         linear_handler = AsyncMock()
         rules = [ModelTriageRule(name="ticket_all", priority=1, action="ticket")]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, linear_handler=linear_handler
+            db_pool=db_pool,
+            rules=rules,
+            linear_handler=linear_handler,
+            event_bus=AsyncMock(),
         )
         event = _make_error_event()
 
@@ -235,7 +244,9 @@ class TestHandlerRuntimeErrorTriage:
         )
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+        )
 
         event = _make_error_event(
             error_category=EnumRuntimeErrorCategory.KAFKA_CONSUMER,
@@ -258,7 +269,9 @@ class TestHandlerRuntimeErrorTriage:
         )
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+        )
 
         event = _make_error_event(
             logger_family="asyncpg",
@@ -288,7 +301,9 @@ class TestHandlerRuntimeErrorTriage:
             ModelTriageRule(name="high_priority", priority=1, action="ticket"),
             ModelTriageRule(name="low_priority", priority=100, action="alert"),
         ]
-        handler = HandlerRuntimeErrorTriage(db_pool=db_pool, rules=rules)
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+        )
         event = _make_error_event(
             logger_family="asyncpg",
             error_category=EnumRuntimeErrorCategory.DATABASE,
@@ -331,31 +346,10 @@ class TestHandlerRuntimeErrorTriage:
         call_kwargs = event_bus.publish_envelope.call_args
         assert "error-triaged" in call_kwargs.kwargs.get("topic", "")
 
-    async def test_no_emit_without_event_bus(self) -> None:
-        """No emit when event_bus is None (DB-only mode)."""
-        db_pool = MagicMock()
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(
-            side_effect=[
-                None,  # correlation query
-                {"occurrence_count": 1, "incident_state": "open"},  # upsert
-            ]
-        )
-        db_pool.acquire = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
-            )
-        )
-
-        rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
-        handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=None
-        )
-        event = _make_error_event()
-
-        # Should complete without error even without event bus
-        result = await handler.handle(event)
-        assert result.action == "alert"
+    def test_event_bus_is_required(self) -> None:
+        """event_bus is a required injectable param — no default None."""
+        with pytest.raises(TypeError):
+            HandlerRuntimeErrorTriage(db_pool=MagicMock())  # type: ignore[call-arg]
 
     async def test_emit_failure_does_not_block_triage(self) -> None:
         """Emit failure does not prevent triage result from being returned."""

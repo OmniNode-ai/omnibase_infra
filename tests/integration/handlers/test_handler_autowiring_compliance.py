@@ -58,14 +58,6 @@ class TestHandlerAutowiringCompliance:
         handler = HandlerIntent()
         assert handler is not None
 
-    def test_handler_ledger_projection_no_args(self) -> None:
-        from omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection import (
-            HandlerLedgerProjection,
-        )
-
-        handler = HandlerLedgerProjection()
-        assert handler is not None
-
     def test_handler_llm_openai_compatible_no_args(self) -> None:
         from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
             HandlerLlmOpenaiCompatible,
@@ -96,14 +88,6 @@ class TestHandlerAutowiringCompliance:
         )
 
         handler = HandlerNodeIntrospected()
-        assert handler is not None
-
-    def test_handler_runtime_error_triage_no_args(self) -> None:
-        from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
-            HandlerRuntimeErrorTriage,
-        )
-
-        handler = HandlerRuntimeErrorTriage()
         assert handler is not None
 
     def test_handler_scope_check_initiate_no_args(self) -> None:

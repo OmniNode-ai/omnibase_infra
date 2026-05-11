@@ -3053,7 +3053,9 @@ async def bootstrap() -> int:
                     HandlerRuntimeErrorTriage,
                 )
 
-                triage_handler = HandlerRuntimeErrorTriage(db_pool=postgres_pool)
+                triage_handler = HandlerRuntimeErrorTriage(
+                    db_pool=postgres_pool, event_bus=event_bus
+                )
 
                 triage_topic_resolver = TopicResolver()
                 runtime_error_topic = triage_topic_resolver.resolve(
