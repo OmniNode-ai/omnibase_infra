@@ -2327,6 +2327,13 @@ class RuntimeHostProcess:
             self._pattern_b_broker_config.enabled_profiles
         )
 
+    async def dispatch_local_ingress_request(
+        self,
+        request: ModelLocalRuntimeIngressRequest,
+    ) -> ModelLocalRuntimeIngressResponse:
+        """Public entry point for local ingress dispatch (used by HTTP /skill handler)."""
+        return await self._dispatch_local_ingress_request(request)
+
     async def _dispatch_local_ingress_request(
         self,
         request: ModelLocalRuntimeIngressRequest,

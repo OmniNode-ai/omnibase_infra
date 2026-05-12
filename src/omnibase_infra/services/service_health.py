@@ -65,6 +65,15 @@ from uuid import UUID
 
 from aiohttp import web
 
+from omnibase_core.models.runtime.model_runtime_skill_error import (
+    ModelRuntimeSkillError,
+)
+from omnibase_core.models.runtime.model_runtime_skill_request import (
+    ModelRuntimeSkillRequest,
+)
+from omnibase_core.models.runtime.model_runtime_skill_response import (
+    ModelRuntimeSkillResponse,
+)
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -78,6 +87,9 @@ from omnibase_infra.runtime.models.model_detailed_health_response import (
 )
 from omnibase_infra.runtime.models.model_health_check_response import (
     ModelHealthCheckResponse,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
+    ModelLocalRuntimeIngressRequest,
 )
 from omnibase_infra.utils.correlation import generate_correlation_id
 
@@ -629,6 +641,8 @@ class ServiceHealth:
             self._app.router.add_get("/ready", self._handle_readiness)
             # OMN-519: Detailed diagnostics endpoint
             self._app.router.add_get("/health/detailed", self._handle_health_detailed)
+            # OMN-10860: Skill dispatch endpoint
+            self._app.router.add_post("/skill", self._handle_skill)
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -650,7 +664,7 @@ class ServiceHealth:
                 extra={
                     "host": self._host,
                     "port": self._port,
-                    "endpoints": ["/health", "/ready", "/health/detailed"],
+                    "endpoints": ["/health", "/ready", "/health/detailed", "/skill"],
                     "version": self._version,
                 },
             )
@@ -1132,6 +1146,134 @@ class ServiceHealth:
                 status=503,
                 content_type="application/json",
             )
+
+    async def _handle_skill(self, request: web.Request) -> web.Response:
+        """Handle POST /skill requests — dispatch to local runtime ingress.
+
+        Accepts a JSON body matching ModelRuntimeSkillRequest, dispatches through
+        the runtime's local ingress path, and returns a ModelRuntimeSkillResponse.
+
+        HTTP Status Codes:
+            - 200: Dispatch completed (check response.ok for execution result)
+            - 400: Request body failed validation
+            - 500: Unexpected server error
+        """
+        raw_correlation = request.headers.get("X-Correlation-ID")
+        try:
+            correlation_id: UUID = (
+                UUID(raw_correlation) if raw_correlation else generate_correlation_id()
+            )
+        except ValueError:
+            correlation_id = generate_correlation_id()
+
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001 — boundary: aiohttp json() raises various types
+            skill_response = ModelRuntimeSkillResponse(
+                ok=False,
+                command_name="unknown",
+                correlation_id=correlation_id,
+                error=ModelRuntimeSkillError(
+                    code="validation_error",
+                    message=f"Invalid JSON body: {exc}",
+                ),
+            )
+            return web.Response(
+                text=skill_response.model_dump_json(exclude_none=True),
+                status=400,
+                content_type="application/json",
+            )
+
+        try:
+            skill_request = ModelRuntimeSkillRequest.model_validate(body, strict=False)
+        except Exception as exc:  # noqa: BLE001 — boundary: Pydantic ValidationError + others
+            skill_response = ModelRuntimeSkillResponse(
+                ok=False,
+                command_name=body.get("command_name", "unknown")
+                if isinstance(body, dict)
+                else "unknown",
+                correlation_id=correlation_id,
+                error=ModelRuntimeSkillError(
+                    code="validation_error",
+                    message=f"Invalid skill request: {exc}",
+                ),
+            )
+            return web.Response(
+                text=skill_response.model_dump_json(exclude_none=True),
+                status=400,
+                content_type="application/json",
+            )
+
+        ingress_request = ModelLocalRuntimeIngressRequest(
+            command_name=skill_request.command_name,
+            payload=skill_request.payload,
+            correlation_id=skill_request.correlation_id or correlation_id,
+            timeout_ms=min(skill_request.timeout_ms, 600_000),
+        )
+
+        try:
+            ingress_response = await self.runtime.dispatch_local_ingress_request(
+                ingress_request
+            )
+        except Exception as exc:
+            logger.exception(
+                "Skill dispatch failed with exception (correlation_id=%s)",
+                correlation_id,
+                extra={"error": str(exc), "error_type": type(exc).__name__},
+            )
+            skill_response = ModelRuntimeSkillResponse(
+                ok=False,
+                command_name=skill_request.command_name,
+                correlation_id=correlation_id,
+                error=ModelRuntimeSkillError(
+                    code="dispatch_error",
+                    message=f"Skill dispatch failed: {exc}",
+                ),
+            )
+            return web.Response(
+                text=skill_response.model_dump_json(exclude_none=True),
+                status=500,
+                content_type="application/json",
+            )
+
+        if ingress_response.ok and ingress_response.dispatch_result is not None:
+            skill_response = ModelRuntimeSkillResponse(
+                ok=True,
+                command_name=ingress_response.command_name,
+                node_alias=ingress_response.node_alias,
+                resolved_node_name=ingress_response.resolved_node_name,
+                contract_name=ingress_response.contract_name,
+                command_topic=ingress_response.command_topic,
+                terminal_event=ingress_response.terminal_event,
+                correlation_id=ingress_response.correlation_id,
+                dispatch_result=ingress_response.dispatch_result,
+                output_payloads=ingress_response.output_payloads,
+            )
+        else:
+            ingress_err = ingress_response.error
+            skill_response = ModelRuntimeSkillResponse(
+                ok=False,
+                command_name=ingress_response.command_name,
+                correlation_id=ingress_response.correlation_id,
+                error=ModelRuntimeSkillError(
+                    code=ingress_err.code
+                    if ingress_err is not None
+                    else "dispatch_error",
+                    message=ingress_err.message
+                    if ingress_err is not None
+                    else "dispatch failed",
+                    retryable=ingress_err.retryable
+                    if ingress_err is not None
+                    else False,
+                    details=ingress_err.details if ingress_err is not None else None,
+                ),
+            )
+
+        return web.Response(
+            text=skill_response.model_dump_json(exclude_none=True),
+            status=200,
+            content_type="application/json",
+        )
 
     def _build_component_health(
         self,
