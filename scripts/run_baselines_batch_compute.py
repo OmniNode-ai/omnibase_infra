@@ -43,10 +43,8 @@ import asyncpg
 from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
-from omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baselines_batch_compute import (
+from omnibase_infra.nodes.node_baselines_batch_compute import (
     HandlerBaselinesBatchCompute,
-)
-from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_command import (
     ModelBaselinesBatchComputeCommand,
 )
 
