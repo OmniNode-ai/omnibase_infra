@@ -191,6 +191,19 @@ health_check:
     - name: "graph_backend"
       type: "connection"
       critical: true
+env_dependencies:
+  GRAPH_BOLT_URI:
+    required: false
+    description: "Bolt protocol URI for the graph database (e.g. 'bolt://192.168.86.201:7687'); used by HandlerGraph as the primary connection URI"
+  MEMGRAPH_BOLT_URI:
+    required: false
+    description: "Bolt URI for the Memgraph instance; checked before GRAPH_BOLT_URI when both are set"
+  OMNIMEMORY_MEMGRAPH_HOST:
+    required: false
+    description: "Hostname or IP for Memgraph; used by ModelConfigGraphProjector when GRAPH_BOLT_URI/MEMGRAPH_BOLT_URI are not set"
+  OMNIMEMORY_MEMGRAPH_PORT:
+    required: false
+    description: "Port for Memgraph Bolt connection; used alongside OMNIMEMORY_MEMGRAPH_HOST by ModelConfigGraphProjector"
 # Metadata
 metadata:
   description: "Capability-oriented effect node for intent storage operations. Handles storing classified intents in Memgraph graph database and querying intents by session or distribution statistics."
