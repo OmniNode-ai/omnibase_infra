@@ -38,6 +38,7 @@ ROUTE_ID_INVOCATION_COMMAND = "route.delegation.invocation"
 ROUTE_ID_ROUTING_DECISION = "route.delegation.routing-decision"
 ROUTE_ID_QUALITY_GATE_RESULT = "route.delegation.quality-gate-result"
 ROUTE_ID_AGENT_TASK_LIFECYCLE = "route.delegation.agent-task-lifecycle"
+ROUTE_ID_DELEGATION_ROUTING_REQUEST = "route.delegation.routing-request"
 
 
 class WiringResult(TypedDict):
@@ -392,5 +393,56 @@ async def wire_delegation_dispatchers(
     return {
         "dispatchers": dispatchers_registered,
         "routes": routes_registered,
+        "status": "success",
+    }
+
+
+async def wire_delegation_routing_dispatcher(
+    engine: MessageDispatchEngine,
+    correlation_id: UUID | None = None,
+) -> dict[str, list[str] | str]:
+    """Wire the delegation routing reducer dispatcher into MessageDispatchEngine.
+
+    Registers DispatcherDelegationRoutingRequest so that messages of category
+    'command' and type 'omnibase-infra.delegation-routing-request' are routed
+    to the routing reducer handler instead of the DLQ.
+
+    Args:
+        engine: MessageDispatchEngine to register the dispatcher with.
+        correlation_id: Optional correlation ID for error tracking.
+
+    Returns:
+        Summary dict with dispatchers, routes, and status.
+    """
+    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+    from omnibase_infra.nodes.node_delegation_routing_reducer.dispatchers.dispatcher_delegation_routing_request import (
+        DispatcherDelegationRoutingRequest,
+    )
+
+    dispatcher = DispatcherDelegationRoutingRequest()
+    engine.register_dispatcher(
+        dispatcher_id=dispatcher.dispatcher_id,
+        dispatcher=dispatcher.handle,
+        category=dispatcher.category,
+        message_types=dispatcher.message_types,
+    )
+
+    route = ModelDispatchRoute(
+        route_id=ROUTE_ID_DELEGATION_ROUTING_REQUEST,
+        topic_pattern="*.cmd.*.delegation-routing-request.*",
+        message_category=EnumMessageCategory.COMMAND,
+        dispatcher_id=dispatcher.dispatcher_id,
+        message_type="omnibase-infra.delegation-routing-request",
+    )
+    engine.register_route(route)
+
+    logger.info(
+        "Delegation routing dispatcher wired (correlation_id=%s)",
+        correlation_id,
+    )
+
+    return {
+        "dispatchers": [dispatcher.dispatcher_id],
+        "routes": [route.route_id],
         "status": "success",
     }
