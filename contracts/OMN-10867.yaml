@@ -1,0 +1,37 @@
+# OMN-10867 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-10867"
+title: "Fix build_loop contract schemas — add event_bus block to write_effect, normalize both contracts"
+summary: >
+  node_build_loop_write_effect had no event_bus block, causing wire_from_manifest to silently skip it. Fix adds event_bus.subscribe_topics, migrates handler_routing format, removes stale schema fields, regenerates topic enum, and adds integration test coverage.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-schema"
+    description: "Both node contracts updated to current schema format; write_effect wired by wire_from_manifest"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_build_loop_contract_schema_omn10867.py -v"
+  - id: "dod-unit-tests"
+    description: "All existing build_loop unit tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/ -k 'build_loop' -v"
+  - id: "dod-deploy"
+    description: >
+      Deploy verification: contract.yaml changes are schema-only — no migration, no topology change. The write_effect node was previously skipped (not wired); adding event_bus.subscribe_topics causes it to be wired on next runtime restart. Runtime restart on .201 is the only required deploy step.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: ssh jonah@192.168.86.201 'docker restart omninode-runtime-effects'"
