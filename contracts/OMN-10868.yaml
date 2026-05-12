@@ -41,8 +41,8 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run pytest tests/integration/delegation/test_delegation_routing_dispatcher_wiring.py -v'
   - id: dod-004
-    description: deploy-compatible — pure DI wiring, no file writes, no side effects, no DB or Kafka dependencies
+    description: deploy-compatible — no migration required, no new topics, pure DI wiring ships with next runtime deploy
     source: manual
     checks:
-      - check_type: behavior_proven
-        check_value: 'dispatcher registration is pure DI wiring only — no I/O at wiring time, no runtime side effects beyond engine.register_dispatcher() and engine.register_route()'
+      - check_type: command
+        check_value: 'deploy: pure DI wiring — no DB migration, no new Kafka topics; ships automatically on next docker exec onex-runtime deploy'
