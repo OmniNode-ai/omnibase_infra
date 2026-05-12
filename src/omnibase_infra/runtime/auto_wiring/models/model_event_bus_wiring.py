@@ -24,3 +24,11 @@ class ModelEventBusWiring(BaseModel):
         default=None,
         description="Optional contract-declared consumer purpose",
     )
+    plugin_managed: bool = Field(
+        default=False,
+        description=(
+            "When True, auto-wiring skips Kafka subscription for this contract's "
+            "topics. A domain plugin owns the subscription with custom config "
+            "(e.g. result_applier). Auto-wiring still registers dispatch routes."
+        ),
+    )

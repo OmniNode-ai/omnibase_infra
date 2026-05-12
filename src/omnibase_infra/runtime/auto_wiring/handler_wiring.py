@@ -1440,6 +1440,14 @@ async def subscribe_wired_contract_topics(
             or contract.name not in result_appliers_by_contract
         ):
             continue
+        # plugin_managed: domain plugin owns Kafka subscription (OMN-10864).
+        if contract.event_bus is not None and contract.event_bus.plugin_managed:
+            logger.info(
+                "Auto-wiring (deferred): skipping Kafka subscription for "
+                "plugin-managed contract '%s' (OMN-10864)",
+                contract.name,
+            )
+            continue
         topics_subscribed = await _subscribe_contract_topics(
             contract=contract,
             dispatch_engine=dispatch_engine,
@@ -1582,10 +1590,25 @@ def _prepare_contract_wiring(
                 f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
             ) from exc
 
+    # plugin_managed: domain plugin owns Kafka subscription for this contract's
+    # topics (OMN-10864). Dispatch routes are still registered so the engine
+    # can route messages consumed via the plugin's EventBusSubcontractWiring.
+    subscription_topics: list[str] = (
+        []
+        if contract.event_bus.plugin_managed
+        else list(contract.event_bus.subscribe_topics)
+    )
+    if contract.event_bus.plugin_managed:
+        logger.info(
+            "Auto-wiring: skipping Kafka subscription for plugin-managed contract "
+            "'%s' — domain plugin owns topic subscription (OMN-10864)",
+            contract.name,
+        )
+
     return PreparedContractWiring(
         contract=contract,
         prepared_wirings=prepared_wirings,
-        subscription_topics=list(contract.event_bus.subscribe_topics),
+        subscription_topics=subscription_topics,
         environment=environment,
     )
 
