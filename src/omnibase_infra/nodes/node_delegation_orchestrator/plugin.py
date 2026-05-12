@@ -191,6 +191,7 @@ class PluginDelegation:
         try:
             from omnibase_infra.nodes.node_delegation_orchestrator.wiring import (
                 wire_delegation_dispatchers,
+                wire_delegation_routing_dispatcher,
             )
 
             dispatch_summary = await wire_delegation_dispatchers(
@@ -200,13 +201,23 @@ class PluginDelegation:
                 event_bus=config.event_bus,
             )
 
+            routing_summary = await wire_delegation_routing_dispatcher(
+                engine=config.dispatch_engine,
+                correlation_id=config.correlation_id,
+            )
+
+            all_dispatchers = list(dispatch_summary.get("dispatchers", [])) + list(
+                routing_summary.get("dispatchers", [])
+            )
+
             duration = time.time() - start_time
             logger.info(
                 "Delegation dispatchers wired into engine (correlation_id=%s)",
                 config.correlation_id,
                 extra={
-                    "dispatchers": dispatch_summary.get("dispatchers", []),
-                    "routes": dispatch_summary.get("routes", []),
+                    "dispatchers": all_dispatchers,
+                    "routes": list(dispatch_summary.get("routes", []))
+                    + list(routing_summary.get("routes", [])),
                 },
             )
 
@@ -215,7 +226,7 @@ class PluginDelegation:
                 plugin_id=self.plugin_id,
                 success=True,
                 message="Delegation dispatchers wired into engine",
-                resources_created=list(dispatch_summary.get("dispatchers", [])),
+                resources_created=all_dispatchers,
                 duration_seconds=duration,
             )
 

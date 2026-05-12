@@ -1,0 +1,45 @@
+schema_version: '1.0.0'
+ticket_id: OMN-10868
+title: 'fix(OMN-10868): wire delegation routing dispatcher in DI kernel'
+summary: >
+  Registers DispatcherDelegationRoutingRequest in the MessageDispatchEngine via PluginDelegation.wire_dispatchers(), fixing the ProtocolConfigurationError that routed delegation-routing-request commands to the DLQ.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Unit and integration tests for routing dispatcher wiring
+    command: uv run pytest tests/unit/nodes/node_delegation_routing_reducer/dispatchers/ tests/integration/delegation/test_delegation_routing_dispatcher_wiring.py -v
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks 1571 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-10868.yaml'
+  - id: dod-002
+    description: Unit tests prove dispatcher routes correctly, handles invalid payload, propagates errors
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_delegation_routing_reducer/dispatchers/ -v'
+  - id: dod-003
+    description: Integration tests prove dispatcher registered in engine, message types match contract topic, PluginDelegation wires it
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/delegation/test_delegation_routing_dispatcher_wiring.py -v'
+  - id: dod-004
+    description: deploy-compatible — no migration required, no new topics, pure DI wiring ships with next runtime deploy
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy: pure DI wiring — no DB migration, no new Kafka topics; ships automatically on next docker exec onex-runtime deploy'
