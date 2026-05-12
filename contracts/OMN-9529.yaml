@@ -21,7 +21,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "grep -rn 'ONEX_GROUP_ID' docker/docker-compose.infra.yml | grep -v 'OMN-8840' | wc -l"
+        check_value: "! grep -RInE 'ONEX_(OUTPUT|INPUT)_TOPIC' docker/docker-compose.infra.yml docker/docker-compose.e2e.yml docker/catalog/services docker/Dockerfile.runtime .secretresolver_allowlist"
   - id: dod-tests-pass
     description: Stale topic env var enforcement tests continue to pass
     source: manual
