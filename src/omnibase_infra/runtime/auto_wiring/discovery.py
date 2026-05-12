@@ -231,6 +231,16 @@ def _resolve_contract_path(node_cls: type) -> Path:
     )
 
 
+def _parse_bool_field(raw_dict: dict, field_name: str, default: bool = False) -> bool:
+    value = raw_dict.get(field_name, default)
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"event_bus.{field_name} must be a boolean when provided, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
 def _parse_contract(
     *,
     contract_path: Path,
@@ -267,7 +277,7 @@ def _parse_contract(
             subscribe_topics=tuple(eb_raw.get("subscribe_topics", [])),
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
             consumer_purpose=eb_raw.get("consumer_purpose"),
-            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+            plugin_managed=_parse_bool_field(eb_raw, "plugin_managed", False),
         )
 
     # Extract handler routing — new format (handler_routing:) or legacy (handler:)
