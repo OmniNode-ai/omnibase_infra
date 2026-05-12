@@ -106,8 +106,9 @@ class TestServiceHealthSkillEndpointIntegration:
 
             runtime.dispatch_local_ingress_request = AsyncMock(return_value=ingress_ok)  # type: ignore[method-assign]
 
-            health_server, port = await self._boot_health_server(runtime)
+            health_server: ServiceHealth | None = None
             try:
+                health_server, port = await self._boot_health_server(runtime)
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
                         f"http://127.0.0.1:{port}/skill",
@@ -125,7 +126,8 @@ class TestServiceHealthSkillEndpointIntegration:
                 assert data["command_name"] == "test_command"
                 runtime.dispatch_local_ingress_request.assert_awaited_once()
             finally:
-                await health_server.stop()
+                if health_server is not None:
+                    await health_server.stop()
                 await runtime.stop()
 
     @pytest.mark.asyncio
@@ -141,8 +143,9 @@ class TestServiceHealthSkillEndpointIntegration:
             seed_mock_handlers(runtime)
             await runtime.start()
 
-            health_server, port = await self._boot_health_server(runtime)
+            health_server: ServiceHealth | None = None
             try:
+                health_server, port = await self._boot_health_server(runtime)
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
                         f"http://127.0.0.1:{port}/skill",
@@ -155,7 +158,8 @@ class TestServiceHealthSkillEndpointIntegration:
                 assert data["ok"] is False
                 assert data["error"]["code"] == "validation_error"
             finally:
-                await health_server.stop()
+                if health_server is not None:
+                    await health_server.stop()
                 await runtime.stop()
 
     @pytest.mark.asyncio
@@ -175,8 +179,9 @@ class TestServiceHealthSkillEndpointIntegration:
 
             runtime.dispatch_local_ingress_request = AsyncMock(return_value=ingress_ok)  # type: ignore[method-assign]
 
-            health_server, port = await self._boot_health_server(runtime)
+            health_server: ServiceHealth | None = None
             try:
+                health_server, port = await self._boot_health_server(runtime)
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
                         f"http://127.0.0.1:{port}/skill",
@@ -190,5 +195,6 @@ class TestServiceHealthSkillEndpointIntegration:
                 ingress_req = call_args[0][0]
                 assert ingress_req.correlation_id == corr_id
             finally:
-                await health_server.stop()
+                if health_server is not None:
+                    await health_server.stop()
                 await runtime.stop()
