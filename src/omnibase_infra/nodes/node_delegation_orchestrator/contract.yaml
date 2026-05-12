@@ -42,6 +42,7 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
+  plugin_managed: true
   subscribe_topics:
     - "onex.cmd.omnibase-infra.delegation-request.v1"
     - "onex.cmd.omnibase-infra.invocation.v1"

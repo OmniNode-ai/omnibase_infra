@@ -267,6 +267,7 @@ def _parse_contract(
             subscribe_topics=tuple(eb_raw.get("subscribe_topics", [])),
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
             consumer_purpose=eb_raw.get("consumer_purpose"),
+            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
         )
 
     # Extract handler routing — new format (handler_routing:) or legacy (handler:)
