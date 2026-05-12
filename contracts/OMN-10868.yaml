@@ -7,9 +7,9 @@ summary: >
 is_seam_ticket: false
 interface_change: false
 interfaces_touched:
-  - node_delegation_routing_reducer.dispatchers
-  - node_delegation_orchestrator.wiring
-  - node_delegation_orchestrator.plugin
+  - protocols
+  - topics
+  - events
 evidence_requirements:
   - kind: tests
     description: Unit and integration tests for routing dispatcher wiring
