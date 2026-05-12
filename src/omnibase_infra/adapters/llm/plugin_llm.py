@@ -190,16 +190,17 @@ class PluginLlm:
 
         event_bus = getattr(config, "event_bus", None)
         if event_bus is not None and config.container is not None:
-            from omnibase_core.enums import EnumInjectionScope
-            from omnibase_infra.adapters.llm.adapter_llm_caller_delegation import (
+            from omnimarket.adapters.llm.adapter_llm_caller_delegation import (
                 LlmCallerDelegation,
             )
-            from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
+            from omnimarket.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
                 DelegationIntentBridge,
             )
             from omnibase_infra.nodes.node_delegation_orchestrator.protocol_delegation_intent_bridge import (
                 ProtocolDelegationIntentBridge,
             )
+
+            from omnibase_core.enums import EnumInjectionScope
 
             bridge = DelegationIntentBridge(
                 event_bus=event_bus,

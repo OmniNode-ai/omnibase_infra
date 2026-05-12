@@ -67,6 +67,9 @@ from typing import cast
 from uuid import UUID
 
 import yaml
+from omnimarket.nodes.node_delegation_orchestrator.plugin import (
+    PluginDelegation,
+)
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
@@ -108,9 +111,6 @@ from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_e
 )
 from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
-)
-from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
-    PluginDelegation,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     ServiceRegistration,

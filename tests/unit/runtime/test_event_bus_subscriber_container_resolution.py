@@ -145,7 +145,7 @@ async def test_delegation_plugin_resolves_subscriber_bus_from_container() -> Non
     When the container has the bus registered under ProtocolEventBusSubscriber,
     the plugin should use that instance (not config.event_bus).
     """
-    from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
+    from omnimarket.nodes.node_delegation_orchestrator.plugin import (
         PluginDelegation,
     )
 
@@ -213,7 +213,7 @@ async def test_delegation_plugin_falls_back_to_config_event_bus_when_container_a
     None
 ):
     """PluginDelegation falls back to config.event_bus when container has no service_registry."""
-    from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
+    from omnimarket.nodes.node_delegation_orchestrator.plugin import (
         PluginDelegation,
     )
 
@@ -259,7 +259,7 @@ async def test_delegation_plugin_skips_when_bus_lacks_subscribe_and_not_in_conta
     None
 ):
     """PluginDelegation skips when bus has no subscribe and container resolution fails."""
-    from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
+    from omnimarket.nodes.node_delegation_orchestrator.plugin import (
         PluginDelegation,
     )
 

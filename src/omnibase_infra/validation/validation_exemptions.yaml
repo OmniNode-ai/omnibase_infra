@@ -2711,28 +2711,6 @@ pattern_exemptions:
       - CLAUDE.md (Pydantic Model Standards)
     ticket: OMN-2736
   # ==========================================================================
-  # Bifrost Delegation Config Exemptions (OMN-10637)
-  # ==========================================================================
-  # backend_id and model_name in model_bifrost_delegation_config.py are
-  # human-readable identifiers, not entity references requiring UUID or
-  # ID + display_name pattern.
-  - file_pattern: 'model_bifrost_delegation_config\.py'
-    violation_pattern: "Field 'backend_id' should use UUID"
-    reason: >
-      backend_id is a human-readable slug identifier (e.g., 'local-qwen-coder-30b'), not a UUID entity reference. Delegation routing rules and audit logs reference backends by readable name. UUID identifiers would degrade config usability. Same rationale as model_bifrost_config.py backend_id exemption (OMN-2736).
-
-    documentation:
-      - CLAUDE.md (Pydantic Model Standards)
-    ticket: OMN-10637
-  - file_pattern: 'model_bifrost_delegation_config\.py'
-    violation_pattern: "Field 'model_name' might reference an entity"
-    reason: >
-      model_name is a model identifier string (e.g., 'claude-sonnet-4-6', 'cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit') sent directly in LLM API outbound requests. It is not a reference to a domain entity and does not correspond to an entity with an ID field — it is the literal string the LLM API requires.
-
-    documentation:
-      - CLAUDE.md (Pydantic Model Standards)
-    ticket: OMN-10637
-  # ==========================================================================
   # ContractTopicExtractor: event_name Field Exemption (OMN-2963)
   # ==========================================================================
   # event_name is a parsed component of a Kafka topic string
@@ -3262,39 +3240,6 @@ pattern_exemptions:
 
     ticket: OMN-7656
   # ==========================================================================
-  # Model Name Exemption (OMN-7764)
-  # ==========================================================================
-  # model_name is a human-readable LLM model identifier (e.g., "Qwen3-Coder-14B"),
-  # NOT an entity reference requiring ID + display_name pattern.
-  - file_pattern: 'model_task_delegated_event\.py'
-    violation_pattern: "might reference an entity"
-    reason: >
-      model_name is a human-readable LLM model identifier string (e.g., "Qwen3-Coder-14B") from the routing decision. It is not a domain entity reference — it is a telemetry label for analytics dashboards.
-
-    documentation:
-      - CLAUDE.md (Delegation Pipeline - model routing)
-    ticket: OMN-7764
-  # LLM Call ID Exemptions (OMN-7766)
-  # ==========================================================================
-  # llm_call_id is an external provider identifier (e.g., OpenAI chatcmpl-xxx),
-  # NOT an internal UUID. The _id suffix triggers a false positive.
-  - file_pattern: 'model_task_delegated_event\.py'
-    violation_pattern: "Field 'llm_call_id' should use UUID"
-    reason: >
-      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
-
-    documentation:
-      - CLAUDE.md (External Provider Identifiers)
-    ticket: OMN-7766
-  - file_pattern: 'model_inference_response_data\.py'
-    violation_pattern: "Field 'llm_call_id' should use UUID"
-    reason: >
-      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
-
-    documentation:
-      - CLAUDE.md (External Provider Identifiers)
-    ticket: OMN-7766
-  # ==========================================================================
   # ModelMachineEntry: machine_id Field Exemption (OMN-7527)
   # ==========================================================================
   # machine_id is a human-readable slug identifier (e.g., 'infra-server', 'm2-ultra'),
@@ -3482,24 +3427,6 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-2736
-  # ==========================================================================
-  # Bifrost Delegation Config Models Exemption (OMN-10637)
-  # ==========================================================================
-  # model_bifrost_delegation_config.py contains six tightly coupled models
-  # that together define the delegation routing config schema:
-  # - ModelDelegationFallbackPolicy: per-rule failover behavior
-  # - ModelDelegationRoutingRule: single routing rule (embeds FallbackPolicy)
-  # - ModelDelegationBackendConfig: backend entry
-  # - ModelDelegationCircuitBreakerConfig: gateway-level circuit breaker
-  # - ModelDelegationFailoverConfig: gateway-level failover
-  # - ModelBifrostDelegationConfig: root config (embeds all of the above)
-  # These form a single config schema; splitting would scatter a cohesive
-  # contract across 6 files with no benefit.
-  - file_pattern: 'model_bifrost_delegation_config\.py'
-    violation_pattern: '\d+ models in one file'
-    reason: >
-      All six models define a single delegation routing config schema loaded from bifrost_delegation.yaml. ModelBifrostDelegationConfig embeds ModelDelegationBackendConfig, ModelDelegationRoutingRule (which embeds ModelDelegationFallbackPolicy), ModelDelegationCircuitBreakerConfig, and ModelDelegationFailoverConfig. They are always used together as a unit and splitting them into 6 files provides no cohesion benefit.
-
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-10637
