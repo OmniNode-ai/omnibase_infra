@@ -30,8 +30,6 @@
 #   ONEX_LOG_LEVEL    - Logging level (default: INFO)
 #   ONEX_ENVIRONMENT  - Environment name (default: local)
 #   ONEX_GROUP_ID     - Consumer group ID (default: onex-runtime)
-#   Note: ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC were removed (OMN-8784).
-#         Topics must be declared in node contract event_bus.subscribe_topics / publish_topics.
 #
 # =============================================================================
 # PERFORMANCE OPTIMIZATION TIPS
