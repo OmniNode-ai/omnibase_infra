@@ -642,6 +642,16 @@ async def _wire_package_node_subscriptions(
             )
             continue
 
+        # plugin_managed: domain plugin owns Kafka subscription (OMN-10864).
+        if event_bus_section.get("plugin_managed"):
+            skipped_no_topics += 1
+            logger.info(
+                "RuntimeHostProcess: skipping Kafka subscription for "
+                "plugin-managed contract node=%s (OMN-10864)",
+                node_name,
+            )
+            continue
+
         if node_name in already_wired_names:
             skipped_existing += 1
             continue
@@ -5569,14 +5579,24 @@ class RuntimeHostProcess:
                 raw_contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001 - loader below reports malformed contracts
                 raw_contract = None
-            if _requires_raw_event_projection_wiring(
+            raw_event_bus = (
                 raw_contract.get("event_bus")
                 if isinstance(raw_contract, dict)
                 else None
-            ):
+            )
+            if _requires_raw_event_projection_wiring(raw_event_bus):
                 logger.info(
                     "Skipping event_bus subcontract wiring for raw projection consumer: "
                     "handler=%s",
+                    descriptor.name or handler_type,
+                )
+                continue
+
+            # plugin_managed: domain plugin owns Kafka subscription (OMN-10864).
+            if isinstance(raw_event_bus, dict) and raw_event_bus.get("plugin_managed"):
+                logger.info(
+                    "RuntimeHostProcess: skipping Kafka subscription for "
+                    "plugin-managed contract handler=%s (OMN-10864)",
                     descriptor.name or handler_type,
                 )
                 continue
