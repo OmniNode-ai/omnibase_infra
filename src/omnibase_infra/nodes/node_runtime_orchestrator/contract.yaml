@@ -462,6 +462,13 @@ handlers:
   optional:
     - type: ProtocolLogger
       version: {major: 1, minor: 0, patch: 0}
+env_dependencies:
+  ONEX_ENVIRONMENT:
+    required: false
+    description: "Environment label (e.g. 'production', 'staging', 'local') used by runtime health monitor and contract publisher for environment-tagged events; defaults to 'local'"
+  KAFKA_ENVIRONMENT:
+    required: false
+    description: "Kafka environment label passed to the service kernel bootstrap; propagated to runtime event envelopes; defaults to reading ONEX_ENVIRONMENT fallback"
 profile_tags:
   - runtime
   - orchestrator

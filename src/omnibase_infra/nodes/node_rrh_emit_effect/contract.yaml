@@ -48,6 +48,10 @@ handler_routing:
       supported_operations:
         - "rrh.collect.toolchain"
       description: "Collect build-tool versions (pre-commit, ruff, pytest, mypy)."
+env_dependencies:
+  ONEX_ENVIRONMENT:
+    required: false
+    description: "Environment label (e.g. 'production', 'staging', 'local') passed to runtime target collection; defaults to 'local'"
 capabilities:
   - name: "rrh.collect"
     description: "Collect environment data for RRH validation"
