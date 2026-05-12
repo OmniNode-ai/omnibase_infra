@@ -41,6 +41,10 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: '# migration pending'
+  - path: omnibase_infra/nodes/node_build_loop_write_effect/handlers/handler_build_loop_append.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-10867'
   - path: omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_append.py
     violations:
       - missing_handler_routing

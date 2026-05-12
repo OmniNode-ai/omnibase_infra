@@ -91,6 +91,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
 _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
     # Chain learning — publisher nodes not yet implemented
     "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-09-01",
     # Delegation — request comes from omniclaude hooks, not contract-declared

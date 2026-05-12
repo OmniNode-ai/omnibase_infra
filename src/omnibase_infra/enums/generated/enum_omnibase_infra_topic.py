@@ -19,6 +19,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_BASELINE_COMPARISON_REQUEST_V1 = "onex.cmd.omnibase-infra.baseline-comparison-request.v1"  # onex.cmd.omnibase-infra.baseline-comparison-request.v1
+    CMD_BUILD_LOOP_APPEND_V1 = "onex.cmd.omnibase-infra.build-loop-append.v1"  # onex.cmd.omnibase-infra.build-loop-append.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-inference-request.v1"  # onex.cmd.omnibase-infra.delegation-inference-request.v1
@@ -35,6 +36,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     EVT_AGENT_TASK_LIFECYCLE_V1 = "onex.evt.omnibase-infra.agent-task-lifecycle.v1"  # onex.evt.omnibase-infra.agent-task-lifecycle.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
+    EVT_BUILD_LOOP_APPENDED_V1 = "onex.evt.omnibase-infra.build-loop-appended.v1"  # onex.evt.omnibase-infra.build-loop-appended.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
     EVT_CHAIN_REPLAY_RESULT_V1 = "onex.evt.omnibase-infra.chain-replay-result.v1"  # onex.evt.omnibase-infra.chain-replay-result.v1
