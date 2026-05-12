@@ -12,17 +12,14 @@
 # Related Tickets:
 #   - OMN-9774: Add build-loop projection consumer chain + build_loop_runs table
 #   - OMN-8943: Prove Full Four-Node ONEX Pattern End-to-End (parent epic)
+#   - OMN-10867: Update build_loop contract schemas to current format
 name: "node_build_loop_projection_compute"
-contract_name: "node_build_loop_projection_compute"
-node_name: "node_build_loop_projection_compute"
+node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "0.1.1"
-node_type: "COMPUTE_GENERIC"
-runtime_profiles:
-  - "effects"
+  patch: 2
+node_version: "0.1.2"
 description: >
   Subscribes to onex.evt.omnimarket.build-loop-orchestrator-completed.v1 and projects each terminal event into a ModelPayloadBuildLoopAppend intent for NodeBuildLoopWriteEffect to persist into the build_loop_runs append-only audit table. Uses consumer_purpose="audit" and auto_offset_reset="earliest" so retried or replayed terminal events are captured rather than silently swallowed. Mirrors the canonical node_ledger_projection_compute pattern.
 
@@ -76,6 +73,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-04-26"
+  updated: "2026-05-12"
   ticket: "OMN-9774"
   tags:
     - compute

@@ -12,23 +12,18 @@
 # Related Tickets:
 #   - OMN-9774: Add build-loop projection consumer chain + build_loop_runs table
 #   - OMN-8943: Prove Full Four-Node ONEX Pattern End-to-End (parent epic)
+#   - OMN-10867: Update build_loop contract schemas to current format
 name: "node_build_loop_write_effect"
-contract_name: "node_build_loop_write_effect"
-node_name: "node_build_loop_write_effect"
+node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
-node_version:
-  major: 0
-  minor: 1
-  patch: 0
-node_type: "EFFECT_GENERIC"
-runtime_profiles:
-  - "effects"
+node_version: "0.2.0"
 description: >
   Capability-oriented EFFECT node for build_loop terminal-event persistence. Consumes ModelPayloadBuildLoopAppend intents and INSERTs one row per intent into the public.build_loop_runs append-only audit table. There is no idempotency key — retried terminal events surface as duplicate rows so duplication is observable rather than silently swallowed.
 
+# Strongly typed I/O models
 input_model:
   name: "ModelPayloadBuildLoopAppend"
   module: "omnibase_infra.nodes.node_build_loop_projection_compute.models"
@@ -37,6 +32,20 @@ output_model:
   name: "ModelBuildLoopAppendResult"
   module: "omnibase_infra.nodes.node_build_loop_write_effect.models"
   description: "Outcome of one build_loop_runs INSERT."
+# Event bus configuration
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.build-loop-append.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.build-loop-appended.v1"
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "build_loop.append"
+      handler_class: "HandlerBuildLoopAppend"
+      handler_module: "omnibase_infra.nodes.node_build_loop_write_effect.handlers.handler_build_loop_append"
+      description: "Append-only INSERT into build_loop_runs"
 capabilities:
   - name: "build_loop.write"
     description: "Append a build_loop terminal event to build_loop_runs"
@@ -47,14 +56,6 @@ node_capabilities:
   postgres: true
   write: true
   database: true
-handler_routing:
-  routing_strategy: "operation_match"
-  handlers:
-    - operation: "build_loop.append"
-      handler:
-        name: "HandlerBuildLoopAppend"
-        module: "omnibase_infra.nodes.node_build_loop_write_effect.handlers.handler_build_loop_append"
-      description: "Append-only INSERT into build_loop_runs"
 io_operations:
   - operation: "build_loop.append"
     description: "Append a single build_loop terminal event row"
@@ -112,6 +113,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-04-26"
+  updated: "2026-05-12"
   ticket: "OMN-9774"
   tags:
     - effect
