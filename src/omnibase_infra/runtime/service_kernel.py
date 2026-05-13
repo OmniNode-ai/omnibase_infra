@@ -67,9 +67,6 @@ from typing import cast
 from uuid import UUID
 
 import yaml
-from omnimarket.nodes.node_delegation_orchestrator.plugin import (
-    PluginDelegation,
-)
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
@@ -1743,7 +1740,14 @@ async def bootstrap() -> int:
         # get their consumers started before the runtime is restarted or killed.
 
         # Try to register PluginDelegation (OMN-7040: delegation pipeline).
+        # Imported lazily here (not at module scope) so a missing/unavailable
+        # omnimarket dependency degrades gracefully instead of crashing kernel
+        # startup, and to avoid a module-load circular import.
         try:
+            from omnimarket.nodes.node_delegation_orchestrator.plugin import (
+                PluginDelegation,
+            )
+
             plugin_registry.register(PluginDelegation())
             logger.info(
                 "PluginDelegation registered (correlation_id=%s)",
