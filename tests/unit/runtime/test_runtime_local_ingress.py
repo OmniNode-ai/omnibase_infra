@@ -215,7 +215,7 @@ def test_discover_runtime_local_ingress_routes_skips_malformed_contract(
     assert discover_runtime_local_ingress_routes(("fakepkg",)) == {}
 
 
-def test_discover_runtime_local_ingress_routes_rejects_duplicate_alias(
+def test_discover_runtime_local_ingress_routes_omits_ambiguous_public_base_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -243,8 +243,14 @@ def test_discover_runtime_local_ingress_routes_rejects_duplicate_alias(
         _import_module,
     )
 
-    with pytest.raises(ValueError, match="Duplicate local ingress route alias 'same'"):
-        discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+    routes = discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+
+    assert "same" not in routes
+    assert "node_same" not in routes
+    assert routes["pkg1.same"].command_topic == "onex.cmd.alpha.start.v1"
+    assert routes["pkg1.node_same"].contract_name == "same"
+    assert routes["pkg2.same"].command_topic == "onex.cmd.beta.start.v1"
+    assert routes["pkg2.node_same"].contract_name == "same"
 
 
 def test_discover_runtime_local_ingress_routes_allows_equivalent_duplicate_alias(
@@ -289,7 +295,7 @@ handler_routing:
     assert routes["same.run"].terminal_event == "onex.evt.same.completed.v1"
 
 
-def test_discover_runtime_local_ingress_routes_rejects_duplicate_operation_alias(
+def test_discover_runtime_local_ingress_routes_omits_ambiguous_public_operation_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -325,10 +331,13 @@ handler_routing:
         _import_module,
     )
 
-    with pytest.raises(
-        ValueError, match=r"Duplicate local ingress route alias 'shared\.run'"
-    ):
-        discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+    routes = discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+
+    assert "shared.run" not in routes
+    assert routes["pkg1.alpha.shared.run"].command_topic == "onex.cmd.alpha.start.v1"
+    assert routes["pkg1.node_alpha.shared.run"].contract_name == "alpha"
+    assert routes["pkg2.beta.shared.run"].command_topic == "onex.cmd.beta.start.v1"
+    assert routes["pkg2.node_beta.shared.run"].contract_name == "beta"
 
 
 def test_discover_runtime_local_ingress_routes_omits_ambiguous_raw_operation_alias(
@@ -368,8 +377,81 @@ handler_routing:
     assert "run" not in routes
     assert routes["alpha.run"].command_topic == "onex.cmd.alpha.start.v1"
     assert routes["node_alpha.run"].contract_name == "alpha"
+    assert routes["pkg.alpha.run"].contract_name == "alpha"
+    assert routes["pkg.node_alpha.run"].contract_name == "alpha"
     assert routes["beta.run"].command_topic == "onex.cmd.beta.start.v1"
     assert routes["node_beta.run"].contract_name == "beta"
+    assert routes["pkg.beta.run"].contract_name == "beta"
+    assert routes["pkg.node_beta.run"].contract_name == "beta"
+
+
+def test_discover_runtime_local_ingress_routes_omits_cross_repo_orchestrator_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    infra_root = tmp_path / "omnibase_infra"
+    market_root = tmp_path / "omnimarket"
+    for root in (infra_root, market_root):
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("", encoding="utf-8")
+        (root / "nodes" / "node_delegation_orchestrator").mkdir(parents=True)
+
+    (
+        infra_root / "nodes" / "node_delegation_orchestrator" / "contract.yaml"
+    ).write_text(
+        """
+name: node_delegation_orchestrator
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.delegation-request.v1
+terminal_event: onex.evt.omnibase-infra.delegation-completed.v1
+terminal_events:
+  success: onex.evt.omnibase-infra.delegation-completed.v1
+  failure: onex.evt.omnibase-infra.delegation-failed.v1
+handler_routing:
+  handlers:
+    - operation: delegation.orchestrate
+""".strip(),
+        encoding="utf-8",
+    )
+    (
+        market_root / "nodes" / "node_delegation_orchestrator" / "contract.yaml"
+    ).write_text(
+        """
+name: node_delegation_orchestrator
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.delegation-request.v1
+terminal_event: onex.evt.omnibase-infra.delegation-completed.v1
+handler_routing:
+  handlers:
+    - operation: delegation.orchestrate
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def _import_module(name: str) -> object:
+        root = infra_root if name == "omnibase_infra" else market_root
+        return SimpleNamespace(__file__=str(root / "__init__.py"))
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        _import_module,
+    )
+
+    routes = discover_runtime_local_ingress_routes(("omnibase_infra", "omnimarket"))
+
+    assert "node_delegation_orchestrator" not in routes
+    assert "delegation.orchestrate" not in routes
+    infra_alias = "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate"
+    market_alias = "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
+    assert routes[infra_alias].terminal_events == (
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+        "onex.evt.omnibase-infra.delegation-failed.v1",
+    )
+    assert routes[market_alias].terminal_events == (
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+    )
 
 
 def test_discover_runtime_local_ingress_routes_registers_unqualified_operation_aliases(
@@ -402,6 +484,8 @@ handler_routing:
     assert routes["run"].command_topic == "onex.cmd.demo.start.v1"
     assert routes["demo.run"].contract_name == "demo"
     assert routes["node_demo.run"].contract_name == "demo"
+    assert routes["fakepkg.demo.run"].contract_name == "demo"
+    assert routes["fakepkg.node_demo.run"].contract_name == "demo"
 
 
 @pytest.mark.asyncio

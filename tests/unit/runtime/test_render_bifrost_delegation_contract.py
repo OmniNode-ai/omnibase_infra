@@ -19,123 +19,109 @@ def _http_url(authority: str) -> str:
     return "http" + "://" + authority
 
 
-def _source_contract(path: Path, *, required: bool = False) -> Path:
-    path.write_text(
-        yaml.safe_dump(
+def _backend(
+    *,
+    backend_id: str,
+    base_url_env: str,
+    model_name: str,
+    capabilities: list[str],
+    required: bool = False,
+) -> dict[str, object]:
+    return {
+        "backend_id": backend_id,
+        "base_url_env": base_url_env,
+        "required": required,
+        "endpoint_url": "",
+        "model_name": model_name,
+        "tier": "local",
+        "timeout_ms": 30000,
+        "capabilities": capabilities,
+    }
+
+
+def _contract_data(backends: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "config_version": "1.1.0",
+        "schema_version": "bifrost_delegation.v1",
+        "backends": backends,
+        "routing_rules": [
             {
-                "config_version": "1.1.0",
-                "schema_version": "bifrost_delegation.v1",
-                "backends": [
-                    {
-                        "backend_id": "local-qwen-coder-30b",
-                        "base_url_env": "LLM_CODER_URL",
-                        "required": required,
-                        "endpoint_url": "",
-                        "model_name": "qwen-test",
-                        "tier": "local",
-                        "timeout_ms": 30000,
-                        "capabilities": ["code_generation"],
-                    }
-                ],
-                "routing_rules": [
-                    {
-                        "rule_id": "d4e5f6a7-0001-4000-8000-000000000001",
-                        "priority": 10,
-                        "task_class": "test",
-                        "task_class_contract_version": "1.0.0",
-                        "backend_policy_version": "1.0.0",
-                        "match_operation_types": ["chat_completion"],
-                        "match_capabilities": ["code_generation"],
-                        "latency_sla_ms": 30000,
-                        "backend_ids": ["local-qwen-coder-30b"],
-                        "fallback_policy": {
-                            "action": "return_error",
-                            "max_retries": 0,
-                            "on_exhaust": "return_error",
-                        },
-                        "shadow_policy_id": "e5f6a7b8-0001-4000-8000-000000000001",
-                    }
-                ],
-                "default_backends": ["local-qwen-coder-30b"],
-                "circuit_breaker": {"failure_threshold": 5, "window_seconds": 30},
-                "failover": {"max_attempts": 3, "backoff_base_ms": 500},
-                "shadow_mode": {
-                    "enabled": False,
-                    "policy_version": "unknown",
-                    "log_sample_rate": 1.0,
-                    "comparison_logging_enabled": True,
-                    "max_shadow_latency_ms": 5.0,
+                "rule_id": "d4e5f6a7-0001-4000-8000-000000000001",
+                "priority": 10,
+                "task_class": "test",
+                "task_class_contract_version": "1.0.0",
+                "backend_policy_version": "1.0.0",
+                "match_operation_types": ["chat_completion"],
+                "match_capabilities": ["code_generation"],
+                "latency_sla_ms": 30000,
+                "backend_ids": ["local-qwen-coder-30b"],
+                "fallback_policy": {
+                    "action": "return_error",
+                    "max_retries": 0,
+                    "on_exhaust": "return_error",
                 },
-            },
-            sort_keys=False,
-        ),
+                "shadow_policy_id": "e5f6a7b8-0001-4000-8000-000000000001",
+            }
+        ],
+        "default_backends": ["local-qwen-coder-30b"],
+        "circuit_breaker": {"failure_threshold": 5, "window_seconds": 30},
+        "failover": {"max_attempts": 3, "backoff_base_ms": 500},
+        "shadow_mode": {
+            "enabled": False,
+            "policy_version": "unknown",
+            "log_sample_rate": 1.0,
+            "comparison_logging_enabled": True,
+            "max_shadow_latency_ms": 5.0,
+        },
+    }
+
+
+def _write_contract(path: Path, data: dict[str, object]) -> Path:
+    path.write_text(
+        yaml.safe_dump(data, sort_keys=False),
         encoding="utf-8",
     )
     return path
+
+
+def _source_contract(path: Path, *, required: bool = False) -> Path:
+    return _write_contract(
+        path,
+        _contract_data(
+            [
+                _backend(
+                    backend_id="local-qwen-coder-30b",
+                    base_url_env="LLM_CODER_URL",
+                    required=required,
+                    model_name="qwen-test",
+                    capabilities=["code_generation"],
+                )
+            ]
+        ),
+    )
 
 
 def _source_contract_with_optional_backend(path: Path) -> Path:
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "config_version": "1.1.0",
-                "schema_version": "bifrost_delegation.v1",
-                "backends": [
-                    {
-                        "backend_id": "local-qwen-coder-30b",
-                        "base_url_env": "LLM_CODER_URL",
-                        "required": True,
-                        "endpoint_url": "",
-                        "model_name": "qwen-test",
-                        "tier": "local",
-                        "timeout_ms": 30000,
-                        "capabilities": ["code_generation"],
-                    },
-                    {
-                        "backend_id": "local-deepseek-r1-14b",
-                        "base_url_env": "LLM_DEEPSEEK_R1_URL",
-                        "endpoint_url": "",
-                        "model_name": "deepseek-test",
-                        "tier": "local",
-                        "timeout_ms": 30000,
-                        "capabilities": ["research"],
-                    },
-                ],
-                "routing_rules": [
-                    {
-                        "rule_id": "d4e5f6a7-0001-4000-8000-000000000001",
-                        "priority": 10,
-                        "task_class": "test",
-                        "task_class_contract_version": "1.0.0",
-                        "backend_policy_version": "1.0.0",
-                        "match_operation_types": ["chat_completion"],
-                        "match_capabilities": ["code_generation"],
-                        "latency_sla_ms": 30000,
-                        "backend_ids": ["local-qwen-coder-30b"],
-                        "fallback_policy": {
-                            "action": "return_error",
-                            "max_retries": 0,
-                            "on_exhaust": "return_error",
-                        },
-                        "shadow_policy_id": "e5f6a7b8-0001-4000-8000-000000000001",
-                    }
-                ],
-                "default_backends": ["local-qwen-coder-30b"],
-                "circuit_breaker": {"failure_threshold": 5, "window_seconds": 30},
-                "failover": {"max_attempts": 3, "backoff_base_ms": 500},
-                "shadow_mode": {
-                    "enabled": False,
-                    "policy_version": "unknown",
-                    "log_sample_rate": 1.0,
-                    "comparison_logging_enabled": True,
-                    "max_shadow_latency_ms": 5.0,
-                },
-            },
-            sort_keys=False,
+    return _write_contract(
+        path,
+        _contract_data(
+            [
+                _backend(
+                    backend_id="local-qwen-coder-30b",
+                    base_url_env="LLM_CODER_URL",
+                    required=True,
+                    model_name="qwen-test",
+                    capabilities=["code_generation"],
+                ),
+                _backend(
+                    backend_id="local-deepseek-r1-14b",
+                    base_url_env="LLM_DEEPSEEK_R1_URL",
+                    model_name="deepseek-test",
+                    capabilities=["research"],
+                ),
+            ]
         ),
-        encoding="utf-8",
     )
-    return path
 
 
 @pytest.mark.unit

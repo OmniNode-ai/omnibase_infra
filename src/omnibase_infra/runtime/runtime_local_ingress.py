@@ -84,7 +84,7 @@ def discover_runtime_local_ingress_routes(
 
     routes: dict[str, RuntimeLocalIngressRoute] = {}
     alias_sources: dict[str, str] = {}
-    ambiguous_raw_operation_aliases: set[str] = set()
+    ambiguous_public_aliases: set[str] = set()
 
     for package_name in package_names:
         package_root = _resolve_package_root(package_name)
@@ -138,30 +138,72 @@ def discover_runtime_local_ingress_routes(
                 package_name=package_name,
             )
 
-            for alias in (contract_name, node_dir_name):
+            for alias in _package_scoped_route_aliases(route):
                 _register_local_ingress_route_alias(
                     routes,
                     alias_sources,
                     alias,
                     route,
-                    source="base",
+                    source="package_scoped",
+                    ambiguous_public_aliases=ambiguous_public_aliases,
                 )
 
+            for alias in tuple(dict.fromkeys((contract_name, node_dir_name))):
+                was_ambiguous = _register_local_ingress_route_alias(
+                    routes,
+                    alias_sources,
+                    alias,
+                    route,
+                    source="base",
+                    ambiguous_public_aliases=ambiguous_public_aliases,
+                    allow_ambiguous_public_alias=True,
+                )
+                if was_ambiguous:
+                    logger.warning(
+                        "Omitting ambiguous public local ingress route alias",
+                        extra={
+                            "alias": alias,
+                            "contract_path": route.contract_path,
+                        },
+                    )
+
             for operation_alias in _extract_handler_operation_aliases(raw):
-                for qualified_alias in _qualified_operation_aliases(
+                for package_alias in _package_scoped_operation_aliases(
                     route, operation_alias
                 ):
                     _register_local_ingress_route_alias(
                         routes,
                         alias_sources,
+                        package_alias,
+                        route,
+                        source="package_scoped_operation",
+                        ambiguous_public_aliases=ambiguous_public_aliases,
+                    )
+
+                for qualified_alias in _qualified_operation_aliases(
+                    route, operation_alias
+                ):
+                    was_ambiguous = _register_local_ingress_route_alias(
+                        routes,
+                        alias_sources,
                         qualified_alias,
                         route,
                         source="operation_qualified",
+                        ambiguous_public_aliases=ambiguous_public_aliases,
+                        allow_ambiguous_public_alias=True,
                     )
+                    if was_ambiguous:
+                        logger.warning(
+                            "Omitting ambiguous public local ingress operation alias",
+                            extra={
+                                "alias": qualified_alias,
+                                "contract_path": route.contract_path,
+                            },
+                        )
 
                 if (
                     "." in operation_alias
-                    or operation_alias in ambiguous_raw_operation_aliases
+                    or operation_alias in ambiguous_public_aliases
                 ):
                     continue
 
@@ -171,7 +213,8 @@ def discover_runtime_local_ingress_routes(
                     operation_alias,
                     route,
                     source="operation_raw",
-                    ambiguous_raw_operation_aliases=ambiguous_raw_operation_aliases,
+                    ambiguous_public_aliases=ambiguous_public_aliases,
+                    allow_ambiguous_public_alias=True,
                 )
                 if was_ambiguous:
                     logger.warning(
@@ -192,9 +235,13 @@ def _register_local_ingress_route_alias(
     route: RuntimeLocalIngressRoute,
     *,
     source: str,
-    ambiguous_raw_operation_aliases: set[str] | None = None,
+    ambiguous_public_aliases: set[str] | None = None,
+    allow_ambiguous_public_alias: bool = False,
 ) -> bool:
-    """Register a local ingress alias, returning True when a raw op is ambiguous."""
+    """Register a local ingress alias, returning True when it is ambiguous."""
+
+    if ambiguous_public_aliases is not None and alias in ambiguous_public_aliases:
+        return True
 
     existing = routes.get(alias)
     if existing is None:
@@ -215,17 +262,20 @@ def _register_local_ingress_route_alias(
 
     existing_source = alias_sources.get(alias)
     if (
-        source == "operation_raw"
-        and existing_source == "operation_raw"
-        and ambiguous_raw_operation_aliases is not None
+        allow_ambiguous_public_alias
+        and _is_public_alias_source(source)
+        and _is_public_alias_source(existing_source)
+        and ambiguous_public_aliases is not None
     ):
-        ambiguous_raw_operation_aliases.add(alias)
+        ambiguous_public_aliases.add(alias)
         routes.pop(alias, None)
         alias_sources.pop(alias, None)
         logger.warning(
-            "Removed ambiguous unqualified local ingress operation alias",
+            "Removed ambiguous public local ingress alias",
             extra={
                 "alias": alias,
+                "first_source": existing_source,
+                "second_source": source,
                 "first_contract_path": existing.contract_path,
                 "second_contract_path": route.contract_path,
             },
@@ -236,6 +286,10 @@ def _register_local_ingress_route_alias(
         f"Duplicate local ingress route alias '{alias}' for "
         f"{existing.contract_path} and {route.contract_path}"
     )
+
+
+def _is_public_alias_source(source: str | None) -> bool:
+    return source in {"base", "operation_qualified", "operation_raw"}
 
 
 def _local_ingress_routes_equivalent(
@@ -275,6 +329,31 @@ def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
             terminal_events.append(topic)
 
     return tuple(dict.fromkeys(terminal_events))
+
+
+def _package_scoped_route_aliases(
+    route: RuntimeLocalIngressRoute,
+) -> tuple[str, ...]:
+    """Return package-scoped aliases that stay deterministic across repos."""
+
+    aliases = (
+        f"{route.package_name}.{route.contract_name}",
+        f"{route.package_name}.{route.node_name}",
+    )
+    return tuple(dict.fromkeys(aliases))
+
+
+def _package_scoped_operation_aliases(
+    route: RuntimeLocalIngressRoute,
+    operation_alias: str,
+) -> tuple[str, ...]:
+    """Return package-scoped operation aliases for colliding public names."""
+
+    aliases = (
+        f"{route.package_name}.{route.contract_name}.{operation_alias}",
+        f"{route.package_name}.{route.node_name}.{operation_alias}",
+    )
+    return tuple(dict.fromkeys(aliases))
 
 
 def _qualified_operation_aliases(
