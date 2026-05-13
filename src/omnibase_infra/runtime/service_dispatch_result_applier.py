@@ -206,8 +206,10 @@ class DispatchResultApplier:
     def _resolve_output_topic(self, event: BaseModel) -> str:
         """Resolve the output topic for an event using the output_topic_map.
 
-        Tries the short name (class name with ``Model`` prefix removed) first,
-        then the full class name, and falls back to ``_output_topic``.
+        Typed event models may carry an explicit ``topic`` field. When present,
+        that is the most specific contract boundary. Otherwise this tries the
+        short name (class name with ``Model`` prefix removed), then the full
+        class name, and falls back to ``_output_topic``.
 
         Args:
             event: The output event payload (a Pydantic BaseModel).
@@ -215,6 +217,9 @@ class DispatchResultApplier:
         Returns:
             The resolved topic string.
         """
+        embedded_topic = getattr(event, "topic", None)
+        if isinstance(embedded_topic, str) and embedded_topic.strip():
+            return embedded_topic.strip()
         if not self._output_topic_map:
             return self._output_topic
         class_name = type(event).__name__

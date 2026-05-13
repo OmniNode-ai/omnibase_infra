@@ -11,6 +11,9 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.enums.enum_handler_resolution_outcome import (
+    EnumHandlerResolutionOutcome,
+)
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
@@ -569,6 +572,48 @@ class TestWireFromManifest:
 
         assert report.total_wired == 1
         container.get_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_falsey_container_still_satisfies_required_container_param(
+        self,
+    ) -> None:
+        """A valid but falsey container must still reach known-param injection."""
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        handler_routing = _make_handler_routing(
+            handler_name="FakeHandler",
+            handler_module="fake.module",
+        )
+        contract = _make_contract(handler_routing=handler_routing)
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        class FalseyContainer:
+            def __bool__(self) -> bool:
+                return False
+
+        class FakeHandler:
+            def __init__(self, container: object) -> None:
+                self.container = container
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        container = FalseyContainer()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=FakeHandler,
+        ):
+            report = await wire_from_manifest(manifest, engine, container=container)
+
+        assert report.total_wired == 1
+        prepared = report.results[0]
+        assert prepared.outcome is EnumWiringOutcome.WIRED
+        assert prepared.wirings[0].resolution_outcome is (
+            EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
+        )
 
     @pytest.mark.asyncio
     async def test_wire_failure_import_error_strict_mode_raises(self) -> None:

@@ -990,6 +990,50 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     return not required_params or required_params == frozenset({"event_bus"})
 
 
+def _materialize_known_handler_dependencies(
+    *,
+    handler_name: str,
+    handler_cls: type,
+    materialized_explicit_dependencies: dict[str, dict[str, object]] | None,
+    event_bus: object | None,
+    container: object | None,
+    ownership_query: object | None,
+) -> dict[str, dict[str, object]] | None:
+    """Materialize infra-known constructor deps for core resolver Step 2.
+
+    Runtime images may carry a core resolver that only direct-injects
+    ``event_bus``. Threading ``container`` / ``ownership_query`` through the
+    existing explicit-dependency map keeps infra wiring deterministic without
+    requiring a synchronized core release.
+    """
+    required_params = _required_handler_init_params(handler_cls)
+    if not required_params:
+        return materialized_explicit_dependencies
+    if not required_params.intersection({"container", "ownership_query"}):
+        return materialized_explicit_dependencies
+    if (
+        materialized_explicit_dependencies is not None
+        and handler_name in materialized_explicit_dependencies
+    ):
+        return materialized_explicit_dependencies
+
+    available = {
+        name: value
+        for name, value in (
+            ("event_bus", event_bus),
+            ("container", container),
+            ("ownership_query", ownership_query),
+        )
+        if value is not None
+    }
+    if not required_params <= set(available):
+        return materialized_explicit_dependencies
+
+    merged = dict(materialized_explicit_dependencies or {})
+    merged[handler_name] = {name: available[name] for name in required_params}
+    return merged
+
+
 def _derive_topic_pattern_from_topic(topic: str) -> str:
     """Derive a topic pattern from a fully qualified topic string.
 
@@ -1960,11 +2004,23 @@ def _prepare_handler_wiring(
     ):
         _effective_container = None
     else:
-        _effective_container = container or (
-            getattr(dispatch_engine, "_container", None)
-            if dispatch_engine is not None
-            else None
+        _effective_container = (
+            container
+            if container is not None
+            else (
+                getattr(dispatch_engine, "_container", None)
+                if dispatch_engine is not None
+                else None
+            )
         )
+    _effective_materialized_dependencies = _materialize_known_handler_dependencies(
+        handler_name=handler_ref.name,
+        handler_cls=handler_cls,
+        materialized_explicit_dependencies=materialized_explicit_dependencies,
+        event_bus=event_bus,
+        container=_effective_container,
+        ownership_query=ownership_query,
+    )
 
     def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
         """Return a containment-only PreparedWiring for an async-incompat handler.
@@ -2021,7 +2077,7 @@ def _prepare_handler_wiring(
             contract_name=contract.name,
             node_name=contract.name,
             explicit_dependency_shape=None,
-            materialized_explicit_dependencies=materialized_explicit_dependencies,
+            materialized_explicit_dependencies=_effective_materialized_dependencies,
             event_bus=event_bus,
             container=_effective_container,
             ownership_query=ownership_query,

@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import stat
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +54,7 @@ class RuntimeLocalIngressRoute:
     terminal_event: str | None
     contract_path: str
     package_name: str
+    terminal_events: tuple[str, ...] = ()
 
 
 def parse_active_runtime_packages(
@@ -82,6 +83,8 @@ def discover_runtime_local_ingress_routes(
     """Discover local-ingress routes from installed package node contracts."""
 
     routes: dict[str, RuntimeLocalIngressRoute] = {}
+    alias_sources: dict[str, str] = {}
+    ambiguous_raw_operation_aliases: set[str] = set()
 
     for package_name in package_names:
         package_root = _resolve_package_root(package_name)
@@ -130,20 +133,185 @@ def discover_runtime_local_ingress_routes(
                 command_topic=command_topic,
                 event_type=_derive_route_event_type(raw, command_topic),
                 terminal_event=_safe_optional_string(raw.get("terminal_event")),
+                terminal_events=_extract_terminal_events(raw),
                 contract_path=str(contract_path),
                 package_name=package_name,
             )
 
             for alias in (contract_name, node_dir_name):
-                existing = routes.get(alias)
-                if existing is not None and existing != route:
-                    raise ValueError(
-                        f"Duplicate local ingress route alias '{alias}' for "
-                        f"{existing.contract_path} and {route.contract_path}"
+                _register_local_ingress_route_alias(
+                    routes,
+                    alias_sources,
+                    alias,
+                    route,
+                    source="base",
+                )
+
+            for operation_alias in _extract_handler_operation_aliases(raw):
+                for qualified_alias in _qualified_operation_aliases(
+                    route, operation_alias
+                ):
+                    _register_local_ingress_route_alias(
+                        routes,
+                        alias_sources,
+                        qualified_alias,
+                        route,
+                        source="operation_qualified",
                     )
-                routes[alias] = route
+
+                if (
+                    "." in operation_alias
+                    or operation_alias in ambiguous_raw_operation_aliases
+                ):
+                    continue
+
+                was_ambiguous = _register_local_ingress_route_alias(
+                    routes,
+                    alias_sources,
+                    operation_alias,
+                    route,
+                    source="operation_raw",
+                    ambiguous_raw_operation_aliases=ambiguous_raw_operation_aliases,
+                )
+                if was_ambiguous:
+                    logger.warning(
+                        "Omitting ambiguous unqualified local ingress operation alias",
+                        extra={
+                            "alias": operation_alias,
+                            "contract_path": route.contract_path,
+                        },
+                    )
 
     return routes
+
+
+def _register_local_ingress_route_alias(
+    routes: dict[str, RuntimeLocalIngressRoute],
+    alias_sources: dict[str, str],
+    alias: str,
+    route: RuntimeLocalIngressRoute,
+    *,
+    source: str,
+    ambiguous_raw_operation_aliases: set[str] | None = None,
+) -> bool:
+    """Register a local ingress alias, returning True when a raw op is ambiguous."""
+
+    existing = routes.get(alias)
+    if existing is None:
+        routes[alias] = route
+        alias_sources[alias] = source
+        return False
+
+    if _local_ingress_routes_equivalent(existing, route):
+        logger.info(
+            "Ignoring duplicate local ingress route alias with matching interface",
+            extra={
+                "alias": alias,
+                "kept_contract_path": existing.contract_path,
+                "ignored_contract_path": route.contract_path,
+            },
+        )
+        return False
+
+    existing_source = alias_sources.get(alias)
+    if (
+        source == "operation_raw"
+        and existing_source == "operation_raw"
+        and ambiguous_raw_operation_aliases is not None
+    ):
+        ambiguous_raw_operation_aliases.add(alias)
+        routes.pop(alias, None)
+        alias_sources.pop(alias, None)
+        logger.warning(
+            "Removed ambiguous unqualified local ingress operation alias",
+            extra={
+                "alias": alias,
+                "first_contract_path": existing.contract_path,
+                "second_contract_path": route.contract_path,
+            },
+        )
+        return True
+
+    raise ValueError(
+        f"Duplicate local ingress route alias '{alias}' for "
+        f"{existing.contract_path} and {route.contract_path}"
+    )
+
+
+def _local_ingress_routes_equivalent(
+    left: RuntimeLocalIngressRoute,
+    right: RuntimeLocalIngressRoute,
+) -> bool:
+    """Return whether two routes expose the same local-ingress interface."""
+    return (
+        left.node_name == right.node_name
+        and left.contract_name == right.contract_name
+        and left.command_topic == right.command_topic
+        and left.event_type == right.event_type
+        and left.terminal_event == right.terminal_event
+        and left.terminal_events == right.terminal_events
+    )
+
+
+def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
+    """Return all contract-declared terminal topics for local ingress waits."""
+
+    terminal_events: list[str] = []
+    terminal_event = _safe_optional_string(raw.get("terminal_event"))
+    if terminal_event is not None:
+        terminal_events.append(terminal_event)
+
+    raw_terminal_events = raw.get("terminal_events")
+    if isinstance(raw_terminal_events, dict):
+        values: Iterable[object] = raw_terminal_events.values()
+    elif isinstance(raw_terminal_events, list | tuple):
+        values = raw_terminal_events
+    else:
+        values = ()
+
+    for value in values:
+        topic = _safe_optional_string(value)
+        if topic is not None:
+            terminal_events.append(topic)
+
+    return tuple(dict.fromkeys(terminal_events))
+
+
+def _qualified_operation_aliases(
+    route: RuntimeLocalIngressRoute,
+    operation_alias: str,
+) -> tuple[str, ...]:
+    """Return deterministic qualified aliases for a handler operation."""
+
+    aliases = (
+        operation_alias,
+        f"{route.contract_name}.{operation_alias}",
+        f"{route.node_name}.{operation_alias}",
+    )
+    return tuple(dict.fromkeys(alias for alias in aliases if "." in alias))
+
+
+def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, ...]:
+    """Return handler operation names that can act as local ingress aliases."""
+    handler_routing = raw.get("handler_routing")
+    if not isinstance(handler_routing, dict):
+        return ()
+
+    handlers = handler_routing.get("handlers")
+    if not isinstance(handlers, list):
+        return ()
+
+    aliases: list[str] = []
+    for handler in handlers:
+        if not isinstance(handler, dict):
+            continue
+        operation = handler.get("operation")
+        if not isinstance(operation, str):
+            continue
+        normalized = operation.strip()
+        if normalized:
+            aliases.append(normalized)
+    return tuple(dict.fromkeys(aliases))
 
 
 class RuntimeLocalIngressServer:

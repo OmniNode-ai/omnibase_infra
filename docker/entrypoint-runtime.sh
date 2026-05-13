@@ -115,6 +115,11 @@ else
   echo "[entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping omniintelligence fingerprint stamp"
 fi
 
+if [ -n "${BIFROST_CONTRACT_PATH:-}" ]; then
+  echo "[entrypoint] Rendering Bifrost delegation contract..."
+  python -m omnibase_infra.runtime.render_bifrost_delegation_contract
+fi
+
 echo "[entrypoint] Starting runtime kernel..."
 
 exec "$@"

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -53,6 +54,12 @@ def _error_result(
         error_message=error_message,
         completed_at=datetime.now(UTC),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalPayload:
+    payload: object
+    topic: str
 
 
 class RuntimePatternBBroker:
@@ -140,7 +147,7 @@ class RuntimePatternBBroker:
             )
 
         try:
-            terminal_payload = (
+            terminal = (
                 await self._dispatch_and_wait_with_direct_kafka_consumer(command, route)
                 if self._supports_direct_kafka_terminal_consumer()
                 else await self._dispatch_and_wait_with_event_bus_subscription(
@@ -163,10 +170,16 @@ class RuntimePatternBBroker:
                 error_message=sanitize_error_message(exc),
             )
 
+        status = _status_for_terminal_topic(route, terminal.topic)
         return route, ModelDispatchBusTerminalResult(
             correlation_id=correlation_id,
-            status="completed",
-            payload=terminal_payload,
+            status=status,
+            payload=terminal.payload,
+            error_message=(
+                _terminal_error_message(terminal.payload)
+                if status == "failed"
+                else None
+            ),
             completed_at=datetime.now(UTC),
         )
 
@@ -174,27 +187,42 @@ class RuntimePatternBBroker:
         self,
         command: ModelDispatchBusCommand,
         route: RuntimeLocalIngressRoute,
-    ) -> object:
+    ) -> TerminalPayload:
         correlation_id = command.correlation_id
-        terminal_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
-        terminal_event = route.terminal_event
-        if terminal_event is None:
+        terminal_queue: asyncio.Queue[TerminalPayload] = asyncio.Queue(maxsize=1)
+        terminal_topics = _terminal_topics(route)
+        if not terminal_topics:
             raise RuntimeError(f"Route '{command.command_name}' has no terminal event")
 
-        async def on_terminal(message: ModelEventMessage) -> None:
+        async def on_terminal(message: ModelEventMessage, topic: str) -> None:
             terminal_envelope = ModelEventEnvelope[object].model_validate_json(
                 message.value
             )
             if terminal_envelope.correlation_id != correlation_id:
                 return
             if terminal_queue.empty():
-                await terminal_queue.put(terminal_envelope.payload)
+                await terminal_queue.put(
+                    TerminalPayload(payload=terminal_envelope.payload, topic=topic)
+                )
 
-        unsubscribe_terminal = await self._event_bus.subscribe(
-            terminal_event,
-            group_id=_terminal_group_id(correlation_id),
-            on_message=on_terminal,
-        )
+        def terminal_callback(
+            topic: str,
+        ) -> Callable[[ModelEventMessage], Awaitable[None]]:
+            async def callback(message: ModelEventMessage) -> None:
+                await on_terminal(message, topic)
+
+            return callback
+
+        unsubscribe_terminals: list[Callable[[], Awaitable[None]]] = []
+        for topic in terminal_topics:
+            unsubscribe = await self._event_bus.subscribe(
+                topic,
+                group_id=_terminal_group_id(correlation_id),
+                on_message=terminal_callback(topic),
+            )
+            unsubscribe_terminals.append(
+                cast("Callable[[], Awaitable[None]]", unsubscribe)
+            )
         try:
             await self._publish_worker_command(command, route)
             return await asyncio.wait_for(
@@ -202,23 +230,25 @@ class RuntimePatternBBroker:
                 timeout=command.timeout_seconds,
             )
         finally:
-            try:
-                await unsubscribe_terminal()
-            except Exception:  # noqa: BLE001
-                pass
+            for unsubscribe_terminal in unsubscribe_terminals:
+                try:
+                    await unsubscribe_terminal()
+                except Exception:  # noqa: BLE001
+                    pass
 
     async def _dispatch_and_wait_with_direct_kafka_consumer(
         self,
         command: ModelDispatchBusCommand,
         route: RuntimeLocalIngressRoute,
-    ) -> object:
-        if route.terminal_event is None:
+    ) -> TerminalPayload:
+        terminal_topics = _terminal_topics(route)
+        if not terminal_topics:
             raise RuntimeError(f"Route '{command.command_name}' has no terminal event")
 
         kafka_event_bus = self._kafka_event_bus()
         config = getattr(kafka_event_bus, "config", SimpleNamespace())
         consumer = AIOKafkaConsumer(
-            route.terminal_event,
+            *terminal_topics,
             bootstrap_servers=self._kafka_bootstrap_servers(),
             group_id=_terminal_group_id(command.correlation_id),
             auto_offset_reset="latest",
@@ -248,7 +278,15 @@ class RuntimePatternBBroker:
                     message.value
                 )
                 if terminal_envelope.correlation_id == command.correlation_id:
-                    return terminal_envelope.payload
+                    topic = getattr(message, "topic", None)
+                    if not isinstance(topic, str) or not topic:
+                        topic = str(
+                            terminal_envelope.event_type or route.terminal_event
+                        )
+                    return TerminalPayload(
+                        payload=terminal_envelope.payload,
+                        topic=topic,
+                    )
         finally:
             try:
                 await consumer.stop()
@@ -339,6 +377,34 @@ class RuntimePatternBBroker:
             envelope.model_dump_json().encode("utf-8"),
             None,
         )
+
+
+def _terminal_topics(route: RuntimeLocalIngressRoute) -> tuple[str, ...]:
+    if route.terminal_events:
+        return route.terminal_events
+    if route.terminal_event is not None:
+        return (route.terminal_event,)
+    return ()
+
+
+def _status_for_terminal_topic(route: RuntimeLocalIngressRoute, topic: str) -> str:
+    return "completed" if topic == route.terminal_event else "failed"
+
+
+def _terminal_error_message(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    nested_payload = payload.get("payload")
+    if isinstance(nested_payload, dict):
+        for key in ("failure_reason", "error_message", "error"):
+            value = nested_payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    for key in ("failure_reason", "error_message", "error"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 __all__ = ["RuntimePatternBBroker"]

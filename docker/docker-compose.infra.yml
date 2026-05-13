@@ -144,6 +144,9 @@ x-runtime-env: &runtime-env
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
+  BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-/app/src/omnibase_infra/configs/bifrost_delegation.yaml}
+  BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:-1}
   # Restrict the runtime surface to first-party infra + marketplace packages.
   ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}
   # OMN-6440: Runtime contract YAMLs from omnibase_core (env var override for Docker)
@@ -219,6 +222,8 @@ x-runtime-env: &runtime-env
   LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
   LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for PluginLlm activation}
   LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for PluginLlm activation}
+  LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
+  LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}
   # --- OpenTelemetry (OMN-8697: wired to Phoenix for LLM span visibility) ---
   # Phoenix runs alongside the runtime; all containers export spans via OTLP HTTP.
   # OTEL_SERVICE_NAME is set per-service (see individual service blocks below).

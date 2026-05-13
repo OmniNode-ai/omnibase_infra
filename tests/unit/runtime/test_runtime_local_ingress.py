@@ -169,6 +169,12 @@ event_bus:
   subscribe_topics:
     - onex.cmd.demo.start.v1
 terminal_event: onex.evt.demo.completed.v1
+terminal_events:
+  success: onex.evt.demo.completed.v1
+  failure: onex.evt.demo.failed.v1
+handler_routing:
+  handlers:
+    - operation: demo.run
 """.strip(),
         encoding="utf-8",
     )
@@ -181,7 +187,12 @@ terminal_event: onex.evt.demo.completed.v1
 
     assert routes["demo"].command_topic == "onex.cmd.demo.start.v1"
     assert routes["node_demo"].contract_name == "demo"
+    assert routes["demo.run"].contract_name == "demo"
     assert routes["demo"].terminal_event == "onex.evt.demo.completed.v1"
+    assert routes["demo"].terminal_events == (
+        "onex.evt.demo.completed.v1",
+        "onex.evt.demo.failed.v1",
+    )
 
 
 def test_discover_runtime_local_ingress_routes_skips_malformed_contract(
@@ -233,6 +244,131 @@ def test_discover_runtime_local_ingress_routes_rejects_duplicate_alias(
 
     with pytest.raises(ValueError, match="Duplicate local ingress route alias 'same'"):
         discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+
+
+def test_discover_runtime_local_ingress_routes_allows_equivalent_duplicate_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_one = tmp_path / "pkg1"
+    package_two = tmp_path / "pkg2"
+    for root in (package_one, package_two):
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("", encoding="utf-8")
+        (root / "nodes" / "node_same").mkdir(parents=True)
+        (root / "nodes" / "node_same" / "contract.yaml").write_text(
+            """
+name: same
+event_bus:
+  subscribe_topics:
+    - onex.cmd.same.start.v1
+terminal_event: onex.evt.same.completed.v1
+handler_routing:
+  handlers:
+    - operation: same.run
+""".strip(),
+            encoding="utf-8",
+        )
+
+    def _import_module(name: str) -> object:
+        root = package_one if name == "pkg1" else package_two
+        return SimpleNamespace(__file__=str(root / "__init__.py"))
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        _import_module,
+    )
+
+    routes = discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+
+    assert routes["same"].contract_path == str(
+        package_one / "nodes" / "node_same" / "contract.yaml"
+    )
+    assert routes["node_same"].command_topic == "onex.cmd.same.start.v1"
+    assert routes["same.run"].terminal_event == "onex.evt.same.completed.v1"
+
+
+def test_discover_runtime_local_ingress_routes_rejects_duplicate_operation_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_one = tmp_path / "pkg1"
+    package_two = tmp_path / "pkg2"
+    for root, node_name, contract_name, topic in (
+        (package_one, "node_alpha", "alpha", "onex.cmd.alpha.start.v1"),
+        (package_two, "node_beta", "beta", "onex.cmd.beta.start.v1"),
+    ):
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("", encoding="utf-8")
+        node_dir = root / "nodes" / node_name
+        node_dir.mkdir(parents=True)
+        (node_dir / "contract.yaml").write_text(
+            f"""
+name: {contract_name}
+event_bus:
+  subscribe_topics:
+    - {topic}
+handler_routing:
+  handlers:
+    - operation: shared.run
+""".strip(),
+            encoding="utf-8",
+        )
+
+    def _import_module(name: str) -> object:
+        root = package_one if name == "pkg1" else package_two
+        return SimpleNamespace(__file__=str(root / "__init__.py"))
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(
+        ValueError, match=r"Duplicate local ingress route alias 'shared\.run'"
+    ):
+        discover_runtime_local_ingress_routes(("pkg1", "pkg2"))
+
+
+def test_discover_runtime_local_ingress_routes_omits_ambiguous_raw_operation_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "pkg"
+    package_root.mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+
+    for node_name, contract_name, topic in (
+        ("node_alpha", "alpha", "onex.cmd.alpha.start.v1"),
+        ("node_beta", "beta", "onex.cmd.beta.start.v1"),
+    ):
+        node_dir = package_root / "nodes" / node_name
+        node_dir.mkdir(parents=True)
+        (node_dir / "contract.yaml").write_text(
+            f"""
+name: {contract_name}
+event_bus:
+  subscribe_topics:
+    - {topic}
+handler_routing:
+  handlers:
+    - operation: run
+""".strip(),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    routes = discover_runtime_local_ingress_routes(("pkg",))
+
+    assert "run" not in routes
+    assert routes["alpha.run"].command_topic == "onex.cmd.alpha.start.v1"
+    assert routes["node_alpha.run"].contract_name == "alpha"
+    assert routes["beta.run"].command_topic == "onex.cmd.beta.start.v1"
+    assert routes["node_beta.run"].contract_name == "beta"
 
 
 @pytest.mark.asyncio

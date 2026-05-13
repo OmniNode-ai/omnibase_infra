@@ -124,6 +124,8 @@ def test_canary_bundle_required_env_subset_of_core_baseline() -> None:
             "LLM_CODER_FAST_URL",
             "LLM_EMBEDDING_URL",
             "LLM_DEEPSEEK_R1_URL",
+            "LLM_ENDPOINT_CIDR_ALLOWLIST",
+            "LOCAL_LLM_SHARED_SECRET",
             "OMNIDASH_ANALYTICS_DB_URL",
             # core bundle Infisical vars (transitive via includes: [core])
             "INFISICAL_CLIENT_ID",

@@ -51,6 +51,13 @@ class UnmappedEvent(BaseModel):
     value: str = "x"
 
 
+class TopicCarryingEvent(BaseModel):
+    """Event whose typed payload declares its own topic."""
+
+    topic: str
+    value: str = "x"
+
+
 def _make_result(**overrides: object) -> ModelDispatchResult:
     defaults: dict[str, object] = {
         "status": EnumDispatchStatus.SUCCESS,
@@ -141,6 +148,17 @@ class TestResolveOutputTopic:
         )
         event = UnmappedEvent()
         assert applier._resolve_output_topic(event) == "mapped-topic"
+
+    def test_embedded_topic_takes_precedence(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "mapped-topic",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
 
 
 # ---------------------------------------------------------------------------

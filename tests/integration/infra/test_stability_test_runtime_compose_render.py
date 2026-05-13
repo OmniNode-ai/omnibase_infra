@@ -102,6 +102,8 @@ COMPOSE_RENDER_ENV = {
     "LLM_CODER_URL": "http://llm-coder.invalid",
     "LLM_DEEPSEEK_R1_URL": "http://llm-deepseek.invalid",
     "LLM_EMBEDDING_URL": "http://llm-embedding.invalid",
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.0/24",
+    "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
