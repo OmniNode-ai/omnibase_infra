@@ -77,7 +77,9 @@ def load_bifrost_config_from_env() -> ModelBifrostConfig:
     # External backends (only added when API key is configured)
     _add_backend_if_set(backends, "glm", "GLM_BASE_URL")
     # Gemini uses a well-known base URL; only add when API key is present
-    if os.environ.get("GEMINI_API_KEY", "").strip():
+    if os.environ.get(
+        "GEMINI_API_KEY", ""
+    ).strip():  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
         _add_backend_if_set(
             backends,
             "gemini",
@@ -118,7 +120,9 @@ def _add_backend_if_set(
     default_url: str | None = None,
 ) -> None:
     """Add a backend entry if the env var is set and non-empty."""
-    url = os.environ.get(env_var, "").strip()
+    url = os.environ.get(
+        env_var, ""
+    ).strip()  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
     if not url and default_url:
         url = default_url
     if not url:

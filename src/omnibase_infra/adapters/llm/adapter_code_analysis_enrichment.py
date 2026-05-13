@@ -156,8 +156,11 @@ class AdapterCodeAnalysisEnrichment:
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
         """
-        self._base_url: str = base_url or os.environ.get(
-            "LLM_CODER_URL", "http://localhost:8000"
+        self._base_url: str = (
+            base_url
+            or os.environ.get(  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+                "LLM_CODER_URL", "http://localhost:8000"
+            )
         )
         self._model: str = model
         self._max_tokens: int = max_tokens

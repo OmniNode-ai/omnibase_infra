@@ -216,7 +216,7 @@ class AdapterLlmProviderOpenai:
         self._provider_type_value = provider_type
         self._base_url = base_url or os.environ.get(
             "LLM_CODER_URL", "http://localhost:8000"
-        )
+        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
         self._default_model = default_model
         self._api_key = api_key
         self._is_available = True
