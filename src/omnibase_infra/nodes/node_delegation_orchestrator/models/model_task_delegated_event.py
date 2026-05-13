@@ -91,6 +91,11 @@ class ModelTaskDelegatedEvent(BaseModel):
         default=None,
         description="Raw response received from the delegated model.",
     )
+    pricing_manifest_version: int = Field(
+        default=0,
+        ge=0,
+        description="Version of the pricing manifest used to compute cost_savings_usd.",
+    )
 
 
 __all__: list[str] = ["ModelTaskDelegatedEvent"]
