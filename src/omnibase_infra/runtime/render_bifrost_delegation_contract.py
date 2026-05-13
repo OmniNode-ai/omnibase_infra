@@ -46,7 +46,10 @@ def _load_yaml(path: Path) -> dict[str, object]:
 def _has_populated_endpoint(path: Path) -> bool:
     if not path.exists():
         return False
-    data = _load_yaml(path)
+    try:
+        data = _load_yaml(path)
+    except ProtocolConfigurationError:
+        return False
     backends = data.get("backends", [])
     if not isinstance(backends, list):
         return False

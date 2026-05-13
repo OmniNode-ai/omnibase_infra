@@ -173,6 +173,26 @@ def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_empty_generated_target_is_replaced_from_source(tmp_path: Path) -> None:
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text("", encoding="utf-8")
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+        verify_endpoints=True,
+        endpoint_probe=lambda _url, _model, _timeout: None,
+    )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+@pytest.mark.unit
 def test_required_endpoint_probe_failure_blocks_render(tmp_path: Path) -> None:
     source = _source_contract(tmp_path / "source.yaml", required=True)
     target = tmp_path / "rendered.yaml"
