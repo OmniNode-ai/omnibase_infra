@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 if TYPE_CHECKING:
     import asyncpg
@@ -41,7 +41,7 @@ def _get_postgres_dsn() -> str | None:
         DSN string if configuration is available, None otherwise.
     """
     config = PostgresConfig.from_env()
-    if not config.is_configured:
+    if not config.is_configured or not check_postgres_reachable(config, timeout=1.0):
         return None
     return config.build_dsn()
 
@@ -58,7 +58,7 @@ def postgres_dsn() -> str:
     """
     dsn = _get_postgres_dsn()
     if dsn is None:
-        pytest.skip("PostgreSQL not configured (set OMNIBASE_INFRA_DB_URL)")
+        pytest.skip("PostgreSQL not configured or not reachable")
     return dsn
 
 
