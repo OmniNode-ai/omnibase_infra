@@ -131,22 +131,22 @@ class TestRoutingByTaskType:
             decision.endpoint_url == "http://192.168.86.201:8000"
         )  # onex-allow-internal-ip
 
-    def test_document_routes_to_deepseek(
+    def test_document_routes_to_coder(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Document tasks go to deepseek-r1-14b via local-deepseek backend."""
+        """Document tasks go to qwen3-coder-30b via the local coder backend."""
         bifrost = _write_bifrost(
             tmp_path,
             {
-                "local-deepseek-r1-14b": "http://192.168.86.201:8001"
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
             },  # onex-allow-internal-ip
         )
         monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
         req = _request(task_type="document")
         decision = delta(req)
-        assert decision.selected_model == "deepseek-r1-14b"
+        assert decision.selected_model == "qwen3-coder-30b"
         assert (
-            decision.endpoint_url == "http://192.168.86.201:8001"
+            decision.endpoint_url == "http://192.168.86.201:8000"
         )  # onex-allow-internal-ip
 
 
@@ -166,11 +166,11 @@ class TestFastPathRouting:
         monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
         req = _request(task_type="test", prompt="Write tests for auth.py")
         decision = delta(req)
-        assert decision.selected_model == "deepseek-r1-14b"
+        assert decision.selected_model == "qwen3-coder-30b"
         assert (
-            decision.endpoint_url == "http://192.168.86.201:8001"
+            decision.endpoint_url == "http://192.168.86.201:8000"
         )  # onex-allow-internal-ip
-        assert decision.max_context_tokens == 24576
+        assert decision.max_context_tokens == 65536
 
     def test_long_prompt_skips_fast_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -202,20 +202,20 @@ class TestFastPathRouting:
         decision = delta(req)
         assert decision.selected_model == "qwen3-coder-30b"
 
-    def test_document_uses_deepseek_fast_path(
+    def test_document_uses_coder_fast_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Document tasks use deepseek-r1-14b (fast path in local tier)."""
+        """Document tasks use qwen3-coder-30b (fast path in local tier)."""
         bifrost = _write_bifrost(
             tmp_path,
             {
-                "local-deepseek-r1-14b": "http://192.168.86.201:8001"
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
             },  # onex-allow-internal-ip
         )
         monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
         req = _request(task_type="document", prompt="short prompt")
         decision = delta(req)
-        assert decision.selected_model == "deepseek-r1-14b"
+        assert decision.selected_model == "qwen3-coder-30b"
 
 
 class TestMissingEndpoint:
@@ -284,7 +284,7 @@ class TestSystemPrompts:
         bifrost = _write_bifrost(
             tmp_path,
             {
-                "local-deepseek-r1-14b": "http://192.168.86.201:8001"
+                "local-qwen-coder-30b": "http://192.168.86.201:8000"
             },  # onex-allow-internal-ip
         )
         monkeypatch.setenv("BIFROST_CONTRACT_PATH", bifrost)
