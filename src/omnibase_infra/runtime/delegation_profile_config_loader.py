@@ -16,7 +16,7 @@ import yaml
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from omnibase_core.models.contracts.model_delegation_runtime_profile import (
+    from omnibase_compat.contracts.delegation.model_delegation_runtime_profile import (
         ModelDelegationRuntimeProfile,
     )
 
@@ -32,17 +32,17 @@ class DelegationProfileConfigLoader:
     Raises DelegationProfileNotFoundError on missing file or schema violation.
     Never reads env vars for delegation configuration — contract is the sole source.
 
-    Return types use Any because omnibase_core's delegation models are gated behind
-    PR #1072 (OMN-10919) and not yet in the published package. Once merged, these
-    signatures will be narrowed to ModelDelegationRuntimeProfile and sub-models.
+    Return types use Any because omnibase_compat's delegation models are gated behind
+    omnibase_compat PR #87 (OMN-10919) and not yet in the published package. Once merged,
+    these signatures will be narrowed to ModelDelegationRuntimeProfile and sub-models.
     """
 
     def __init__(self, contract_path: Path) -> None:
         self._contract_path = contract_path
-        # ONEX_EXCLUDE: any_type — narrowed to ModelDelegationRuntimeProfile after OMN-10919 merges
+        # ONEX_EXCLUDE: any_type — narrowed to ModelDelegationRuntimeProfile after omnibase_compat PR#87 merges
         self._profile: Any = None
 
-    # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationRuntimeProfile after OMN-10919 merges
+    # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationRuntimeProfile after omnibase_compat PR#87 merges
     def load(self) -> Any:
         """Load and validate the delegation runtime profile.
 
@@ -58,7 +58,7 @@ class DelegationProfileConfigLoader:
 
         raw = yaml.safe_load(self._contract_path.read_text(encoding="utf-8"))
 
-        from omnibase_core.models.contracts.model_delegation_runtime_profile import (
+        from omnibase_compat.contracts.delegation.model_delegation_runtime_profile import (
             ModelDelegationRuntimeProfile,
         )
 
@@ -71,12 +71,12 @@ class DelegationProfileConfigLoader:
 
         return self._profile
 
-    # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationEventBusEndpoint after OMN-10919 merges
+    # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationEventBusEndpoint after omnibase_compat PR#87 merges
     def event_bus_config(self) -> Any:
         """Return the event bus endpoint config from the loaded profile."""
         return self.load().event_bus
 
-    # ONEX_EXCLUDE: any_type — return narrowed to dict[str, ModelDelegationLlmBackend] after OMN-10919 merges
+    # ONEX_EXCLUDE: any_type — return narrowed to dict[str, ModelDelegationLlmBackend] after omnibase_compat PR#87 merges
     def llm_backend_config(self) -> Any:
         """Return the LLM backends dict from the loaded profile."""
         return self.load().llm_backends
