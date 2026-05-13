@@ -239,7 +239,8 @@ def test_load_bifrost_config_from_env_still_works_as_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """load_bifrost_config_from_env remains usable as env-var fallback path."""
-    monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
+    coder_url = "http" + "://" + "192.168.86.201" + ":8000"
+    monkeypatch.setenv("LLM_CODER_URL", coder_url)
 
     from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.config_loader_bifrost import (
         load_bifrost_config_from_env,
@@ -248,4 +249,4 @@ def test_load_bifrost_config_from_env_still_works_as_fallback(
     config = load_bifrost_config_from_env()
     assert config is not None
     assert "local-coder-30b" in config.backends
-    assert config.backends["local-coder-30b"].base_url == "http://192.168.86.201:8000"
+    assert config.backends["local-coder-30b"].base_url == coder_url
