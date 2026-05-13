@@ -57,6 +57,20 @@ def _route_with_failure_terminal() -> RuntimeLocalIngressRoute:
     )
 
 
+def _route_with_plural_only_terminal() -> RuntimeLocalIngressRoute:
+    route = _route()
+    return RuntimeLocalIngressRoute(
+        node_name=route.node_name,
+        contract_name=route.contract_name,
+        command_topic=route.command_topic,
+        event_type=route.event_type,
+        terminal_event=None,
+        contract_path=route.contract_path,
+        package_name=route.package_name,
+        terminal_events=("onex.evt.omnimarket.session-orchestrator-completed.v1",),
+    )
+
+
 async def _collect_terminal_result(
     bus: EventBusInmemory,
     response_topic: str,
@@ -400,6 +414,52 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
     assert result.status == "failed"
     assert result.error_message == "routing contract missing"
     assert created_consumers[0].stopped is True
+
+
+@pytest.mark.asyncio
+async def test_service_pattern_b_broker_accepts_plural_only_terminal_events() -> None:
+    bus = EventBusInmemory(environment="test", group="pattern-b")
+    await bus.start()
+
+    route = _route_with_plural_only_terminal()
+    broker = RuntimePatternBBroker(
+        bus,
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+    await broker.start()
+
+    async def worker(message: ModelEventMessage) -> None:
+        envelope = ModelEventEnvelope[object].model_validate_json(message.value)
+        terminal_topic = route.terminal_events[0]
+        terminal_envelope = ModelEventEnvelope[object](
+            payload={"status": "complete"},
+            correlation_id=envelope.correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=terminal_topic,
+            source_tool="session_orchestrator",
+        )
+        await bus.publish(
+            terminal_topic,
+            None,
+            terminal_envelope.model_dump_json().encode("utf-8"),
+            None,
+        )
+
+    await bus.subscribe(route.command_topic, group_id="worker", on_message=worker)
+
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
+
+    _, result = await broker.dispatch_request(command)
+
+    assert result.status == "completed"
+    assert result.payload == {"status": "complete"}
 
 
 @pytest.mark.asyncio

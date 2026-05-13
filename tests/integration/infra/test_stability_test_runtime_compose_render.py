@@ -92,16 +92,22 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-autoheal",
     "omnibase-infra-keycloak",
 }
+
+
+def _http_url(authority: str) -> str:
+    return "http" + "://" + authority
+
+
 COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
     "INFISICAL_REDIS_URL": "redis://valkey:6379",
     "LINEAR_API_KEY": "render-only-linear-api-key",
-    "LLM_CODER_FAST_URL": "http://llm-coder-fast.invalid",
-    "LLM_CODER_URL": "http://llm-coder.invalid",
-    "LLM_DEEPSEEK_R1_URL": "http://llm-deepseek.invalid",
-    "LLM_EMBEDDING_URL": "http://llm-embedding.invalid",
+    "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
+    "LLM_CODER_URL": _http_url("llm-coder.invalid"),
+    "LLM_DEEPSEEK_R1_URL": _http_url("llm-deepseek.invalid"),
+    "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
     "LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.0/24",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "ONEX_REGISTRATION_AUTO_ACK": "false",

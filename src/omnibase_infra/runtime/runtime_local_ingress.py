@@ -283,12 +283,14 @@ def _qualified_operation_aliases(
 ) -> tuple[str, ...]:
     """Return deterministic qualified aliases for a handler operation."""
 
+    if "." in operation_alias:
+        return (operation_alias,)
+
     aliases = (
-        operation_alias,
         f"{route.contract_name}.{operation_alias}",
         f"{route.node_name}.{operation_alias}",
     )
-    return tuple(dict.fromkeys(alias for alias in aliases if "." in alias))
+    return tuple(dict.fromkeys(aliases))
 
 
 def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, ...]:

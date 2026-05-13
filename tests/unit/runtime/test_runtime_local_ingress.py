@@ -188,6 +188,7 @@ handler_routing:
     assert routes["demo"].command_topic == "onex.cmd.demo.start.v1"
     assert routes["node_demo"].contract_name == "demo"
     assert routes["demo.run"].contract_name == "demo"
+    assert "node_demo.demo.run" not in routes
     assert routes["demo"].terminal_event == "onex.evt.demo.completed.v1"
     assert routes["demo"].terminal_events == (
         "onex.evt.demo.completed.v1",
@@ -369,6 +370,38 @@ handler_routing:
     assert routes["node_alpha.run"].contract_name == "alpha"
     assert routes["beta.run"].command_topic == "onex.cmd.beta.start.v1"
     assert routes["node_beta.run"].contract_name == "beta"
+
+
+def test_discover_runtime_local_ingress_routes_registers_unqualified_operation_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / "node_demo").mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / "node_demo" / "contract.yaml").write_text(
+        """
+name: demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.start.v1
+terminal_event: onex.evt.demo.completed.v1
+handler_routing:
+  handlers:
+    - operation: run
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    routes = discover_runtime_local_ingress_routes(("fakepkg",))
+
+    assert routes["run"].command_topic == "onex.cmd.demo.start.v1"
+    assert routes["demo.run"].contract_name == "demo"
+    assert routes["node_demo.run"].contract_name == "demo"
 
 
 @pytest.mark.asyncio

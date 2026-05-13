@@ -1011,12 +1011,6 @@ def _materialize_known_handler_dependencies(
         return materialized_explicit_dependencies
     if not required_params.intersection({"container", "ownership_query"}):
         return materialized_explicit_dependencies
-    if (
-        materialized_explicit_dependencies is not None
-        and handler_name in materialized_explicit_dependencies
-    ):
-        return materialized_explicit_dependencies
-
     available = {
         name: value
         for name, value in (
@@ -1030,7 +1024,10 @@ def _materialize_known_handler_dependencies(
         return materialized_explicit_dependencies
 
     merged = dict(materialized_explicit_dependencies or {})
-    merged[handler_name] = {name: available[name] for name in required_params}
+    handler_dependencies = dict(merged.get(handler_name, {}))
+    for name in required_params:
+        handler_dependencies.setdefault(name, available[name])
+    merged[handler_name] = handler_dependencies
     return merged
 
 

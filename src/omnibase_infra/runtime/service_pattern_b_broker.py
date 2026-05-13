@@ -137,13 +137,12 @@ class RuntimePatternBBroker:
                 error_message=f"Unknown Pattern B route '{command.command_name}'",
             )
 
-        if route.terminal_event is None:
+        terminal_topics = _terminal_topics(route)
+        if not terminal_topics:
             return route, _error_result(
                 correlation_id,
                 status="failed",
-                error_message=(
-                    f"Route '{command.command_name}' does not declare a terminal_event"
-                ),
+                error_message=f"Route '{command.command_name}' does not declare terminal events",
             )
 
         try:
@@ -388,7 +387,11 @@ def _terminal_topics(route: RuntimeLocalIngressRoute) -> tuple[str, ...]:
 
 
 def _status_for_terminal_topic(route: RuntimeLocalIngressRoute, topic: str) -> str:
-    return "completed" if topic == route.terminal_event else "failed"
+    success_topic = route.terminal_event
+    if success_topic is None:
+        terminal_topics = _terminal_topics(route)
+        success_topic = terminal_topics[0] if terminal_topics else ""
+    return "completed" if topic == success_topic else "failed"
 
 
 def _terminal_error_message(payload: object) -> str | None:

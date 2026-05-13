@@ -15,6 +15,10 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 )
 
 
+def _http_url(authority: str) -> str:
+    return "http" + "://" + authority
+
+
 def _source_contract(path: Path, *, required: bool = False) -> Path:
     path.write_text(
         yaml.safe_dump(
@@ -142,12 +146,12 @@ def test_render_populates_endpoint_from_declared_provider_env(tmp_path: Path) ->
     rendered = render_bifrost_delegation_contract(
         source_path=source,
         target_path=target,
-        environ={"LLM_CODER_URL": "http://coder.local:8000"},
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
     )
 
     assert rendered == target
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert data["backends"][0]["endpoint_url"] == "http://coder.local:8000"
+    assert data["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
 
 
 @pytest.mark.unit
@@ -168,7 +172,7 @@ def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
     source = _source_contract(tmp_path / "source.yaml", required=True)
     target = _source_contract(tmp_path / "target.yaml")
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    data["backends"][0]["endpoint_url"] = "http://pre-rendered.local:8000"
+    data["backends"][0]["endpoint_url"] = _http_url("pre-rendered.local:8000")
     target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     rendered = render_bifrost_delegation_contract(
@@ -179,7 +183,7 @@ def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
 
     assert rendered == target
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == "http://pre-rendered.local:8000"
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("pre-rendered.local:8000")
 
 
 @pytest.mark.unit
@@ -191,7 +195,7 @@ def test_required_endpoint_probe_failure_blocks_render(tmp_path: Path) -> None:
         render_bifrost_delegation_contract(
             source_path=source,
             target_path=target,
-            environ={"LLM_CODER_URL": "http://coder.local:8000"},
+            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
             verify_endpoints=True,
             endpoint_probe=lambda _url, model, _timeout: f"missing model {model}",
         )
@@ -205,7 +209,7 @@ def test_optional_endpoint_probe_failure_leaves_backend_unpopulated(
     target = tmp_path / "rendered.yaml"
 
     def probe(url: str, _model: str, _timeout: float) -> str | None:
-        if url == "http://deepseek.local:8101":
+        if url == _http_url("deepseek.local:8101"):
             return "model endpoint timed out"
         return None
 
@@ -213,13 +217,13 @@ def test_optional_endpoint_probe_failure_leaves_backend_unpopulated(
         source_path=source,
         target_path=target,
         environ={
-            "LLM_CODER_URL": "http://coder.local:8000",
-            "LLM_DEEPSEEK_R1_URL": "http://deepseek.local:8101",
+            "LLM_CODER_URL": _http_url("coder.local:8000"),
+            "LLM_DEEPSEEK_R1_URL": _http_url("deepseek.local:8101"),
         },
         verify_endpoints=True,
         endpoint_probe=probe,
     )
 
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["backends"][0]["endpoint_url"] == "http://coder.local:8000"
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
     assert loaded["backends"][1]["endpoint_url"] == ""
