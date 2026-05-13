@@ -26,6 +26,7 @@ Test matrix (plan §Task 5 acceptance):
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -300,6 +301,49 @@ class TestPrepareHandlerWiringDelegatesToResolver:
                 container=None,
                 materialized_explicit_dependencies=materialized,
             )
+        assert prepared.is_skip is False
+        assert (
+            prepared.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
+        )
+
+    @pytest.mark.unit
+    def test_delegation_dispatch_port_materialized_from_event_bus(self) -> None:
+        """Runtime materializes HandlerDelegateSkill's annotated dispatch port."""
+        contract = _make_contract(handler_name="HandlerWithDispatchPort")
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class ProtocolDelegationDispatchPort(Protocol):
+            async def dispatch(self, **kwargs: object) -> dict[str, object]: ...
+
+        class HandlerWithDispatchPort:
+            def __init__(
+                self, *, dispatch_port: ProtocolDelegationDispatchPort
+            ) -> None:
+                self.dispatch_port = dispatch_port
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        event_bus = MagicMock()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithDispatchPort,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=event_bus,
+                container=None,
+            )
+
         assert prepared.is_skip is False
         assert (
             prepared.resolution_outcome

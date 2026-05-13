@@ -11,7 +11,7 @@ import logging
 import os
 import stat
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -167,27 +167,29 @@ def discover_runtime_local_ingress_routes(
                         },
                     )
 
-            for operation_alias in _extract_handler_operation_aliases(raw):
+            for operation_alias, operation_route in _extract_handler_operation_routes(
+                raw, route
+            ):
                 for package_alias in _package_scoped_operation_aliases(
-                    route, operation_alias
+                    operation_route, operation_alias
                 ):
                     _register_local_ingress_route_alias(
                         routes,
                         alias_sources,
                         package_alias,
-                        route,
+                        operation_route,
                         source="package_scoped_operation",
                         ambiguous_public_aliases=ambiguous_public_aliases,
                     )
 
                 for qualified_alias in _qualified_operation_aliases(
-                    route, operation_alias
+                    operation_route, operation_alias
                 ):
                     was_ambiguous = _register_local_ingress_route_alias(
                         routes,
                         alias_sources,
                         qualified_alias,
-                        route,
+                        operation_route,
                         source="operation_qualified",
                         ambiguous_public_aliases=ambiguous_public_aliases,
                         allow_ambiguous_public_alias=True,
@@ -211,7 +213,7 @@ def discover_runtime_local_ingress_routes(
                     routes,
                     alias_sources,
                     operation_alias,
-                    route,
+                    operation_route,
                     source="operation_raw",
                     ambiguous_public_aliases=ambiguous_public_aliases,
                     allow_ambiguous_public_alias=True,
@@ -374,6 +376,18 @@ def _qualified_operation_aliases(
 
 def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, ...]:
     """Return handler operation names that can act as local ingress aliases."""
+    return tuple(
+        dict.fromkeys(
+            alias for alias, _route in _extract_handler_operation_routes(raw, None)
+        )
+    )
+
+
+def _extract_handler_operation_routes(
+    raw: dict[object, object],
+    base_route: RuntimeLocalIngressRoute | None,
+) -> tuple[tuple[str, RuntimeLocalIngressRoute], ...]:
+    """Return handler operation aliases with handler-specific route metadata."""
     handler_routing = raw.get("handler_routing")
     if not isinstance(handler_routing, dict):
         return ()
@@ -382,7 +396,7 @@ def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, 
     if not isinstance(handlers, list):
         return ()
 
-    aliases: list[str] = []
+    aliases: list[tuple[str, RuntimeLocalIngressRoute]] = []
     for handler in handlers:
         if not isinstance(handler, dict):
             continue
@@ -390,9 +404,38 @@ def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, 
         if not isinstance(operation, str):
             continue
         normalized = operation.strip()
-        if normalized:
-            aliases.append(normalized)
-    return tuple(dict.fromkeys(aliases))
+        if not normalized:
+            continue
+        route = base_route
+        if route is not None:
+            event_type = _handler_event_type(handler, route.event_type)
+            route = replace(route, event_type=event_type)
+        aliases.append(
+            (
+                normalized,
+                route
+                or RuntimeLocalIngressRoute(
+                    node_name="",
+                    contract_name="",
+                    command_topic="",
+                    event_type=None,
+                    terminal_event=None,
+                    contract_path="",
+                    package_name="",
+                ),
+            )
+        )
+    return tuple(aliases)
+
+
+def _handler_event_type(
+    handler_entry: dict[object, object],
+    fallback: str | None,
+) -> str | None:
+    raw_event_type = handler_entry.get("event_type")
+    if isinstance(raw_event_type, str) and raw_event_type.strip():
+        return raw_event_type.strip()
+    return fallback
 
 
 class RuntimeLocalIngressServer:

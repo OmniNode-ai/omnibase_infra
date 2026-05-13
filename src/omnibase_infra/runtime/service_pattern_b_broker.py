@@ -28,7 +28,10 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -401,11 +404,11 @@ def _terminal_error_message(payload: object) -> str | None:
         for key in ("failure_reason", "error_message", "error"):
             value = nested_payload.get(key)
             if isinstance(value, str) and value.strip():
-                return value
+                return sanitize_error_string(value)
     for key in ("failure_reason", "error_message", "error"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value
+            return sanitize_error_string(value)
     return None
 
 

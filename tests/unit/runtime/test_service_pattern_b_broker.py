@@ -401,6 +401,43 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
 
 
 @pytest.mark.asyncio
+async def test_service_pattern_b_broker_sanitizes_terminal_failure_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route_with_failure_terminal()
+    failure_topic = route.terminal_events[1]
+    created_consumers = _install_fake_aiokafka_consumer(monkeypatch)
+
+    broker = RuntimePatternBBroker(
+        _FakeKafkaTransport(
+            route,
+            created_consumers,
+            terminal_topic=failure_topic,
+            terminal_payload={
+                "payload": {
+                    "failure_reason": (
+                        "failed to connect to postgres://user:pass@db:5432/app"
+                    )
+                }
+            },
+        ),
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
+
+    _resolved_route, result = await broker.dispatch_request(command)
+
+    assert result.error_message == "[REDACTED - potentially sensitive data]"
+
+
+@pytest.mark.asyncio
 async def test_service_pattern_b_broker_accepts_plural_only_terminal_events() -> None:
     bus = EventBusInmemory(environment="test", group="pattern-b")
     await bus.start()

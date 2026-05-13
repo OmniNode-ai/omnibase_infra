@@ -219,7 +219,16 @@ class DispatchResultApplier:
         """
         embedded_topic = getattr(event, "topic", None)
         if isinstance(embedded_topic, str) and embedded_topic.strip():
-            return embedded_topic.strip()
+            candidate_topic = embedded_topic.strip()
+            if candidate_topic in self._allowed_output_topics():
+                return candidate_topic
+            logger.warning(
+                "Ignoring undeclared embedded output topic",
+                extra={
+                    "topic": candidate_topic,
+                    "event_type": type(event).__name__,
+                },
+            )
         if not self._output_topic_map:
             return self._output_topic
         class_name = type(event).__name__
@@ -228,6 +237,14 @@ class DispatchResultApplier:
             short_name,
             self._output_topic_map.get(class_name, self._output_topic),
         )
+
+    def _allowed_output_topics(self) -> set[str]:
+        """Return contract-derived topics the applier may publish to."""
+        return {
+            self._output_topic,
+            *self._output_topic_map.values(),
+            *self._topic_router.values(),
+        }
 
     def _execute_projection(
         self,

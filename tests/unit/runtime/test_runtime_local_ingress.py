@@ -488,6 +488,44 @@ handler_routing:
     assert routes["fakepkg.node_demo.run"].contract_name == "demo"
 
 
+def test_discover_runtime_local_ingress_routes_uses_handler_event_type_for_operation_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "fakepkg"
+    node_dir = package_root / "nodes" / "node_demo"
+    node_dir.mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (node_dir / "contract.yaml").write_text(
+        """
+name: demo
+event_bus:
+  subscribe_topics:
+    - onex.cmd.demo.start.v1
+handler_routing:
+  handlers:
+    - operation: alpha
+      event_type: demo.alpha-command
+    - operation: beta
+      event_type: demo.beta-command
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    routes = discover_runtime_local_ingress_routes(("fakepkg",))
+
+    assert routes["alpha"].event_type == "demo.alpha-command"
+    assert routes["demo.alpha"].event_type == "demo.alpha-command"
+    assert routes["fakepkg.demo.alpha"].event_type == "demo.alpha-command"
+    assert routes["beta"].event_type == "demo.beta-command"
+    assert routes["demo.beta"].event_type == "demo.beta-command"
+    assert routes["fakepkg.demo.beta"].event_type == "demo.beta-command"
+
+
 @pytest.mark.asyncio
 async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
     correlation_id = uuid4()

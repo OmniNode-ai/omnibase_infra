@@ -88,6 +88,9 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
+    from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
+        ProtocolPatternBBrokerTransport,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -982,12 +985,24 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """Return True when sync container resolution is unnecessary for handler_cls.
 
     Zero-arg handlers can be constructed directly by the resolver, and handlers
-    that require only ``event_bus`` can be constructed from the event-bus path.
-    In both cases, calling a sync container from runtime-managed async boot is
-    unnecessary and can trip ``asyncio.run()`` crashes.
+    that require only runtime-known ports can be constructed from materialized
+    dependencies. In both cases, calling a sync container from runtime-managed
+    async boot is unnecessary and can trip ``asyncio.run()`` crashes.
     """
     required_params = _required_handler_init_params(handler_cls)
-    return not required_params or required_params == frozenset({"event_bus"})
+    return not required_params or required_params <= frozenset(
+        {"event_bus", "dispatch_port"}
+    )
+
+
+def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:
+    parameter = inspect.signature(handler_cls).parameters.get("dispatch_port")
+    if parameter is None:
+        return False
+    annotation = parameter.annotation
+    if isinstance(annotation, str):
+        return annotation == "ProtocolDelegationDispatchPort"
+    return getattr(annotation, "__name__", "") == "ProtocolDelegationDispatchPort"
 
 
 def _materialize_known_handler_dependencies(
@@ -1009,7 +1024,9 @@ def _materialize_known_handler_dependencies(
     required_params = _required_handler_init_params(handler_cls)
     if not required_params:
         return materialized_explicit_dependencies
-    if not required_params.intersection({"container", "ownership_query"}):
+    if not required_params.intersection(
+        {"container", "ownership_query", "dispatch_port"}
+    ):
         return materialized_explicit_dependencies
     available = {
         name: value
@@ -1020,6 +1037,18 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
+    if (
+        "dispatch_port" in required_params
+        and event_bus is not None
+        and _handler_requires_delegation_dispatch_port(handler_cls)
+    ):
+        from omnibase_infra.runtime.service_delegation_dispatch_port import (
+            RuntimeDelegationDispatchPort,
+        )
+
+        available["dispatch_port"] = RuntimeDelegationDispatchPort(
+            cast("ProtocolPatternBBrokerTransport", event_bus)
+        )
     if not required_params <= set(available):
         return materialized_explicit_dependencies
 

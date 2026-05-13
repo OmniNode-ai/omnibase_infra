@@ -155,10 +155,22 @@ class TestResolveOutputTopic:
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "mapped-topic",
+                "FailedTopicCarryingEvent": "onex.evt.example.failed.v1",
             },
         )
         event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
         assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
+
+    def test_undeclared_embedded_topic_falls_back_to_contract_topic(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "mapped-topic",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "mapped-topic"
 
 
 # ---------------------------------------------------------------------------
