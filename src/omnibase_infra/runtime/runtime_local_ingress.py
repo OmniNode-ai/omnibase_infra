@@ -13,10 +13,12 @@ import stat
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
 )
@@ -55,6 +57,8 @@ class RuntimeLocalIngressRoute:
     contract_path: str
     package_name: str
     terminal_events: tuple[str, ...] = ()
+    input_model_module: str | None = None
+    input_model_name: str | None = None
 
 
 def parse_active_runtime_packages(
@@ -127,6 +131,7 @@ def discover_runtime_local_ingress_routes(
                 continue
 
             node_dir_name = contract_path.parent.name
+            input_model_module, input_model_name = _extract_input_model_ref(raw)
             route = RuntimeLocalIngressRoute(
                 node_name=node_dir_name,
                 contract_name=contract_name,
@@ -136,6 +141,8 @@ def discover_runtime_local_ingress_routes(
                 terminal_events=_extract_terminal_events(raw),
                 contract_path=str(contract_path),
                 package_name=package_name,
+                input_model_module=input_model_module,
+                input_model_name=input_model_name,
             )
 
             for alias in _package_scoped_route_aliases(route):
@@ -306,6 +313,8 @@ def _local_ingress_routes_equivalent(
         and left.event_type == right.event_type
         and left.terminal_event == right.terminal_event
         and left.terminal_events == right.terminal_events
+        and left.input_model_module == right.input_model_module
+        and left.input_model_name == right.input_model_name
     )
 
 
@@ -409,7 +418,13 @@ def _extract_handler_operation_routes(
         route = base_route
         if route is not None:
             event_type = _handler_event_type(handler, route.event_type)
-            route = replace(route, event_type=event_type)
+            input_model_module, input_model_name = _extract_input_model_ref(handler)
+            route = replace(
+                route,
+                event_type=event_type,
+                input_model_module=input_model_module or route.input_model_module,
+                input_model_name=input_model_name or route.input_model_name,
+            )
         aliases.append(
             (
                 normalized,
@@ -436,6 +451,65 @@ def _handler_event_type(
     if isinstance(raw_event_type, str) and raw_event_type.strip():
         return raw_event_type.strip()
     return fallback
+
+
+def validate_runtime_local_ingress_payload(
+    route: RuntimeLocalIngressRoute,
+    payload: dict[str, JsonType],
+) -> dict[str, JsonType]:
+    """Validate and JSON-normalize an ingress payload against its route contract."""
+
+    model_cls = _load_route_input_model(route)
+    if model_cls is None:
+        return payload
+
+    model = model_cls.model_validate(payload)
+    return cast("dict[str, JsonType]", model.model_dump(mode="json", exclude_none=True))
+
+
+def _load_route_input_model(
+    route: RuntimeLocalIngressRoute,
+) -> type[BaseModel] | None:
+    if route.input_model_module is None and route.input_model_name is None:
+        return None
+    if route.input_model_module is None or route.input_model_name is None:
+        raise ValueError(
+            "Local ingress route declares an input_model without both module and name"
+        )
+
+    module = importlib.import_module(route.input_model_module)
+    model_cls = getattr(module, route.input_model_name, None)
+    if not isinstance(model_cls, type) or not issubclass(model_cls, BaseModel):
+        raise TypeError(
+            "Local ingress route input_model is not a pydantic BaseModel: "
+            f"{route.input_model_module}.{route.input_model_name}"
+        )
+    return model_cls
+
+
+def _extract_input_model_ref(
+    raw: dict[object, object],
+) -> tuple[str | None, str | None]:
+    input_model = raw.get("input_model")
+    if isinstance(input_model, dict):
+        module = _safe_optional_string(
+            input_model.get("module")
+        ) or _safe_optional_string(raw.get("handler_module"))
+        name = _safe_optional_string(input_model.get("name"))
+        return (
+            (module, name) if module is not None and name is not None else (None, None)
+        )
+    if isinstance(input_model, str):
+        normalized = input_model.strip()
+        if not normalized:
+            return None, None
+        module, separator, name = normalized.rpartition(".")
+        if separator:
+            return module, name
+        handler_module = _safe_optional_string(raw.get("handler_module"))
+        if handler_module is not None:
+            return handler_module, normalized
+    return None, None
 
 
 class RuntimeLocalIngressServer:

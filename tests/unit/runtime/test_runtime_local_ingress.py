@@ -499,6 +499,9 @@ def test_discover_runtime_local_ingress_routes_uses_handler_event_type_for_opera
     (node_dir / "contract.yaml").write_text(
         """
 name: demo
+input_model:
+  name: ModelDemoRequest
+  module: fakepkg.models.model_demo_request
 event_bus:
   subscribe_topics:
     - onex.cmd.demo.start.v1
@@ -506,6 +509,9 @@ handler_routing:
   handlers:
     - operation: alpha
       event_type: demo.alpha-command
+      input_model:
+        name: ModelAlphaRequest
+        module: fakepkg.models.model_alpha_request
     - operation: beta
       event_type: demo.beta-command
 """.strip(),
@@ -521,9 +527,13 @@ handler_routing:
     assert routes["alpha"].event_type == "demo.alpha-command"
     assert routes["demo.alpha"].event_type == "demo.alpha-command"
     assert routes["fakepkg.demo.alpha"].event_type == "demo.alpha-command"
+    assert routes["alpha"].input_model_module == "fakepkg.models.model_alpha_request"
+    assert routes["alpha"].input_model_name == "ModelAlphaRequest"
     assert routes["beta"].event_type == "demo.beta-command"
     assert routes["demo.beta"].event_type == "demo.beta-command"
     assert routes["fakepkg.demo.beta"].event_type == "demo.beta-command"
+    assert routes["beta"].input_model_module == "fakepkg.models.model_demo_request"
+    assert routes["beta"].input_model_name == "ModelDemoRequest"
 
 
 @pytest.mark.asyncio
@@ -602,6 +612,96 @@ async def test_runtime_host_process_dispatch_local_ingress_preserves_request_tim
     assert response.ok is True
     command = broker.dispatch_request.await_args.args[0]
     assert command.timeout_seconds == 600
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_payload_before_broker() -> (
+    None
+):
+    route = RuntimeLocalIngressRoute(
+        node_name="node_session_orchestrator",
+        contract_name="session_orchestrator",
+        command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        event_type="omnimarket.session-orchestrator-start",
+        terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        package_name="omnimarket",
+        input_model_module=(
+            "omnibase_infra.runtime.models.model_local_runtime_ingress_request"
+        ),
+        input_model_name="ModelLocalRuntimeIngressRequest",
+    )
+    broker = SimpleNamespace(dispatch_request=AsyncMock())
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {"session_orchestrator": route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name="session_orchestrator",
+            payload={"payload": {"dry_run": True}},
+        )
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == "validation_error"
+    broker.dispatch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_payload() -> (
+    None
+):
+    route = RuntimeLocalIngressRoute(
+        node_name="node_session_orchestrator",
+        contract_name="session_orchestrator",
+        command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        event_type="omnimarket.session-orchestrator-start",
+        terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        package_name="omnimarket",
+        input_model_module=(
+            "omnibase_infra.runtime.models.model_local_runtime_ingress_request"
+        ),
+        input_model_name="ModelLocalRuntimeIngressRequest",
+    )
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
+        completed_at=datetime.now(UTC),
+        correlation_id=uuid4(),
+    )
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(return_value=(route, dispatch_result))
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {"session_orchestrator": route}
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name="session_orchestrator",
+            payload={
+                "command_name": "inner-command",
+                "payload": {"dry_run": True},
+            },
+        )
+    )
+
+    assert response.ok is True
+    command = broker.dispatch_request.await_args.args[0]
+    assert command.payload == {
+        "command_name": "inner-command",
+        "payload": {"dry_run": True},
+        "timeout_ms": 300_000,
+    }
 
 
 @pytest.mark.asyncio
