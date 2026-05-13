@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -2281,7 +2281,7 @@ requires-dist = [
     { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" },
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=235c31996d20217c4270319b59dc76a0568fe078" },
     { name = "omnibase-spi", specifier = ">=0.20.6" },
-    { name = "omnimarket", git = "https://github.com/OmniNode-ai/omnimarket.git?branch=jonah%2Fomn-10865-add-delegation-nodes" },
+    { name = "omnimarket", git = "https://github.com/OmniNode-ai/omnimarket.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.62" },
@@ -2349,7 +2349,7 @@ wheels = [
 [[package]]
 name = "omnimarket"
 version = "0.2.0"
-source = { git = "https://github.com/OmniNode-ai/omnimarket.git?branch=jonah%2Fomn-10865-add-delegation-nodes#863712054596f960c36f0a6e9b1af7fc1df148f4" }
+source = { git = "https://github.com/OmniNode-ai/omnimarket.git?branch=main#a73edb046fcc70950c2df09f94cac9e2dd9f2fff" }
 dependencies = [
     { name = "aiokafka" },
     { name = "anthropic" },
