@@ -15,7 +15,7 @@ These tests drive:
   EventBusInmemory           (captures all published envelopes)
 
 and assert that task-delegated events are present in the bus history with
-the required payload fields (correlation_id, task_type, model_name, max_tokens).
+the required payload fields (correlation_id, task_type, model_name, quality_gate_passed).
 
 This is distinct from the handler-unit tests in test_delegation_pipeline_e2e.py
 which only assert what the handler *returns*. These tests assert what actually
@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -48,9 +48,6 @@ from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_r
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_inference_intent import (
     ModelInferenceIntent,
-)
-from omnibase_infra.nodes.node_delegation_orchestrator.models.model_inference_response_data import (
-    ModelInferenceResponseData,
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_quality_gate_intent import (
     ModelQualityGateIntent,
@@ -108,7 +105,6 @@ async def _drive_pipeline_to_terminal(
     *,
     bus: EventBusInmemory,
     handler: HandlerDelegationWorkflow,
-    bridge: DelegationIntentBridge,
     request: ModelDelegationRequest,
     inference_content: str,
 ) -> None:
@@ -129,6 +125,12 @@ async def _drive_pipeline_to_terminal(
     """
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
+    # Wire a deterministic MockLlmCaller so Step 4 exercises the public inference path.
+    bridge = DelegationIntentBridge(
+        event_bus=bus,
+        llm_caller=MockLlmCaller(response_content=inference_content),
+    )
+
     cid = request.correlation_id
 
     # Step 1 — request intake
@@ -146,19 +148,10 @@ async def _drive_pipeline_to_terminal(
     assert isinstance(step3_events[0], ModelInferenceIntent)
     inference_intent = step3_events[0]
 
-    # Step 4 — inference intent → inference response (bridge publishes to bus)
-    inference_response = ModelInferenceResponseData(
-        correlation_id=cid,
-        content=inference_content,
-        model_used=inference_intent.model,
-        latency_ms=50,
-        prompt_tokens=100,
-        completion_tokens=200,
-        total_tokens=300,
-    )
-    await bridge._publish(
-        inference_response, "onex.evt.omnibase-infra.inference-response.v1"
-    )
+    # Step 4 — inference intent → inference response via public bridge path.
+    # Using MockLlmCaller ensures this exercises handle_inference_intent() end-to-end,
+    # so inference-intent handling regressions are caught by the golden chain.
+    inference_response = await bridge.handle_inference_intent(inference_intent)
 
     # Step 5 — inference response drives orchestrator
     step5_events = handler.handle_inference_response(inference_response)
@@ -229,12 +222,10 @@ async def test_success_path_emits_task_delegated_on_bus() -> None:
         )
 
         handler = HandlerDelegationWorkflow()
-        bridge = DelegationIntentBridge(event_bus=bus)
 
         await _drive_pipeline_to_terminal(
             bus=bus,
             handler=handler,
-            bridge=bridge,
             request=request,
             inference_content=good_content,
         )
@@ -295,12 +286,10 @@ async def test_failure_path_emits_task_delegated_on_bus() -> None:
         )
 
         handler = HandlerDelegationWorkflow()
-        bridge = DelegationIntentBridge(event_bus=bus)
 
         await _drive_pipeline_to_terminal(
             bus=bus,
             handler=handler,
-            bridge=bridge,
             request=request,
             inference_content=refusal_content,
         )
@@ -369,12 +358,10 @@ async def test_task_delegated_payload_has_required_fields(
         )
 
         handler = HandlerDelegationWorkflow()
-        bridge = DelegationIntentBridge(event_bus=bus)
 
         await _drive_pipeline_to_terminal(
             bus=bus,
             handler=handler,
-            bridge=bridge,
             request=request,
             inference_content=inference_content,
         )
