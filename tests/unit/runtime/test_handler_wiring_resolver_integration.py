@@ -306,64 +306,6 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
         )
 
-    @pytest.mark.unit
-    def test_runtime_dispatch_port_is_materialized_from_event_bus(self) -> None:
-        """Handlers can declare the runtime-owned delegation dispatch port."""
-        contract = _make_contract(handler_name="HandlerWithDispatchPort")
-        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
-
-        class FakeEventBus:
-            async def publish(
-                self,
-                topic: str,
-                key: bytes | None,
-                value: bytes,
-                headers: object = None,
-            ) -> None:
-                return None
-
-            async def subscribe(self, *args: object, **kwargs: object) -> object:
-                async def unsubscribe() -> None:
-                    return None
-
-                return unsubscribe
-
-        class HandlerWithDispatchPort:
-            captured_dispatch_port: object | None = None
-
-            def __init__(self, *, dispatch_port: object) -> None:
-                self.dispatch_port = dispatch_port
-                HandlerWithDispatchPort.captured_dispatch_port = dispatch_port
-
-            async def handle(self, envelope: object) -> None:
-                return None
-
-        ownership = ServiceLocalHandlerOwnershipQuery(
-            local_node_names=frozenset({contract.name})
-        )
-        resolver = ServiceHandlerResolver()
-        with patch(
-            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=HandlerWithDispatchPort,
-        ):
-            prepared = _prepare_handler_wiring(
-                contract=contract,
-                entry=entry,
-                dispatch_engine=None,
-                resolver=resolver,
-                ownership_query=ownership,
-                event_bus=FakeEventBus(),
-                container=None,
-            )
-
-        assert prepared.is_skip is False
-        assert (
-            prepared.resolution_outcome
-            is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
-        )
-        assert HandlerWithDispatchPort.captured_dispatch_port is not None
-        assert hasattr(HandlerWithDispatchPort.captured_dispatch_port, "dispatch")
-
 
 # ---------------------------------------------------------------------------
 # wire_from_manifest — full-flow skip + determinism + fail-fast
