@@ -277,6 +277,145 @@ class TestPackageNodeSubscriptionWiring:
         assert wired2 == 0  # all already wired
 
 
+class TestPluginManagedSkipsRuntimeHostSubscription:
+    """plugin_managed=true in contract.yaml prevents runtime-host from subscribing [OMN-10864 v2]."""
+
+    @pytest.mark.asyncio
+    async def test_plugin_managed_contract_skipped_in_package_wiring(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """_wire_package_node_subscriptions skips plugin_managed=true contracts."""
+        node = tmp_path / "nodes" / "node_delegation_orchestrator" / "contract.yaml"
+        node.parent.mkdir(parents=True)
+        node.write_text(
+            textwrap.dedent("""\
+            name: "node_delegation_orchestrator"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.delegation-request.v1"
+              plugin_managed: true
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        (
+            wired,
+            _skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 0
+        assert skipped_no_topics == 1
+        mock_event_bus_wiring.wire_subscriptions.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_plugin_managed_false_still_wired_in_package_wiring(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """Contracts with plugin_managed=false (or absent) are still subscribed."""
+        node = tmp_path / "nodes" / "node_normal_worker" / "contract.yaml"
+        node.parent.mkdir(parents=True)
+        node.write_text(
+            textwrap.dedent("""\
+            name: "node_normal_worker"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnimarket.normal-work.v1"
+              plugin_managed: false
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        wired, _, _ = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 1
+        mock_event_bus_wiring.wire_subscriptions.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_mixed_contracts_only_non_plugin_managed_wired(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """In a mix of contracts, only non-plugin-managed ones get subscriptions."""
+        managed = tmp_path / "nodes" / "node_delegation_orchestrator" / "contract.yaml"
+        managed.parent.mkdir(parents=True)
+        managed.write_text(
+            textwrap.dedent("""\
+            name: "node_delegation_orchestrator"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.delegation-request.v1"
+              plugin_managed: true
+            """)
+        )
+
+        normal = tmp_path / "nodes" / "node_normal_worker" / "contract.yaml"
+        normal.parent.mkdir(parents=True)
+        normal.write_text(
+            textwrap.dedent("""\
+            name: "node_normal_worker"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnimarket.normal-work.v1"
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        wired, _, skipped_no_topics = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 1
+        assert skipped_no_topics == 1
+        wired_names = {c["node_name"] for c in mock_event_bus_wiring._wire_calls}
+        assert "node_delegation_orchestrator" not in wired_names
+        assert "node_normal_worker" in wired_names
+
+
 class TestDiscoverPackageNodeContracts:
     """Tests for _discover_package_node_contracts."""
 
