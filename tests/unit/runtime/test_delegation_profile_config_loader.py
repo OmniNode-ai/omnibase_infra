@@ -3,7 +3,7 @@
 
 """Unit tests for DelegationProfileConfigLoader (OMN-10923).
 
-Requires omnibase-core PR #1072 (jonah/omn-10919-delegation-runtime-profile-contract)
+Requires omnibase_compat PR #87 (jonah/omn-10919-delegation-contract-models)
 to be merged before the published package includes the delegation models.
 """
 
