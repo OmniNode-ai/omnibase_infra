@@ -27,6 +27,7 @@ from check_delegation_env_reads import (
 )
 
 
+@pytest.mark.unit
 class TestIsDelegationModule:
     def test_adapters_llm(self) -> None:
         assert _is_delegation_module(
@@ -47,6 +48,7 @@ class TestIsDelegationModule:
         assert not _is_delegation_module("src/omnibase_infra/runtime/service_kernel.py")
 
 
+@pytest.mark.unit
 class TestIsAllowlisted:
     def test_test_file_allowlisted(self) -> None:
         assert _is_allowlisted("tests/unit/delegation/test_foo.py")
@@ -60,6 +62,7 @@ class TestIsAllowlisted:
         )
 
 
+@pytest.mark.unit
 class TestFindEnvCallsInSource:
     def test_detects_os_environ_get(self) -> None:
         source = 'import os\nvalue = os.environ.get("KEY", "")\n'

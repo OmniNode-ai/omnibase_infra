@@ -13,9 +13,8 @@ from omnibase_infra.runtime.delegation_profile_config_loader import (
     DelegationProfileConfigLoader,
 )
 
-pytestmark = pytest.mark.integration
 
-
+@pytest.mark.integration
 def test_delegation_profile_loader_projects_contract_runtime_config() -> None:
     pytest.importorskip(
         "omnibase_compat.contracts.delegation.model_delegation_runtime_profile",

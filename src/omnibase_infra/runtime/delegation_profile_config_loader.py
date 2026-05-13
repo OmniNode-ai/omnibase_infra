@@ -10,18 +10,19 @@ Zero env var reads — all configuration is sourced from the contract file.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any  # ONEX_EXCLUDE: any_type
+from typing import Any  # ONEX_EXCLUDE: any_type
 
 import yaml
 from pydantic import ValidationError
 
-if TYPE_CHECKING:
-    from omnibase_compat.contracts.delegation.model_delegation_runtime_profile import (
-        ModelDelegationRuntimeProfile,
-    )
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
-class DelegationProfileNotFoundError(Exception):
+class DelegationProfileNotFoundError(ProtocolConfigurationError):
     """Raised when the delegation profile contract is missing or invalid."""
 
 
@@ -53,23 +54,31 @@ class DelegationProfileConfigLoader:
 
         if not self._contract_path.exists():
             raise DelegationProfileNotFoundError(
-                f"Delegation profile contract not found: {self._contract_path}"
+                f"Delegation profile contract not found: {self._contract_path}",
+                context=self._error_context("load.missing_contract"),
             )
 
-        raw = yaml.safe_load(self._contract_path.read_text(encoding="utf-8"))
-
-        from omnibase_compat.contracts.delegation.model_delegation_runtime_profile import (
-            ModelDelegationRuntimeProfile,
-        )
-
         try:
+            raw = yaml.safe_load(self._contract_path.read_text(encoding="utf-8"))
+            from omnibase_compat.contracts.delegation.model_delegation_runtime_profile import (
+                ModelDelegationRuntimeProfile,
+            )
+
             self._profile = ModelDelegationRuntimeProfile.model_validate(raw)
-        except ValidationError as exc:
+        except (OSError, yaml.YAMLError, ValidationError) as exc:
             raise DelegationProfileNotFoundError(
-                f"Invalid delegation profile contract at {self._contract_path}: {exc}"
+                f"Invalid delegation profile contract at {self._contract_path}: {exc}",
+                context=self._error_context("load.invalid_contract"),
             ) from exc
 
         return self._profile
+
+    def _error_context(self, operation: str) -> ModelInfraErrorContext:
+        return ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation=f"delegation_profile_config_loader.{operation}",
+            target_name=str(self._contract_path),
+        )
 
     # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationEventBusEndpoint after omnibase_compat PR#87 merges
     def event_bus_config(self) -> Any:

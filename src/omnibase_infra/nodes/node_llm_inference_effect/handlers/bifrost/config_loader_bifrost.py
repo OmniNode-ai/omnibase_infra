@@ -293,7 +293,10 @@ def load_bifrost_config_from_contract(
     try:
         items = llm_backends.items() if hasattr(llm_backends, "items") else {}
         for backend_key, backend_cfg in items:
-            bifrost_ref = getattr(backend_cfg, "bifrost_endpoint_ref", None)
+            if isinstance(backend_cfg, dict):
+                bifrost_ref = backend_cfg.get("bifrost_endpoint_ref")
+            else:
+                bifrost_ref = getattr(backend_cfg, "bifrost_endpoint_ref", None)
             if bifrost_ref is None:
                 continue
             # bifrost_endpoint_ref is a logical name — it is the backend_id that
