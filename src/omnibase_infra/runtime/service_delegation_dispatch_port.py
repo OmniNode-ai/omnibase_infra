@@ -31,6 +31,7 @@ from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroke
 
 _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
+_PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 900.0
 
@@ -60,6 +61,15 @@ def _select_delegation_route(
 
     if len(candidates) == 1:
         alias, route = next(iter(candidates.values()))
+        return ModelSelectedDelegationRoute(alias=alias, route=route)
+
+    preferred = [
+        candidate
+        for candidate in candidates.values()
+        if candidate[1].package_name == _PREFERRED_DELEGATION_PACKAGE
+    ]
+    if len(preferred) == 1:
+        alias, route = preferred[0]
         return ModelSelectedDelegationRoute(alias=alias, route=route)
 
     fallback_route = routes.get(_DELEGATION_OPERATION_ALIAS)

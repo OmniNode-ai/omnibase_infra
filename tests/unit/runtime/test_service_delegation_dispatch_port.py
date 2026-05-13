@@ -54,6 +54,32 @@ def test_select_delegation_route_prefers_success_failure_terminal_interface() ->
     )
 
 
+def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> None:
+    routes = {
+        "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate": _route(
+            package_name="omnibase_infra",
+            terminal_events=(
+                "onex.evt.omnibase-infra.delegation-completed.v1",
+                "onex.evt.omnibase-infra.delegation-failed.v1",
+            ),
+        ),
+        "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(
+                "onex.evt.omnibase-infra.delegation-completed.v1",
+                "onex.evt.omnibase-infra.delegation-failed.v1",
+            ),
+        ),
+    }
+
+    selected = _select_delegation_route(routes)
+
+    assert (
+        selected.alias
+        == "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
+    )
+
+
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     payload = {
         "topic": "onex.evt.omnibase-infra.delegation-completed.v1",
