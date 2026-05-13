@@ -211,8 +211,8 @@ class TestDelegationPipelineHappyPath:
         assert final_events[2].delegated_by == "delegation-pipeline"
         assert final_events[2].cost_savings_usd > 0
 
-    def test_happy_path_document_task_routes_to_deepseek(self) -> None:
-        """Verify document tasks route to DeepSeek and use temperature 0.5."""
+    def test_happy_path_document_task_routes_to_qwen(self) -> None:
+        """Verify document tasks route to Qwen and use temperature 0.5."""
         cid = uuid4()
         request = ModelDelegationRequest(
             prompt="Write docstrings for the ConfigPrefetcher class",
@@ -222,12 +222,12 @@ class TestDelegationPipelineHappyPath:
         )
 
         routing_decision = routing_delta(request)
-        # document tasks route to the deployed DeepSeek model in the local tier
+        # document tasks route to Qwen in the local tier for bounded demo output.
         assert (
             routing_decision.selected_model
-            == "Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ"
+            == "cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
         )
-        assert routing_decision.endpoint_url == "http://192.168.86.201:8001"
+        assert routing_decision.endpoint_url == "http://192.168.86.201:8000"
 
         orchestrator = HandlerDelegationWorkflow()
         orchestrator.handle_delegation_request(request)

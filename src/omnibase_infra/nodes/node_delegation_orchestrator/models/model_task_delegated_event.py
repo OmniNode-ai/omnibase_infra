@@ -83,6 +83,14 @@ class ModelTaskDelegatedEvent(BaseModel):
         ge=1,
         description="Number of LLM invocations to reach compliance.",
     )
+    prompt_text: str | None = Field(
+        default=None,
+        description="Raw prompt sent to the delegated model.",
+    )
+    response_text: str | None = Field(
+        default=None,
+        description="Raw response received from the delegated model.",
+    )
 
 
 __all__: list[str] = ["ModelTaskDelegatedEvent"]

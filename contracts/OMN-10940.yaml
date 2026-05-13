@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-10940"
+title: "Reconcile delegation runtime live patches"
+summary: "Reconcile delegation workflow live patches, terminal task-delegated fields, bridge output handling, and schema migration fingerprint evidence."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "protocols"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-integration-pipeline"
+    description: "Integration coverage proves the delegation pipeline live-patch reconciliation path."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_delegation_pipeline_e2e.py -q"
+  - id: "dod-schema-fingerprint"
+    description: "Migration schema fingerprint is stamped for the added delegation and service-registry migrations."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python scripts/check_schema_fingerprint.py verify"
+  - id: "dod-deploy"
+    description: "Deploy validation plan for delegation runtime reconciliation; no live runtime restart was performed in this PR."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: after merge, verify the runtime container imports PluginDelegation, applies DispatchResultApplier output events, and can publish a task-delegated event with prompt_text and response_text"

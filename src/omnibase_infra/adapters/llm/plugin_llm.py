@@ -197,6 +197,9 @@ class PluginLlm:
             from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
                 DelegationIntentBridge,
             )
+            from omnibase_infra.nodes.node_delegation_orchestrator.protocol_delegation_intent_bridge import (
+                ProtocolDelegationIntentBridge,
+            )
 
             bridge = DelegationIntentBridge(
                 event_bus=event_bus,
@@ -204,7 +207,7 @@ class PluginLlm:
             )
             if config.container.service_registry is not None:
                 await config.container.service_registry.register_instance(
-                    interface=DelegationIntentBridge,
+                    interface=ProtocolDelegationIntentBridge,  # type: ignore[type-abstract]
                     instance=bridge,
                     scope=EnumInjectionScope.GLOBAL,
                     metadata={

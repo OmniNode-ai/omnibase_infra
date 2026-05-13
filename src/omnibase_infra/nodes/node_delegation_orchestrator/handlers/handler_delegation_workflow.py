@@ -467,6 +467,8 @@ class HandlerDelegationWorkflow:
             llm_call_id=workflow.inference_llm_call_id,
             tokens_to_compliance=tokens_to_compliance,
             compliance_attempts=compliance_attempts,
+            prompt_text=workflow.request.prompt,
+            response_text=workflow.inference_content,
         )
 
         events: list[BaseModel] = []
