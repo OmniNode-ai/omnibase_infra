@@ -81,6 +81,11 @@ jobs:
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
 
+      # SYNC: OMN-10926 — delegation env read scanner in enforce mode (Wave 2)
+      # Fails CI if any delegation/LLM/bifrost module adds a new bare os.environ/os.getenv read.
+      - name: Delegation env read scanner (enforce)
+        run: python scripts/ci/check_delegation_env_reads.py --mode enforce
+
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
