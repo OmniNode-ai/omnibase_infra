@@ -19,9 +19,9 @@ env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
-  # Large transitive wheels such as scipy can exceed uv's 30s default on
-  # self-hosted runners during sibling-boundary jobs.
-  UV_HTTP_TIMEOUT: "120"
+  # Large transitive wheels such as torch and CUDA packages can exceed uv's
+  # default timeout on self-hosted runners during sibling-boundary jobs.
+  UV_HTTP_TIMEOUT: "600"
   # Force inmemory event bus for CI tests (no Kafka infrastructure available)
   # This overrides the default "kafka" in contracts/runtime/runtime_config.yaml
   ONEX_EVENT_BUS_TYPE: "inmemory"
