@@ -350,6 +350,61 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
         )
 
+    @pytest.mark.unit
+    def test_optional_delegation_dispatch_port_materialized_from_event_bus(
+        self,
+    ) -> None:
+        """Runtime injects HandlerDelegateSkill's optional dispatch port override."""
+        contract = _make_contract(handler_name="HandlerWithOptionalDispatchPort")
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class ProtocolDelegationDispatchPort(Protocol):
+            async def dispatch(self, **kwargs: object) -> dict[str, object]: ...
+
+        class HandlerWithOptionalDispatchPort:
+            last_dispatch_port: object | None = None
+
+            def __init__(
+                self,
+                event_bus: object,
+                dispatch_port: ProtocolDelegationDispatchPort | None = None,
+            ) -> None:
+                self.event_bus = event_bus
+                self.dispatch_port = dispatch_port
+                HandlerWithOptionalDispatchPort.last_dispatch_port = dispatch_port
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        event_bus = MagicMock()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithOptionalDispatchPort,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=event_bus,
+                container=None,
+            )
+
+        from omnibase_infra.runtime.service_delegation_dispatch_port import (
+            RuntimeDelegationDispatchPort,
+        )
+
+        assert prepared.is_skip is False
+        assert isinstance(
+            HandlerWithOptionalDispatchPort.last_dispatch_port,
+            RuntimeDelegationDispatchPort,
+        )
+
 
 # ---------------------------------------------------------------------------
 # wire_from_manifest — full-flow skip + determinism + fail-fast

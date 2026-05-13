@@ -34,7 +34,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, get_args, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -1001,8 +1001,13 @@ def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:
         return False
     annotation = parameter.annotation
     if isinstance(annotation, str):
-        return annotation == "ProtocolDelegationDispatchPort"
-    return getattr(annotation, "__name__", "") == "ProtocolDelegationDispatchPort"
+        return "ProtocolDelegationDispatchPort" in annotation
+    if getattr(annotation, "__name__", "") == "ProtocolDelegationDispatchPort":
+        return True
+    return any(
+        getattr(arg, "__name__", "") == "ProtocolDelegationDispatchPort"
+        for arg in get_args(annotation)
+    )
 
 
 def _materialize_known_handler_dependencies(
@@ -1021,11 +1026,24 @@ def _materialize_known_handler_dependencies(
     existing explicit-dependency map keeps infra wiring deterministic without
     requiring a synchronized core release.
     """
+    signature = inspect.signature(handler_cls)
+    constructor_params = frozenset(
+        name
+        for name, param in signature.parameters.items()
+        if name != "self"
+        and param.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    )
+    requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
     required_params = _required_handler_init_params(handler_cls)
-    if not required_params:
+    if not required_params and not requires_delegation_port:
         return materialized_explicit_dependencies
-    if not required_params.intersection(
-        {"container", "ownership_query", "dispatch_port"}
+    if not (
+        required_params.intersection({"container", "ownership_query", "dispatch_port"})
+        or ("dispatch_port" in constructor_params and requires_delegation_port)
     ):
         return materialized_explicit_dependencies
     available = {
@@ -1038,9 +1056,9 @@ def _materialize_known_handler_dependencies(
         if value is not None
     }
     if (
-        "dispatch_port" in required_params
+        "dispatch_port" in constructor_params
         and event_bus is not None
-        and _handler_requires_delegation_dispatch_port(handler_cls)
+        and requires_delegation_port
     ):
         from omnibase_infra.runtime.service_delegation_dispatch_port import (
             RuntimeDelegationDispatchPort,
@@ -1056,6 +1074,8 @@ def _materialize_known_handler_dependencies(
     handler_dependencies = dict(merged.get(handler_name, {}))
     for name in required_params:
         handler_dependencies.setdefault(name, available[name])
+    if "dispatch_port" in constructor_params and "dispatch_port" in available:
+        handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
     merged[handler_name] = handler_dependencies
     return merged
 
