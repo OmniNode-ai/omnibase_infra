@@ -56,6 +56,7 @@ def _contract_topics() -> set[str]:
     return set(event_bus["subscribe_topics"]) | set(event_bus["publish_topics"])
 
 
+@pytest.mark.unit
 def test_delegation_constant_count_meets_baseline() -> None:
     constants = _delegation_topic_constants()
     assert len(constants) >= _EXPECTED_MINIMUM_CONSTANTS, (
@@ -64,6 +65,7 @@ def test_delegation_constant_count_meets_baseline() -> None:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "constant_name",
     sorted(_delegation_topic_constants()),
