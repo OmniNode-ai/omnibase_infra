@@ -29,18 +29,17 @@ tiers:
           - code_review
           - refactor
           - test
+          - document
           - research
+        fast_path_threshold_tokens: 65536
       - id: deepseek-r1-14b
         backend_id: local-deepseek-r1-14b
         max_context_tokens: 24576
         use_for:
-          - test
           - research
           - reasoning
           - planning
           - review
-          - document
-        fast_path_threshold_tokens: 24576
     eval_before_accept: true
     eval_model: deepseek-r1-14b
     max_retries: 2
