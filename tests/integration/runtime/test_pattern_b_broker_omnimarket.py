@@ -64,7 +64,7 @@ async def test_pattern_b_broker_dispatches_real_aislop_handler(tmp_path: Path) -
     )
     await broker.start()
 
-    handler = NodeAislopSweep()
+    handler = NodeAislopSweep(event_bus=bus)
 
     async def worker(message: ModelEventMessage) -> None:
         envelope = ModelEventEnvelope[object].model_validate_json(message.value)
