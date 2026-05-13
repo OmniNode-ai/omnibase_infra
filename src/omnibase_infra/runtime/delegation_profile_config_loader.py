@@ -81,6 +81,11 @@ class DelegationProfileConfigLoader:
         """Return the LLM backends dict from the loaded profile."""
         return self.load().llm_backends
 
+    # ONEX_EXCLUDE: any_type — return narrowed to ModelDelegationSecurityConfig after OMN-10919 merges
+    def security_config(self) -> Any:
+        """Return the security config section from the loaded profile."""
+        return self.load().security
+
 
 __all__ = [
     "DelegationProfileConfigLoader",
