@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -90,6 +91,119 @@ async def _collect_terminal_result(
         on_message=on_message,
     )
     return queue
+
+
+class _FakeAIOKafkaConsumer:
+    created: ClassVar[list[_FakeAIOKafkaConsumer]] = []
+    stop_error: ClassVar[Exception | None] = None
+
+    def __init__(self, *topics: object, **_kwargs: object) -> None:
+        self.topics = topics
+        self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+        self.seeked_to_end = False
+        self.started = False
+        self.stopped = False
+        type(self).created.append(self)
+
+    async def start(self) -> None:
+        await asyncio.sleep(0)
+        self.started = True
+
+    def assignment(self) -> set[str]:
+        return {"partition-0"} if self.started else set()
+
+    async def seek_to_end(self, *_assignment: object) -> None:
+        await asyncio.sleep(0)
+        self.seeked_to_end = True
+
+    async def getone(self) -> SimpleNamespace:
+        return await self.messages.get()
+
+    async def stop(self) -> None:
+        await asyncio.sleep(0)
+        if type(self).stop_error is not None:
+            raise type(self).stop_error
+        self.stopped = True
+
+
+def _install_fake_aiokafka_consumer(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stop_error: Exception | None = None,
+) -> list[_FakeAIOKafkaConsumer]:
+    _FakeAIOKafkaConsumer.created = []
+    _FakeAIOKafkaConsumer.stop_error = stop_error
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
+        _FakeAIOKafkaConsumer,
+    )
+    return _FakeAIOKafkaConsumer.created
+
+
+class _FakeKafkaTransport:
+    config = SimpleNamespace(
+        session_timeout_ms=45000,
+        heartbeat_interval_ms=15000,
+        max_poll_interval_ms=300000,
+        reconnect_backoff_ms=2000,
+    )
+    _bootstrap_servers = "redpanda:9092"
+
+    def __init__(
+        self,
+        route: RuntimeLocalIngressRoute,
+        consumers: list[_FakeAIOKafkaConsumer],
+        *,
+        terminal_topic: str | None = None,
+        terminal_payload: dict[str, object] | None = None,
+        assert_seeked: bool = False,
+    ) -> None:
+        self._route = route
+        self._consumers = consumers
+        self._terminal_topic = terminal_topic
+        self._terminal_payload = terminal_payload or {
+            "status": "complete",
+            "dispatch_count": 5,
+        }
+        self._assert_seeked = assert_seeked
+
+    def _build_auth_kwargs(self) -> dict[str, object]:
+        return {}
+
+    async def publish(
+        self,
+        _topic: str,
+        _key: bytes | None,
+        value: bytes,
+        _headers: object | None = None,
+    ) -> None:
+        assert self._consumers
+        consumer = self._consumers[-1]
+        if self._assert_seeked:
+            assert consumer.seeked_to_end is True
+
+        command_envelope = ModelEventEnvelope[object].model_validate_json(value)
+        terminal_topic = self._terminal_topic or self._route.terminal_event or "unknown"
+        terminal_envelope = ModelEventEnvelope[object](
+            payload=self._terminal_payload,
+            correlation_id=command_envelope.correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=terminal_topic,
+            source_tool="session_orchestrator",
+        )
+        await consumer.messages.put(
+            SimpleNamespace(
+                topic=terminal_topic,
+                value=terminal_envelope.model_dump_json().encode(),
+            )
+        )
+
+    def subscribe(
+        self,
+        *_args: object,
+        **_kwargs: object,
+    ) -> object:
+        pytest.fail("Kafka-backed terminal waits should use a direct consumer")
 
 
 @pytest.mark.asyncio
@@ -226,78 +340,10 @@ async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route = _route()
-    created_consumers: list[FakeAIOKafkaConsumer] = []
-
-    class FakeAIOKafkaConsumer:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
-            self.seeked_to_end = False
-            self.started = False
-            self.stopped = False
-            created_consumers.append(self)
-
-        async def start(self) -> None:
-            self.started = True
-
-        def assignment(self) -> set[str]:
-            return {"partition-0"} if self.started else set()
-
-        async def seek_to_end(self, *_assignment: object) -> None:
-            self.seeked_to_end = True
-
-        async def getone(self) -> SimpleNamespace:
-            return await self.messages.get()
-
-        async def stop(self) -> None:
-            self.stopped = True
-
-    class FakeKafkaTransport:
-        config = SimpleNamespace(
-            session_timeout_ms=45000,
-            heartbeat_interval_ms=15000,
-            max_poll_interval_ms=300000,
-            reconnect_backoff_ms=2000,
-        )
-        _bootstrap_servers = "redpanda:9092"
-
-        def _build_auth_kwargs(self) -> dict[str, object]:
-            return {}
-
-        async def publish(
-            self,
-            _topic: str,
-            _key: bytes | None,
-            value: bytes,
-            _headers: object | None = None,
-        ) -> None:
-            assert created_consumers
-            assert created_consumers[-1].seeked_to_end is True
-            command_envelope = ModelEventEnvelope[object].model_validate_json(value)
-            terminal_envelope = ModelEventEnvelope[object](
-                payload={"status": "complete", "dispatch_count": 5},
-                correlation_id=command_envelope.correlation_id,
-                envelope_timestamp=datetime.now(UTC),
-                event_type=route.terminal_event,
-                source_tool="session_orchestrator",
-            )
-            await created_consumers[-1].messages.put(
-                SimpleNamespace(value=terminal_envelope.model_dump_json().encode())
-            )
-
-        async def subscribe(
-            self,
-            *_args: object,
-            **_kwargs: object,
-        ) -> object:
-            pytest.fail("Kafka-backed terminal waits should use a direct consumer")
-
-    monkeypatch.setattr(
-        "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
-        FakeAIOKafkaConsumer,
-    )
+    created_consumers = _install_fake_aiokafka_consumer(monkeypatch)
 
     broker = RuntimePatternBBroker(
-        FakeKafkaTransport(),
+        _FakeKafkaTransport(route, created_consumers, assert_seeked=True),
         command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
         routes={"session_orchestrator": route},
     )
@@ -323,79 +369,17 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
 ) -> None:
     route = _route_with_failure_terminal()
     failure_topic = route.terminal_events[1]
-    created_consumers: list[FakeAIOKafkaConsumer] = []
-
-    class FakeAIOKafkaConsumer:
-        def __init__(self, *topics: object, **_kwargs: object) -> None:
-            self.topics = topics
-            self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
-            self.started = False
-            self.stopped = False
-            created_consumers.append(self)
-
-        async def start(self) -> None:
-            self.started = True
-
-        def assignment(self) -> set[str]:
-            return {"partition-0"} if self.started else set()
-
-        async def seek_to_end(self, *_assignment: object) -> None:
-            return None
-
-        async def getone(self) -> SimpleNamespace:
-            return await self.messages.get()
-
-        async def stop(self) -> None:
-            self.stopped = True
-
-    class FakeKafkaTransport:
-        config = SimpleNamespace(
-            session_timeout_ms=45000,
-            heartbeat_interval_ms=15000,
-            max_poll_interval_ms=300000,
-            reconnect_backoff_ms=2000,
-        )
-        _bootstrap_servers = "redpanda:9092"
-
-        def _build_auth_kwargs(self) -> dict[str, object]:
-            return {}
-
-        async def publish(
-            self,
-            _topic: str,
-            _key: bytes | None,
-            value: bytes,
-            _headers: object | None = None,
-        ) -> None:
-            command_envelope = ModelEventEnvelope[object].model_validate_json(value)
-            terminal_envelope = ModelEventEnvelope[object](
-                payload={"payload": {"failure_reason": "routing contract missing"}},
-                correlation_id=command_envelope.correlation_id,
-                envelope_timestamp=datetime.now(UTC),
-                event_type=failure_topic,
-                source_tool="session_orchestrator",
-            )
-            await created_consumers[-1].messages.put(
-                SimpleNamespace(
-                    topic=failure_topic,
-                    value=terminal_envelope.model_dump_json().encode(),
-                )
-            )
-
-        async def subscribe(
-            self,
-            *_args: object,
-            **_kwargs: object,
-        ) -> object:
-            pytest.fail("Kafka-backed terminal waits should use a direct consumer")
-
-    monkeypatch.setattr(
-        "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
-        FakeAIOKafkaConsumer,
-    )
+    created_consumers = _install_fake_aiokafka_consumer(monkeypatch)
 
     broker = RuntimePatternBBroker(
-        FakeKafkaTransport(),
+        _FakeKafkaTransport(
+            route,
+            created_consumers,
+            terminal_topic=failure_topic,
+            terminal_payload={
+                "payload": {"failure_reason": "routing contract missing"}
+            },
+        ),
         command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
         routes={"session_orchestrator": route},
     )
@@ -467,74 +451,13 @@ async def test_service_pattern_b_broker_preserves_result_when_kafka_stop_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route = _route()
-    created_consumers: list[FakeAIOKafkaConsumer] = []
-
-    class FakeAIOKafkaConsumer:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
-            self.started = False
-            created_consumers.append(self)
-
-        async def start(self) -> None:
-            self.started = True
-
-        def assignment(self) -> set[str]:
-            return {"partition-0"} if self.started else set()
-
-        async def seek_to_end(self, *_assignment: object) -> None:
-            return None
-
-        async def getone(self) -> SimpleNamespace:
-            return await self.messages.get()
-
-        async def stop(self) -> None:
-            raise RuntimeError("failed to close terminal consumer")
-
-    class FakeKafkaTransport:
-        config = SimpleNamespace(
-            session_timeout_ms=45000,
-            heartbeat_interval_ms=15000,
-            max_poll_interval_ms=300000,
-            reconnect_backoff_ms=2000,
-        )
-        _bootstrap_servers = "redpanda:9092"
-
-        def _build_auth_kwargs(self) -> dict[str, object]:
-            return {}
-
-        async def publish(
-            self,
-            _topic: str,
-            _key: bytes | None,
-            value: bytes,
-            _headers: object | None = None,
-        ) -> None:
-            command_envelope = ModelEventEnvelope[object].model_validate_json(value)
-            terminal_envelope = ModelEventEnvelope[object](
-                payload={"status": "complete", "dispatch_count": 5},
-                correlation_id=command_envelope.correlation_id,
-                envelope_timestamp=datetime.now(UTC),
-                event_type=route.terminal_event,
-                source_tool="session_orchestrator",
-            )
-            await created_consumers[-1].messages.put(
-                SimpleNamespace(value=terminal_envelope.model_dump_json().encode())
-            )
-
-        async def subscribe(
-            self,
-            *_args: object,
-            **_kwargs: object,
-        ) -> object:
-            pytest.fail("Kafka-backed terminal waits should use a direct consumer")
-
-    monkeypatch.setattr(
-        "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
-        FakeAIOKafkaConsumer,
+    created_consumers = _install_fake_aiokafka_consumer(
+        monkeypatch,
+        stop_error=RuntimeError("failed to close terminal consumer"),
     )
 
     broker = RuntimePatternBBroker(
-        FakeKafkaTransport(),
+        _FakeKafkaTransport(route, created_consumers),
         command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
         routes={"session_orchestrator": route},
     )

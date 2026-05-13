@@ -1004,12 +1004,19 @@ def _materialize_known_handler_dependencies(
     Runtime images may carry a core resolver that only direct-injects
     ``event_bus``. Threading ``container`` / ``ownership_query`` through the
     existing explicit-dependency map keeps infra wiring deterministic without
-    requiring a synchronized core release.
+    requiring a synchronized core release. Runtime-owned ports are materialized
+    here as explicit dependencies when handlers declare them.
     """
     required_params = _required_handler_init_params(handler_cls)
     if not required_params:
         return materialized_explicit_dependencies
-    if not required_params.intersection({"container", "ownership_query"}):
+    known_dependency_names = {
+        "container",
+        "dispatch_port",
+        "event_bus",
+        "ownership_query",
+    }
+    if not required_params.intersection(known_dependency_names):
         return materialized_explicit_dependencies
     available = {
         name: value
@@ -1020,6 +1027,14 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
+    if "dispatch_port" in required_params and event_bus is not None:
+        from omnibase_infra.runtime.service_delegation_dispatch_port import (
+            RuntimeDelegationDispatchPort,
+        )
+
+        available["dispatch_port"] = RuntimeDelegationDispatchPort(
+            event_bus=event_bus  # type: ignore[arg-type]
+        )
     if not required_params <= set(available):
         return materialized_explicit_dependencies
 
@@ -2000,16 +2015,12 @@ def _prepare_handler_wiring(
         handler_cls
     ):
         _effective_container = None
+    elif container is not None:
+        _effective_container = container
+    elif dispatch_engine is not None:
+        _effective_container = getattr(dispatch_engine, "_container", None)
     else:
-        _effective_container = (
-            container
-            if container is not None
-            else (
-                getattr(dispatch_engine, "_container", None)
-                if dispatch_engine is not None
-                else None
-            )
-        )
+        _effective_container = None
     _effective_materialized_dependencies = _materialize_known_handler_dependencies(
         handler_name=handler_ref.name,
         handler_cls=handler_cls,

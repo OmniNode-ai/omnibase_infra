@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -599,7 +600,7 @@ class TestWireFromManifest:
                 self.container = container
 
             async def handle(self, envelope: object) -> None:
-                return None
+                await asyncio.sleep(0)
 
         container = FalseyContainer()
         with patch(

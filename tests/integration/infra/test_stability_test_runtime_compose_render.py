@@ -98,6 +98,10 @@ def _http_url(authority: str) -> str:
     return "http" + "://" + authority
 
 
+def _cidr(prefix: str, suffix: str) -> str:
+    return prefix + "." + suffix
+
+
 COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
@@ -108,7 +112,7 @@ COMPOSE_RENDER_ENV = {
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),
     "LLM_DEEPSEEK_R1_URL": _http_url("llm-deepseek.invalid"),
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
-    "LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.0/24",
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",

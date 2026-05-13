@@ -14,8 +14,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-from pydantic import ValidationError
-
 from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums import (
     EnumDispatchStatus,
@@ -146,7 +144,7 @@ class DispatcherInferenceResponse(MixinAsyncCircuitBreaker):
         except InfraUnavailableError as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
-            logger.error(  # noqa: TRY400
+            logger.exception(
                 "DispatcherInferenceResponse circuit open: %s",
                 sanitize_error_message(e),
                 extra={"correlation_id": str(correlation_id)},
@@ -164,7 +162,7 @@ class DispatcherInferenceResponse(MixinAsyncCircuitBreaker):
                 output_events=[],
             )
 
-        except (ValidationError, ValueError, KeyError) as e:
+        except (ValueError, KeyError) as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             return ModelDispatchResult(
@@ -180,12 +178,12 @@ class DispatcherInferenceResponse(MixinAsyncCircuitBreaker):
                 output_events=[],
             )
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("handle")
-            logger.error(  # noqa: TRY400
+            logger.exception(
                 "DispatcherInferenceResponse failed: %s",
                 sanitize_error_message(e),
                 extra={"correlation_id": str(correlation_id)},

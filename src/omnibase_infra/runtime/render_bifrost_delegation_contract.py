@@ -16,7 +16,7 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -80,7 +80,7 @@ def _probe_openai_model_endpoint(
             body = response.read()
     except HTTPError as exc:
         return f"{endpoint} returned HTTP {exc.code}"
-    except (TimeoutError, URLError, OSError) as exc:
+    except OSError as exc:
         return f"{endpoint} is not reachable: {exc}"
 
     try:
@@ -142,6 +142,48 @@ def _populate_backend_endpoint(
     return True
 
 
+def _load_render_source(
+    *,
+    should_verify: bool,
+    target: Path,
+    source: Path,
+) -> dict[str, object]:
+    if should_verify and _has_populated_endpoint(target):
+        return _load_yaml(target)
+    if source.exists():
+        return _load_yaml(source)
+    raise ProtocolConfigurationError(f"Bifrost source contract not found at {source}")
+
+
+def _populate_backend_endpoints(
+    backends: list[object],
+    *,
+    env: Mapping[str, str],
+    should_verify: bool,
+    endpoint_probe: EndpointProbe,
+) -> int:
+    populated = 0
+    unresolved_required: list[str] = []
+    for backend in backends:
+        if not isinstance(backend, dict):
+            continue
+        if _populate_backend_endpoint(
+            backend,
+            env=env,
+            verify_endpoints=should_verify,
+            endpoint_probe=endpoint_probe,
+            unresolved_required=unresolved_required,
+        ):
+            populated += 1
+
+    if unresolved_required:
+        missing = "; ".join(sorted(set(unresolved_required)))
+        raise ProtocolConfigurationError(
+            f"Required Bifrost endpoint providers are unresolved: {missing}"
+        )
+    return populated
+
+
 def render_bifrost_delegation_contract(
     *,
     source_path: Path | None = None,
@@ -169,40 +211,21 @@ def render_bifrost_delegation_contract(
         load_bifrost_delegation_config(target)
         return target
 
-    if should_verify and _has_populated_endpoint(target):
-        data = _load_yaml(target)
-    elif source.exists():
-        data = _load_yaml(source)
-    else:
-        raise ProtocolConfigurationError(
-            f"Bifrost source contract not found at {source}"
-        )
+    data = _load_render_source(
+        should_verify=should_verify, target=target, source=source
+    )
     backends = data.get("backends")
     if not isinstance(backends, list):
         raise ProtocolConfigurationError(
             f"Bifrost source contract must declare a backends list: {source}"
         )
 
-    populated = 0
-    unresolved_required: list[str] = []
-    for backend in backends:
-        if not isinstance(backend, dict):
-            continue
-        if _populate_backend_endpoint(
-            backend,
-            env=env,
-            verify_endpoints=should_verify,
-            endpoint_probe=probe,
-            unresolved_required=unresolved_required,
-        ):
-            populated += 1
-
-    if unresolved_required:
-        missing = "; ".join(sorted(set(unresolved_required)))
-        raise ProtocolConfigurationError(
-            f"Required Bifrost endpoint providers are unresolved: {missing}"
-        )
-
+    populated = _populate_backend_endpoints(
+        backends,
+        env=env,
+        should_verify=should_verify,
+        endpoint_probe=probe,
+    )
     if populated == 0:
         raise ProtocolConfigurationError(
             "Bifrost delegation contract rendered with no populated endpoint_url "

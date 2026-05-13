@@ -219,9 +219,7 @@ class RuntimePatternBBroker:
                 group_id=_terminal_group_id(correlation_id),
                 on_message=terminal_callback(topic),
             )
-            unsubscribe_terminals.append(
-                cast("Callable[[], Awaitable[None]]", unsubscribe)
-            )
+            unsubscribe_terminals.append(unsubscribe)
         try:
             await self._publish_worker_command(command, route)
             return await asyncio.wait_for(
@@ -379,11 +377,12 @@ class RuntimePatternBBroker:
 
 
 def _terminal_topics(route: RuntimeLocalIngressRoute) -> tuple[str, ...]:
+    topics: list[str] = []
     if route.terminal_events:
-        return route.terminal_events
-    if route.terminal_event is not None:
-        return (route.terminal_event,)
-    return ()
+        topics.extend(route.terminal_events)
+    elif route.terminal_event is not None:
+        topics.append(route.terminal_event)
+    return tuple(topics)
 
 
 def _status_for_terminal_topic(route: RuntimeLocalIngressRoute, topic: str) -> str:
