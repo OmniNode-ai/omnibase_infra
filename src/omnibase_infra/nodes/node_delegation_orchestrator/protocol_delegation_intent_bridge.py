@@ -15,7 +15,8 @@ class ProtocolDelegationIntentBridge(Protocol):
     """Protocol key for delegation intent bridge DI lookup."""
 
     @property
-    def llm_caller(self) -> ProtocolLlmCaller | None: ...
+    def llm_caller(self) -> ProtocolLlmCaller | None:
+        pass  # Protocol stub — implementation provided by concrete class
 
 
 __all__ = ["ProtocolDelegationIntentBridge"]
