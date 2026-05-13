@@ -30,4 +30,6 @@ def test_delegation_profile_loader_projects_contract_runtime_config() -> None:
 
     assert profile.runtime_profile == "main"
     assert loader.event_bus_config().bootstrap_servers == ["redpanda:9092"]
-    assert loader.llm_backend_config()["default"].provider == "bifrost"
+    assert (
+        loader.llm_backend_config()["default"].bifrost_endpoint_ref == "local-bifrost"
+    )
