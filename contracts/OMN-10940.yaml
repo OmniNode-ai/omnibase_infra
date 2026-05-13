@@ -6,7 +6,7 @@ is_seam_ticket: false
 interface_change: true
 interfaces_touched:
   - "events"
-  - "runtime"
+  - "protocols"
 emergency_bypass:
   enabled: false
   justification: ""
