@@ -339,6 +339,9 @@ class PluginDelegation:
             from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
                 DelegationIntentBridge,
             )
+            from omnibase_infra.nodes.node_delegation_orchestrator.protocol_delegation_intent_bridge import (
+                ProtocolDelegationIntentBridge,
+            )
 
             # Resolve the bridge registered by PluginLlm (has real LlmCallerDelegation).
             # Fall back to None so routing/quality-gate intents still work without LLM.
@@ -347,7 +350,7 @@ class PluginDelegation:
                 try:
                     existing_bridge = (
                         await config.container.service_registry.resolve_service(
-                            DelegationIntentBridge
+                            ProtocolDelegationIntentBridge  # type: ignore[type-abstract]
                         )
                     )
                     llm_caller = existing_bridge.llm_caller
