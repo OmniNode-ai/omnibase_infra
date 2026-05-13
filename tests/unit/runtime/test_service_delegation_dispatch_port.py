@@ -3,10 +3,20 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
 
+from omnibase_core.models.dispatch.model_dispatch_bus_command import (
+    ModelDispatchBusCommand,
+)
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
+    RuntimeDelegationDispatchPort,
     _normalize_result_payload,
     _select_delegation_route,
 )
@@ -78,6 +88,58 @@ def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> 
         selected.alias
         == "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route(
+        package_name="omnimarket",
+        terminal_events=(
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+        ),
+    )
+    captured_timeout_seconds: list[float] = []
+
+    class FakeBroker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def dispatch_request(
+            self, command: ModelDispatchBusCommand
+        ) -> tuple[object, object]:
+            captured_timeout_seconds.append(command.timeout_seconds)
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=uuid4(),
+                status="completed",
+                payload={"content": "ok"},
+                completed_at=datetime.now(UTC),
+            )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        FakeBroker,
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=object(),  # type: ignore[arg-type]
+        routes={
+            "omnimarket.node_delegation_orchestrator.delegation.orchestrate": route
+        },
+    )
+
+    await port.dispatch(
+        prompt="probe",
+        task_type="document",
+        correlation_id=uuid4(),
+        max_tokens=512,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+    )
+
+    assert captured_timeout_seconds == [600.0]
 
 
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:

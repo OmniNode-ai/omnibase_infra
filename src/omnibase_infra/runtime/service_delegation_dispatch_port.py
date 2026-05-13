@@ -33,7 +33,7 @@ _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
-_DEFAULT_TIMEOUT_SECONDS = 900.0
+_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
 @dataclass(frozen=True, slots=True)
