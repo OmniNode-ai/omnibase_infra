@@ -134,8 +134,15 @@ async def start_llm_inference_consumer(
                 # Route by model name heuristics
                 model_lower = model_name.lower()
                 if "glm" in model_lower:
-                    base_url = os.environ.get("LLM_GLM_URL", "")
-                    api_key = api_key or os.environ.get("LLM_GLM_API_KEY", "")
+                    base_url = os.environ.get(
+                        "LLM_GLM_URL", ""
+                    )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+                    api_key = (
+                        api_key
+                        or os.environ.get(
+                            "LLM_GLM_API_KEY", ""
+                        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+                    )
                 elif "deepseek" in model_lower:
                     base_url = endpoints.get("LLM_DEEPSEEK_R1_URL", "")
                 elif "coder" in model_lower or "qwen" in model_lower:
