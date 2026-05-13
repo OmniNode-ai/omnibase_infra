@@ -217,6 +217,13 @@ class DispatchResultApplier:
         Returns:
             The resolved topic string.
         """
+        embedded_topic = self._resolve_embedded_output_topic(event)
+        if embedded_topic is not None:
+            return embedded_topic
+        return self._resolve_mapped_output_topic(event)
+
+    def _resolve_embedded_output_topic(self, event: BaseModel) -> str | None:
+        """Return a declared topic carried by the event payload, if present."""
         embedded_topic = getattr(event, "topic", None)
         if isinstance(embedded_topic, str) and embedded_topic.strip():
             candidate_topic = embedded_topic.strip()
@@ -229,6 +236,10 @@ class DispatchResultApplier:
                     "event_type": type(event).__name__,
                 },
             )
+        return None
+
+    def _resolve_mapped_output_topic(self, event: BaseModel) -> str:
+        """Resolve output topic from configured class maps or fallback topic."""
         if not self._output_topic_map:
             return self._output_topic
         class_name = type(event).__name__
@@ -489,9 +500,14 @@ class DispatchResultApplier:
                             str(effective_correlation_id),
                         )
 
-                    resolved_topic = self._topic_router.get(
-                        type(output_event).__name__,
-                        self._resolve_output_topic(output_event),
+                    embedded_topic = self._resolve_embedded_output_topic(output_event)
+                    resolved_topic = (
+                        embedded_topic
+                        if embedded_topic is not None
+                        else self._topic_router.get(
+                            type(output_event).__name__,
+                            self._resolve_mapped_output_topic(output_event),
+                        )
                     )
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
