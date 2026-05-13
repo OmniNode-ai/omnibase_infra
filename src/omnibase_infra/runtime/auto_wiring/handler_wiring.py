@@ -1844,6 +1844,7 @@ async def _subscribe_contract_topics(
             effective_result_applier = DispatchResultApplier(
                 event_bus=event_bus,
                 output_topic=output_topic,
+                allowed_output_topics=contract.event_bus.publish_topics,
             )
     node_identity = ModelNodeIdentity(
         env=environment,

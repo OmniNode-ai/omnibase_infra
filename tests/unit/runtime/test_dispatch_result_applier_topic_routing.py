@@ -161,6 +161,21 @@ class TestResolveOutputTopic:
         event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
         assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
 
+    def test_embedded_topic_can_use_publish_topic_allowlist(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "onex.evt.example.completed.v1",
+            },
+            allowed_output_topics={
+                "onex.evt.example.completed.v1",
+                "onex.evt.example.failed.v1",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
+
     def test_undeclared_embedded_topic_falls_back_to_contract_topic(self) -> None:
         applier = DispatchResultApplier(
             event_bus=AsyncMock(),
@@ -252,8 +267,11 @@ class TestPublishPathTopicRouting:
                 "TopicCarryingEvent": "router-topic",
             },
             output_topic_map={
-                "TopicCarryingEvent": "mapped-topic",
-                "FailedTopicCarryingEvent": "onex.evt.example.failed.v1",
+                "TopicCarryingEvent": "onex.evt.example.completed.v1",
+            },
+            allowed_output_topics={
+                "onex.evt.example.completed.v1",
+                "onex.evt.example.failed.v1",
             },
         )
         result = _make_result(

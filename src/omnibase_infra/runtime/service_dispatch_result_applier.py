@@ -43,7 +43,7 @@ Related:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4, uuid5
@@ -133,6 +133,9 @@ class DispatchResultApplier:
         projection_effect: ProtocolProjectionEffect | None = None,
         topic_router: dict[str, str] | None = None,
         output_topic_map: dict[str, str] | None = None,
+        output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
+        | None = None,
+        allowed_output_topics: Iterable[str] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -160,6 +163,13 @@ class DispatchResultApplier:
                 ``published_events``) to their declared Kafka topics. Uses short
                 names (``Model`` prefix stripped) with full class name fallback.
                 Build with ``load_published_events_map()`` (OMN-5132).
+            output_event_handler: Optional async hook for output events that are
+                executed in-process instead of being published. If it returns a
+                non-None model, the original output event is considered handled.
+            allowed_output_topics: Optional contract-derived allowlist of publish
+                topics. This should include ``event_bus.publish_topics`` so
+                per-instance embedded topics can select any declared terminal
+                topic, even when multiple terminal outcomes share one event model.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -168,6 +178,12 @@ class DispatchResultApplier:
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
+        self._output_event_handler = output_event_handler
+        self._allowed_output_topic_set: set[str] = {
+            topic.strip()
+            for topic in (allowed_output_topics or ())
+            if isinstance(topic, str) and topic.strip()
+        }
 
     @property
     def published_events_map(self) -> dict[str, str]:
@@ -255,6 +271,7 @@ class DispatchResultApplier:
             self._output_topic,
             *self._output_topic_map.values(),
             *self._topic_router.values(),
+            *self._allowed_output_topic_set,
         }
 
     def _execute_projection(
