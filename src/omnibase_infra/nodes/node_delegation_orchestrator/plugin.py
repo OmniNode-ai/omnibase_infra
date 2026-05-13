@@ -112,10 +112,53 @@ class PluginDelegation:
         except Exception:  # noqa: BLE001
             return []
 
+    def _load_contract_llm_backends(self) -> dict[str, object]:
+        """Load llm_backends from delegation profile contract.
+
+        Returns an empty dict if the contract is absent or invalid.
+        """
+        try:
+            from omnibase_infra.runtime.delegation_profile_config_loader import (
+                DelegationProfileConfigLoader,
+            )
+
+            loader = DelegationProfileConfigLoader(contract_path=self._contract_path)
+            backends = loader.llm_backend_config()
+            if backends is None:
+                return {}
+            return dict(backends) if hasattr(backends, "__iter__") else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _load_contract_security(self) -> object | None:
+        """Load security config from delegation profile contract.
+
+        Returns None if the contract is absent, invalid, or has no security section.
+        """
+        try:
+            from omnibase_infra.runtime.delegation_profile_config_loader import (
+                DelegationProfileConfigLoader,
+            )
+
+            loader = DelegationProfileConfigLoader(contract_path=self._contract_path)
+            return loader.security_config()
+        except Exception:  # noqa: BLE001
+            return None
+
     @property
     def contract_bootstrap_servers(self) -> list[str]:
         """Bootstrap servers sourced from the delegation runtime profile contract."""
         return self._contract_bootstrap_servers
+
+    @property
+    def contract_llm_backends(self) -> dict[str, object]:
+        """LLM backend config sourced from the delegation runtime profile contract."""
+        return self._load_contract_llm_backends()
+
+    @property
+    def contract_security(self) -> object | None:
+        """Security config sourced from the delegation runtime profile contract."""
+        return self._load_contract_security()
 
     @property
     def plugin_id(self) -> str:
