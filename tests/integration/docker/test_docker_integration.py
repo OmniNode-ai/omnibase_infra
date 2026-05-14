@@ -1098,6 +1098,10 @@ class TestDockerComposeProfiles:
                 "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
                 "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
                 "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+                # OMN-10943: HTTP request signing and CIDR allowlist for the
+                # local LLM HTTP transport added with :? fail-fast.
+                "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+                "LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.0/24",
             }
         )
 
