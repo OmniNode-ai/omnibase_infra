@@ -80,19 +80,6 @@ def test_handler_change_without_contract_change_fails():
 
 
 @pytest.mark.unit
-def test_node_handler_named_test_file_does_not_trigger_contract_sync():
-    """Test files under tests/unit/nodes are not production node handlers."""
-    result = run_script(
-        [
-            "tests/unit/nodes/node_delegation_routing_reducer/handlers/test_handler_delegation_routing.py",
-        ]
-    )
-    assert result.returncode == 0, (
-        f"Expected PASS for test-only handler path.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-@pytest.mark.unit
 def test_skill_prompt_change_with_skill_md_passes():
     """Skill prompt.md change accompanied by SKILL.md change must PASS."""
     result = run_script(

@@ -11,9 +11,7 @@ manifest. The fixture contains at least one handler per branch:
 
     * RESOLVED_VIA_NODE_REGISTRY       — materialized explicit dep map
     * RESOLVED_VIA_CONTAINER           — container.get_service returns instance
-    * RESOLVED_VIA_KNOWN_PARAMS        — ``__init__(self, event_bus)`` (subsumes
-                                         the legacy single-param EVENT_BUS path
-                                         per OMN-10278)
+    * RESOLVED_VIA_EVENT_BUS           — ``__init__(self, event_bus)``
     * RESOLVED_VIA_ZERO_ARG            — zero-arg constructor
     * RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP — node not hosted here
 
@@ -98,13 +96,7 @@ class HandlerContainerOwned:
 
 
 class HandlerEventBusOwned:
-    """Handler resolved via RESOLVED_VIA_KNOWN_PARAMS (single event_bus kwarg).
-
-    Historically this branch resolved as RESOLVED_VIA_EVENT_BUS. With the
-    OMN-10278 multi-param resolver extension, the single-param event_bus path
-    is subsumed by the broader RESOLVED_VIA_KNOWN_PARAMS outcome — same
-    handler, same dependency, new outcome enum label.
-    """
+    """Handler resolved via RESOLVED_VIA_EVENT_BUS (single event_bus kwarg)."""
 
     def __init__(self, event_bus: object) -> None:
         self.event_bus = event_bus
@@ -420,12 +412,12 @@ class TestFullAutoWiringExercisesResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER
         )
 
-        # Known-params branch (subsumes legacy EVENT_BUS path per OMN-10278)
+        # Event-bus branch
         event_bus_contract = _find_contract(report, "node_event_bus_owned")
         assert len(event_bus_contract.wirings) == 1
         assert (
             event_bus_contract.wirings[0].resolution_outcome
-            is EnumHandlerResolutionOutcome.RESOLVED_VIA_KNOWN_PARAMS
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_EVENT_BUS
         )
 
         # Zero-arg branch
@@ -466,12 +458,10 @@ class TestFullAutoWiringExercisesResolver:
             f"precedence path; observed: {observed_outcomes!r}"
         )
         # Stronger: observed set equals expected full-branch coverage.
-        # RESOLVED_VIA_KNOWN_PARAMS subsumes the legacy single-param
-        # RESOLVED_VIA_EVENT_BUS path per OMN-10278.
         expected_outcomes = {
             EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER,
-            EnumHandlerResolutionOutcome.RESOLVED_VIA_KNOWN_PARAMS,
+            EnumHandlerResolutionOutcome.RESOLVED_VIA_EVENT_BUS,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_ZERO_ARG,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP,
         }

@@ -255,11 +255,8 @@ class AdapterCodeReviewAnalysis:
                 "Provide a valid URL or set the LLM_CODER_FAST_URL environment variable.",
                 context=context,
             )
-        resolved_base_url: str = (
-            base_url
-            or os.environ.get(  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
-                "LLM_CODER_FAST_URL", "http://localhost:8001"
-            )
+        resolved_base_url: str = base_url or os.environ.get(
+            "LLM_CODER_FAST_URL", "http://localhost:8001"
         )
         if not resolved_base_url.strip():
             context = ModelInfraErrorContext.with_correlation(

@@ -43,7 +43,7 @@ Related:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4, uuid5
@@ -133,8 +133,6 @@ class DispatchResultApplier:
         projection_effect: ProtocolProjectionEffect | None = None,
         topic_router: dict[str, str] | None = None,
         output_topic_map: dict[str, str] | None = None,
-        output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
-        | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -162,9 +160,6 @@ class DispatchResultApplier:
                 ``published_events``) to their declared Kafka topics. Uses short
                 names (``Model`` prefix stripped) with full class name fallback.
                 Build with ``load_published_events_map()`` (OMN-5132).
-            output_event_handler: Optional async hook for output events that are
-                executed in-process instead of being published. If it returns a
-                non-None model, the original output event is considered handled.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -173,7 +168,6 @@ class DispatchResultApplier:
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
-        self._output_event_handler = output_event_handler
 
     @property
     def published_events_map(self) -> dict[str, str]:
@@ -446,25 +440,6 @@ class DispatchResultApplier:
         if result.output_events:
             for idx, output_event in enumerate(result.output_events):
                 try:
-                    if self._output_event_handler is not None:
-                        handled_result = await self._output_event_handler(output_event)
-                        if handled_result is not None:
-                            logger.info(
-                                "Handled output event in-process "
-                                "(event_type=%s, result_type=%s, correlation_id=%s)",
-                                type(output_event).__name__,
-                                type(handled_result).__name__,
-                                str(effective_correlation_id),
-                                extra={
-                                    "output_event_type": type(output_event).__name__,
-                                    "handled_result_type": type(
-                                        handled_result
-                                    ).__name__,
-                                    "dispatcher_id": result.dispatcher_id,
-                                },
-                            )
-                            continue
-
                     # Deterministic envelope_id: uuid5(correlation_id, "type:index")
                     # ensures redeliveries produce identical IDs, enabling
                     # downstream consumers to deduplicate at-least-once events.

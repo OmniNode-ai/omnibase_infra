@@ -473,11 +473,9 @@ _DB_URL_ENV_MAP: dict[str, str] = {
 }
 
 _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
-    "delegation-shadow-comparison": "delegation_shadow_comparison",
     "node-heartbeat": "heartbeat",
     "node-introspection": "introspection",
     "node-state-change": "state_change",
-    "task-delegated": "task_delegated",
 }
 
 

@@ -29,7 +29,6 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-compat>=0.3.1,<1.0.0",
     "omnibase-core>=0.40.1,<0.41.0",
     "omnibase-spi>=0.20.6",
     "omnimarket>=0.1.0",
@@ -169,19 +168,10 @@ override-dependencies = [
     # (schema registry / repair / budget policy nodes) without waiting for
     # omnimarket to re-pin OCC by branch.
     "onex-change-control @ git+https://github.com/OmniNode-ai/onex_change_control.git@main",
-    # OMN-10923: omnimarket pins omnibase-compat to the v0.3.1 zip archive, which
-    # predates the delegation contract models (PR #87, commit d86ee00). This
-    # config loader imports from omnibase_compat.contracts.delegation, which
-    # only exists at omnibase_compat main HEAD (commit 51c39d8). Override forces
-    # the newer git pin to win. The OMN-4315 sibling check workflows have been
-    # updated to NOT redundantly inject a file:// override for omnibase-compat
-    # (uv rejects multiple URL specs for the same package).
-    "omnibase-compat @ git+https://github.com/OmniNode-ai/omnibase_compat.git@51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a",
 ]
 
 [tool.uv.sources]
-omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", rev = "51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" }
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "235c31996d20217c4270319b59dc76a0568fe078" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "b42e6dae20f9ac02ef35a776c35ec32aae0023ed" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
 [tool.ruff]
