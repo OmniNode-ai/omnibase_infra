@@ -169,8 +169,9 @@ class TestModelOperationContextBoundaryConditions:
         timeout_seconds = 30.0
         current_time = time.time()
 
-        # Create context where elapsed is just under the timeout
-        started_at = current_time - timeout_seconds + 0.001  # 0.001 seconds under
+        # Use a 100ms margin so slow CI runners don't cross the boundary
+        # between time.time() capture and is_timed_out() evaluation.
+        started_at = current_time - timeout_seconds + 0.1  # 100ms under
 
         ctx = ModelOperationContext(
             correlation_id=uuid4(),
