@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=235c31996d20217c4270319b59dc76a0568fe078" },
     { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main" },
 ]
 
@@ -2165,7 +2165,7 @@ dependencies = [
 [[package]]
 name = "omnibase-core"
 version = "0.40.2"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main#235c31996d20217c4270319b59dc76a0568fe078" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=235c31996d20217c4270319b59dc76a0568fe078#235c31996d20217c4270319b59dc76a0568fe078" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2279,7 +2279,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=235c31996d20217c4270319b59dc76a0568fe078" },
     { name = "omnibase-spi", specifier = ">=0.20.6" },
     { name = "omnimarket", git = "https://github.com/OmniNode-ai/omnimarket.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
