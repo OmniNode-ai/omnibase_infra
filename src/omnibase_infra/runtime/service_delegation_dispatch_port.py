@@ -7,10 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
 from omnimarket.nodes.node_delegation_orchestrator.models.model_delegation_request import (
