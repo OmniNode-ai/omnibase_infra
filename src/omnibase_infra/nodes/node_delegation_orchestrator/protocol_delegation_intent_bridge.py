@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
+from omnimarket.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
     ProtocolLlmCaller,
 )
 
