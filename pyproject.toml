@@ -181,7 +181,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", rev = "51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" }
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "b42e6dae20f9ac02ef35a776c35ec32aae0023ed" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "235c31996d20217c4270319b59dc76a0568fe078" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
 [tool.ruff]
