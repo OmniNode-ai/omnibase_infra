@@ -324,7 +324,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             ) -> None:
                 self.dispatch_port = dispatch_port
 
-            async def handle(self, envelope: object) -> None:
+            def handle(self, envelope: object) -> None:
                 return None
 
         ownership = ServiceLocalHandlerOwnershipQuery(
@@ -376,7 +376,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
                 self.dispatch_port = dispatch_port
                 HandlerWithOptionalDispatchPort.last_dispatch_port = dispatch_port
 
-            async def handle(self, envelope: object) -> None:
+            def handle(self, envelope: object) -> None:
                 return None
 
         ownership = ServiceLocalHandlerOwnershipQuery(
