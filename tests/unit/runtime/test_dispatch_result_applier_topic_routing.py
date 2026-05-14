@@ -51,6 +51,13 @@ class UnmappedEvent(BaseModel):
     value: str = "x"
 
 
+class TopicCarryingEvent(BaseModel):
+    """Event whose typed payload declares its own topic."""
+
+    topic: str
+    value: str = "x"
+
+
 def _make_result(**overrides: object) -> ModelDispatchResult:
     defaults: dict[str, object] = {
         "status": EnumDispatchStatus.SUCCESS,
@@ -142,6 +149,44 @@ class TestResolveOutputTopic:
         event = UnmappedEvent()
         assert applier._resolve_output_topic(event) == "mapped-topic"
 
+    def test_embedded_topic_takes_precedence(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "mapped-topic",
+                "FailedTopicCarryingEvent": "onex.evt.example.failed.v1",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
+
+    def test_embedded_topic_can_use_publish_topic_allowlist(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "onex.evt.example.completed.v1",
+            },
+            allowed_output_topics={
+                "onex.evt.example.completed.v1",
+                "onex.evt.example.failed.v1",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "onex.evt.example.failed.v1"
+
+    def test_undeclared_embedded_topic_falls_back_to_contract_topic(self) -> None:
+        applier = DispatchResultApplier(
+            event_bus=AsyncMock(),
+            output_topic="fallback-topic",
+            output_topic_map={
+                "TopicCarryingEvent": "mapped-topic",
+            },
+        )
+        event = TopicCarryingEvent(topic="onex.evt.example.failed.v1")
+        assert applier._resolve_output_topic(event) == "mapped-topic"
+
 
 # ---------------------------------------------------------------------------
 # Publish path integration tests
@@ -211,6 +256,32 @@ class TestPublishPathTopicRouting:
         mock_bus.publish_envelope.assert_called_once()
         call_kwargs = mock_bus.publish_envelope.call_args
         assert call_kwargs.kwargs["topic"] == "router-topic"
+
+    @pytest.mark.asyncio
+    async def test_embedded_topic_takes_precedence_over_topic_router(self) -> None:
+        mock_bus = AsyncMock()
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic="fallback-topic",
+            topic_router={
+                "TopicCarryingEvent": "router-topic",
+            },
+            output_topic_map={
+                "TopicCarryingEvent": "onex.evt.example.completed.v1",
+            },
+            allowed_output_topics={
+                "onex.evt.example.completed.v1",
+                "onex.evt.example.failed.v1",
+            },
+        )
+        result = _make_result(
+            output_events=[TopicCarryingEvent(topic="onex.evt.example.failed.v1")],
+        )
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args
+        assert call_kwargs.kwargs["topic"] == "onex.evt.example.failed.v1"
 
     @pytest.mark.asyncio
     async def test_multiple_events_route_independently(self) -> None:

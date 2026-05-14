@@ -34,7 +34,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, get_args, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -87,6 +87,9 @@ if TYPE_CHECKING:
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
+    )
+    from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
+        ProtocolPatternBBrokerTransport,
     )
 
 logger = logging.getLogger(__name__)
@@ -982,12 +985,99 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """Return True when sync container resolution is unnecessary for handler_cls.
 
     Zero-arg handlers can be constructed directly by the resolver, and handlers
-    that require only ``event_bus`` can be constructed from the event-bus path.
-    In both cases, calling a sync container from runtime-managed async boot is
-    unnecessary and can trip ``asyncio.run()`` crashes.
+    that require only runtime-known ports can be constructed from materialized
+    dependencies. In both cases, calling a sync container from runtime-managed
+    async boot is unnecessary and can trip ``asyncio.run()`` crashes.
     """
     required_params = _required_handler_init_params(handler_cls)
-    return not required_params or required_params == frozenset({"event_bus"})
+    return not required_params or required_params <= frozenset(
+        {"event_bus", "dispatch_port"}
+    )
+
+
+def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:
+    parameter = inspect.signature(handler_cls).parameters.get("dispatch_port")
+    if parameter is None:
+        return False
+    annotation = parameter.annotation
+    if isinstance(annotation, str):
+        return "ProtocolDelegationDispatchPort" in annotation
+    if getattr(annotation, "__name__", "") == "ProtocolDelegationDispatchPort":
+        return True
+    return any(
+        getattr(arg, "__name__", "") == "ProtocolDelegationDispatchPort"
+        for arg in get_args(annotation)
+    )
+
+
+def _materialize_known_handler_dependencies(
+    *,
+    handler_name: str,
+    handler_cls: type,
+    materialized_explicit_dependencies: dict[str, dict[str, object]] | None,
+    event_bus: object | None,
+    container: object | None,
+    ownership_query: object | None,
+) -> dict[str, dict[str, object]] | None:
+    """Materialize infra-known constructor deps for core resolver Step 2.
+
+    Runtime images may carry a core resolver that only direct-injects
+    ``event_bus``. Threading ``container`` / ``ownership_query`` through the
+    existing explicit-dependency map keeps infra wiring deterministic without
+    requiring a synchronized core release.
+    """
+    signature = inspect.signature(handler_cls)
+    constructor_params = frozenset(
+        name
+        for name, param in signature.parameters.items()
+        if name != "self"
+        and param.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    )
+    requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
+    required_params = _required_handler_init_params(handler_cls)
+    if not required_params and not requires_delegation_port:
+        return materialized_explicit_dependencies
+    if not (
+        required_params.intersection({"container", "ownership_query", "dispatch_port"})
+        or ("dispatch_port" in constructor_params and requires_delegation_port)
+    ):
+        return materialized_explicit_dependencies
+    available = {
+        name: value
+        for name, value in (
+            ("event_bus", event_bus),
+            ("container", container),
+            ("ownership_query", ownership_query),
+        )
+        if value is not None
+    }
+    if (
+        "dispatch_port" in constructor_params
+        and event_bus is not None
+        and requires_delegation_port
+    ):
+        from omnibase_infra.runtime.service_delegation_dispatch_port import (
+            RuntimeDelegationDispatchPort,
+        )
+
+        available["dispatch_port"] = RuntimeDelegationDispatchPort(
+            cast("ProtocolPatternBBrokerTransport", event_bus)
+        )
+    if not required_params <= set(available):
+        return materialized_explicit_dependencies
+
+    merged = dict(materialized_explicit_dependencies or {})
+    handler_dependencies = dict(merged.get(handler_name, {}))
+    for name in required_params:
+        handler_dependencies.setdefault(name, available[name])
+    if "dispatch_port" in constructor_params and "dispatch_port" in available:
+        handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
+    merged[handler_name] = handler_dependencies
+    return merged
 
 
 def _derive_topic_pattern_from_topic(topic: str) -> str:
@@ -1774,6 +1864,7 @@ async def _subscribe_contract_topics(
             effective_result_applier = DispatchResultApplier(
                 event_bus=event_bus,
                 output_topic=output_topic,
+                allowed_output_topics=contract.event_bus.publish_topics,
             )
     node_identity = ModelNodeIdentity(
         env=environment,
@@ -1959,12 +2050,20 @@ def _prepare_handler_wiring(
         handler_cls
     ):
         _effective_container = None
+    elif container is not None:
+        _effective_container = container
+    elif dispatch_engine is not None:
+        _effective_container = getattr(dispatch_engine, "_container", None)
     else:
-        _effective_container = container or (
-            getattr(dispatch_engine, "_container", None)
-            if dispatch_engine is not None
-            else None
-        )
+        _effective_container = None
+    _effective_materialized_dependencies = _materialize_known_handler_dependencies(
+        handler_name=handler_ref.name,
+        handler_cls=handler_cls,
+        materialized_explicit_dependencies=materialized_explicit_dependencies,
+        event_bus=event_bus,
+        container=_effective_container,
+        ownership_query=ownership_query,
+    )
 
     def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
         """Return a containment-only PreparedWiring for an async-incompat handler.
@@ -2021,7 +2120,7 @@ def _prepare_handler_wiring(
             contract_name=contract.name,
             node_name=contract.name,
             explicit_dependency_shape=None,
-            materialized_explicit_dependencies=materialized_explicit_dependencies,
+            materialized_explicit_dependencies=_effective_materialized_dependencies,
             event_bus=event_bus,
             container=_effective_container,
             ownership_query=ownership_query,

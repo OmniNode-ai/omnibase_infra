@@ -63,6 +63,8 @@ _PRE_GROWTH_ENV_VARS = frozenset(
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
+        "LLM_ENDPOINT_CIDR_ALLOWLIST",
+        "LOCAL_LLM_SHARED_SECRET",
         # omnidash projection DSN: present in ~/.omnibase/.env alongside
         # POSTGRES_PASSWORD; used by intelligence-api and projection consumers.
         "OMNIDASH_ANALYTICS_DB_URL",

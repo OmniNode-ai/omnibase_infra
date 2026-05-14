@@ -1,0 +1,69 @@
+# OMN-10943 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-10943"
+title: "fix(OMN-10943): repair runtime local ingress delegation path"
+summary: >-
+  Local runtime ingress now exposes handler_routing.handlers[].operation values as aliases for the same contract route used by contract and node names. Runtime Pattern B dispatch also honors contract-declared success and failure terminal events so delegate_skill.orchestrate can fail deterministically instead of timing out when delegation routing or inference fails. The runtime container now materializes the deployed Bifrost delegation contract from source contract provider declarations at boot, verifies declared OpenAI-compatible model surfaces before enabling optional backends, and declares the LLM CIDR allowlist and shared HMAC secret as required runtime dependencies.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit and integration tests for runtime local ingress operation aliases and delegation terminal handling pass"
+    command: >-
+      uv run pytest tests/unit/runtime/test_runtime_local_ingress.py tests/integration/test_runtime_local_ingress_operation_alias.py tests/unit/runtime/test_service_pattern_b_broker.py tests/unit/runtime/test_dispatch_result_applier_topic_routing.py tests/unit/delegation/test_delegation_chain_e2e.py tests/unit/delegation/test_delegation_contracts.py tests/unit/runtime/test_render_bifrost_delegation_contract.py -q
+  - kind: "tests"
+    description: "Runtime compose/catalog tests prove Bifrost endpoint verification and required LLM CIDR env wiring"
+    command: >-
+      uv run pytest tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/unit/infra/test_runtime_bundle_decomposition.py tests/unit/infra/test_canary_bundle.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1581"
+    command: "gh pr checks 1581 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-unit-integration-tests"
+    description: "Unit and integration tests cover operation alias dispatch through RuntimeHostProcess"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/test_runtime_local_ingress.py tests/integration/test_runtime_local_ingress_operation_alias.py -q
+  - id: "dod-pattern-b-regression"
+    description: "Pattern B broker tests cover success and failure terminal event waits"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q"
+  - id: "dod-delegation-terminal-failure"
+    description: "Delegation bridge failures publish contract-declared failure terminal events instead of leaving Pattern B waiters to time out"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/delegation/test_delegation_chain_e2e.py tests/unit/delegation/test_delegation_contracts.py tests/unit/runtime/test_dispatch_result_applier_topic_routing.py -q
+  - id: "dod-live-runtime-deploy-validation"
+    description: "Deploy validation requires runtime restart and adapter-facing /skill probe after merge"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy omninode-stability-test-runtime after merge, then POST /skill command_name=delegate_skill.orchestrate and verify the response is not unknown_command and does not time out
+  - id: "dod-bifrost-contract-render"
+    description: "Runtime boot materializes the deployed Bifrost contract from source contract provider declarations and only enables endpoint URLs after model-list verification"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/unit/nodes/node_llm_inference_effect/handlers/bifrost/test_bifrost_delegation_config.py -q
+  - id: "dod-runtime-env-contract"
+    description: "Runtime compose and catalog declare LLM endpoint transport security settings as required instead of failing later inside the HTTP transport"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose -f docker/docker-compose.infra.yml --profile runtime config --quiet

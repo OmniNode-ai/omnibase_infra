@@ -43,7 +43,7 @@ Related:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4, uuid5
@@ -133,6 +133,9 @@ class DispatchResultApplier:
         projection_effect: ProtocolProjectionEffect | None = None,
         topic_router: dict[str, str] | None = None,
         output_topic_map: dict[str, str] | None = None,
+        output_event_handler: Callable[[BaseModel], Awaitable[BaseModel | None]]
+        | None = None,
+        allowed_output_topics: Iterable[str] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -160,6 +163,13 @@ class DispatchResultApplier:
                 ``published_events``) to their declared Kafka topics. Uses short
                 names (``Model`` prefix stripped) with full class name fallback.
                 Build with ``load_published_events_map()`` (OMN-5132).
+            output_event_handler: Optional async hook for output events that are
+                executed in-process instead of being published. If it returns a
+                non-None model, the original output event is considered handled.
+            allowed_output_topics: Optional contract-derived allowlist of publish
+                topics. This should include ``event_bus.publish_topics`` so
+                per-instance embedded topics can select any declared terminal
+                topic, even when multiple terminal outcomes share one event model.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -168,6 +178,12 @@ class DispatchResultApplier:
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
+        self._output_event_handler = output_event_handler
+        self._allowed_output_topic_set: set[str] = {
+            topic.strip()
+            for topic in (allowed_output_topics or ())
+            if isinstance(topic, str) and topic.strip()
+        }
 
     @property
     def published_events_map(self) -> dict[str, str]:
@@ -206,8 +222,10 @@ class DispatchResultApplier:
     def _resolve_output_topic(self, event: BaseModel) -> str:
         """Resolve the output topic for an event using the output_topic_map.
 
-        Tries the short name (class name with ``Model`` prefix removed) first,
-        then the full class name, and falls back to ``_output_topic``.
+        Typed event models may carry an explicit ``topic`` field. When present,
+        that is the most specific contract boundary. Otherwise this tries the
+        short name (class name with ``Model`` prefix removed), then the full
+        class name, and falls back to ``_output_topic``.
 
         Args:
             event: The output event payload (a Pydantic BaseModel).
@@ -215,6 +233,29 @@ class DispatchResultApplier:
         Returns:
             The resolved topic string.
         """
+        embedded_topic = self._resolve_embedded_output_topic(event)
+        if embedded_topic is not None:
+            return embedded_topic
+        return self._resolve_mapped_output_topic(event)
+
+    def _resolve_embedded_output_topic(self, event: BaseModel) -> str | None:
+        """Return a declared topic carried by the event payload, if present."""
+        embedded_topic = getattr(event, "topic", None)
+        if isinstance(embedded_topic, str) and embedded_topic.strip():
+            candidate_topic = embedded_topic.strip()
+            if candidate_topic in self._allowed_output_topics():
+                return candidate_topic
+            logger.warning(
+                "Ignoring undeclared embedded output topic",
+                extra={
+                    "topic": candidate_topic,
+                    "event_type": type(event).__name__,
+                },
+            )
+        return None
+
+    def _resolve_mapped_output_topic(self, event: BaseModel) -> str:
+        """Resolve output topic from configured class maps or fallback topic."""
         if not self._output_topic_map:
             return self._output_topic
         class_name = type(event).__name__
@@ -223,6 +264,15 @@ class DispatchResultApplier:
             short_name,
             self._output_topic_map.get(class_name, self._output_topic),
         )
+
+    def _allowed_output_topics(self) -> set[str]:
+        """Return contract-derived topics the applier may publish to."""
+        return {
+            self._output_topic,
+            *self._output_topic_map.values(),
+            *self._topic_router.values(),
+            *self._allowed_output_topic_set,
+        }
 
     def _execute_projection(
         self,
@@ -467,9 +517,14 @@ class DispatchResultApplier:
                             str(effective_correlation_id),
                         )
 
-                    resolved_topic = self._topic_router.get(
-                        type(output_event).__name__,
-                        self._resolve_output_topic(output_event),
+                    embedded_topic = self._resolve_embedded_output_topic(output_event)
+                    resolved_topic = (
+                        embedded_topic
+                        if embedded_topic is not None
+                        else self._topic_router.get(
+                            type(output_event).__name__,
+                            self._resolve_mapped_output_topic(output_event),
+                        )
                     )
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,

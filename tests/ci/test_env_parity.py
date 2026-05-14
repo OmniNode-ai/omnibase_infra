@@ -123,6 +123,8 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
+        "LLM_ENDPOINT_CIDR_ALLOWLIST",
+        "LOCAL_LLM_SHARED_SECRET",
         # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
         "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS",
     }
@@ -155,6 +157,11 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         # with the OMN-10635 release/deploy follow-up because this PR cannot
         # update the sibling omninode_infra checkout used by the parity job.
         "ONEX_ACTIVE_RUNTIME_PACKAGES",
+        # Bifrost contract rendering knobs. k8s ConfigMap parity belongs with
+        # the sibling omninode_infra ConfigMap update; tracked by OMN-10943.
+        "BIFROST_CONTRACT_PATH",
+        "BIFROST_SOURCE_CONTRACT_PATH",
+        "BIFROST_VERIFY_ENDPOINTS",
         # OpenTelemetry — opt-in observability (empty = disabled)
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_SERVICE_NAME",

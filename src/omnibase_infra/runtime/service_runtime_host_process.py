@@ -149,6 +149,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
+    validate_runtime_local_ingress_payload,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
@@ -2411,6 +2412,57 @@ class RuntimeHostProcess:
                 },
             )
 
+        try:
+            validated_payload = validate_runtime_local_ingress_payload(
+                route,
+                request.payload,
+            )
+        except ValidationError as exc:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                command_name=route.contract_name,
+                node_alias=request.node_alias,
+                resolved_node_name=route.node_name,
+                contract_name=route.contract_name,
+                command_topic=route.command_topic,
+                terminal_event=route.terminal_event,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="validation_error",
+                    message=(
+                        f"Invalid local ingress payload for {route.contract_name}"
+                    ),
+                    details={
+                        "input_model": (
+                            f"{route.input_model_module}.{route.input_model_name}"
+                            if route.input_model_module and route.input_model_name
+                            else None
+                        ),
+                        "errors": json.loads(exc.json(include_url=False)),
+                    },
+                ),
+            )
+        except (AttributeError, ImportError, TypeError, ValueError) as exc:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                command_name=route.contract_name,
+                node_alias=request.node_alias,
+                resolved_node_name=route.node_name,
+                contract_name=route.contract_name,
+                command_topic=route.command_topic,
+                terminal_event=route.terminal_event,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="validation_error",
+                    message=sanitize_error_message(exc),
+                    details={
+                        "contract_path": route.contract_path,
+                        "input_model_module": route.input_model_module,
+                        "input_model_name": route.input_model_name,
+                    },
+                ),
+            )
+
         await self._handler_semaphore.acquire()
         try:
             async with self._pending_lock:
@@ -2424,7 +2476,7 @@ class RuntimeHostProcess:
                     ModelDispatchBusCommand(
                         command_name=route.contract_name,
                         requester="runtime-local-ingress",
-                        payload=request.payload,
+                        payload=validated_payload,
                         correlation_id=correlation_id,
                         response_topic=(
                             EnumOmnibaseInfraTopic.EVT_PATTERN_B_DISPATCH_COMPLETED_V1.value
