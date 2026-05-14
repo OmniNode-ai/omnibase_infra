@@ -12,9 +12,8 @@
 # OMN-8732: Test removal gate
 #
 # Hard-blocks merge when a PR deletes a tests/integration/*.py file
-# without adding a replacement. Override: include
-# [skip-test-removal-gate: <reason>] in the PR body for legitimate
-# test consolidation.
+# without adding a replacement. No override mechanism — consolidation
+# requires a replacement test to be added in the same PR.
 
 name: Integration Test Check
 
@@ -126,16 +125,8 @@ jobs:
           fetch-depth: 0
 
       - name: Detect integration test deletions without replacements
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-
-          # Allow legitimate test consolidation via override token
-          if echo "${PR_BODY:-}" | grep -qF '[skip-test-removal-gate:'; then
-            echo "skip-test-removal-gate token found — bypassing test removal check"
-            exit 0
-          fi
 
           # Counting logic lives in a Python script so it can be unit-tested
           # against synthetic git diff outputs. See
