@@ -173,7 +173,9 @@ override-dependencies = [
     # predates the delegation contract models (PR #87, commit d86ee00). This
     # config loader imports from omnibase_compat.contracts.delegation, which
     # only exists at omnibase_compat main HEAD (commit 51c39d8). Override forces
-    # the newer git pin to win.
+    # the newer git pin to win. The OMN-4315 sibling check workflows have been
+    # updated to NOT redundantly inject a file:// override for omnibase-compat
+    # (uv rejects multiple URL specs for the same package).
     "omnibase-compat @ git+https://github.com/OmniNode-ai/omnibase_compat.git@51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a",
 ]
 

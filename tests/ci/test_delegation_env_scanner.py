@@ -150,13 +150,15 @@ class TestScanDelegationModules:
         assert result.scanned_files > 0
         assert result.report_generated
 
-    def test_scanner_finds_violations_in_repo(self) -> None:
-        """Known env reads exist in delegation modules — scanner must detect them."""
+    def test_delegation_modules_have_no_env_reads(self) -> None:
+        """OMN-10925 removed all env reads from delegation modules; scanner
+        must confirm the clean state stays clean. Any new violation means
+        someone reintroduced an env read inside the delegation pipeline."""
         repo_root = Path(__file__).parent.parent.parent
         result = scan_delegation_modules(repo_root=repo_root, mode="report")
-        assert len(result.violations) > 0, (
-            "Expected known env reads in delegation modules — "
-            "check node_delegation_routing_reducer and adapters/llm/"
+        assert result.violations == [], (
+            "Delegation modules must read all config from contracts. "
+            f"Found env reads: {result.violations}"
         )
 
     def test_report_mode_does_not_fail(self) -> None:
