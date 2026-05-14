@@ -28,6 +28,9 @@ import pytest
 from omnibase_infra.adapters.llm.adapter_llm_caller_delegation import (
     LlmCallerDelegation,
 )
+from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
+    AdapterLlmProviderOpenai,
+)
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
 )
@@ -250,4 +253,34 @@ async def test_end_to_end_max_tokens_chain(max_tokens: int) -> None:
     assert adapter_req.max_tokens == max_tokens, (
         f"End-to-end: max_tokens={max_tokens} was lost or mutated; "
         f"ModelLlmAdapterRequest.max_tokens={adapter_req.max_tokens}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. AdapterLlmProviderOpenai._translate_request: max_tokens reaches the
+#    infra-layer ModelLlmInferenceRequest unchanged. The earlier tests mock
+#    AdapterLlmProviderOpenai wholesale, so a cap regression inside
+#    _translate_request would slip through. This test drives the real method.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("max_tokens", [1024, 2048, 4096, 8192])
+def test_provider_translate_request_propagates_max_tokens(max_tokens: int) -> None:
+    """AdapterLlmProviderOpenai._translate_request must preserve max_tokens unchanged."""
+    adapter = AdapterLlmProviderOpenai(
+        base_url="http://192.168.86.201:8000",  # onex-allow-internal-ip
+        default_model="qwen3-coder-30b",
+    )
+    spi_request = ModelLlmAdapterRequest(
+        prompt="Write a test.",
+        model_name="qwen3-coder-30b",
+        max_tokens=max_tokens,
+        temperature=0.3,
+        timeout_seconds=60.0,
+    )
+    infra_request = adapter._translate_request(spi_request)
+    assert infra_request.max_tokens == max_tokens, (
+        f"_translate_request mutated max_tokens: requested {max_tokens}, "
+        f"got {infra_request.max_tokens} on ModelLlmInferenceRequest"
     )
