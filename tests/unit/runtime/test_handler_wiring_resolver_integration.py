@@ -25,6 +25,7 @@ Test matrix (plan §Task 5 acceptance):
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from pathlib import Path
 from typing import Protocol
 from unittest.mock import MagicMock, patch
@@ -314,7 +315,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
 
         class ProtocolDelegationDispatchPort(Protocol):
-            async def dispatch(self, **kwargs: object) -> dict[str, object]:
+            def dispatch(self, **kwargs: object) -> Awaitable[dict[str, object]]:
                 """Protocol method stub for dispatch port."""
 
         class HandlerWithDispatchPort:
@@ -360,7 +361,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
 
         class ProtocolDelegationDispatchPort(Protocol):
-            async def dispatch(self, **kwargs: object) -> dict[str, object]:
+            def dispatch(self, **kwargs: object) -> Awaitable[dict[str, object]]:
                 """Protocol method stub for dispatch port."""
 
         class HandlerWithOptionalDispatchPort:

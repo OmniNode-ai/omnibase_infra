@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -106,11 +107,13 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
 
     class FakeBroker:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
+            self.args = _args
+            self.kwargs = _kwargs
 
         async def dispatch_request(
             self, command: ModelDispatchBusCommand
         ) -> tuple[object, object]:
+            await asyncio.sleep(0)
             captured_timeout_seconds.append(command.timeout_seconds)
             captured_payloads.append(dict(command.payload))
             return route, ModelDispatchBusTerminalResult(

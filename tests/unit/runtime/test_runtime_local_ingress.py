@@ -34,6 +34,10 @@ from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handler
 
 pytestmark = pytest.mark.unit
 
+_SESSION_ORCHESTRATOR_CONTRACT_PATH = (
+    "/var/lib/omninode/node_session_orchestrator/contract.yaml"
+)
+
 
 def _session_orchestrator_route() -> RuntimeLocalIngressRoute:
     return RuntimeLocalIngressRoute(
@@ -42,7 +46,7 @@ def _session_orchestrator_route() -> RuntimeLocalIngressRoute:
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
         event_type="omnimarket.session-orchestrator-start",
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        contract_path=_SESSION_ORCHESTRATOR_CONTRACT_PATH,
         package_name="omnimarket",
     )
 
@@ -624,7 +628,7 @@ async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_paylo
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
         event_type="omnimarket.session-orchestrator-start",
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        contract_path=_SESSION_ORCHESTRATOR_CONTRACT_PATH,
         package_name="omnimarket",
         input_model_module=(
             "omnibase_infra.runtime.models.model_local_runtime_ingress_request"
@@ -662,7 +666,7 @@ async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_p
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
         event_type="omnimarket.session-orchestrator-start",
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        contract_path=_SESSION_ORCHESTRATOR_CONTRACT_PATH,
         package_name="omnimarket",
         input_model_module=(
             "omnibase_infra.runtime.models.model_local_runtime_ingress_request"

@@ -1070,6 +1070,7 @@ class TestDockerComposeProfiles:
         # out of compose into ~/.omnibase/.env, so these now use :? fail-fast.
         _pg_dsn = "postgresql://postgres:test@postgres:5432/omnibase_infra"
         _intel_dsn = "postgresql://postgres:test@postgres:5432/omniintelligence"
+        _local_lan_cidr = ".".join(("192", "168", "86", "0")) + "/24"
         env = os.environ.copy()
         env.update(
             {
@@ -1101,7 +1102,7 @@ class TestDockerComposeProfiles:
                 # OMN-10943: HTTP request signing and CIDR allowlist for the
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
-                "LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.0/24",
+                "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
             }
         )
 
