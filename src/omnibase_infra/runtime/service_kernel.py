@@ -1440,10 +1440,16 @@ async def bootstrap() -> int:
                     Non-fatal: any failure (subscribe timeout, broker outage,
                     missing topic on fresh broker) is logged and the task exits
                     cleanly. Never propagates to the kernel.
+
+                    Subscriptions established here are tracked locally and
+                    unsubscribed in the task's finally block so the kernel
+                    does not retain orphan consumers ingesting events with no
+                    finalizer loop to drain them.
                     """
                     import json as _json
 
                     _poll_interval = 2.0
+                    _unsubscribes: list[Callable[[], Awaitable[None]]] = []
 
                     try:
                         for _input_topic in _savings_input_topics:
@@ -1461,14 +1467,15 @@ async def bootstrap() -> int:
                                         else msg,
                                     )
 
-                                await event_bus.subscribe(
+                                _unsubscribe = await event_bus.subscribe(
                                     _input_topic,
                                     on_message=_savings_on_message,  # type: ignore[arg-type]
                                     group_id=f"savings-estimator.{_input_topic}",
                                 )
+                                _unsubscribes.append(_unsubscribe)
                             except asyncio.CancelledError:
                                 raise
-                            except BaseException:  # noqa: BLE001
+                            except Exception:  # noqa: BLE001
                                 logger.warning(
                                     "Could not subscribe to %s for savings estimation",
                                     _input_topic,
@@ -1511,12 +1518,21 @@ async def bootstrap() -> int:
                                 )
                     except asyncio.CancelledError:
                         raise
-                    except BaseException:  # noqa: BLE001 — task-level safety net
+                    except Exception:  # noqa: BLE001 — task-level safety net
                         logger.warning(
                             "Savings estimation consumer terminated unexpectedly; "
                             "pipeline will write zero rows until next runtime boot",
                             exc_info=True,
                         )
+                    finally:
+                        for _unsubscribe in _unsubscribes:
+                            try:
+                                await _unsubscribe()
+                            except Exception:  # noqa: BLE001 — best-effort cleanup
+                                logger.warning(
+                                    "Failed to unsubscribe savings-estimator subscription",
+                                    exc_info=True,
+                                )
 
                 savings_task = asyncio.create_task(
                     _savings_consumer_loop(), name="savings-estimation-consumer"
@@ -1530,9 +1546,9 @@ async def bootstrap() -> int:
                     if exc is not None:
                         logger.warning(
                             "Savings estimation consumer task exited with exception "
-                            "(correlation_id=%s): %s",
+                            "(correlation_id=%s, exc_type=%s)",
                             correlation_id,
-                            exc,
+                            type(exc).__name__,
                             exc_info=exc,
                         )
 
