@@ -15,4 +15,4 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "echo 'deploy: pricing_manifest_version is backward-compatible additive field; old events default to 0 via extra=ignore'"
+        check_value: "echo 'deploy: pricing_manifest_version is a backward-compatible additive field; old events missing this field default to 0 via model field default'"
