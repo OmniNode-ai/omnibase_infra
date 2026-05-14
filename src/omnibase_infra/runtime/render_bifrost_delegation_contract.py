@@ -21,11 +21,11 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
-
-from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.config_loader_bifrost_delegation import (
+from omnimarket.adapters.llm.bifrost.config_loader_bifrost_delegation import (
     load_bifrost_delegation_config,
 )
+
+from omnibase_infra.errors import ProtocolConfigurationError
 
 _DEFAULT_SOURCE_PATH = Path("/app/src/omnibase_infra/configs/bifrost_delegation.yaml")
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
@@ -145,6 +145,31 @@ def _populate_backend_endpoint(
     return True
 
 
+_RENDER_HINT_FIELDS = frozenset({"required", "base_url_env"})
+
+
+def _strip_render_hint_fields(path: Path) -> None:
+    """Remove render-only hint fields from a contract file in place."""
+    if not path.exists():
+        return
+    try:
+        data = _load_yaml(path)
+    except ProtocolConfigurationError:
+        return
+    backends = data.get("backends")
+    if not isinstance(backends, list):
+        return
+    changed = False
+    for backend in backends:
+        if isinstance(backend, dict):
+            for field in _RENDER_HINT_FIELDS:
+                if field in backend:
+                    del backend[field]  # type: ignore[attr-defined]
+                    changed = True
+    if changed:
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
 def _load_render_source(
     *,
     should_verify: bool,
@@ -211,6 +236,7 @@ def render_bifrost_delegation_contract(
     )
 
     if not should_verify and _has_populated_endpoint(target):
+        _strip_render_hint_fields(target)
         load_bifrost_delegation_config(target)
         return target
 
@@ -235,6 +261,14 @@ def render_bifrost_delegation_contract(
             "values. Add base_url_env fields to the source contract or provide a "
             "pre-rendered contract via BIFROST_CONTRACT_PATH."
         )
+
+    # Strip render-only hint fields before writing the deployed contract —
+    # `required` is used internally by _populate_backend_endpoint but is not
+    # part of the deployed ModelDelegationBackendConfig schema.
+    for backend in backends:
+        if isinstance(backend, dict):
+            backend.pop("required", None)
+            backend.pop("base_url_env", None)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")

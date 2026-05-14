@@ -13,11 +13,12 @@ if TYPE_CHECKING:
     from typing import Literal
 from uuid import UUID
 
+from omnimarket.nodes.node_delegation_orchestrator.models.model_delegation_request import (
+    ModelDelegationRequest,
+)
+
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
-)
-from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_request import (
-    ModelDelegationRequest,
 )
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
@@ -159,8 +160,7 @@ class RuntimeDelegationDispatchPort:
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
-        quality_contract_mode: str = "extend_task_class",
-        acceptance_criteria: tuple[str, ...] = (),
+        output_schema_key: str | None = None,
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
 
@@ -174,11 +174,7 @@ class RuntimeDelegationDispatchPort:
             correlation_id=correlation_id,
             max_tokens=max_tokens,
             emitted_at=datetime.now(UTC),
-            quality_contract_mode=cast(
-                "Literal['extend_task_class', 'replace_task_class']",
-                quality_contract_mode,
-            ),
-            acceptance_criteria=acceptance_criteria,
+            output_schema_key=output_schema_key,
         )
 
         command = ModelDispatchBusCommand(

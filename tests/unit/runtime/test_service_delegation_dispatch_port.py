@@ -142,16 +142,12 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
         source_file_path=None,
         source_session_id=None,
         wait=True,
-        quality_contract_mode="replace_task_class",
-        acceptance_criteria=("exactly_two_sentences", "plain_text_only"),
+        output_schema_key=None,
     )
 
     assert captured_timeout_seconds == [600.0]
-    assert captured_payloads[0]["quality_contract_mode"] == "replace_task_class"
-    assert captured_payloads[0]["acceptance_criteria"] == [
-        "exactly_two_sentences",
-        "plain_text_only",
-    ]
+    assert captured_payloads[0]["prompt"] == "probe"
+    assert captured_payloads[0]["task_type"] == "document"
 
 
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
