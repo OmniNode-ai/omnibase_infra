@@ -196,11 +196,11 @@ class PluginLlm:
             from omnimarket.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
                 DelegationIntentBridge,
             )
+
+            from omnibase_core.enums import EnumInjectionScope
             from omnibase_infra.nodes.node_delegation_orchestrator.protocol_delegation_intent_bridge import (
                 ProtocolDelegationIntentBridge,
             )
-
-            from omnibase_core.enums import EnumInjectionScope
 
             bridge = DelegationIntentBridge(
                 event_bus=event_bus,
