@@ -266,7 +266,7 @@ class AdapterTestBoilerplateGeneration:
             )
         self._base_url: str = base_url or os.environ.get(
             "LLM_CODER_FAST_URL", "http://localhost:8001"
-        )
+        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
         if not self._base_url.strip():
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,

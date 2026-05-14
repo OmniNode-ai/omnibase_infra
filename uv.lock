@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -9,6 +9,7 @@ resolution-markers = [
 
 [manifest]
 overrides = [
+    { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" },
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=b42e6dae20f9ac02ef35a776c35ec32aae0023ed" },
     { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main" },
 ]
@@ -2155,24 +2156,11 @@ wheels = [
 [[package]]
 name = "omnibase-compat"
 version = "0.3.1"
-source = { url = "https://github.com/OmniNode-ai/omnibase_compat/archive/ea4239d357fe07bb7c45afee9edceaa5c428bf32.zip" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a#51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" }
 dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { hash = "sha256:c7e6103f38ce61b85f58b670ef1d36235ced1ed470cf80b094688447abe53136" }
-
-[package.metadata]
-requires-dist = [
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "typing-extensions", specifier = ">=4.5.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "omnibase-core"
@@ -2216,6 +2204,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "neo4j" },
+    { name = "omnibase-compat" },
     { name = "omnibase-core" },
     { name = "omnibase-spi" },
     { name = "omnimarket" },
@@ -2289,6 +2278,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
+    { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=51c39d8a743b6264ca0b72bd9efd90dcad6a6d3a" },
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=b42e6dae20f9ac02ef35a776c35ec32aae0023ed" },
     { name = "omnibase-spi", specifier = ">=0.20.6" },
     { name = "omnimarket", git = "https://github.com/OmniNode-ai/omnimarket.git?branch=main" },

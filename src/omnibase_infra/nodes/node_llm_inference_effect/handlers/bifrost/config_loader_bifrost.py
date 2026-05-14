@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from uuid import UUID
 
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_config import (
@@ -76,7 +77,9 @@ def load_bifrost_config_from_env() -> ModelBifrostConfig:
     # External backends (only added when API key is configured)
     _add_backend_if_set(backends, "glm", "GLM_BASE_URL")
     # Gemini uses a well-known base URL; only add when API key is present
-    if os.environ.get("GEMINI_API_KEY", "").strip():
+    if os.environ.get(
+        "GEMINI_API_KEY", ""
+    ).strip():  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
         _add_backend_if_set(
             backends,
             "gemini",
@@ -117,7 +120,9 @@ def _add_backend_if_set(
     default_url: str | None = None,
 ) -> None:
     """Add a backend entry if the env var is set and non-empty."""
-    url = os.environ.get(env_var, "").strip()
+    url = os.environ.get(
+        env_var, ""
+    ).strip()  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
     if not url and default_url:
         url = default_url
     if not url:
@@ -245,4 +250,91 @@ def _pick_default_backends(
     return tuple(defaults)
 
 
-__all__: list[str] = ["load_bifrost_config_from_env"]
+def load_bifrost_config_from_contract(
+    contract_path: Path,
+) -> ModelBifrostConfig | None:
+    """Build ``ModelBifrostConfig`` from a delegation runtime profile contract.
+
+    Reads the ``llm_backends`` section of the profile contract (OMN-10925) and
+    constructs backend entries from the ``bifrost_endpoint_ref`` fields declared
+    there.  Returns ``None`` when the contract is absent, invalid, or contains
+    no usable LLM backend config — callers should fall back to
+    ``load_bifrost_config_from_env`` in that case.
+
+    This is the contract-first path.  The env-var path (``load_bifrost_config_from_env``)
+    remains available as a migration-period fallback.
+
+    Args:
+        contract_path: Path to the delegation runtime profile YAML file.
+
+    Returns:
+        A ``ModelBifrostConfig`` populated from contract data, or ``None``
+        when the contract cannot supply LLM backend configuration.
+
+    .. versionadded:: 0.41.0
+    """
+    try:
+        from omnibase_infra.runtime.delegation_profile_config_loader import (
+            DelegationProfileConfigLoader,
+        )
+
+        loader = DelegationProfileConfigLoader(contract_path=contract_path)
+        llm_backends = loader.llm_backend_config()
+    except Exception:  # noqa: BLE001
+        return None
+
+    if llm_backends is None:
+        return None
+
+    # llm_backends is a dict[str, ModelDelegationLlmBackend] after OMN-10919.
+    # Until the model is in the published package, work at the raw-dict level via
+    # __iter__ / attribute access with getattr so tests can validate the YAML path.
+    backends: dict[str, ModelBifrostBackendConfig] = {}
+    try:
+        items = llm_backends.items() if hasattr(llm_backends, "items") else {}
+        for backend_key, backend_cfg in items:
+            if isinstance(backend_cfg, dict):
+                bifrost_ref = backend_cfg.get("bifrost_endpoint_ref")
+            else:
+                bifrost_ref = getattr(backend_cfg, "bifrost_endpoint_ref", None)
+            if bifrost_ref is None:
+                continue
+            # bifrost_endpoint_ref is a logical name — it is the backend_id that
+            # the bifrost gateway uses.  Map it to a stub backend entry so the
+            # contract path is represented in the resulting config.
+            # The actual endpoint URL comes from the deployed bifrost contract
+            # (see _load_bifrost_endpoints() in handler_delegation_routing.py).
+            backends[bifrost_ref] = ModelBifrostBackendConfig(
+                backend_id=bifrost_ref,
+                base_url="",  # resolved at runtime from deployed bifrost contract
+            )
+            logger.debug(
+                "Added bifrost backend '%s' from contract key '%s'",
+                bifrost_ref,
+                backend_key,
+            )
+    except Exception:  # noqa: BLE001
+        return None
+
+    if not backends:
+        return None
+
+    routing_rules = _build_default_routing_rules(backends)
+    default_backend_ids = _pick_default_backends(backends)
+    config = ModelBifrostConfig(
+        backends=backends,
+        routing_rules=tuple(routing_rules),
+        default_backends=default_backend_ids,
+    )
+    logger.info(
+        "Loaded bifrost config from contract: %d backends, %d routing rules",
+        len(backends),
+        len(routing_rules),
+    )
+    return config
+
+
+__all__: list[str] = [
+    "load_bifrost_config_from_contract",
+    "load_bifrost_config_from_env",
+]
