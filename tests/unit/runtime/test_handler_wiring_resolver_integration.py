@@ -314,7 +314,8 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
 
         class ProtocolDelegationDispatchPort(Protocol):
-            async def dispatch(self, **kwargs: object) -> dict[str, object]: ...
+            async def dispatch(self, **kwargs: object) -> dict[str, object]:
+                """Protocol method stub for dispatch port."""
 
         class HandlerWithDispatchPort:
             def __init__(
@@ -359,7 +360,8 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
 
         class ProtocolDelegationDispatchPort(Protocol):
-            async def dispatch(self, **kwargs: object) -> dict[str, object]: ...
+            async def dispatch(self, **kwargs: object) -> dict[str, object]:
+                """Protocol method stub for dispatch port."""
 
         class HandlerWithOptionalDispatchPort:
             last_dispatch_port: object | None = None

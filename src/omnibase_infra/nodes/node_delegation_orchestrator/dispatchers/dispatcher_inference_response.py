@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,
@@ -33,6 +32,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envel
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
     from omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_delegation_workflow import (
         HandlerDelegationWorkflow,

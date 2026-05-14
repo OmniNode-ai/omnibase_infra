@@ -7,7 +7,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Literal
 from uuid import UUID
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
