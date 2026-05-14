@@ -51,6 +51,7 @@ runtime-observability-projections:
     - llm-cost-aggregation-consumer
     - consumer-health-projection
     - decision-store-consumer
+    - omnimarket-projection-delegation
   includes: []
   inject_env: {}
   inject_required_env:
