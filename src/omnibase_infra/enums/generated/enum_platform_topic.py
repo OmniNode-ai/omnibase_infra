@@ -19,8 +19,6 @@ class EnumPlatformTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_CONTRACT_RESOLVE_REQUESTED_V1 = "onex.cmd.platform.contract-resolve-requested.v1"  # onex.cmd.platform.contract-resolve-requested.v1
-    CMD_INTENT_QUERY_DISTRIBUTION_V1 = "onex.cmd.platform.intent-query-distribution.v1"  # onex.cmd.platform.intent-query-distribution.v1
-    CMD_INTENT_QUERY_SESSION_V1 = "onex.cmd.platform.intent-query-session.v1"  # onex.cmd.platform.intent-query-session.v1
     CMD_LEDGER_APPEND_V1 = "onex.cmd.platform.ledger-append.v1"  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = "onex.cmd.platform.node-registration-acked.v1"  # onex.cmd.platform.node-registration-acked.v1
@@ -29,10 +27,6 @@ class EnumPlatformTopic(str, Enum):
     EVT_CONTRACT_DEREGISTERED_V1 = "onex.evt.platform.contract-deregistered.v1"  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = "onex.evt.platform.contract-registered.v1"  # onex.evt.platform.contract-registered.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = "onex.evt.platform.fsm-state-transitions.v1"  # onex.evt.platform.fsm-state-transitions.v1
-    EVT_INTENT_CLASSIFIED_V1 = "onex.evt.platform.intent-classified.v1"  # onex.evt.platform.intent-classified.v1
-    EVT_INTENT_DISTRIBUTION_RESULT_V1 = "onex.evt.platform.intent-distribution-result.v1"  # onex.evt.platform.intent-distribution-result.v1
-    EVT_INTENT_SESSION_QUERY_RESULT_V1 = "onex.evt.platform.intent-session-query-result.v1"  # onex.evt.platform.intent-session-query-result.v1
-    EVT_INTENT_STORED_V1 = "onex.evt.platform.intent-stored.v1"  # onex.evt.platform.intent-stored.v1
     EVT_LEDGER_APPENDED_V1 = "onex.evt.platform.ledger-appended.v1"  # onex.evt.platform.ledger-appended.v1
     EVT_LEDGER_QUERY_RESULT_V1 = "onex.evt.platform.ledger-query-result.v1"  # onex.evt.platform.ledger-query-result.v1
     EVT_MERGE_GATE_DECISION_V1 = "onex.evt.platform.merge-gate-decision.v1"  # onex.evt.platform.merge-gate-decision.v1
