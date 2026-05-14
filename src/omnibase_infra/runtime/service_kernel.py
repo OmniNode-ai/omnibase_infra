@@ -1435,76 +1435,108 @@ async def bootstrap() -> int:
                 ]
 
                 async def _savings_consumer_loop() -> None:
-                    """Consume input events and produce savings estimates."""
+                    """Consume input events and produce savings estimates.
+
+                    Non-fatal: any failure (subscribe timeout, broker outage,
+                    missing topic on fresh broker) is logged and the task exits
+                    cleanly. Never propagates to the kernel.
+                    """
                     import json as _json
 
                     _poll_interval = 2.0
 
-                    for _input_topic in _savings_input_topics:
-                        try:
+                    try:
+                        for _input_topic in _savings_input_topics:
+                            try:
 
-                            async def _savings_on_message(
-                                msg: object,
-                                *,
-                                _topic: str = _input_topic,
-                            ) -> None:
-                                _savings_estimator.ingest_event(
-                                    _topic,
-                                    _json.loads(msg)  # type: ignore[arg-type]
-                                    if isinstance(msg, (str, bytes))
-                                    else msg,
+                                async def _savings_on_message(
+                                    msg: object,
+                                    *,
+                                    _topic: str = _input_topic,
+                                ) -> None:
+                                    _savings_estimator.ingest_event(
+                                        _topic,
+                                        _json.loads(msg)  # type: ignore[arg-type]
+                                        if isinstance(msg, (str, bytes))
+                                        else msg,
+                                    )
+
+                                await event_bus.subscribe(
+                                    _input_topic,
+                                    on_message=_savings_on_message,  # type: ignore[arg-type]
+                                    group_id=f"savings-estimator.{_input_topic}",
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except BaseException:  # noqa: BLE001
+                                logger.warning(
+                                    "Could not subscribe to %s for savings estimation",
+                                    _input_topic,
+                                    exc_info=True,
                                 )
 
-                            await event_bus.subscribe(
-                                _input_topic,
-                                on_message=_savings_on_message,  # type: ignore[arg-type]
-                                group_id=f"savings-estimator.{_input_topic}",
-                            )
-                        except Exception:  # noqa: BLE001
-                            logger.warning(
-                                "Could not subscribe to %s for savings estimation",
-                                _input_topic,
-                                exc_info=True,
-                            )
-
-                    while True:
-                        try:
-                            await asyncio.sleep(_poll_interval)
-                            estimates = (
-                                await _savings_estimator.finalize_ready_sessions()
-                            )
-                            for estimate in estimates:
-                                try:
-                                    _envelope: ModelEventEnvelope[object] = (
-                                        ModelEventEnvelope(
-                                            payload=estimate,
-                                            correlation_id=str(
-                                                estimate.get("correlation_id", "")
-                                            ),
-                                            event_type="savings.estimated",
-                                            source="savings_estimation_consumer",
+                        while True:
+                            try:
+                                await asyncio.sleep(_poll_interval)
+                                estimates = (
+                                    await _savings_estimator.finalize_ready_sessions()
+                                )
+                                for estimate in estimates:
+                                    try:
+                                        _envelope: ModelEventEnvelope[object] = (
+                                            ModelEventEnvelope(
+                                                payload=estimate,
+                                                correlation_id=str(
+                                                    estimate.get("correlation_id", "")
+                                                ),
+                                                event_type="savings.estimated",
+                                                source="savings_estimation_consumer",
+                                            )
                                         )
-                                    )
-                                    await event_bus.publish_envelope(
-                                        _envelope,  # type: ignore[arg-type]
-                                        topic=_savings_topic,
-                                    )
-                                except Exception:  # noqa: BLE001
-                                    logger.warning(
-                                        "Failed to emit savings estimate",
-                                        exc_info=True,
-                                    )
-                        except asyncio.CancelledError:
-                            break
-                        except Exception:  # noqa: BLE001 — never crash the loop
-                            logger.warning(
-                                "Savings estimation loop iteration failed",
-                                exc_info=True,
-                            )
+                                        await event_bus.publish_envelope(
+                                            _envelope,  # type: ignore[arg-type]
+                                            topic=_savings_topic,
+                                        )
+                                    except Exception:  # noqa: BLE001
+                                        logger.warning(
+                                            "Failed to emit savings estimate",
+                                            exc_info=True,
+                                        )
+                            except asyncio.CancelledError:
+                                break
+                            except Exception:  # noqa: BLE001 — never crash the loop
+                                logger.warning(
+                                    "Savings estimation loop iteration failed",
+                                    exc_info=True,
+                                )
+                    except asyncio.CancelledError:
+                        raise
+                    except BaseException:  # noqa: BLE001 — task-level safety net
+                        logger.warning(
+                            "Savings estimation consumer terminated unexpectedly; "
+                            "pipeline will write zero rows until next runtime boot",
+                            exc_info=True,
+                        )
 
                 savings_task = asyncio.create_task(
                     _savings_consumer_loop(), name="savings-estimation-consumer"
                 )
+
+                def _savings_task_done(t: asyncio.Task[None]) -> None:
+                    """Silence unobserved task exceptions so they don't surface as kernel errors."""
+                    if t.cancelled():
+                        return
+                    exc = t.exception()
+                    if exc is not None:
+                        logger.warning(
+                            "Savings estimation consumer task exited with exception "
+                            "(correlation_id=%s): %s",
+                            correlation_id,
+                            exc,
+                            exc_info=exc,
+                        )
+
+                savings_task.add_done_callback(_savings_task_done)
                 logger.info(
                     "Savings estimation consumer started (correlation_id=%s)",
                     correlation_id,
