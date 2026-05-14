@@ -71,10 +71,13 @@ if TYPE_CHECKING:
 
 # Delegate to shared PostgresConfig for consistent availability checks.
 # See tests/helpers/util_postgres.py for the canonical implementation.
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 _postgres_config = PostgresConfig.from_env()
-POSTGRES_AVAILABLE = _postgres_config.is_configured
+POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
+    _postgres_config,
+    timeout=1.0,
+)
 
 
 class _PostgresConfigDict(TypedDict):

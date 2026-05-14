@@ -32,7 +32,7 @@ import pytest
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import TopicAlreadyExistsError
 
-from tests.helpers.util_kafka import validate_bootstrap_servers
+from tests.helpers.util_kafka import check_host_reachability, validate_bootstrap_servers
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -46,25 +46,23 @@ logger = logging.getLogger(__name__)
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available based on environment variable.
+# Check if Kafka is available based on environment variable and TCP reachability.
 # NOTE: We intentionally do NOT provide a default value. Tests should only run
 # when KAFKA_BOOTSTRAP_SERVERS is explicitly set, not when assuming a default
 # infrastructure address (which won't be available in CI).
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
-
-# Validate configuration only if environment variable is set
-# This provides detailed validation for local development
-if KAFKA_AVAILABLE:
-    _kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
-    # Override KAFKA_AVAILABLE if format validation fails
-    if not _kafka_config_validation.is_valid:
-        KAFKA_AVAILABLE = False
-        _skip_reason = _kafka_config_validation.skip_reason
-    else:
-        _skip_reason = None
-else:
-    _skip_reason = "Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)"
+_kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
+_kafka_reachable, _kafka_reachability_error = (
+    check_host_reachability(
+        _kafka_config_validation.host,
+        int(_kafka_config_validation.port),
+        timeout=1.0,
+    )
+    if _kafka_config_validation
+    else (False, _kafka_config_validation.skip_reason)
+)
+KAFKA_AVAILABLE = bool(_kafka_config_validation) and _kafka_reachable
+_skip_reason = _kafka_reachability_error or _kafka_config_validation.skip_reason
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
@@ -265,7 +263,6 @@ async def kafka_event_bus(
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="local",
-        group="mcp-sync-test",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,
         retry_backoff_base=0.5,

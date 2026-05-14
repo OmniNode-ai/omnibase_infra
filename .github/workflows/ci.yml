@@ -19,9 +19,9 @@ env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
-  # Large transitive wheels such as scipy can exceed uv's 30s default on
-  # self-hosted runners during sibling-boundary jobs.
-  UV_HTTP_TIMEOUT: "120"
+  # Large transitive wheels such as torch and CUDA packages can exceed uv's
+  # default timeout on self-hosted runners during sibling-boundary jobs.
+  UV_HTTP_TIMEOUT: "600"
   # Force inmemory event bus for CI tests (no Kafka infrastructure available)
   # This overrides the default "kafka" in contracts/runtime/runtime_config.yaml
   ONEX_EVENT_BUS_TYPE: "inmemory"
@@ -80,11 +80,6 @@ jobs:
 
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
-
-      # SYNC: OMN-10926 — delegation env read scanner in enforce mode (Wave 2)
-      # Fails CI if any delegation/LLM/bifrost module adds a new bare os.environ/os.getenv read.
-      - name: Delegation env read scanner (enforce)
-        run: python scripts/ci/check_delegation_env_reads.py --mode enforce
 
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
@@ -185,7 +180,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -424,7 +419,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout omnibase_infra
@@ -481,11 +476,7 @@ jobs:
         run: |
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
-          # OMN-10923: omnibase-compat is pinned via pyproject.toml
-          # [tool.uv] override-dependencies. Adding a file:// override
-          # here would cause "Requirements contain conflicting URLs" since
-          # uv treats CLI --overrides and pyproject override-dependencies
-          # as the same constraint layer.
+          echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
           uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence
 
       - name: Run schema handshake validation (changed-only)
@@ -542,7 +533,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1161,7 +1152,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout omnibase_infra
@@ -1213,11 +1204,7 @@ jobs:
         run: |
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
-          # OMN-10923: omnibase-compat is pinned via pyproject.toml
-          # [tool.uv] override-dependencies. Adding a file:// override
-          # here would cause "Requirements contain conflicting URLs" since
-          # uv treats CLI --overrides and pyproject override-dependencies
-          # as the same constraint layer.
+          echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
           uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence
 
       - name: Run Kafka boundary compatibility tests

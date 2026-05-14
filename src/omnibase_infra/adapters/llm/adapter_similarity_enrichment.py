@@ -134,9 +134,7 @@ class AdapterSimilarityEnrichment:
                 by Qdrant before results are returned.  ``None`` disables the
                 threshold (all results up to ``top_k`` are returned).
         """
-        _embedding_base_url = embedding_base_url or os.environ.get(
-            "LLM_EMBEDDING_URL"
-        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+        _embedding_base_url = embedding_base_url or os.environ.get("LLM_EMBEDDING_URL")
         if not _embedding_base_url:
             raise ProtocolConfigurationError(
                 "embedding_base_url is required. Set LLM_EMBEDDING_URL environment variable.",
@@ -147,9 +145,7 @@ class AdapterSimilarityEnrichment:
             )
         self._embedding_base_url: str = _embedding_base_url
         self._embedding_model: str = embedding_model
-        _qdrant_url = qdrant_url or os.environ.get(
-            "QDRANT_URL"
-        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+        _qdrant_url = qdrant_url or os.environ.get("QDRANT_URL")
         if not _qdrant_url:
             raise ProtocolConfigurationError(
                 "qdrant_url is required. Set QDRANT_URL environment variable.",

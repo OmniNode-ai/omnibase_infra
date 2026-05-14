@@ -61,16 +61,16 @@ trap 'rm -rf "$tmpdir"' EXIT
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
 
-    # Node handler pattern: src/<package>/nodes/<node>/handlers/*.py
-    if echo "$file" | grep -qE '^src/[^/]+/nodes/([^/]+)/handlers/[^/]+\.py$'; then
-        node="$(echo "$file" | sed -E 's|^src/[^/]+/nodes/([^/]+)/handlers/[^/]+\.py$|\1|')"
+    # Node handler pattern: .../nodes/<node>/handlers/*.py
+    if echo "$file" | grep -qE '.*/nodes/([^/]+)/handlers/[^/]+\.py$'; then
+        node="$(echo "$file" | sed -E 's|.*/nodes/([^/]+)/handlers/[^/]+\.py$|\1|')"
         touch "$tmpdir/node_handler_${node}"
         continue
     fi
 
-    # Node contract pattern: src/<package>/nodes/<node>/contract.yaml
-    if echo "$file" | grep -qE '^src/[^/]+/nodes/([^/]+)/contract\.yaml$'; then
-        node="$(echo "$file" | sed -E 's|^src/[^/]+/nodes/([^/]+)/contract\.yaml$|\1|')"
+    # Node contract pattern: .../nodes/<node>/contract.yaml
+    if echo "$file" | grep -qE '.*/nodes/([^/]+)/contract\.yaml$'; then
+        node="$(echo "$file" | sed -E 's|.*/nodes/([^/]+)/contract\.yaml$|\1|')"
         touch "$tmpdir/node_contract_${node}"
         continue
     fi

@@ -196,10 +196,13 @@ def wrap_event_in_envelope(
 
 # PostgreSQL availability - delegates to shared PostgresConfig utility
 # See tests/helpers/util_postgres.py for canonical DSN parsing logic
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 _postgres_config = PostgresConfig.from_env()
-POSTGRES_AVAILABLE = _postgres_config.is_configured
+POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
+    _postgres_config,
+    timeout=1.0,
+)
 
 # Kafka availability — requires both KAFKA_BOOTSTRAP_SERVERS AND KAFKA_INTEGRATION_TESTS=1.
 # KAFKA_BOOTSTRAP_SERVERS is set globally in conftest for model instantiation, so we gate

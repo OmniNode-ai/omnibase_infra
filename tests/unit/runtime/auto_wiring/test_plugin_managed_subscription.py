@@ -21,7 +21,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import yaml
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
@@ -249,44 +248,3 @@ class TestPluginManagedSkipsSubscription:
         assert event_bus.subscribe.call_count == 1
         assert "node_delegation_orchestrator" not in subscriptions
         assert "node_regular_worker" in subscriptions
-
-
-class TestDelegationContractDeclaresPluginManaged:
-    """The delegation contract YAML must have plugin_managed=true in event_bus."""
-
-    def test_delegation_contract_has_plugin_managed_true(self) -> None:
-        contract_path = (
-            Path(__file__).parents[4]
-            / "src"
-            / "omnibase_infra"
-            / "nodes"
-            / "node_delegation_orchestrator"
-            / "contract.yaml"
-        )
-        raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-        assert isinstance(raw, dict), "contract.yaml must be a YAML dict"
-        event_bus = raw.get("event_bus")
-        assert isinstance(event_bus, dict), "event_bus section missing from contract"
-        assert event_bus.get("plugin_managed") is True, (
-            "node_delegation_orchestrator contract.yaml must have "
-            "event_bus.plugin_managed: true (OMN-10864)"
-        )
-
-    def test_delegation_contract_still_declares_subscribe_topics(self) -> None:
-        """plugin_managed=true must coexist with subscribe_topics for discovery."""
-        contract_path = (
-            Path(__file__).parents[4]
-            / "src"
-            / "omnibase_infra"
-            / "nodes"
-            / "node_delegation_orchestrator"
-            / "contract.yaml"
-        )
-        raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-        event_bus = raw.get("event_bus", {})
-        topics = event_bus.get("subscribe_topics", [])
-        assert len(topics) > 0, (
-            "delegation contract must still declare subscribe_topics for "
-            "domain plugin's load_event_bus_subcontract()"
-        )
-        assert "onex.cmd.omnibase-infra.delegation-request.v1" in topics

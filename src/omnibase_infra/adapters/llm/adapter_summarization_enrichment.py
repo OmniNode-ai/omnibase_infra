@@ -194,7 +194,7 @@ class AdapterSummarizationEnrichment:
 
         self._base_url: str = base_url or os.environ.get(
             "LLM_QWEN_72B_URL", "http://localhost:8100"
-        )  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
+        )
         self._model: str = model
         self._token_threshold: int = token_threshold
         self._summary_max_tokens: int = summary_max_tokens

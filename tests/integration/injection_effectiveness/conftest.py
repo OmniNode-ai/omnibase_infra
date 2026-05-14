@@ -25,6 +25,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.helpers.util_postgres import check_postgres_reachable_simple
+
 if TYPE_CHECKING:
     import asyncpg
 
@@ -68,11 +70,20 @@ def _get_postgres_dsn() -> str | None:
 @pytest.fixture
 def postgres_dsn() -> str:
     """Get PostgreSQL DSN or skip test if not configured."""
+    host = os.getenv("POSTGRES_HOST")
+    port_raw = os.getenv("POSTGRES_PORT", "5436")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        pytest.skip(f"PostgreSQL not configured (invalid POSTGRES_PORT={port_raw!r})")
+
     dsn = _get_postgres_dsn()
     if dsn is None:
         pytest.skip(
             "PostgreSQL not configured (missing POSTGRES_HOST or POSTGRES_PASSWORD)"
         )
+    if host is None or not check_postgres_reachable_simple(host, port, timeout=1.0):
+        pytest.skip("PostgreSQL not reachable")
     return dsn
 
 

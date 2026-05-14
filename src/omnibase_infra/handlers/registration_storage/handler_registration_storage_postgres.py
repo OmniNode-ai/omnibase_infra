@@ -241,18 +241,9 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             transport_type=cb_config.transport_type,
         )
 
-        # Store configuration — host is required via env var only when no DSN
-        # is provided (dsn-based pool creation does not consult host).
+        # Store configuration — host is required via env var if not provided
         self._dsn = dsn
-        if host is not None:
-            self._host = host
-        elif dsn:
-            # DSN encodes connection target; host is unused on the dsn path.
-            # Keep a placeholder so attribute access stays valid for callers
-            # that read it for logging/diagnostics.
-            self._host = "(via-dsn)"
-        else:
-            self._host = os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: env  # fmt: skip
+        self._host = host if host is not None else os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: env  # fmt: skip
         self._port = port
         self._database = database
         self._user = user

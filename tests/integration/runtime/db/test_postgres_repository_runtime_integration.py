@@ -70,13 +70,15 @@ def _check_postgres_configured() -> tuple[bool, str]:
     Returns:
         Tuple of (configured, skip_message).
     """
-    from tests.helpers.util_postgres import PostgresConfig
+    from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
     config = PostgresConfig.from_env()
     if not config.is_configured:
         return False, (
             "Missing OMNIBASE_INFRA_DB_URL or required POSTGRES_* fallback variables"
         )
+    if not check_postgres_reachable(config, timeout=1.0):
+        return False, "PostgreSQL configured but not reachable"
     return True, ""
 
 

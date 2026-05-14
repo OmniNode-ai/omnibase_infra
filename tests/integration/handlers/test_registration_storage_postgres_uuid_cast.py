@@ -40,14 +40,17 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelRegistrationRecord,
     ModelStorageQuery,
 )
-from tests.helpers.util_postgres import PostgresConfig
+from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 
 _postgres_config = PostgresConfig.from_env()
-POSTGRES_AVAILABLE = _postgres_config.is_configured
+POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
+    _postgres_config,
+    timeout=1.0,
+)
 
 
 class _PostgresConfigDict(TypedDict):

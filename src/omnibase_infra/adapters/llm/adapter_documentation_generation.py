@@ -246,11 +246,8 @@ class AdapterDocumentationGeneration:
                 "Provide a valid URL or set the LLM_DEEPSEEK_R1_URL environment variable.",
                 context=context,
             )
-        self._base_url: str = (
-            base_url
-            or os.environ.get(  # ONEX_FLAG_EXEMPT: Wave 3 migration to contract config (OMN-10915)
-                "LLM_DEEPSEEK_R1_URL", "http://localhost:8001"
-            )
+        self._base_url: str = base_url or os.environ.get(
+            "LLM_DEEPSEEK_R1_URL", "http://localhost:8001"
         )
         self._model: str = model
         self._max_tokens: int = max_tokens

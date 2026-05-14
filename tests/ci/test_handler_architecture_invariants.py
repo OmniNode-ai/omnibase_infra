@@ -62,10 +62,6 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_contract_scan.py",
         "handler_event_bus_wiring.py",
         "handler_runtime_lifecycle.py",
-        # Delegation pipeline reducers (pure-function delta() pattern, not ONEX handler protocol)
-        "handler_delegation_workflow.py",
-        "handler_quality_gate.py",
-        "handler_delegation_routing.py",
     }
 )
 
@@ -91,21 +87,7 @@ _APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
 # Each entry is (contract_path_relative_to_repo, handler_class_name).
 # The meta-test TestWiringExemptionsValid enforces anti-permanence:
 # exemptions for handlers that pass the wiring check will cause test failure.
-_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
-    {
-        # OMN-7040: Delegation pipeline reducers use module-level delta() functions,
-        # not ONEX handler class protocol. They are invoked directly by the orchestrator,
-        # not through the handler registry. Exempted from class-based wiring check.
-        (
-            "src/omnibase_infra/nodes/node_delegation_quality_gate_reducer/contract.yaml",
-            "HandlerQualityGate",
-        ),
-        (
-            "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
-            "HandlerDelegationRouting",
-        ),
-    }
-)
+_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 # Contract YAML root directory
 _CONTRACTS_ROOT = _SRC_ROOT / "nodes"

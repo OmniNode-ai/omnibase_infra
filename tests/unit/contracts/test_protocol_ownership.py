@@ -77,7 +77,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPostgresAdapter": "nodes/node_registry_effect/protocols/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
     "ProtocolLlmHandler": "nodes/node_llm_inference_effect/services/protocol_llm_handler.py",
-    "ProtocolLlmCaller": "nodes/node_delegation_orchestrator/delegation_intent_bridge.py",
     "ProtocolContractPublisherSource": "services/contract_publisher/sources/protocol.py",
     "ProtocolInjectionEffectivenessReader": "services/observability/injection_effectiveness/protocol_reader.py",
     "ProtocolTopicCatalogService": "services/protocol_topic_catalog_service.py",
@@ -156,9 +155,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
-    # [NODE] DI boundary for delegation intent bridge — narrows the LLM caller surface
-    # so the delegation orchestrator handler can be tested without driving the real caller (OMN-10940).
-    "ProtocolDelegationIntentBridge": "nodes/node_delegation_orchestrator/protocol_delegation_intent_bridge.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
