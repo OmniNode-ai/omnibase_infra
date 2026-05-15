@@ -335,7 +335,7 @@ class TestServiceHealthEndpoints:
         with patch("omnibase_infra.services.service_health.logger.info") as mock_info:
             response = await server._handle_health(mock_request)
 
-        assert response.status == 200
+        assert response.status == 503
         transition_logs = [
             call
             for call in mock_info.call_args_list
@@ -377,8 +377,10 @@ class TestServiceHealthEndpoints:
         assert '"status":"healthy"' in response_text
 
     @pytest.mark.asyncio
-    async def test_health_endpoint_treats_attached_startup_as_degraded(self) -> None:
-        """Test /health returns degraded 200 when runtime reports startup_in_progress."""
+    async def test_health_endpoint_fails_when_attached_runtime_is_not_running(
+        self,
+    ) -> None:
+        """Test /health returns failing degraded when runtime reports not running."""
         mock_runtime = MagicMock()
         mock_runtime.health_check = AsyncMock(
             return_value={
@@ -395,12 +397,13 @@ class TestServiceHealthEndpoints:
 
         response = await server._handle_health(mock_request)
 
-        assert response.status == 200
+        assert response.status == 503
         response_text = response.text
         assert response_text is not None
         assert '"status":"degraded"' in response_text
         assert '"startup_in_progress":true' in response_text
         assert '"degraded":true' in response_text
+        assert '"runtime_attached":true' in response_text
 
 
 @pytest.mark.unit
@@ -984,8 +987,8 @@ class TestServiceHealthContainerInjection:
         assert server.container is server.container
 
     @pytest.mark.asyncio
-    async def test_health_endpoint_degrades_when_runtime_not_resolved(self) -> None:
-        """Container-only startup should still expose a live /health endpoint."""
+    async def test_health_endpoint_fails_when_runtime_not_resolved(self) -> None:
+        """Container-only startup must not satisfy Docker healthchecks."""
         mock_container = MagicMock(spec=ModelONEXContainer)
         server = ServiceHealth(container=mock_container)
         server._is_running = True
@@ -994,7 +997,7 @@ class TestServiceHealthContainerInjection:
 
         response = await server._handle_health(mock_request)
 
-        assert response.status == 200
+        assert response.status == 503
         response_text = response.text
         assert response_text is not None
         assert '"status":"degraded"' in response_text

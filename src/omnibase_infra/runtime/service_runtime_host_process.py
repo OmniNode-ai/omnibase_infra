@@ -5180,7 +5180,8 @@ class RuntimeHostProcess:
 
         # Degraded state:
         # - running with failed handlers (reduced functionality)
-        # - actively starting with a live event bus (liveness OK, not ready yet)
+        # - actively starting with a live event bus (structured degraded state;
+        #   ServiceHealth still fails Docker probes until is_running=True)
         startup_in_progress = (
             self._is_starting and not self._is_running and event_bus_healthy
         )
