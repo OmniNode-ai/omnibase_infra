@@ -22,6 +22,10 @@ class AdapterCliInput:
 
     async def collect_choice(self, step: ModelInteractiveStep) -> str:
         options = step.options
+        if not options:
+            if step.required:
+                raise ValueError(f"Step '{step.id}' is required but has no options")
+            return ""
         prompt_text = self._format_choice_prompt(step)
         while True:
             raw = await asyncio.get_event_loop().run_in_executor(
@@ -42,6 +46,10 @@ class AdapterCliInput:
 
     async def collect_multi_choice(self, step: ModelInteractiveStep) -> list[str]:
         options = step.options
+        if not options:
+            if step.required:
+                raise ValueError(f"Step '{step.id}' is required but has no options")
+            return []
         prompt_text = self._format_multi_choice_prompt(step)
         while True:
             raw = await asyncio.get_event_loop().run_in_executor(

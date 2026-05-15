@@ -37,7 +37,13 @@ class AdapterFakeInput:
             raise TypeError(
                 f"Step '{step.id}': expected list response, got {type(response)}"
             )
-        return [t.strip() for t in response if isinstance(t, str) and t.strip()]
+        non_str = [item for item in response if not isinstance(item, str)]
+        if non_str:
+            raise TypeError(
+                f"Step '{step.id}': list response contains non-str elements: "
+                f"{[type(x).__name__ for x in non_str]}"
+            )
+        return [t.strip() for t in response if t.strip()]
 
     async def collect_text(self, step: ModelInteractiveStep) -> str:
         response = self._responses.get(step.id, "")

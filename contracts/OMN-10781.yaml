@@ -40,4 +40,5 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "deploy-gate: library-only onboarding protocol additions — no new topics or schema changes; no restart required"
+        check_value: >-
+          uv run python -c "from omnibase_infra.onboarding.protocol_input_adapter import ProtocolInputAdapter; print('ok')"
