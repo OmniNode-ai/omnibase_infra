@@ -168,6 +168,25 @@ jobs:
           echo "================================================================"
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
+  infra-node-handler-ownership:
+    name: Infra Node Handler Ownership
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Reject unallowlisted infra node handlers
+        run: bash scripts/ci/reject-node-implementations.sh --all
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
@@ -672,7 +691,7 @@ jobs:
 
   detect-changes:
     name: Detect Changes
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
+    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -1063,7 +1082,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
+    needs: [tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
@@ -1072,6 +1091,7 @@ jobs:
           gate="${{ needs.tests-gate.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
+          infrahnd="${{ needs.infra-node-handler-ownership.result }}"
           migrationfreeze="${{ needs.migration-freeze.result }}"
           fingerprint="${{ needs.fingerprint-check.result }}"
           demoloop="${{ needs.demo-loop-gate.result }}"
@@ -1088,6 +1108,7 @@ jobs:
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
+             [[ "$infrahnd" == "success" ]] && \
              [[ "$migrationfreeze" == "success" ]] && \
              [[ "$fingerprint" == "success" ]] && \
              [[ "$demoloop" == "success" ]] && \
@@ -1104,6 +1125,7 @@ jobs:
             echo "CI Tests Gate (15 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
+            echo "Infra Node Handler Ownership: Passed"
             echo "Migration Freeze: Passed"
             echo "Fingerprint Check: Passed"
             echo "Demo Loop Gate: Passed"
@@ -1122,6 +1144,7 @@ jobs:
             echo "CI Tests Gate: $gate"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
+            echo "Infra Node Handler Ownership: $infrahnd"
             echo "Migration Freeze: $migrationfreeze"
             echo "Fingerprint Check: $fingerprint"
             echo "Demo Loop Gate: $demoloop"

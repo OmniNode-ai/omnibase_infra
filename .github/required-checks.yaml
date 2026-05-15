@@ -13,7 +13,7 @@ required_checks:
     workflow: test.yml
     job_id: ci-summary
     rationale: >
-      Umbrella correctness gate (OMN-4497). Aggregates ALL sub-jobs in test.yml via `needs:` -- tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check. Fails if any required sub-job fails. This is the single branch protection check required across all repos per OMN-4497.
+      Umbrella correctness gate (OMN-4497). Aggregates ALL sub-jobs in test.yml via `needs:` -- tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check. Fails if any required sub-job fails. This is the single branch protection check required across all repos per OMN-4497.
 
 # -- Sub-jobs (feed into CI Summary -- not required directly in branch protection) -
 sub_jobs:
@@ -25,6 +25,10 @@ sub_jobs:
     workflow: test.yml
     job_id: onex-validation
     rationale: "Architecture layers, ONEX rules, I/O purity audit, markdown links -- gated by CI Summary"
+  - name: "Infra Node Handler Ownership"
+    workflow: test.yml
+    job_id: infra-node-handler-ownership
+    rationale: "Rejects unallowlisted omnibase_infra node handler implementations that belong in omnimarket -- gated by CI Summary"
   - name: "Migration Freeze Check"
     workflow: test.yml
     job_id: migration-freeze
