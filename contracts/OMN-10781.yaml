@@ -1,0 +1,43 @@
+# OMN-10781 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-10781"
+title: "feat(OMN-10781): add onboarding input adapter protocol"
+summary: >-
+  Adds interactive onboarding protocol surface: ProtocolInputAdapter, AdapterCliInput (stdin), AdapterFakeInput (test), EnumInteractiveStepType, EnumInteractivePolicyType, and supporting Pydantic models (ModelInteractiveStep, ModelInteractivePolicy, ModelInteractiveResult, ModelTransition, ModelTransitionBranch). Pure library addition — no Kafka topics, no schema changes, no runtime restart required.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Onboarding model and adapter unit tests pass"
+    command: >-
+      uv run pytest tests/unit/onboarding/ -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1598"
+    command: "gh pr checks 1598 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-10781"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-10781.yaml"
+  - id: "dod-unit-tests"
+    description: "Onboarding model and adapter unit tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/onboarding/ -q
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation: changes are pure library additions (models, enums, protocol, adapters). No new Kafka topics, no schema changes, no API surface changes. No runtime restart required.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy-gate: library-only onboarding protocol additions — no new topics or schema changes; no restart required"
