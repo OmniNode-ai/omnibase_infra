@@ -15,9 +15,17 @@ class OverlaySchemaInvalidError(RuntimeHostError):
     """Raised when the overlay file fails YAML parsing or Pydantic validation."""
 
 
+class UnsupportedOverlayVersionError(RuntimeHostError):
+    """Overlay file declares a version not in the supported set."""
+
+
 class OverlayPermissionError(RuntimeHostError):
-    """Overlay file permissions too open for a secret-containing file."""
+    """Overlay file permissions are too open for a secret-containing file."""
+
+
+class OverlayMergeConflictError(RuntimeHostError):
+    """Irreconcilable conflict detected in the overlay stack."""
 
 
 class RequiredConfigMissingError(RuntimeHostError):
-    """One or more required config keys declared in contracts are absent from the overlay."""
+    """A contract-required config key has no value in the overlay."""
