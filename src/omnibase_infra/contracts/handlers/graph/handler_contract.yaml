@@ -119,6 +119,27 @@ activation:
   optional: true
   required_env:
     - OMNIMEMORY_MEMGRAPH_HOST
+dependencies:
+  - name: "graph_bolt_uri"
+    type: "environment"
+    env_var: "GRAPH_BOLT_URI"
+    required: false
+    description: "Primary Bolt URI for graph database connections."
+  - name: "memgraph_bolt_uri"
+    type: "environment"
+    env_var: "MEMGRAPH_BOLT_URI"
+    required: false
+    description: "Legacy Memgraph Bolt URI used before GRAPH_BOLT_URI."
+  - name: "omnimemory_memgraph_host"
+    type: "environment"
+    env_var: "OMNIMEMORY_MEMGRAPH_HOST"
+    required: false
+    description: "Compose-aligned Memgraph host for OmniMemory graph connections."
+  - name: "omnimemory_memgraph_port"
+    type: "environment"
+    env_var: "OMNIMEMORY_MEMGRAPH_PORT"
+    required: false
+    description: "Compose-aligned Memgraph Bolt port for OmniMemory graph connections."
 metadata:
   handler_type: "infra_handler"
   handler_category: "effect"
