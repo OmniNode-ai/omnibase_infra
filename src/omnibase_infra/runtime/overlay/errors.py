@@ -1,23 +1,31 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Overlay-specific error types for runtime boot."""
+"""Overlay-specific error classes for OverlayFileLoader, OverlayConfigResolver, and related components."""
 
 from __future__ import annotations
 
-from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.errors import RuntimeHostError
 
 
 class OverlayNotFoundError(RuntimeHostError):
-    """Raised when the overlay file is missing and no fallback is available."""
+    """Overlay file is missing; user must run onboarding to generate one."""
 
 
 class OverlaySchemaInvalidError(RuntimeHostError):
-    """Raised when the overlay file fails YAML parsing or Pydantic validation."""
+    """Overlay file is malformed YAML or fails Pydantic schema validation."""
+
+
+class UnsupportedOverlayVersionError(RuntimeHostError):
+    """Overlay file declares a version not in the supported set."""
 
 
 class OverlayPermissionError(RuntimeHostError):
-    """Overlay file permissions too open for a secret-containing file."""
+    """Overlay file permissions are too open for a secret-containing file."""
+
+
+class OverlayMergeConflictError(RuntimeHostError):
+    """Irreconcilable conflict detected in the overlay stack."""
 
 
 class RequiredConfigMissingError(RuntimeHostError):
-    """One or more required config keys declared in contracts are absent from the overlay."""
+    """A contract-required config key has no value in the overlay."""

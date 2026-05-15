@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Resolution result model for overlay config resolver."""
+"""Frozen result of OverlayConfigResolver.resolve()."""
 
 from __future__ import annotations
 
@@ -20,26 +20,37 @@ logger = logging.getLogger(__name__)
 
 
 class ModelOverlayResolutionResult(BaseModel):
+    """Frozen result of resolving overlay config against contract requirements."""
+
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    resolved: dict[str, str] = Field(default_factory=dict)
-    missing: tuple[str, ...] = Field(default_factory=tuple)
-    manifest: ModelOverlayResolutionManifest
+    resolved: dict[str, str] = Field(
+        ..., description="Keys resolved from the overlay file."
+    )
+    missing: tuple[str, ...] = Field(
+        ..., description="Optional keys that had no value in the overlay."
+    )
+    manifest: ModelOverlayResolutionManifest = Field(
+        ..., description="Evidence artifact for this resolution."
+    )
 
     def apply_to_environment(self) -> ModelOverlayEnvInjectionResult:
+        """Inject resolved keys into os.environ. Never overwrites existing keys."""
         injected: list[str] = []
         skipped: list[str] = []
         for key, value in self.resolved.items():
-            if key in os.environ:
-                logger.warning(
-                    "Overlay key %s already set in environment; skipping overlay injection",
-                    key,
-                )
-                skipped.append(key)
-            else:
+            if key not in os.environ:
                 os.environ[key] = value
                 injected.append(key)
+            else:
+                logger.warning(
+                    "Overlay key %s skipped: already set in environment", key
+                )
+                skipped.append(key)
         return ModelOverlayEnvInjectionResult(
-            injected_keys=tuple(injected),
-            skipped_existing_keys=tuple(skipped),
+            injected_keys=tuple(sorted(injected)),
+            skipped_existing_keys=tuple(sorted(skipped)),
         )
+
+
+__all__ = ["ModelOverlayResolutionResult"]
