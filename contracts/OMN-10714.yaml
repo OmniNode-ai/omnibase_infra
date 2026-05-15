@@ -1,0 +1,32 @@
+# OMN-10714 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control
+# (contracts/OMN-10714.yaml in OmniNode-ai/onex_change_control).
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: OMN-10714
+title: "Declare miscellaneous handler config in contract.yaml"
+summary: >
+  Declares miscellaneous omnibase_infra handler environment variables as typed contract dependencies so contract-config discovery can resolve filesystem, setup preflight, Slack, Gmail, and shared handler configuration.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-contract-config-deps
+    description: Miscellaneous omnibase_infra handler config keys are declared in contract YAML.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/config_discovery/test_contract_config_extractor.py tests/unit/runtime/test_runtime_contract_config_loader.py -q"
+  - id: dod-deploy
+    description: >
+      Contract-only config declaration change. No migration, new topic, or runtime restart was performed pre-merge; the declarations ship with the next normal runtime deploy.
+
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: no live deploy or restart performed for OMN-10714; contract-only configuration declarations ship with the next normal runtime rollout"
