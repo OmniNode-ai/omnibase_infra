@@ -106,6 +106,14 @@ repos:
         files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
+      - id: check-env-reads
+        name: Block new os.environ reads (use overlay-resolved config)
+        entry: scripts/check-env-reads.sh --staged
+        language: script
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
