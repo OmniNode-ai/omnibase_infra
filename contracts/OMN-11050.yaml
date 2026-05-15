@@ -1,0 +1,50 @@
+# OMN-11050 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11050"
+title: "refactor(OMN-11050): rename imperative onboarding steps to verification semantics"
+summary: >-
+  Canonical onboarding DAG infrastructure step keys now use verification-mode names (check_docker_infra, check_secrets, check_event_bus, check_omnidash, check_node_bus_connection). The onboarding orchestrator contract was bumped to reflect the handler/output evidence fields added on this PR branch after related onboarding PRs were merged into the branch.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+  - protocols
+evidence_requirements:
+  - kind: "tests"
+    description: "Onboarding unit and integration tests cover renamed verification steps and output evidence fields"
+    command: >-
+      uv run pytest tests/unit/onboarding tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding.py tests/integration/onboarding/test_onboarding_verification_semantics.py -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1599"
+    command: "gh pr checks 1599 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-11050"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-11050.yaml"
+  - id: "dod-onboarding-verification-semantics"
+    description: "Integration test proves renamed verification steps resolve through the real DAG policy and handler path"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/onboarding/test_onboarding_verification_semantics.py -q"
+  - id: "dod-onboarding-unit-regression"
+    description: "Unit tests cover policy resolution, loader behavior, and onboarding output status/capability evidence"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/onboarding tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding.py -q
+  - id: "dod-deploy"
+    description: "Deploy validation: onboarding DAG and handler contract changes are library/schema changes only; no running runtime container restart is required before merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy-gate: no runtime deploy required for onboarding verification naming and output metadata contract update"

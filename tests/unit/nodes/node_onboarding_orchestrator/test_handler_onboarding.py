@@ -170,6 +170,30 @@ class TestEnumOnboardingStatusFields:
         assert output.status == EnumOnboardingStatus.FAILED
 
     @pytest.mark.asyncio
+    async def test_mixed_pass_fail_without_skip_yields_partial_status(self) -> None:
+        """Mixed pass/fail outcomes without skipped steps set status=PARTIAL."""
+        input_model = ModelOnboardingInput(
+            target_capabilities=["first_node_running"],
+            continue_on_failure=True,
+        )
+        mock = AsyncMock(
+            side_effect=[
+                _make_passing_result(),
+                _make_failing_result(),
+                _make_passing_result(),
+                _make_passing_result(),
+                _make_passing_result(),
+            ]
+        )
+        with patch(
+            "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding.execute_verification",
+            mock,
+        ):
+            output = await handle_onboarding(input_model)
+
+        assert output.status == EnumOnboardingStatus.PARTIAL
+
+    @pytest.mark.asyncio
     async def test_blocked_when_steps_skipped(self) -> None:
         """Steps skipped due to previous failure sets status=BLOCKED."""
         input_model = ModelOnboardingInput(target_capabilities=["first_node_running"])

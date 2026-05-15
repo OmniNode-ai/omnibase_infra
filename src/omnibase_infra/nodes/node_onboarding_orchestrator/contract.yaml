@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Ticket: OMN-8272, OMN-10784
+# Ticket: OMN-8272, OMN-10784, OMN-11050
 name: "node_onboarding_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 description: >
-  Onboarding orchestrator — supports two execution paths. DAG path (default): loads the canonical graph, resolves a policy to a minimal step set, executes verification for each step, and renders markdown output. Interactive path (OMN-10784): when policy_name is set and the resolved policy has policy_type=interactive, dispatches to InteractiveExecutor with an injected input adapter, optionally writing env config via ConfigWriter when dry_run=False. Emits lifecycle events on completion. No result field (Invariant I5).
+  Onboarding orchestrator — supports two execution paths. DAG path (default): loads the canonical graph, resolves a policy to a minimal verification step set, executes verification for each step, and renders markdown output. Interactive path (OMN-10784): when policy_name is set and the resolved policy has policy_type=interactive, dispatches to InteractiveExecutor with an injected input adapter, optionally writing env config via ConfigWriter when dry_run=False. Emits lifecycle events on completion. No result field (Invariant I5).
 
 input_model:
   name: "ModelOnboardingInput"
@@ -18,7 +18,7 @@ input_model:
 output_model:
   name: "ModelOnboardingOutput"
   module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_output"
-  description: "Step results, success flag, counts, rendered markdown output, and interactive provenance fields (provenance, policy_name, policy_type, visited_steps, terminal_step, dry_run, env_output_path_written) for OMN-10784."
+  description: "Step results, success flag, counts, rendered markdown output, verification status taxonomy (status, verified_capabilities, unmet_capabilities), and interactive provenance fields (provenance, policy_name, policy_type, visited_steps, terminal_step, dry_run, env_output_path_written) for OMN-10784."
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -41,4 +41,4 @@ event_bus:
     - "onex.evt.omnibase-infra.onboarding-step-verified.v1"
 metadata:
   description: "Onboarding orchestrator that loads the canonical graph, resolves policy, executes verifications, and renders markdown output"
-  ticket: "OMN-8272"
+  ticket: "OMN-8272, OMN-10784, OMN-11050"

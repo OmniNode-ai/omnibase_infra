@@ -225,6 +225,8 @@ async def _handle_dag(
         status = EnumOnboardingStatus.PASSED
     elif any(r.message == "Skipped due to previous failure" for r in step_results):
         status = EnumOnboardingStatus.BLOCKED
+    elif any(r.passed for r in step_results):
+        status = EnumOnboardingStatus.PARTIAL
     else:
         status = EnumOnboardingStatus.FAILED
 
