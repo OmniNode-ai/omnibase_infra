@@ -10,16 +10,33 @@ set -euo pipefail
 MODE="${1:---staged}"
 BASE_REF="${2:-origin/main}"
 
-APPROVED_PATTERNS=(
-    "runtime/service_kernel.py"
-    "runtime/overlay/"
-    "runtime/config_discovery/config_prefetcher.py"
-    "runtime/runtime_profile.py"
+# Anchored path patterns — matched against /-separated path segments to prevent
+# substring false-positives (e.g. "tests/" must not match "src/contests/").
+# Prefix patterns: file must START with this value (top-level directories).
+APPROVED_PREFIX_PATTERNS=(
     "tests/"
     "scripts/"
 )
+# Infix patterns: file must contain "/<pattern>" (path segment boundary).
+APPROVED_INFIX_PATTERNS=(
+    "/runtime/service_kernel.py"
+    "/runtime/overlay/"
+    "/runtime/config_discovery/config_prefetcher.py"
+    "/runtime/runtime_profile.py"
+)
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
+
+is_approved() {
+    local file="$1"
+    for prefix in "${APPROVED_PREFIX_PATTERNS[@]}"; do
+        [[ "$file" == "$prefix"* ]] && return 0
+    done
+    for infix in "${APPROVED_INFIX_PATTERNS[@]}"; do
+        [[ "$file" == *"$infix"* ]] && return 0
+    done
+    return 1
+}
 
 get_changed_files() {
     case "$MODE" in
@@ -40,16 +57,13 @@ get_diff() {
 FAILED=0
 while IFS= read -r file; do
     [ -z "$file" ] && continue
-    APPROVED=0
-    for pattern in "${APPROVED_PATTERNS[@]}"; do
-        [[ "$file" == *"$pattern"* ]] && APPROVED=1 && break
-    done
-    [ "$APPROVED" -eq 1 ] && continue
+    is_approved "$file" && continue
 
     if get_diff "$file" | grep -qE "^\+.*($ENV_READ_PATTERNS)"; then
         echo "BLOCKED: $file introduces new os.environ/os.getenv read"
         echo "  Use overlay-resolved config instead."
-        echo "  Approved modules: ${APPROVED_PATTERNS[*]}"
+        echo "  Approved top-level dirs: ${APPROVED_PREFIX_PATTERNS[*]}"
+        echo "  Approved path segments: ${APPROVED_INFIX_PATTERNS[*]}"
         FAILED=1
     fi
 done < <(get_changed_files)

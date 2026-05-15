@@ -139,7 +139,7 @@ class TestCheckEnvReadsGate:
             tmp_path,
             {
                 "src/omnibase_infra/runtime/config_discovery/config_prefetcher.py": (
-                    'os.environ["KEY"] = "value"\n'
+                    'x = os.environ.get("KEY")\n'
                 )
             },
         )
