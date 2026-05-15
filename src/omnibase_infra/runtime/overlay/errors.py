@@ -20,7 +20,7 @@ class UnsupportedOverlayVersionError(RuntimeHostError):
 
 
 class OverlayPermissionError(RuntimeHostError):
-    """Overlay file permissions are too open for a secret-containing file."""
+    """Overlay file permissions too open for a secret-containing file."""
 
 
 class OverlayMergeConflictError(RuntimeHostError):
