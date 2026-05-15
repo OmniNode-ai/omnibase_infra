@@ -38,6 +38,14 @@ inputs:
     description: 'Set to "false" to skip uv cache restore/save for short timeout-sensitive jobs'
     required: false
     default: 'true'
+  sync-attempts:
+    description: 'Maximum uv sync attempts before failing'
+    required: false
+    default: '3'
+  sync-retry-delay-seconds:
+    description: 'Base delay in seconds between uv sync retries'
+    required: false
+    default: '10'
 runs:
   using: 'composite'
   steps:
@@ -65,12 +73,50 @@ runs:
       env:
         CACHE_ENABLED: ${{ inputs.cache-enabled }}
         INSTALL_ARGS: ${{ inputs.install-args }}
+        UV_SYNC_ATTEMPTS: ${{ inputs.sync-attempts }}
+        UV_SYNC_RETRY_DELAY_SECONDS: ${{ inputs.sync-retry-delay-seconds }}
       run: |
         export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
         git config --global http.version HTTP/1.1
         read -r -a install_args <<< "$INSTALL_ARGS"
-        if [ "$CACHE_ENABLED" = "false" ]; then
-          uv sync --no-cache "${install_args[@]}"
-        else
-          uv sync "${install_args[@]}"
+        sync_attempts="${UV_SYNC_ATTEMPTS}"
+        retry_delay_seconds="${UV_SYNC_RETRY_DELAY_SECONDS}"
+
+        if ! [[ "$sync_attempts" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::sync-attempts must be a positive integer (got: ${sync_attempts})"
+          exit 2
         fi
+
+        if ! [[ "$retry_delay_seconds" =~ ^[0-9]+$ ]]; then
+          echo "::error::sync-retry-delay-seconds must be a non-negative integer (got: ${retry_delay_seconds})"
+          exit 2
+        fi
+
+        echo "uv version: $(uv --version)"
+        echo "uv sync attempts: ${sync_attempts}"
+        echo "uv sync retry delay seconds: ${retry_delay_seconds}"
+        echo "UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-<unset>}"
+        echo "UV_CONCURRENT_DOWNLOADS=${UV_CONCURRENT_DOWNLOADS:-<unset>}"
+        echo "UV_CONCURRENT_BUILDS=${UV_CONCURRENT_BUILDS:-<unset>}"
+        echo "UV_NO_CACHE=${UV_NO_CACHE:-<unset>}"
+
+        sync_cmd=(uv sync)
+        if [ "$CACHE_ENABLED" = "false" ]; then
+          sync_cmd+=(--no-cache)
+        fi
+
+        sync_cmd+=("${install_args[@]}")
+
+        attempt=1
+        until "${sync_cmd[@]}"; do
+          status=$?
+          if [ "$attempt" -ge "$sync_attempts" ]; then
+            echo "::error::uv sync failed after ${attempt} attempt(s)"
+            exit "$status"
+          fi
+
+          sleep_seconds=$((retry_delay_seconds * attempt))
+          echo "::warning::uv sync attempt ${attempt}/${sync_attempts} failed with exit ${status}; retrying in ${sleep_seconds}s"
+          sleep "$sleep_seconds"
+          attempt=$((attempt + 1))
+        done
