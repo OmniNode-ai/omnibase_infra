@@ -539,6 +539,16 @@ class TestDockerComposeSecurity:
                 f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
             )
 
+    def test_runtime_socket_uses_owned_tmpfs(self) -> None:
+        """Runtime socket mount must not depend on host directory ownership."""
+        compose_file = COMPOSE_FILE_PATH
+        content = compose_file.read_text()
+
+        assert "/data/omninode/runtime-local-ingress" not in content
+        assert "${ONEX_LOCAL_RUNTIME_SOCKET_DIR" not in content
+        assert "tmpfs:" in content
+        assert "/run/onex-runtime:uid=1000,gid=1000,mode=0770" in content
+
 
 @pytest.mark.unit
 class TestDockerNetworkSecurity:

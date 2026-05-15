@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11067
+title: "Stabilize stability-test runtime ingress startup"
+summary: "Fix the stability-test main runtime startup crash by making the local ingress socket path runtime-owned and cleaning up partially-started resources."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused local ingress, Pattern B, runtime startup cleanup, and compose render checks pass."
+    command: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run pytest tests/integration/test_runtime_pattern_b_ingress_config.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_pattern_b_broker.py tests/unit/runtime/test_kernel.py::TestLoadRuntimeConfig::test_repo_runtime_config_enables_main_profile_ingress tests/unit/models/test_model_serialization_roundtrip.py tests/unit/docker/test_docker_security.py::TestDockerComposeSecurity::test_runtime_socket_uses_owned_tmpfs tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_runtime_socket_uses_owned_tmpfs -q"
+  - kind: manual
+    description: "Deploy-gate proof: after merge and approved runtime restart, the stability runtime reports local ingress running and accepts an OmniMarket Pattern B command."
+    command: >-
+      deploy: set -euo pipefail; CORR_ID=$(python3 -c 'import uuid; print(uuid.uuid4())'); docker exec omninode-stability-test-runtime python -c "import json, urllib.request; h=json.loads(urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=5).read()); d=h['details']; assert d['runtime_attached'] is True; assert d['local_ingress']['running'] is True; print({'runtime_attached': d['runtime_attached'], 'local_ingress': d['local_ingress']})"; printf '{"command_name":"runtime_sweep","requester":"deploy-gate","payload":{"dry_run":true},"correlation_id":"%s","response_topic":"onex.evt.omnimarket.pattern-b-dispatch-completed.v1","timeout_seconds":5}\n' "$CORR_ID" | docker exec -i omnibase-infra-stability-test-redpanda rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1; timeout 20s docker exec omnibase-infra-stability-test-redpanda rpk topic consume onex.evt.omnimarket.pattern-b-dispatch-completed.v1 --offset start 2>/dev/null | grep -m1 "$CORR_ID"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-focused-tests
+    description: "Focused tests prove local ingress and Pattern B config plus startup cleanup behavior."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run pytest tests/integration/test_runtime_pattern_b_ingress_config.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_pattern_b_broker.py tests/unit/runtime/test_kernel.py::TestLoadRuntimeConfig::test_repo_runtime_config_enables_main_profile_ingress tests/unit/models/test_model_serialization_roundtrip.py tests/unit/docker/test_docker_security.py::TestDockerComposeSecurity::test_runtime_socket_uses_owned_tmpfs tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_runtime_socket_uses_owned_tmpfs -q"
+  - id: dod-compose-render
+    description: "Rendered stability compose uses runtime-owned tmpfs for the socket path."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "POSTGRES_PASSWORD=postgres LINEAR_API_KEY=dummy docker compose --profile runtime -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml config --format json | jq -e '.services[\"omninode-runtime\"] as $s | (($s.tmpfs // []) | index(\"/run/onex-runtime:uid=1000,gid=1000,mode=0770\") != null) and ((((($s.volumes // []) | map(tostring) | join(\"\\n\")) | contains(\"/run/onex-runtime\")) | not))' >/dev/null"
+  - id: dod-deploy-proof
+    description: "Post-merge deploy proof must show local ingress running and the OmniMarket Pattern B topic accepting commands."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy: set -euo pipefail; CORR_ID=$(python3 -c 'import uuid; print(uuid.uuid4())'); docker exec omninode-stability-test-runtime python -c "import json, urllib.request; h=json.loads(urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=5).read()); d=h['details']; assert d['runtime_attached'] is True; assert d['local_ingress']['running'] is True; print({'runtime_attached': d['runtime_attached'], 'local_ingress': d['local_ingress']})"; printf '{"command_name":"runtime_sweep","requester":"deploy-gate","payload":{"dry_run":true},"correlation_id":"%s","response_topic":"onex.evt.omnimarket.pattern-b-dispatch-completed.v1","timeout_seconds":5}\n' "$CORR_ID" | docker exec -i omnibase-infra-stability-test-redpanda rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1; timeout 20s docker exec omnibase-infra-stability-test-redpanda rpk topic consume onex.evt.omnimarket.pattern-b-dispatch-completed.v1 --offset start 2>/dev/null | grep -m1 "$CORR_ID"

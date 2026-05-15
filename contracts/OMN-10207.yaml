@@ -36,7 +36,7 @@ dod_evidence:
       - check_type: command
         check_value: "PYTHONPATH=$PWD/src:$PYTHONPATH uv run python -c \"from pathlib import Path; from omnibase_infra.runtime.service_kernel import load_runtime_config; c=load_runtime_config(Path('contracts')); print(c.local_ingress.model_dump(mode='json')); print(c.pattern_b_broker.model_dump(mode='json'))\""
   - id: dod-compose-config
-    description: "Stability compose render includes the host-visible local runtime socket mount on the main runtime service."
+    description: "Stability compose render includes the runtime-owned local runtime socket tmpfs on the main runtime service."
     source: manual
     checks:
       - check_type: command

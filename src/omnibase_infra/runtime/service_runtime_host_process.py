@@ -1715,14 +1715,26 @@ class RuntimeHostProcess:
             if self._shutdown_requested.is_set():
                 logger.info("RuntimeHostProcess startup cancelled by shutdown")
                 return
+            await self._cleanup_after_startup_failure()
             raise
         except Exception:
             self._is_running = False
+            await self._cleanup_after_startup_failure()
             raise
         finally:
             if self._startup_task is startup_task:
                 self._startup_task = None
             self._is_starting = False
+
+    async def _cleanup_after_startup_failure(self) -> None:
+        """Release partially-started resources after start() fails."""
+        try:
+            await self.stop()
+        except Exception as cleanup_error:  # noqa: BLE001 - preserve startup failure
+            logger.warning(
+                "RuntimeHostProcess cleanup after startup failure failed: %s",
+                sanitize_error_message(cleanup_error),
+            )
 
     async def _start_runtime(self) -> None:
         """Start the runtime host.
