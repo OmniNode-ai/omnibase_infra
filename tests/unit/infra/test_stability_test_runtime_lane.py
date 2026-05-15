@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+BASE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_FILE = REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
 RUNBOOK_FILE = REPO_ROOT / "docs" / "runbooks" / "stability-test-runtime-lane.md"
 
@@ -86,6 +87,13 @@ def _load_overlay() -> dict:
     overlay = yaml.load(overlay_text, Loader=_TestSafeLoader)  # noqa: S506
     assert isinstance(overlay, dict)
     return overlay
+
+
+def _load_base_compose() -> dict:
+    base_text = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
+    base = yaml.load(base_text, Loader=yaml.SafeLoader)
+    assert isinstance(base, dict)
+    return base
 
 
 def _labels_by_key(labels: list[str]) -> dict[str, str]:
@@ -244,6 +252,22 @@ def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> N
         assert "../contracts:/app/contracts:ro" not in volumes
         assert all(":/app/contracts" not in volume for volume in volumes)
         assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+
+
+@pytest.mark.unit
+def test_stability_lane_runtime_healthchecks_fail_on_http_503() -> None:
+    """Stability lane inherits curl --fail probes from runtime compose services."""
+    base = _load_base_compose()
+    overlay = _load_overlay()
+
+    for service_name in RUNTIME_SERVICES:
+        assert "healthcheck" not in overlay["services"][service_name]
+        assert base["services"][service_name]["healthcheck"]["test"] == [
+            "CMD",
+            "curl",
+            "-sf",
+            "http://localhost:8085/health",
+        ]
 
 
 @pytest.mark.unit

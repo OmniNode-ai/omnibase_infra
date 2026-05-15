@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Integration proof for OMN-9741 effects health liveness during startup.
+"""Integration proof for runtime health liveness during startup.
 
 OMN-9741 fixes the health liveness contract: when the runtime is not yet
-attached (subscription startup in progress), the /health endpoint must return
-HTTP 200 with status=degraded rather than HTTP 503, so Docker/autoheal does
-not recycle a live effects process during long Kafka subscription setup.
+attached, the /health endpoint can expose structured runtime_pending details
+before RuntimeHostProcess exists.
+
+OMN-11068 tightens the Docker probe contract: runtime_pending must return HTTP
+503 so Docker health cannot report success while runtime_attached=false.
 
 Ticket: OMN-9741
 Integration Test Coverage gate: OMN-7005 (hard gate since 2026-04-13).
@@ -25,12 +27,11 @@ from omnibase_infra.services.service_health import ServiceHealth
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_health_endpoint_returns_200_degraded_when_runtime_not_attached() -> None:
-    """Health endpoint must return HTTP 200 degraded when runtime is not yet attached.
+async def test_health_endpoint_returns_503_degraded_when_runtime_not_attached() -> None:
+    """Health endpoint must fail Docker probes when runtime is not yet attached.
 
-    This is the liveness invariant for OMN-9741: Docker autoheal kills containers
-    on HTTP 503. During Kafka subscription startup, runtime is None — the endpoint
-    must return degraded (HTTP 200), not unhealthy (HTTP 503).
+    This is the OMN-11068 masking regression: plain curl -sf Docker healthchecks
+    must fail while runtime_attached=false and startup_phase=runtime_pending.
     """
     container = MagicMock()
     server = ServiceHealth(container=container)
@@ -38,9 +39,9 @@ async def test_health_endpoint_returns_200_degraded_when_runtime_not_attached() 
 
     response = await server._handle_health(mock_request)
 
-    assert response.status == 200, (
-        f"Expected HTTP 200 (degraded) when runtime not attached, got {response.status}. "
-        "Docker autoheal would kill a container returning 503 during startup."
+    assert response.status == 503, (
+        f"Expected HTTP 503 (degraded) when runtime not attached, got {response.status}. "
+        "Docker healthchecks must not pass while runtime_attached=false."
     )
     body = json.loads(response.text)
     assert body["status"] == "degraded", (
@@ -81,8 +82,8 @@ async def test_health_endpoint_returns_200_healthy_after_attach_runtime() -> Non
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_health_endpoint_returns_200_degraded_during_runtime_startup() -> None:
-    """Health endpoint returns degraded 200 when runtime reports startup_in_progress."""
+async def test_health_endpoint_returns_503_degraded_until_runtime_is_running() -> None:
+    """Health endpoint fails Docker probes while attached runtime is not running."""
     mock_runtime = MagicMock()
     mock_runtime.health_check = AsyncMock(
         return_value={
@@ -100,7 +101,8 @@ async def test_health_endpoint_returns_200_degraded_during_runtime_startup() -> 
 
     response = await server._handle_health(mock_request)
 
-    assert response.status == 200
+    assert response.status == 503
     body = json.loads(response.text)
     assert body["status"] == "degraded"
     assert body["details"]["startup_in_progress"] is True
+    assert body["details"]["is_running"] is False
