@@ -62,6 +62,14 @@ class ResourceLimits:
 
 
 @dataclass(frozen=True)
+class ULimit:
+    """Container ulimit soft/hard pair for docker compose."""
+
+    soft: int
+    hard: int
+
+
+@dataclass(frozen=True)
 class CatalogManifest:
     """Declaration of a single deployable catalog entry.
 
@@ -86,6 +94,7 @@ class CatalogManifest:
     restart: str = "unless-stopped"
     labels: dict[str, str] = field(default_factory=dict)
     resources: ResourceLimits | None = None
+    ulimits: dict[str, ULimit] = field(default_factory=dict)
     stop_grace_period: str | None = None
     # Per-entry env overrides (e.g., per-entry OTEL name)
     catalog_env: dict[str, str] = field(default_factory=dict)

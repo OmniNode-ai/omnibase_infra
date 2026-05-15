@@ -46,6 +46,16 @@ def test_generated_compose_preserves_depends_on_conditions() -> None:
 
 
 @pytest.mark.unit
+def test_generated_compose_preserves_redpanda_ulimits() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["core"])
+    compose = generate_compose(resolved)
+    redpanda = compose["services"]["redpanda"]
+
+    assert redpanda["ulimits"] == {"nofile": {"soft": 65535, "hard": 65535}}
+
+
+@pytest.mark.unit
 def test_generated_compose_preserves_one_shot_semantics() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])

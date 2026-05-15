@@ -20,6 +20,7 @@ from omnibase_infra.docker.catalog.manifest_schema import (
     HealthCheck,
     PortMapping,
     ResourceLimits,
+    ULimit,
 )
 
 
@@ -82,6 +83,13 @@ def _load_manifest(path: Path) -> CatalogManifest:
             memory_reservation=str(r.get("memory_reservation", "128M")),
         )
 
+    ulimits: dict[str, ULimit] = {}
+    for name, limit in (raw.get("ulimits") or {}).items():
+        ulimits[str(name)] = ULimit(
+            soft=int(limit["soft"]),
+            hard=int(limit["hard"]),
+        )
+
     return CatalogManifest(
         name=raw["name"],
         description=raw.get("description", ""),
@@ -99,6 +107,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
         restart=raw.get("restart", "unless-stopped"),
         labels=raw.get("labels", {}),
         resources=resources,
+        ulimits=ulimits,
         stop_grace_period=raw.get("stop_grace_period"),
         catalog_env=raw.get("catalog_env", {}),
         extra_networks=raw.get("extra_networks", []),
