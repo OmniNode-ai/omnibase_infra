@@ -66,6 +66,8 @@ runs:
         CACHE_ENABLED: ${{ inputs.cache-enabled }}
         INSTALL_ARGS: ${{ inputs.install-args }}
       run: |
+        export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+        git config --global http.version HTTP/1.1
         read -r -a install_args <<< "$INSTALL_ARGS"
         if [ "$CACHE_ENABLED" = "false" ]; then
           uv sync --no-cache "${install_args[@]}"
