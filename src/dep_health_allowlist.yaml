@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Dependency Health Sweep — omnibase_infra allowlist
+# OMN-11058: CRITICAL topic triage — runtime ownership verification (2026-05-15)
+#
+# Format: each entry must have a `topic` key (used as literal match by the sweep engine).
+# Optional keys: reason, owner_repo, planned_subscriber, expires_at (all informational).
+#
+# Topics on this list are SUPPRESSED from MISSING_TOPIC_EDGE findings when
+# scanning this repo root. Only use for genuinely unwired topics with a clear plan.
+#
+# Review this list quarterly. Remove entries when the subscriber is wired.
+allowlist:
+  # --- consumer-restart ---
+  # Published by: node_consumer_health_triage_effect (omnibase_infra)
+  # Intended consumer: runtime-level consumer watchdog / supervisor process
+  # Status: genuinely_unwired — the restart command is designed to trigger
+  #         OS/process-level consumer restarts. The receiving component is the
+  #         runtime-worker service, which currently uses process-level restart
+  #         logic (util_consumer_restart), not a Kafka-subscribed ONEX node.
+  #         No node contract declares subscription to this topic.
+  # Expires: 2026-08-15 — either wire a dedicated node_consumer_restart_effect
+  #           or convert the runtime-worker to subscribe via Kafka.
+  - topic: "onex.cmd.omnibase-infra.consumer-restart.v1"
+    reason: "Consumer restart command targets runtime-worker process; no ONEX node subscriber exists yet — runtime-level watchdog planned."
+    owner_repo: omnibase_infra
+    planned_subscriber: node_consumer_restart_effect
+    expires_at: "2026-08-15"
