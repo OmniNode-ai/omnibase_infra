@@ -747,6 +747,7 @@ class AdapterLlmProviderOpenai:
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             api_key=self._api_key,
+            timeout_seconds=request.timeout_seconds,
         )
 
 

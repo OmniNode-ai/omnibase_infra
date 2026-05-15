@@ -32,6 +32,7 @@ class ModelLlmAdapterRequest(BaseModel):
         parameters: Generation parameters as a JSON-compatible dictionary.
         max_tokens: Maximum tokens to generate, or None for default.
         temperature: Sampling temperature, or None for default.
+        timeout_seconds: HTTP request timeout in seconds.
 
     Warning:
         Dict fields (``parameters``) are shallowly mutable despite
@@ -76,6 +77,12 @@ class ModelLlmAdapterRequest(BaseModel):
         ge=0.0,
         le=2.0,
         description="Temperature for generation.",
+    )
+    timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=600.0,
+        description="HTTP request timeout in seconds.",
     )
 
 

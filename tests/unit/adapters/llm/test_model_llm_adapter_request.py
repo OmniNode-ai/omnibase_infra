@@ -29,6 +29,7 @@ class TestModelLlmAdapterRequest:
         assert req.parameters == {}
         assert req.max_tokens is None
         assert req.temperature is None
+        assert req.timeout_seconds == 30.0
 
     def test_request_with_parameters(self) -> None:
         """Request with all optional fields."""
@@ -38,9 +39,11 @@ class TestModelLlmAdapterRequest:
             parameters={"top_p": 0.9},
             max_tokens=500,
             temperature=0.7,
+            timeout_seconds=120.0,
         )
         assert req.max_tokens == 500
         assert req.temperature == 0.7
+        assert req.timeout_seconds == 120.0
         assert req.parameters == {"top_p": 0.9}
 
     def test_frozen_model(self) -> None:
@@ -90,6 +93,21 @@ class TestModelLlmAdapterRequest:
         """temperature defaults to None (provider default)."""
         req = ModelLlmAdapterRequest(prompt="Hello", model_name="test")
         assert req.temperature is None
+
+    def test_timeout_seconds_bounds(self) -> None:
+        """timeout_seconds must match infra request bounds."""
+        with pytest.raises(ValidationError):
+            ModelLlmAdapterRequest(
+                prompt="Hello",
+                model_name="test",
+                timeout_seconds=0.5,
+            )
+        with pytest.raises(ValidationError):
+            ModelLlmAdapterRequest(
+                prompt="Hello",
+                model_name="test",
+                timeout_seconds=601.0,
+            )
 
     def test_satisfies_protocol(self) -> None:
         """Verify structural compatibility with ProtocolLLMRequest."""

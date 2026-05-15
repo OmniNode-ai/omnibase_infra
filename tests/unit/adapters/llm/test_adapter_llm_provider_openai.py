@@ -184,6 +184,7 @@ class TestAdapterLlmProviderOpenaiTranslation:
             model_name="qwen2.5-coder-14b",
             temperature=0.7,
             max_tokens=500,
+            timeout_seconds=120.0,
         )
         infra_request = adapter._translate_request(spi_request)
 
@@ -191,6 +192,7 @@ class TestAdapterLlmProviderOpenaiTranslation:
         assert infra_request.model == "qwen2.5-coder-14b"
         assert infra_request.temperature == 0.7
         assert infra_request.max_tokens == 500
+        assert infra_request.timeout_seconds == 120.0
         assert len(infra_request.messages) == 1
         assert infra_request.messages[0]["role"] == "user"
         assert infra_request.messages[0]["content"] == "Explain ONEX"
