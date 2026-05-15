@@ -303,6 +303,20 @@ def test_stability_lane_render_inherits_release_build_source() -> None:
 
 
 @pytest.mark.integration
+def test_stability_lane_runtime_socket_uses_owned_tmpfs() -> None:
+    rendered_config = _compose_config_json()
+    runtime_service = rendered_config["services"]["omninode-runtime"]
+
+    assert runtime_service["tmpfs"] == ["/run/onex-runtime:uid=1000,gid=1000,mode=0770"]
+    volume_targets = {
+        volume["target"]
+        for volume in runtime_service.get("volumes", [])
+        if isinstance(volume, dict) and "target" in volume
+    }
+    assert "/run/onex-runtime" not in volume_targets
+
+
+@pytest.mark.integration
 def test_stability_lane_render_does_not_expose_production_ports_or_services() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]

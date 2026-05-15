@@ -1519,6 +1519,7 @@ class EventBusKafka(
         # immediately so callers get a clear error.
         stripped_group_id = group_id.strip()
         if not stripped_group_id:
+            self._pending_consumer_keys.discard(consumer_key)
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
@@ -1698,6 +1699,19 @@ class EventBusKafka(
                     logger.debug(
                         "Failed to emit consumer started health event", exc_info=True
                     )
+
+        except asyncio.CancelledError:
+            self._pending_consumer_keys.discard(consumer_key)
+            try:
+                await consumer.stop()
+            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Cleanup failed for cancelled Kafka consumer start (topic=%s): %s",
+                    topic,
+                    cleanup_err,
+                    exc_info=True,
+                )
+            raise
 
         except TimeoutError as e:
             self._pending_consumer_keys.discard(consumer_key)
