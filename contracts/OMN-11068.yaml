@@ -40,3 +40,10 @@ dod_evidence:
       - check_type: "command"
         check_value: >-
           uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - id: "dod-post-merge-deploy-validation"
+    description: "Runtime healthcheck rollout requires normal post-merge deploy validation before claiming live runtime health"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy omninode-stability-test-runtime after merge, then verify docker compose healthcheck fails while /health reports runtime_attached=false or is_running=false and succeeds only after runtime attachment reports is_running=true
