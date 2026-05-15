@@ -109,6 +109,7 @@ def mock_event_bus_wiring() -> MagicMock:
 class TestPackageNodeSubscriptionWiring:
     """Tests for _wire_package_node_subscriptions."""
 
+    @pytest.mark.unit
     def test_legacy_package_node_wiring_disabled_when_runtime_package_filter_set(
         self,
     ) -> None:
@@ -121,6 +122,7 @@ class TestPackageNodeSubscriptionWiring:
             mp.delenv("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", raising=False)
             assert _package_node_subscription_wiring_disabled() is True
 
+    @pytest.mark.unit
     def test_legacy_package_node_wiring_disabled_by_explicit_flag(self) -> None:
         from omnibase_infra.runtime.service_runtime_host_process import (
             _package_node_subscription_wiring_disabled,
@@ -131,6 +133,7 @@ class TestPackageNodeSubscriptionWiring:
             mp.setenv("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "true")
             assert _package_node_subscription_wiring_disabled() is True
 
+    @pytest.mark.unit
     def test_legacy_package_node_wiring_allowed_without_filters(self) -> None:
         from omnibase_infra.runtime.service_runtime_host_process import (
             _package_node_subscription_wiring_disabled,
