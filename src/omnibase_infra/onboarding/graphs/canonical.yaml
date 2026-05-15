@@ -6,11 +6,11 @@
 #
 # DAG:
 #   check_python -> install_uv -> install_core -> create_first_node -> run_standalone_node
-#                                              \-> start_docker_infra -> start_event_bus -> connect_node_to_bus
-#                                                                    \-> configure_secrets
-#                                                                                        \-> start_omnidash
-#                                                                                        \-> configure_cloud_credentials -> deploy_to_cloud
-#                                                                                                                       \-> configure_hybrid_split -> deploy_hybrid
+#                                              \-> check_docker_infra -> check_event_bus -> check_node_bus_connection
+#                                                                    \-> check_secrets
+#                                                                                      \-> check_omnidash
+#                                                                                      \-> configure_cloud_credentials -> deploy_to_cloud
+#                                                                                                                     \-> configure_hybrid_split -> deploy_hybrid
 title: "onex_onboarding_canonical"
 description: "Canonical onboarding graph for the ONEX platform"
 version: {major: 1, minor: 0, patch: 0}
@@ -85,8 +85,8 @@ steps:
       target: "uv run python -m my_first_node.node --dry-run"
       timeout_seconds: 30
       description: "Node executes successfully in dry-run mode"
-  - step_key: "start_docker_infra"
-    name: "Start Docker Infrastructure"
+  - step_key: "check_docker_infra"
+    name: "Check Docker Infrastructure"
     step_type: "action"
     description: "Start PostgreSQL, Redpanda, and Valkey via Docker Compose"
     depends_on: ["install_core"]
@@ -99,11 +99,11 @@ steps:
       target: "localhost:5436"
       timeout_seconds: 30
       description: "PostgreSQL is accepting connections on external port"
-  - step_key: "start_event_bus"
-    name: "Start Event Bus"
+  - step_key: "check_event_bus"
+    name: "Check Event Bus"
     step_type: "action"
     description: "Verify Redpanda/Kafka event bus is running"
-    depends_on: ["start_docker_infra"]
+    depends_on: ["check_docker_infra"]
     required_capabilities: ["docker_infra_running"]
     produces_capabilities: ["event_bus_running"]
     tags: ["infrastructure", "messaging"]
@@ -113,11 +113,11 @@ steps:
       target: "localhost:19092"
       timeout_seconds: 15
       description: "Redpanda is accepting connections on external port"
-  - step_key: "connect_node_to_bus"
-    name: "Connect Node to Event Bus"
+  - step_key: "check_node_bus_connection"
+    name: "Check Node Bus Connection"
     step_type: "action"
     description: "Configure node to publish/consume events via Kafka"
-    depends_on: ["start_event_bus"]
+    depends_on: ["check_event_bus"]
     required_capabilities: ["event_bus_running"]
     produces_capabilities: ["event_bus_connected"]
     tags: ["development", "messaging"]
@@ -127,11 +127,11 @@ steps:
       target: "uv run python -c \"from omnibase_infra.event_bus import get_bus; print('ok')\""
       timeout_seconds: 15
       description: "Event bus client imports successfully"
-  - step_key: "configure_secrets"
-    name: "Configure Secrets"
+  - step_key: "check_secrets"
+    name: "Check Secrets"
     step_type: "action"
     description: "Set up ~/.omnibase/.env with required environment variables"
-    depends_on: ["start_docker_infra"]
+    depends_on: ["check_docker_infra"]
     required_capabilities: ["docker_infra_running"]
     produces_capabilities: ["secrets_configured"]
     tags: ["infrastructure", "security"]
@@ -141,11 +141,11 @@ steps:
       target: "~/.omnibase/.env"
       timeout_seconds: 5
       description: "Environment file exists"
-  - step_key: "start_omnidash"
-    name: "Start Omnidash Dashboard"
+  - step_key: "check_omnidash"
+    name: "Check Omnidash Dashboard"
     step_type: "action"
     description: "Start the analytics dashboard for monitoring"
-    depends_on: ["configure_secrets"]
+    depends_on: ["check_secrets"]
     required_capabilities: ["secrets_configured"]
     produces_capabilities: ["omnidash_running"]
     tags: ["monitoring", "dashboard"]
@@ -173,7 +173,7 @@ steps:
     name: "Validate omnimarket Config"
     step_type: "action"
     description: "Run the omnimarket config validator to confirm all required secrets and env vars are present"
-    depends_on: ["install_omnimarket", "configure_secrets"]
+    depends_on: ["install_omnimarket", "check_secrets"]
     required_capabilities: ["omnimarket_installed", "secrets_configured"]
     produces_capabilities: ["omnimarket_config_valid"]
     tags: ["setup", "validation", "omnimarket"]
@@ -187,7 +187,7 @@ steps:
     name: "Register omnimarket Node"
     step_type: "action"
     description: "Register the first omnimarket node with the runtime registry"
-    depends_on: ["validate_omnimarket_config", "connect_node_to_bus"]
+    depends_on: ["validate_omnimarket_config", "check_node_bus_connection"]
     required_capabilities: ["omnimarket_config_valid", "event_bus_connected"]
     produces_capabilities: ["omnimarket_node_registered"]
     tags: ["development", "omnimarket", "messaging"]
@@ -201,7 +201,7 @@ steps:
     name: "Configure Cloud Credentials"
     step_type: "action"
     description: "Set up cloud provider credentials for remote deployment"
-    depends_on: ["configure_secrets"]
+    depends_on: ["check_secrets"]
     required_capabilities: ["secrets_configured"]
     produces_capabilities: ["cloud_credentials_configured"]
     tags: ["cloud", "infrastructure"]
@@ -215,7 +215,7 @@ steps:
     name: "Deploy to Cloud"
     step_type: "action"
     description: "Deploy ONEX runtime to cloud provider"
-    depends_on: ["configure_cloud_credentials", "connect_node_to_bus"]
+    depends_on: ["configure_cloud_credentials", "check_node_bus_connection"]
     required_capabilities: ["cloud_credentials_configured", "event_bus_connected"]
     produces_capabilities: ["cloud_deployed"]
     tags: ["cloud", "deployment"]
@@ -229,7 +229,7 @@ steps:
     name: "Configure Hybrid Service Split"
     step_type: "action"
     description: "Declare which services run locally and which run in the cloud"
-    depends_on: ["configure_cloud_credentials", "start_docker_infra"]
+    depends_on: ["configure_cloud_credentials", "check_docker_infra"]
     required_capabilities: ["cloud_credentials_configured", "docker_infra_running"]
     produces_capabilities: ["hybrid_split_configured"]
     tags: ["hybrid", "infrastructure"]
@@ -243,7 +243,7 @@ steps:
     name: "Deploy Hybrid Topology"
     step_type: "action"
     description: "Deploy ONEX runtime in hybrid topology (local + cloud services)"
-    depends_on: ["configure_hybrid_split", "connect_node_to_bus"]
+    depends_on: ["configure_hybrid_split", "check_node_bus_connection"]
     required_capabilities: ["hybrid_split_configured", "event_bus_connected"]
     produces_capabilities: ["hybrid_deployed"]
     tags: ["hybrid", "deployment"]

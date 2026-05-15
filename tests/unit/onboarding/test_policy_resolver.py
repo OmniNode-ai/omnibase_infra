@@ -69,9 +69,9 @@ class TestResolvePolicy:
         )
         step_keys = [s.step_key for s in steps]
         assert "check_python" in step_keys
-        assert "connect_node_to_bus" in step_keys
+        assert "check_node_bus_connection" in step_keys
         # Should not include omnidash or secrets
-        assert "start_omnidash" not in step_keys
+        assert "check_omnidash" not in step_keys
 
     def test_topological_order(self, canonical_graph) -> None:
         steps = resolve_policy(

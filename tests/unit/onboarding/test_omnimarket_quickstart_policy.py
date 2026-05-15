@@ -83,8 +83,8 @@ class TestOmnimarketQuickstartPolicy:
         )
         step_keys = {s.step_key for s in steps}
         assert "install_uv" in step_keys
-        assert "configure_secrets" in step_keys
-        assert "connect_node_to_bus" in step_keys
+        assert "check_secrets" in step_keys
+        assert "check_node_bus_connection" in step_keys
 
     def test_all_existing_policies_still_load(self) -> None:
         policies = load_builtin_policies()
