@@ -45,7 +45,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --no-cache --all-extras
 
       - name: Run MyPy type checking
         run: |
@@ -81,7 +81,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --no-cache --all-extras
 
       - name: Check for Optional/Union usage (PEP 604)
         run: uv run ruff check src/ --select UP007,UP006
