@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
+    EnumOnboardingStatus,
+)
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_step_result import (
     ModelStepResult,
 )
@@ -26,6 +29,18 @@ class ModelOnboardingOutput(BaseModel):
     completed_steps: int = Field(description="Number of completed steps")
     step_results: list[ModelStepResult] = Field(description="Per-step results")
     rendered_output: str = Field(description="Rendered output string")
+    status: EnumOnboardingStatus = Field(
+        default=EnumOnboardingStatus.FAILED,
+        description="Overall onboarding result",
+    )
+    verified_capabilities: list[str] = Field(
+        default_factory=list,
+        description="Capabilities that passed verification",
+    )
+    unmet_capabilities: list[str] = Field(
+        default_factory=list,
+        description="Capabilities that failed verification",
+    )
 
     # Interactive provenance (OMN-10784 GPT #11)
     provenance: ModelInteractiveResult | None = Field(
