@@ -37,7 +37,7 @@ class AdapterFakeInput:
             raise TypeError(
                 f"Step '{step.id}': expected list response, got {type(response)}"
             )
-        return list(response)
+        return [t.strip() for t in response if isinstance(t, str) and t.strip()]
 
     async def collect_text(self, step: ModelInteractiveStep) -> str:
         response = self._responses.get(step.id, "")
@@ -45,7 +45,7 @@ class AdapterFakeInput:
             raise TypeError(
                 f"Step '{step.id}': expected str response, got {type(response)}"
             )
-        return response
+        return response.strip()
 
     async def notify_action(self, step: ModelInteractiveStep) -> None:
         self.notified_steps.append(step.id)
