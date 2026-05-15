@@ -182,3 +182,38 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert docker_cache_step["if"] == "${{ false }}"
     assert docker_cache_step["uses"] == "actions/cache/restore@v5"
+
+
+def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
+    action = _load_yaml(SETUP_PYTHON_UV_ACTION)
+
+    assert action["inputs"]["sync-attempts"]["default"] == "3"
+    assert action["inputs"]["sync-retry-delay-seconds"]["default"] == "10"
+
+    install_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Install dependencies"
+    )
+    assert install_step["env"]["UV_SYNC_ATTEMPTS"] == "${{ inputs.sync-attempts }}"
+    assert (
+        install_step["env"]["UV_SYNC_RETRY_DELAY_SECONDS"]
+        == "${{ inputs.sync-retry-delay-seconds }}"
+    )
+
+    run_script = install_step["run"]
+    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
+    assert "git config --global http.version HTTP/1.1" in run_script
+    assert "sync_cmd=(uv sync)" in run_script
+    assert "sync_cmd+=(--no-cache)" in run_script
+    assert 'until "${sync_cmd[@]}"; do' in run_script
+    assert (
+        'echo "::warning::uv sync attempt ${attempt}/${sync_attempts} failed'
+        in run_script
+    )
+    assert 'echo "::error::uv sync failed after ${attempt} attempt(s)"' in run_script
+    assert 'echo "UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-<unset>}"' in run_script
+    assert (
+        'echo "UV_CONCURRENT_DOWNLOADS=${UV_CONCURRENT_DOWNLOADS:-<unset>}"'
+        in run_script
+    )
