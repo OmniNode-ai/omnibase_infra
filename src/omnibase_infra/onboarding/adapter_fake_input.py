@@ -1,45 +1,54 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Fake input adapter for testing.
-
-Takes a dict[step_id, response] at construction and returns predetermined
-responses without any I/O. Used by executor and handler unit tests.
-"""
+"""Fake input adapter — returns predetermined responses for tests."""
 
 from __future__ import annotations
 
-from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveStep
+from collections.abc import Mapping
+
+from omnibase_infra.onboarding.models_interactive import ModelInteractiveStep
 
 
 class AdapterFakeInput:
-    def __init__(self, responses: dict[str, str | list[str]]) -> None:
+    """Drives interactive onboarding with predetermined responses.
+
+    responses: maps step.id → str (for choice/text) or list[str] (for multi_choice).
+    action steps via notify_action are recorded in notified_steps without side effects.
+    """
+
+    def __init__(self, responses: Mapping[str, object]) -> None:
         self._responses = responses
+        self.notified_steps: list[str] = []
 
     async def collect_choice(self, step: ModelInteractiveStep) -> str:
-        value = self._responses[step.id]
-        if not isinstance(value, str):
+        response = self._responses[step.id]
+        if not isinstance(response, str):
             raise TypeError(
-                f"Expected str response for step {step.id!r}, got {type(value)}"
+                f"Step '{step.id}': expected str response, got {type(response)}"
             )
-        return value
+        return response
 
     async def collect_multi_choice(self, step: ModelInteractiveStep) -> list[str]:
-        value = self._responses[step.id]
-        if isinstance(value, list):
-            return [v.strip() for v in value if v.strip()]
-        return [v.strip() for v in str(value).split(",") if v.strip()]
+        response = self._responses[step.id]
+        if isinstance(response, str):
+            return [t.strip() for t in response.split(",") if t.strip()]
+        if not isinstance(response, list):
+            raise TypeError(
+                f"Step '{step.id}': expected list response, got {type(response)}"
+            )
+        return list(response)
 
     async def collect_text(self, step: ModelInteractiveStep) -> str:
-        value = self._responses[step.id]
-        if not isinstance(value, str):
+        response = self._responses.get(step.id, "")
+        if not isinstance(response, str):
             raise TypeError(
-                f"Expected str response for step {step.id!r}, got {type(value)}"
+                f"Step '{step.id}': expected str response, got {type(response)}"
             )
-        return value.strip()
+        return response
 
-    async def notify_action(self, step: ModelInteractiveStep) -> None:  # stub-ok
-        pass
+    async def notify_action(self, step: ModelInteractiveStep) -> None:
+        self.notified_steps.append(step.id)
 
 
 __all__ = ["AdapterFakeInput"]

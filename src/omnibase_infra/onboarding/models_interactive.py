@@ -7,6 +7,8 @@ Individual model files follow the one-model-per-file architecture rule.
 This module re-exports all four for convenient single-import access.
 """
 
+from __future__ import annotations
+
 from omnibase_infra.onboarding.model_interactive_policy import ModelInteractivePolicy
 from omnibase_infra.onboarding.model_interactive_result import (
     ModelInteractiveResult,

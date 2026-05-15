@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.onboarding.enum_interactive_policy_type import (
+    EnumInteractivePolicyType,
+)
 from omnibase_infra.onboarding.model_interactive_step import ModelInteractiveStep
 from omnibase_infra.onboarding.model_transition import ModelTransition
 
@@ -16,10 +17,11 @@ from omnibase_infra.onboarding.model_transition import ModelTransition
 class ModelInteractivePolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    policy_name: str  # ONEX_EXCLUDE: pattern_validator - policy_name is the policy's own identifier, not an entity reference
+    policy_slug: str = Field(alias="policy_name")
+    display_name: str | None = Field(default=None)
     description: str
     version: dict[str, int]
-    policy_type: Literal["interactive"]
+    policy_type: EnumInteractivePolicyType
     target_capabilities: list[str]
     max_estimated_minutes: int
     steps: list[ModelInteractiveStep]
@@ -29,17 +31,17 @@ class ModelInteractivePolicy(BaseModel):
 
     @model_validator(mode="after")
     def _validate_graph_integrity(self) -> ModelInteractivePolicy:
-        step_ids = [s.id for s in self.steps]
-        if not step_ids:
+        step_ids_list = [s.id for s in self.steps]
+        if not step_ids_list:
             raise ValueError("Interactive policy must define at least one step")
 
-        step_id_set = set(step_ids)
+        step_id_set = set(step_ids_list)
 
-        if len(step_id_set) != len(step_ids):
+        if len(step_id_set) != len(step_ids_list):
             raise ValueError("Duplicate step IDs found")
 
         if self.start_step is None:
-            object.__setattr__(self, "start_step", step_ids[0])
+            object.__setattr__(self, "start_step", step_ids_list[0])
         elif self.start_step not in step_id_set:
             raise ValueError(f"start_step references unknown step '{self.start_step}'")
 
@@ -66,6 +68,10 @@ class ModelInteractivePolicy(BaseModel):
                 raise ValueError(f"Terminal step '{tid}' missing from env_output")
 
         return self
+
+    @property
+    def policy_name(self) -> str:
+        return self.policy_slug
 
 
 __all__ = ["ModelInteractivePolicy"]

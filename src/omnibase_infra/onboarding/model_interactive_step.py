@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.onboarding.enum_interactive_step_type import EnumInteractiveStepType
 
 
 class ModelInteractiveStep(BaseModel):
@@ -15,7 +15,7 @@ class ModelInteractiveStep(BaseModel):
 
     id: str = Field(description="Step identifier")
     prompt: str = Field(description="User-facing prompt text")
-    type: Literal["choice", "multi_choice", "text", "action"]
+    type: EnumInteractiveStepType
     options: list[str] = Field(default_factory=list)
     condition: str | None = Field(default=None)
     required: bool = Field(default=True)
