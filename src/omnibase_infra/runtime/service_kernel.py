@@ -872,9 +872,7 @@ async def bootstrap() -> int:
                 )
                 _manifest_dir.mkdir(parents=True, exist_ok=True)
                 _manifest_path = _manifest_dir / "overlay_resolution_manifest.json"
-                _manifest_path.write_text(
-                    _overlay_result.manifest.model_dump_json(indent=2)
-                )
+                _manifest_path.write_text(_overlay_result.manifest.to_json(indent=2))
         except _OverlayNotFoundError:
             raise
         except (OSError, ValueError, ImportError) as _overlay_exc:

@@ -34,5 +34,5 @@ class ModelOverlayResolutionManifest(BaseModel):
         }
         return f"sha256:{hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()}"
 
-    def model_dump_json(self, *, indent: int = 2) -> str:
+    def to_json(self, *, indent: int = 2) -> str:
         return json.dumps(self.model_dump(mode="json"), indent=indent)
