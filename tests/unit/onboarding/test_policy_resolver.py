@@ -26,19 +26,17 @@ def canonical_graph():
 class TestResolvePolicy:
     """Tests for resolve_policy()."""
 
-    def test_standalone_quickstart_produces_5_steps(self, canonical_graph) -> None:
+    def test_standalone_quickstart_produces_3_steps(self, canonical_graph) -> None:
         steps = resolve_policy(
             canonical_graph,
-            target_capabilities=["first_node_running"],
+            target_capabilities=["core_installed"],
         )
         step_keys = [s.step_key for s in steps]
-        assert len(steps) == 5
+        assert len(steps) == 3
         assert step_keys == [
             "check_python",
             "install_uv",
             "install_core",
-            "create_first_node",
-            "run_standalone_node",
         ]
 
     def test_full_platform_produces_all_steps(self, canonical_graph) -> None:
@@ -118,7 +116,7 @@ class TestLoadBuiltinPolicies:
     def test_standalone_targets(self) -> None:
         policies = load_builtin_policies()
         standalone = policies["standalone_quickstart"]
-        assert standalone["target_capabilities"] == ["first_node_running"]
+        assert standalone["target_capabilities"] == ["core_installed"]
 
     def test_full_platform_targets(self) -> None:
         policies = load_builtin_policies()
