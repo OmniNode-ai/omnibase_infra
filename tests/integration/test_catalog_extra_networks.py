@@ -1,12 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration tests for catalog extra_networks support (OMN-8713).
-
-Verifies that services declaring extra_networks in their manifest YAML:
-  - Join those networks in the generated compose service definition
-  - Cause the extra network to appear as external in the top-level networks block
-  - Do not pollute services that lack extra_networks
-"""
+"""Integration tests for catalog extra_networks support (OMN-8713)."""
 
 from __future__ import annotations
 
@@ -22,27 +16,19 @@ CATALOG_DIR = str(REPO_ROOT / "docker" / "catalog")
 
 
 @pytest.mark.integration
-def test_runtime_effects_joins_omnimemory_network() -> None:
-    """runtime-effects manifest declares extra_networks: [omnimemory-network].
-
-    After generate_compose the service must appear in both omnibase-infra-network
-    and omnimemory-network.
-    """
+def test_runtime_effects_has_no_extra_networks() -> None:
+    """runtime-effects should stay on the default runtime network only."""
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
-    # Resolve a bundle that includes runtime-effects; fall back to direct manifest
-    # lookup if no bundle wraps it.
     manifest = resolver._manifests.get("runtime-effects")
     if manifest is None:
         pytest.skip("runtime-effects manifest not found in catalog — skipping")
 
-    assert "omnimemory-network" in manifest.extra_networks, (
-        "runtime-effects manifest must declare extra_networks: [omnimemory-network]"
-    )
+    assert manifest.extra_networks == []
 
 
 @pytest.mark.integration
-def test_generate_compose_extra_network_in_service_networks() -> None:
-    """generate_compose must include extra_networks in service's networks list."""
+def test_generate_compose_runtime_effects_stays_on_default_network() -> None:
+    """runtime-effects should not join any external networks."""
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     manifest = resolver._manifests.get("runtime-effects")
     if manifest is None:
@@ -58,13 +44,12 @@ def test_generate_compose_extra_network_in_service_networks() -> None:
     compose = generate_compose(stack)
 
     svc_networks = compose["services"]["runtime-effects"]["networks"]  # type: ignore[index]
-    assert "omnibase-infra-network" in svc_networks
-    assert "omnimemory-network" in svc_networks
+    assert svc_networks == ["omnibase-infra-network"]
 
 
 @pytest.mark.integration
-def test_generate_compose_extra_network_marked_external() -> None:
-    """Extra networks must appear in the top-level networks block as external."""
+def test_generate_compose_has_no_external_networks_for_runtime_effects() -> None:
+    """runtime-effects should not force external networks into the compose graph."""
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     manifest = resolver._manifests.get("runtime-effects")
     if manifest is None:
@@ -80,10 +65,8 @@ def test_generate_compose_extra_network_marked_external() -> None:
     compose = generate_compose(stack)
 
     top_networks = compose["networks"]  # type: ignore[index]
-    assert "omnimemory-network" in top_networks
-    assert top_networks["omnimemory-network"] == {
-        "name": "omnimemory-network",
-        "external": True,
+    assert top_networks == {
+        "omnibase-infra-network": {"name": "omnibase-infra-network", "driver": "bridge"}
     }
 
 

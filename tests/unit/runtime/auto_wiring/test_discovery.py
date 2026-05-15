@@ -291,6 +291,67 @@ class TestDiscoverContracts:
         assert manifest.contracts[0].node_type == "EFFECT_GENERIC"
 
     @pytest.mark.unit
+    def test_skips_inactive_runtime_packages(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        _make_contract_yaml(tmp_path, name="legacy_effect", node_type="EFFECT_GENERIC")
+        module_file = tmp_path / "node.py"
+        module_file.write_text("")
+
+        cls = type("LegacyEffect", (), {"process": lambda self: None})
+        ep = _make_entry_point("legacy_effect", node_cls=cls, dist_name="omniclaude")
+
+        with (
+            patch(_EP_MODULE, return_value=[ep]),
+            patch("inspect.getfile", return_value=str(module_file)),
+        ):
+            manifest = discover_contracts()
+
+        assert manifest.total_discovered == 0
+        assert manifest.total_errors == 0
+
+    @pytest.mark.unit
+    def test_skips_contracts_targeting_inactive_runtime_package_domains(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        (tmp_path / "contract.yaml").write_text(
+            dedent("""\
+                name: "filesystem_crawler_effect"
+                node_type: "EFFECT_GENERIC"
+                contract_version:
+                  major: 1
+                  minor: 0
+                  patch: 0
+                node_version: "1.0.0"
+                description: "Publishes into omnimemory"
+                event_bus:
+                  subscribe_topics:
+                    - "onex.cmd.omnimemory.filesystem-crawl-requested.v1"
+                  publish_topics:
+                    - "onex.evt.omnimemory.filesystem-crawl-completed.v1"
+                  consumer_purpose: "effects"
+            """)
+        )
+        module_file = tmp_path / "node.py"
+        module_file.write_text("")
+
+        cls = type("FilesystemCrawlerEffect", (), {"process": lambda self: None})
+        ep = _make_entry_point(
+            "filesystem_crawler_effect", node_cls=cls, dist_name="omnimarket"
+        )
+
+        with (
+            patch(_EP_MODULE, return_value=[ep]),
+            patch("inspect.getfile", return_value=str(module_file)),
+        ):
+            manifest = discover_contracts()
+
+        assert manifest.total_discovered == 0
+        assert manifest.total_errors == 0
+
+    @pytest.mark.unit
     def test_captures_missing_contract_as_error(self, tmp_path: Path) -> None:
         # Module dir exists but no contract.yaml
         module_file = tmp_path / "subdir" / "node.py"
@@ -340,6 +401,38 @@ class TestDiscoverContractsFromPaths:
         manifest = discover_contracts_from_paths([bad_path])
         assert manifest.total_discovered == 0
         assert manifest.total_errors == 1
+
+    @pytest.mark.unit
+    def test_skips_explicit_paths_targeting_inactive_runtime_package_domains(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        node_dir = tmp_path / "crawler"
+        node_dir.mkdir()
+        path = node_dir / "contract.yaml"
+        path.write_text(
+            dedent("""\
+                name: "crawler"
+                node_type: "EFFECT_GENERIC"
+                contract_version:
+                  major: 1
+                  minor: 0
+                  patch: 0
+                node_version: "1.0.0"
+                description: "Publishes into omniclaude"
+                event_bus:
+                  subscribe_topics:
+                    - "onex.cmd.platform.request-introspection.v1"
+                  publish_topics:
+                    - "onex.evt.omniclaude.agent-status.v1"
+                  consumer_purpose: "effects"
+            """)
+        )
+
+        manifest = discover_contracts_from_paths([path])
+
+        assert manifest.total_discovered == 0
+        assert manifest.total_errors == 0
 
 
 class TestModelAutoWiringManifest:

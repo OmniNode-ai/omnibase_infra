@@ -31,7 +31,7 @@ class TestLoadBifrostConfigFromEnv:
         env = {
             "LLM_CODER_URL": "http://192.168.86.201:8000",
             "LLM_CODER_FAST_URL": "http://192.168.86.201:8001",
-            "LLM_EMBEDDING_URL": "http://192.168.86.200:8100",
+            "LLM_EMBEDDING_URL": "http://192.168.86.201:8100",
             "LLM_DEEPSEEK_R1_URL": "http://192.168.86.200:8101",
         }
         with patch.dict(os.environ, env, clear=True):
@@ -51,7 +51,7 @@ class TestLoadBifrostConfigFromEnv:
         env = {
             "LLM_CODER_URL": "http://192.168.86.201:8000",
             "LLM_CODER_FAST_URL": "http://192.168.86.201:8001",
-            "LLM_EMBEDDING_URL": "http://192.168.86.200:8100",
+            "LLM_EMBEDDING_URL": "http://192.168.86.201:8100",
             "LLM_DEEPSEEK_R1_URL": "http://192.168.86.200:8101",
         }
         with patch.dict(os.environ, env, clear=True):
@@ -60,7 +60,7 @@ class TestLoadBifrostConfigFromEnv:
         assert len(config.routing_rules) >= 4
 
     def test_embedding_routing_rule(self) -> None:
-        env = {"LLM_EMBEDDING_URL": "http://192.168.86.200:8100"}
+        env = {"LLM_EMBEDDING_URL": "http://192.168.86.201:8100"}
         with patch.dict(os.environ, env, clear=True):
             config = load_bifrost_config_from_env()
         embedding_rules = [

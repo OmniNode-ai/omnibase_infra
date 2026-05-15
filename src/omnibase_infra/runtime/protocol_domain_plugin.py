@@ -160,6 +160,10 @@ from omnibase_infra.runtime.models.model_plugin_discovery_report import (
 )
 from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_runtime_packages import (
+    get_active_runtime_packages,
+    is_runtime_package_active,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -608,6 +612,7 @@ class RegistryDomainPlugin:
             security_config = ModelSecurityConfig()
 
         allowed_namespaces = security_config.get_effective_plugin_namespaces()
+        active_packages = get_active_runtime_packages()
 
         # Retrieve entry points for the group
         eps = entry_points(group=group)
@@ -620,6 +625,15 @@ class RegistryDomainPlugin:
 
         for ep in sorted_eps:
             module_path = self._parse_module_path(ep.value)
+            dist = getattr(ep, "dist", None)
+            dist_name = getattr(dist, "name", "")
+            if dist_name and not is_runtime_package_active(dist_name, active_packages):
+                logger.debug(
+                    "Skipping inactive runtime plugin entry point '%s' from package '%s'",
+                    ep.name,
+                    dist_name,
+                )
+                continue
 
             # Validate namespace BEFORE importing -- pre-import security
             if not self._validate_plugin_namespace(module_path, allowed_namespaces):

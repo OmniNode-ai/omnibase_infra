@@ -55,7 +55,7 @@ def sample_endpoints() -> dict[str, str]:
     """Return a sample endpoint mapping for tests."""
     return {
         "coder-14b": "http://192.168.86.201:8000",
-        "qwen-72b": "http://192.168.86.200:8100",
+        "embedding": "http://192.168.86.201:8100",
     }
 
 
@@ -400,7 +400,7 @@ class TestServiceLlmEndpointHealthInit:
         # Whitebox: access internal CB map to verify per-endpoint isolation.
         # No public API enumerates configured circuit breakers by name.
         assert "coder-14b" in service._circuit_breakers
-        assert "qwen-72b" in service._circuit_breakers
+        assert "embedding" in service._circuit_breakers
         assert len(service._circuit_breakers) == 2
 
     def test_initial_status_map_empty(

@@ -3,9 +3,9 @@
 """Runtime-profile contract ownership filtering for auto-wiring.
 
 Contracts may declare ``runtime_profiles`` to assign their Kafka subscriptions
-to a specific runtime process. This prevents multiple runtime profiles from
-joining the same single-partition consumer groups and stealing work from the
-intended owner.
+to a specific runtime process. Unscoped legacy contracts default to ``main`` so
+the effects/worker runtimes do not join general compute groups and steal work
+from the primary runtime.
 """
 
 from __future__ import annotations
@@ -48,18 +48,23 @@ def filter_manifest_for_runtime_profile(
 ) -> ModelRuntimeProfileOwnershipResult:
     """Return a manifest containing only contracts owned by runtime_profile.
 
-    Contracts without ``runtime_profiles`` remain backward compatible and are
-    owned by every profile. Contracts with an explicit list are wired only by
-    profiles named in that list.
+    Contracts without ``runtime_profiles`` default to ``main`` ownership.
+    Contracts with an explicit list are wired only by profiles named in that
+    list.
     """
     normalized_profile = _normalize_runtime_profile(runtime_profile)
     owned_contracts: list[ModelDiscoveredContract] = []
     skipped_contracts: list[str] = []
 
     for contract in manifest.contracts:
-        if contract.runtime_profiles and normalized_profile not in (
-            contract.runtime_profiles
-        ):
+        if contract.runtime_profiles:
+            if normalized_profile in contract.runtime_profiles:
+                owned_contracts.append(contract)
+            else:
+                skipped_contracts.append(contract.name)
+            continue
+
+        if normalized_profile != "main":
             skipped_contracts.append(contract.name)
             continue
         owned_contracts.append(contract)

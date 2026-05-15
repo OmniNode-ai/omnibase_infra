@@ -52,7 +52,7 @@ class ModelDiscoveredContract(BaseModel):
     )
     terminal_event: str | None = Field(
         default=None,
-        description="Optional terminal event topic declared by orchestrator contracts.",
+        description="Optional contract-declared terminal event topic.",
     )
     event_bus: ModelEventBusWiring | None = Field(
         default=None, description="Event bus wiring if declared"

@@ -72,7 +72,7 @@ def test_projection_dispatch_bridge_injects_db_and_event_type() -> None:
 def test_projection_dispatch_bridge_no_call_when_db_url_missing() -> None:
     """Projection handler is NOT called when OMNIDASH_ANALYTICS_DB_URL is unset.
 
-    Verifies no silent error occurs — handler simply skipped, no exception raised.
+    Verifies no silent error occurs — optional projection handler is skipped.
     """
     call_count = [0]
 

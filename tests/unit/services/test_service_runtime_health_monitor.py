@@ -17,7 +17,9 @@ Related Tickets:
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -38,6 +40,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 from omnibase_infra.services.service_runtime_health_monitor import (
     ConsumerGroupSnapshot,
     ServiceRuntimeHealthMonitor,
+    _discover_contracts,
     _expected_consumer_groups_from_manifest,
     _worst,
 )
@@ -94,6 +97,33 @@ class TestWorstHelper:
 
     def test_empty_list(self):
         assert _worst([]) == "HEALTHY"
+
+
+class TestDiscoverContractsHelper:
+    def test_filters_manifest_to_runtime_profile(self):
+        raw_manifest = _make_manifest(contracts=9, errors=0, subscribe_topics=["a"])
+        filtered_manifest = _make_manifest(
+            contracts=2, errors=0, subscribe_topics=["b"]
+        )
+
+        with (
+            patch.dict(os.environ, {"RUNTIME_PROFILE": "effects"}, clear=False),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discovery.discover_contracts",
+                return_value=raw_manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.profile_ownership.filter_manifest_for_runtime_profile",
+                return_value=SimpleNamespace(manifest=filtered_manifest),
+            ) as mock_filter,
+        ):
+            result = _discover_contracts()
+
+        assert result is filtered_manifest
+        mock_filter.assert_called_once_with(
+            manifest=raw_manifest,
+            runtime_profile="effects",
+        )
 
 
 # =============================================================================

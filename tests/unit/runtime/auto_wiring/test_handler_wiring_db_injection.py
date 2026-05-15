@@ -152,7 +152,7 @@ def test_projection_callback_maps_introspection_event_type() -> None:
 def test_projection_callback_skips_when_db_url_missing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """When DB URL env var is absent, handler is NOT called and error is logged."""
+    """When DB URL env var is absent, optional projections are skipped cleanly."""
     call_count = [0]
 
     class FakeHandler:
@@ -169,14 +169,17 @@ def test_projection_callback_skips_when_db_url_missing(
     envelope.payload = {}
 
     with caplog.at_level(
-        logging.ERROR, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
+        logging.INFO, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
     ):
         with patch(_PATCH_ENVIRON_GET, return_value=""):
             result = asyncio.run(callback(envelope))
 
     assert result is None
     assert call_count[0] == 0
-    assert any("not set" in r.message for r in caplog.records)
+    assert any(
+        r.levelno == logging.INFO and "Projection handler inactive" in r.message
+        for r in caplog.records
+    )
 
 
 @pytest.mark.unit

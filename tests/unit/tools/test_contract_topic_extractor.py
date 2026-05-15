@@ -769,3 +769,23 @@ def test_extract_from_installed_packages_discovers_omnimarket_topics() -> None:
         "Expected at least one topic sourced from omnimarket contracts; "
         "got none — check that omnimarket is installed and in _APPROVED_PACKAGES"
     )
+
+
+@pytest.mark.unit
+def test_extract_from_installed_packages_respects_active_runtime_packages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installed-package discovery skips packages outside the active runtime surface."""
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+
+    extractor = ContractTopicExtractor(include_installed_packages=True)
+    entries = extractor.extract_from_installed_packages(
+        approved_packages=("omniclaude", "omnimarket")
+    )
+
+    assert entries
+    assert all(
+        "omniclaude" not in str(path)
+        for entry in entries
+        for path in entry.source_contracts
+    )

@@ -69,8 +69,17 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     still providing accurate type information to callers.
     """
     from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
+    from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+        filter_manifest_for_runtime_profile,
+    )
 
-    return discover_contracts()  # type: ignore[return-value]
+    manifest = discover_contracts()
+    runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+    ownership_result = filter_manifest_for_runtime_profile(
+        manifest=manifest,
+        runtime_profile=runtime_profile,
+    )
+    return ownership_result.manifest  # type: ignore[return-value]
 
 
 def _filter_manifest_for_runtime_profile(

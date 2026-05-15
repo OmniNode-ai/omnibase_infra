@@ -171,6 +171,7 @@ from omnibase_infra.topics import (
 )
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
-# Environment variable for marketplace skill roots (cross-repo topic discovery)
+# Marketplace package skill-manifest root.
 ENV_MARKETPLACE_SKILLS_ROOT = "ONEX_MARKETPLACE_SKILLS_ROOT"
 DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
@@ -219,6 +220,22 @@ _KAFKA_BROKER_DENYLIST_PATTERNS: tuple[re.Pattern[str], ...] = (
 # Value: comma-separated host prefixes, e.g. "192.168.86.,10.0.0."
 # When unset, only the built-in denylist is enforced.
 ENV_KAFKA_BROKER_ALLOWLIST = "KAFKA_BROKER_ALLOWLIST"
+
+
+def _resolve_marketplace_skills_root() -> str:
+    """Return the configured marketplace package skill root."""
+    return os.environ.get(ENV_MARKETPLACE_SKILLS_ROOT, "").strip()
+
+
+def _contract_registry_subscription_wiring_disabled(
+    runtime_profile: str | None = None,
+) -> bool:
+    """Return True when kernel contract-registry subscriptions should not run."""
+    raw_profile = runtime_profile
+    if raw_profile is None:
+        raw_profile = os.getenv("RUNTIME_PROFILE") or "main"
+    profile = raw_profile.strip().lower()
+    return profile not in {"", "main"}
 
 
 def validate_kafka_broker_allowlist(
@@ -1054,22 +1071,21 @@ async def bootstrap() -> int:
                     TopicProvisioner,
                 )
 
-                # Resolve optional cross-repo skill-manifest root for topic discovery.
-                # ONEX_MARKETPLACE_SKILLS_ROOT: path to marketplace-packaged skills.
-                _skills_root_env = os.environ.get(
-                    ENV_MARKETPLACE_SKILLS_ROOT, ""
-                ).strip()
+                # Resolve optional marketplace skill-manifest root for topic discovery.
+                _skills_root_env = ""
+                if is_runtime_package_active("omniclaude"):
+                    _skills_root_env = _resolve_marketplace_skills_root()
                 _skill_manifests_root: Path | None = None
                 if not _skills_root_env:
                     logger.info(
                         "Topic provisioning: skill-manifest discovery disabled"
-                        " (ONEX_MARKETPLACE_SKILLS_ROOT not set)"
+                        " (no active marketplace skill root)"
                     )
                 else:
                     _skill_manifests_path = Path(_skills_root_env)
                     if not _skill_manifests_path.exists():
                         logger.warning(
-                            "Topic provisioning: ONEX_MARKETPLACE_SKILLS_ROOT=%s not found,"
+                            "Topic provisioning: marketplace skills root %s not found,"
                             " skill topics will not be provisioned",
                             _skills_root_env,
                         )
@@ -1748,36 +1764,42 @@ async def bootstrap() -> int:
             )
 
         # Try to load and register PluginIntelligence via entry-point discovery
-        # (graceful degradation). omniintelligence is an optional dependency —
-        # kernel boots without it. Registered LAST because it subscribes to
-        # 46 topics (~12 min startup).
-        try:
-            from importlib.metadata import entry_points
+        # (graceful degradation). omniintelligence is optional and can be
+        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
+        if is_runtime_package_active("omniintelligence"):
+            try:
+                from importlib.metadata import entry_points
 
-            intel_eps = [
-                e
-                for e in entry_points(group="onex.domain_plugins")
-                if e.name == "intelligence"
-            ]
-            if intel_eps:
-                PluginIntelligence = intel_eps[0].load()
-                plugin_registry.register(PluginIntelligence())
-                logger.info(
-                    "PluginIntelligence registered (correlation_id=%s)",
-                    correlation_id,
-                )
-            else:
-                logger.debug(
-                    "omniintelligence not installed, intelligence plugin not available "
+                intel_eps = [
+                    e
+                    for e in entry_points(group="onex.domain_plugins")
+                    if e.name == "intelligence"
+                ]
+                if intel_eps:
+                    PluginIntelligence = intel_eps[0].load()
+                    plugin_registry.register(PluginIntelligence())
+                    logger.info(
+                        "PluginIntelligence registered (correlation_id=%s)",
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "omniintelligence not installed, intelligence plugin not available "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "PluginIntelligence failed to initialize, continuing without it "
                     "(correlation_id=%s)",
                     correlation_id,
+                    exc_info=True,
                 )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginIntelligence failed to initialize, continuing without it "
+        else:
+            logger.info(
+                "PluginIntelligence skipped by active runtime package filter "
                 "(correlation_id=%s)",
                 correlation_id,
-                exc_info=True,
             )
 
         # 4.6. Discover domain plugins from entry_points (OMN-2000)
@@ -2787,6 +2809,19 @@ async def bootstrap() -> int:
                 "output_topic": config.output_topic,
             },
         )
+        if container.service_registry is not None:
+            try:
+                await container.service_registry.register_instance(
+                    RuntimeHostProcess,
+                    runtime,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Failed to register RuntimeHostProcess in service registry "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
         health_server.attach_runtime(runtime)
 
         # 7. Setup graceful shutdown
@@ -2941,111 +2976,123 @@ async def bootstrap() -> int:
             getattr(event_bus, "subscribe", None)
         )
         if contract_router is not None and has_subscribe:
-            # Create typed node identity for contract registry subscriptions
-            contract_node_identity = ModelNodeIdentity(
-                env=environment,
-                service=config.name or "onex-kernel",
-                node_name="contract-registry",
-                version=config.contract_version or "v1",
-            )
+            runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+            if _contract_registry_subscription_wiring_disabled(runtime_profile):
+                logger.info(
+                    "Contract registry event consumer wiring skipped for "
+                    "runtime profile '%s'",
+                    runtime_profile,
+                )
+            else:
+                # Create typed node identity for contract registry subscriptions
+                contract_node_identity = ModelNodeIdentity(
+                    env=environment,
+                    service=config.name or "onex-kernel",
+                    node_name="contract-registry",
+                    version=config.contract_version or "v1",
+                )
 
-            # Subscribe to 3 contract lifecycle topics with same identity
-            contract_subscribe_start_time = time.time()
+                # Subscribe to 3 contract lifecycle topics with same identity
+                contract_subscribe_start_time = time.time()
 
-            # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
-            # Topics are realm-agnostic in ONEX; the environment/realm is enforced
-            # via envelope identity and consumer group naming, not topic names.
-            topic_resolver = TopicResolver()
-            try:
-                contract_registered_topic = topic_resolver.resolve(
-                    SUFFIX_CONTRACT_REGISTERED,
-                    correlation_id=correlation_id,
-                )
-                contract_deregistered_topic = topic_resolver.resolve(
-                    SUFFIX_CONTRACT_DEREGISTERED,
-                    correlation_id=correlation_id,
-                )
-                node_heartbeat_topic = topic_resolver.resolve(
-                    SUFFIX_NODE_HEARTBEAT,
-                    correlation_id=correlation_id,
-                )
-            except TopicResolutionError as e:
-                # TopicResolutionError is a ProtocolConfigurationError with a
-                # guaranteed infra_context (including correlation_id). Log at
-                # warning level so operators can diagnose configuration issues,
-                # then re-raise with kernel-specific context message.
-                logger.warning(
-                    "TopicResolver rejected topic suffix during kernel bootstrap "
-                    "(correlation_id=%s): %s",
-                    e.infra_context.correlation_id,
-                    e,
+                # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
+                # Topics are realm-agnostic in ONEX; the environment/realm is enforced
+                # via envelope identity and consumer group naming, not topic names.
+                topic_resolver = TopicResolver()
+                try:
+                    contract_registered_topic = topic_resolver.resolve(
+                        SUFFIX_CONTRACT_REGISTERED,
+                        correlation_id=correlation_id,
+                    )
+                    contract_deregistered_topic = topic_resolver.resolve(
+                        SUFFIX_CONTRACT_DEREGISTERED,
+                        correlation_id=correlation_id,
+                    )
+                    node_heartbeat_topic = topic_resolver.resolve(
+                        SUFFIX_NODE_HEARTBEAT,
+                        correlation_id=correlation_id,
+                    )
+                except TopicResolutionError as e:
+                    # TopicResolutionError is a ProtocolConfigurationError with a
+                    # guaranteed infra_context (including correlation_id). Log at
+                    # warning level so operators can diagnose configuration issues,
+                    # then re-raise with kernel-specific context message.
+                    logger.warning(
+                        "TopicResolver rejected topic suffix during kernel bootstrap "
+                        "(correlation_id=%s): %s",
+                        e.infra_context.correlation_id,
+                        e,
+                        extra={
+                            "correlation_id": str(e.infra_context.correlation_id),
+                            "transport_type": "kafka",
+                            "operation": "resolve_topic",
+                        },
+                    )
+                    raise ProtocolConfigurationError(
+                        f"Invalid topic suffix in runtime configuration: {e}",
+                        context=e.infra_context,
+                    ) from e
+
+                logger.info(
+                    "Subscribing to contract registry events on event bus "
+                    "(correlation_id=%s)",
+                    correlation_id,
                     extra={
-                        "correlation_id": str(e.infra_context.correlation_id),
-                        "transport_type": "kafka",
-                        "operation": "resolve_topic",
+                        "topics": [
+                            contract_registered_topic,
+                            contract_deregistered_topic,
+                            node_heartbeat_topic,
+                        ],
+                        "node_identity": {
+                            "env": contract_node_identity.env,
+                            "service": contract_node_identity.service,
+                            "node_name": contract_node_identity.node_name,
+                            "version": contract_node_identity.version,
+                        },
+                        "purpose": EnumConsumerGroupPurpose.CONTRACT_REGISTRY.value,
                     },
                 )
-                raise ProtocolConfigurationError(
-                    f"Invalid topic suffix in runtime configuration: {e}",
-                    context=e.infra_context,
-                ) from e
 
-            logger.info(
-                "Subscribing to contract registry events on event bus (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "topics": [
-                        contract_registered_topic,
-                        contract_deregistered_topic,
-                        node_heartbeat_topic,
-                    ],
-                    "node_identity": {
-                        "env": contract_node_identity.env,
-                        "service": contract_node_identity.service,
-                        "node_name": contract_node_identity.node_name,
-                        "version": contract_node_identity.version,
+                contract_unsub_registered = await event_bus.subscribe(
+                    topic=contract_registered_topic,
+                    node_identity=contract_node_identity,
+                    on_message=contract_router.handle_message,
+                    purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                    required_for_readiness=True,
+                )
+                contract_unsub_deregistered = await event_bus.subscribe(
+                    topic=contract_deregistered_topic,
+                    node_identity=contract_node_identity,
+                    on_message=contract_router.handle_message,
+                    purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                    required_for_readiness=True,
+                )
+                contract_unsub_heartbeat = await event_bus.subscribe(
+                    topic=node_heartbeat_topic,
+                    node_identity=contract_node_identity,
+                    on_message=contract_router.handle_message,
+                    purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                    required_for_readiness=True,
+                )
+
+                # Start the router's tick timer
+                await contract_router.start()
+
+                contract_subscribe_duration = (
+                    time.time() - contract_subscribe_start_time
+                )
+                logger.info(
+                    "Contract registry event consumers started successfully in %.3fs "
+                    "(correlation_id=%s)",
+                    contract_subscribe_duration,
+                    correlation_id,
+                    extra={
+                        "topics_count": 3,
+                        "tick_interval_seconds": contract_router.tick_interval_seconds,
+                        "subscribe_duration_seconds": contract_subscribe_duration,
+                        "event_bus_type": event_bus_type,
                     },
-                    "purpose": EnumConsumerGroupPurpose.CONTRACT_REGISTRY.value,
-                },
-            )
-
-            contract_unsub_registered = await event_bus.subscribe(
-                topic=contract_registered_topic,
-                node_identity=contract_node_identity,
-                on_message=contract_router.handle_message,
-                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
-                required_for_readiness=True,
-            )
-            contract_unsub_deregistered = await event_bus.subscribe(
-                topic=contract_deregistered_topic,
-                node_identity=contract_node_identity,
-                on_message=contract_router.handle_message,
-                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
-                required_for_readiness=True,
-            )
-            contract_unsub_heartbeat = await event_bus.subscribe(
-                topic=node_heartbeat_topic,
-                node_identity=contract_node_identity,
-                on_message=contract_router.handle_message,
-                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
-                required_for_readiness=True,
-            )
-
-            # Start the router's tick timer
-            await contract_router.start()
-
-            contract_subscribe_duration = time.time() - contract_subscribe_start_time
-            logger.info(
-                "Contract registry event consumers started successfully in %.3fs (correlation_id=%s)",
-                contract_subscribe_duration,
-                correlation_id,
-                extra={
-                    "topics_count": 3,
-                    "tick_interval_seconds": contract_router.tick_interval_seconds,
-                    "subscribe_duration_seconds": contract_subscribe_duration,
-                    "event_bus_type": event_bus_type,
-                },
-            )
+                )
 
         # 9.7. Start runtime error triage consumer (OMN-5655)
         # Subscribes to runtime-error events and routes them to the

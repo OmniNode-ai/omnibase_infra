@@ -347,6 +347,36 @@ class TestServiceHealthEndpoints:
         assert transition_logs[0].kwargs["extra"]["is_running"] is False
 
     @pytest.mark.asyncio
+    async def test_health_endpoint_recovers_runtime_from_container_registry(
+        self,
+    ) -> None:
+        """Test /health resolves runtime lazily from container service registry."""
+        mock_runtime = MagicMock()
+        mock_runtime.health_check = AsyncMock(
+            return_value={
+                "healthy": True,
+                "degraded": False,
+                "is_running": True,
+                "event_bus_healthy": True,
+            }
+        )
+        mock_registry = MagicMock()
+        mock_registry.try_resolve_service = AsyncMock(return_value=mock_runtime)
+        mock_container = MagicMock()
+        mock_container.service_registry = mock_registry
+        server = ServiceHealth(container=mock_container, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+
+        response = await server._handle_health(mock_request)
+
+        assert response.status == 200
+        assert server._runtime is mock_runtime
+        mock_registry.try_resolve_service.assert_awaited_once()
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"healthy"' in response_text
+
+    @pytest.mark.asyncio
     async def test_health_endpoint_treats_attached_startup_as_degraded(self) -> None:
         """Test /health returns degraded 200 when runtime reports startup_in_progress."""
         mock_runtime = MagicMock()
