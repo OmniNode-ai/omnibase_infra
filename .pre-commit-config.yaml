@@ -99,6 +99,13 @@ repos:
         files: ^src/omnibase_infra/configs/pricing_manifest\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      - id: reject-node-implementations
+        name: Reject unallowlisted node handlers (belong in omnimarket)
+        entry: bash scripts/ci/reject-node-implementations.sh --staged
+        language: system
+        files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
