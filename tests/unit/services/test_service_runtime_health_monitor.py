@@ -100,6 +100,7 @@ class TestWorstHelper:
 
 
 class TestDiscoverContractsHelper:
+    @pytest.mark.unit
     def test_filters_manifest_to_runtime_profile(self):
         raw_manifest = _make_manifest(contracts=9, errors=0, subscribe_topics=["a"])
         filtered_manifest = _make_manifest(

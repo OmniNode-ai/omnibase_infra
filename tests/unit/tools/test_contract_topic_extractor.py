@@ -776,6 +776,11 @@ def test_extract_from_installed_packages_respects_active_runtime_packages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Installed-package discovery skips packages outside the active runtime surface."""
+    import importlib.util
+
+    if importlib.util.find_spec("omnimarket") is None:
+        pytest.skip("omnimarket not installed — skipping active-runtime-packages test")
+
     monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
 
     extractor = ContractTopicExtractor(include_installed_packages=True)

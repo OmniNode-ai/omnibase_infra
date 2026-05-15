@@ -141,6 +141,7 @@ class TestPackageNodeSubscriptionWiring:
             mp.delenv("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", raising=False)
             assert _package_node_subscription_wiring_disabled() is False
 
+    @pytest.mark.unit
     def test_baseline_subscription_wiring_disabled_for_effects(self) -> None:
         from omnibase_infra.runtime.service_runtime_host_process import (
             _baseline_subscription_wiring_disabled,
@@ -148,6 +149,7 @@ class TestPackageNodeSubscriptionWiring:
 
         assert _baseline_subscription_wiring_disabled("effects") is True
 
+    @pytest.mark.unit
     def test_baseline_subscription_wiring_enabled_for_main(self) -> None:
         from omnibase_infra.runtime.service_runtime_host_process import (
             _baseline_subscription_wiring_disabled,
