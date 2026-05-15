@@ -103,6 +103,13 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
                 }
             }
 
+        # Ulimits
+        if manifest.ulimits:
+            svc["ulimits"] = {
+                name: {"soft": limit.soft, "hard": limit.hard}
+                for name, limit in sorted(manifest.ulimits.items())
+            }
+
         # Labels
         if manifest.labels:
             svc["labels"] = manifest.labels

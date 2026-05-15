@@ -14,6 +14,7 @@ from omnibase_infra.docker.catalog.manifest_schema import (
     PortMapping,
     ServiceLayer,
     ServiceManifest,
+    ULimit,
 )
 
 
@@ -75,6 +76,27 @@ def test_depends_on_with_conditions() -> None:
         condition=DependsOnCondition.SERVICE_COMPLETED_SUCCESSFULLY,
     )
     assert dep_completed.condition == DependsOnCondition.SERVICE_COMPLETED_SUCCESSFULLY
+
+
+@pytest.mark.unit
+def test_service_manifest_accepts_typed_ulimits() -> None:
+    manifest = ServiceManifest(
+        name="redpanda",
+        description="Kafka-compatible event streaming",
+        image="redpandadata/redpanda:v24.2.7",
+        layer=ServiceLayer.INFRASTRUCTURE,
+        required_env=[],
+        hardcoded_env={},
+        operational_defaults={},
+        ports=PortMapping(external=19092, internal=19092),
+        healthcheck=HealthCheck(test="rpk cluster health"),
+        volumes=["redpanda_data:/var/lib/redpanda/data"],
+        depends_on=[],
+        ulimits={"nofile": ULimit(soft=65535, hard=65535)},
+    )
+
+    assert manifest.ulimits["nofile"].soft == 65535
+    assert manifest.ulimits["nofile"].hard == 65535
 
 
 @pytest.mark.unit
