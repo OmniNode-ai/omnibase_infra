@@ -62,9 +62,13 @@ runs:
       if: inputs.skip-install != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        CACHE_ENABLED: ${{ inputs.cache-enabled }}
+        INSTALL_ARGS: ${{ inputs.install-args }}
       run: |
-        if [ "${{ inputs.cache-enabled }}" = "false" ]; then
-          uv sync --no-cache ${{ inputs.install-args }}
+        read -r -a install_args <<< "$INSTALL_ARGS"
+        if [ "$CACHE_ENABLED" = "false" ]; then
+          uv sync --no-cache "${install_args[@]}"
         else
-          uv sync ${{ inputs.install-args }}
+          uv sync "${install_args[@]}"
         fi

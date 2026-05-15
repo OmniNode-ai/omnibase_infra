@@ -41,7 +41,7 @@ async def test_verification_named_infra_steps_resolve_through_handler() -> None:
     """The real DAG policy resolves renamed check_* steps through the handler."""
     calls: list[str] = []
 
-    async def fake_execute(
+    def fake_execute(
         verification: ModelOnboardingStepVerification,
     ) -> ModelVerificationResult:
         target = verification.target
