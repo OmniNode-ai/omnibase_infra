@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+handler_id: shared.infra.handlers
+name: shared_infra_handlers
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+description: >
+  Shared infra handler configuration surface for handlers that live directly under omnibase_infra.handlers rather than inside a node package.
+
+dependencies:
+  - name: "fs_allowed_paths"
+    type: "environment"
+    env_var: "FS_ALLOWED_PATHS"
+    required: false
+    description: "Comma-separated filesystem path allowlist used when HandlerFileSystem config omits allowed_paths"
+  - name: "slack_bot_token"
+    type: "environment"
+    env_var: "SLACK_BOT_TOKEN"
+    required: true
+    description: "Slack Bot Token used by HandlerSlackWebhook for Web API posts"
+  - name: "slack_channel_id"
+    type: "environment"
+    env_var: "SLACK_CHANNEL_ID"
+    required: false
+    description: "Default Slack channel ID used by HandlerSlackWebhook"
+  - name: "gmail_client_id"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_ID"
+    required: true
+    description: "Gmail OAuth2 client ID used by HandlerGmailApi"
+  - name: "gmail_client_secret"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_SECRET"
+    required: true
+    description: "Gmail OAuth2 client secret used by HandlerGmailApi"
+  - name: "gmail_refresh_token"
+    type: "environment"
+    env_var: "GMAIL_REFRESH_TOKEN"
+    required: true
+    description: "Gmail OAuth2 refresh token used by HandlerGmailApi"
+metadata:
+  handler_category: "shared"
+  transport_types:
+    - filesystem
+    - http

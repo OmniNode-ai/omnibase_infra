@@ -32,6 +32,12 @@ handler_routing:
       handler:
         name: "HandlerPreflightCheck"
         module: "omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check"
+dependencies:
+  - name: "omnibase_dir"
+    type: "environment"
+    env_var: "OMNIBASE_DIR"
+    required: false
+    description: "Override path for the local omnibase directory used by setup preflight checks"
 capabilities:
   - "preflight.check"
 metadata:

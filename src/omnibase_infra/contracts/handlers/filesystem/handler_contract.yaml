@@ -64,6 +64,12 @@ capability_outputs:
   - filesystem.list
   - filesystem.delete
   - filesystem.mkdir
+dependencies:
+  - name: "fs_allowed_paths"
+    type: "environment"
+    env_var: "FS_ALLOWED_PATHS"
+    required: false
+    description: "Comma-separated filesystem path allowlist used when handler config omits allowed_paths"
 # NOTE: Models defined in OMN-1160 (FileSystemHandler Contract)
 input_model: omnibase_infra.handlers.filesystem.ModelFileSystemRequest
 output_model: omnibase_infra.handlers.filesystem.ModelFileSystemResult
