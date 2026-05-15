@@ -213,8 +213,8 @@ async def _handle_dag(
     # Compute capability evidence from step results
     verified_caps: list[str] = []
     unmet_caps: list[str] = []
-    for step, result in zip(steps, step_results, strict=True):
-        if result.passed:
+    for step, step_res in zip(steps, step_results, strict=True):
+        if step_res.passed:
             verified_caps.extend(step.produces_capabilities)
         else:
             unmet_caps.extend(step.produces_capabilities)
