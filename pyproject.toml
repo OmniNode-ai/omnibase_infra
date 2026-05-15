@@ -171,6 +171,7 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+# branch pins here are intentional — resolved SHA is captured in uv.lock for reproducibility
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
