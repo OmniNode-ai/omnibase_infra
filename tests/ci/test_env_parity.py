@@ -159,7 +159,6 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "ONEX_ACTIVE_RUNTIME_PACKAGES",
         # Bifrost contract rendering knobs. k8s ConfigMap parity belongs with
         # the sibling omninode_infra ConfigMap update; tracked by OMN-10943.
-        "BIFROST_CONTRACT_PATH",
         "BIFROST_SOURCE_CONTRACT_PATH",
         "BIFROST_VERIFY_ENDPOINTS",
         # OpenTelemetry — opt-in observability (empty = disabled)

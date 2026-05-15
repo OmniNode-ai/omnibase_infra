@@ -1,0 +1,31 @@
+# OMN-11006 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: OMN-11006
+title: "Remove residual delegation contract path env reads"
+summary: >
+  Removes the Bifrost delegation target-path env override from runtime compose, entrypoint, and render code. The renderer now uses the canonical deployed contract path unless tests pass an explicit target_path.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-runtime-render-tests
+    description: Runtime Bifrost contract rendering tests pass after removing the legacy target-path env read.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/ci/test_env_parity.py -q"
+  - id: dod-deploy
+    description: >
+      Runtime config cleanup is deploy-compatible. No live deploy or restart was performed pre-merge; the canonical target path remains /app/data/delegation/bifrost_delegation.yaml for the next normal runtime deploy.
+
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: no live deploy or restart performed for OMN-11006; canonical Bifrost contract path remains /app/data/delegation/bifrost_delegation.yaml"

@@ -231,9 +231,7 @@ def render_bifrost_delegation_contract(
     source = source_path or Path(
         env.get("BIFROST_SOURCE_CONTRACT_PATH", str(_DEFAULT_SOURCE_PATH))
     )
-    target = target_path or Path(
-        env.get("BIFROST_CONTRACT_PATH", str(_DEFAULT_TARGET_PATH))
-    )
+    target = target_path or _DEFAULT_TARGET_PATH
 
     if not should_verify and _has_populated_endpoint(target):
         _strip_render_hint_fields(target)
@@ -259,7 +257,7 @@ def render_bifrost_delegation_contract(
         raise ProtocolConfigurationError(
             "Bifrost delegation contract rendered with no populated endpoint_url "
             "values. Add base_url_env fields to the source contract or provide a "
-            "pre-rendered contract via BIFROST_CONTRACT_PATH."
+            "pre-rendered contract at the default deployed contract path."
         )
 
     # Strip render-only hint fields before writing the deployed contract —
