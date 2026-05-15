@@ -26,19 +26,17 @@ def canonical_graph():
 class TestResolvePolicy:
     """Tests for resolve_policy()."""
 
-    def test_standalone_quickstart_produces_5_steps(self, canonical_graph) -> None:
+    def test_standalone_quickstart_produces_3_steps(self, canonical_graph) -> None:
         steps = resolve_policy(
             canonical_graph,
-            target_capabilities=["first_node_running"],
+            target_capabilities=["core_installed"],
         )
         step_keys = [s.step_key for s in steps]
-        assert len(steps) == 5
+        assert len(steps) == 3
         assert step_keys == [
             "check_python",
             "install_uv",
             "install_core",
-            "create_first_node",
-            "run_standalone_node",
         ]
 
     def test_full_platform_produces_all_steps(self, canonical_graph) -> None:
@@ -69,9 +67,9 @@ class TestResolvePolicy:
         )
         step_keys = [s.step_key for s in steps]
         assert "check_python" in step_keys
-        assert "connect_node_to_bus" in step_keys
+        assert "check_node_bus_connection" in step_keys
         # Should not include omnidash or secrets
-        assert "start_omnidash" not in step_keys
+        assert "check_omnidash" not in step_keys
 
     def test_topological_order(self, canonical_graph) -> None:
         steps = resolve_policy(
@@ -105,7 +103,7 @@ class TestLoadBuiltinPolicies:
 
     def test_loads_builtin_policies(self) -> None:
         policies = load_builtin_policies()
-        assert len(policies) == 8
+        assert len(policies) == 9
         assert "standalone_quickstart" in policies
         assert "contributor_local" in policies
         assert "contributor_cloud" in policies
@@ -114,11 +112,12 @@ class TestLoadBuiltinPolicies:
         assert "new_employee" in policies
         assert "interactive_onboarding" in policies
         assert "omnimarket_quickstart" in policies
+        assert "setup" in policies
 
     def test_standalone_targets(self) -> None:
         policies = load_builtin_policies()
         standalone = policies["standalone_quickstart"]
-        assert standalone["target_capabilities"] == ["first_node_running"]
+        assert standalone["target_capabilities"] == ["core_installed"]
 
     def test_full_platform_targets(self) -> None:
         policies = load_builtin_policies()

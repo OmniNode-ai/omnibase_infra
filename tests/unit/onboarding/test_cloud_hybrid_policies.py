@@ -51,8 +51,8 @@ class TestCloudPolicy:
         assert "check_python" in step_keys
         assert "install_uv" in step_keys
         assert "install_core" in step_keys
-        assert "configure_secrets" in step_keys
-        assert "connect_node_to_bus" in step_keys
+        assert "check_secrets" in step_keys
+        assert "check_node_bus_connection" in step_keys
 
     def test_cloud_policy_topological_order(self, canonical_graph, policies) -> None:
         cloud = policies["contributor_cloud"]
@@ -62,13 +62,13 @@ class TestCloudPolicy:
         )
         step_keys = [s.step_key for s in steps]
 
-        assert step_keys.index("configure_secrets") < step_keys.index(
+        assert step_keys.index("check_secrets") < step_keys.index(
             "configure_cloud_credentials"
         )
         assert step_keys.index("configure_cloud_credentials") < step_keys.index(
             "deploy_to_cloud"
         )
-        assert step_keys.index("connect_node_to_bus") < step_keys.index(
+        assert step_keys.index("check_node_bus_connection") < step_keys.index(
             "deploy_to_cloud"
         )
 
@@ -79,7 +79,7 @@ class TestCloudPolicy:
             target_capabilities=cloud["target_capabilities"],
         )
         step_keys = [s.step_key for s in steps]
-        assert "start_omnidash" not in step_keys
+        assert "check_omnidash" not in step_keys
 
 
 class TestHybridPolicy:
@@ -105,8 +105,8 @@ class TestHybridPolicy:
 
         # Hybrid depends on cloud credentials AND local docker infra
         assert "configure_cloud_credentials" in step_keys
-        assert "start_docker_infra" in step_keys
-        assert "connect_node_to_bus" in step_keys
+        assert "check_docker_infra" in step_keys
+        assert "check_node_bus_connection" in step_keys
 
     def test_hybrid_policy_topological_order(self, canonical_graph, policies) -> None:
         hybrid = policies["contributor_hybrid"]
@@ -119,7 +119,7 @@ class TestHybridPolicy:
         assert step_keys.index("configure_cloud_credentials") < step_keys.index(
             "configure_hybrid_split"
         )
-        assert step_keys.index("start_docker_infra") < step_keys.index(
+        assert step_keys.index("check_docker_infra") < step_keys.index(
             "configure_hybrid_split"
         )
         assert step_keys.index("configure_hybrid_split") < step_keys.index(
@@ -148,7 +148,7 @@ class TestCanonicalGraphCloudHybridSteps:
             for s in canonical_graph.steps
             if s.step_key == "configure_cloud_credentials"
         )
-        assert "configure_secrets" in step.depends_on
+        assert "check_secrets" in step.depends_on
         assert "cloud_credentials_configured" in step.produces_capabilities
 
     def test_deploy_to_cloud_depends_on_credentials_and_bus(
@@ -156,7 +156,7 @@ class TestCanonicalGraphCloudHybridSteps:
     ) -> None:
         step = next(s for s in canonical_graph.steps if s.step_key == "deploy_to_cloud")
         assert "configure_cloud_credentials" in step.depends_on
-        assert "connect_node_to_bus" in step.depends_on
+        assert "check_node_bus_connection" in step.depends_on
         assert "cloud_deployed" in step.produces_capabilities
 
     def test_hybrid_split_depends_on_cloud_creds_and_docker(
@@ -166,11 +166,11 @@ class TestCanonicalGraphCloudHybridSteps:
             s for s in canonical_graph.steps if s.step_key == "configure_hybrid_split"
         )
         assert "configure_cloud_credentials" in step.depends_on
-        assert "start_docker_infra" in step.depends_on
+        assert "check_docker_infra" in step.depends_on
         assert "hybrid_split_configured" in step.produces_capabilities
 
     def test_deploy_hybrid_depends_on_split_and_bus(self, canonical_graph) -> None:
         step = next(s for s in canonical_graph.steps if s.step_key == "deploy_hybrid")
         assert "configure_hybrid_split" in step.depends_on
-        assert "connect_node_to_bus" in step.depends_on
+        assert "check_node_bus_connection" in step.depends_on
         assert "hybrid_deployed" in step.produces_capabilities

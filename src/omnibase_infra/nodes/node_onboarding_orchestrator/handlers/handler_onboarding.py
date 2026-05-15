@@ -20,6 +20,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from omnibase_infra.nodes.node_onboarding_orchestrator.models.enum_onboarding_status import (
+    EnumOnboardingStatus,
+)
 from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input import (
     ModelOnboardingInput,
 )
@@ -148,6 +151,60 @@ async def _handle_interactive(
     )
 
 
+def _skipped_step_result(step: ModelOnboardingStep) -> ModelStepResult:
+    return ModelStepResult(
+        step_key=step.step_key,
+        passed=False,
+        message="Skipped due to previous failure",
+    )
+
+
+async def _execute_dag_step(step: ModelOnboardingStep) -> ModelStepResult:
+    if step.verification is None:
+        return ModelStepResult(
+            step_key=step.step_key,
+            passed=True,
+            message="No verification defined",
+        )
+
+    spec = ModelVerificationSpec(
+        check_type=step.verification.check_type,
+        target=step.verification.target,
+        timeout_seconds=step.verification.timeout_seconds or 10,
+    )
+    result = await execute_verification(spec)
+    return ModelStepResult(
+        step_key=step.step_key,
+        passed=result.passed,
+        message=result.message,
+        elapsed_ms=result.elapsed_ms,
+    )
+
+
+def _collect_capability_evidence(
+    steps: list[ModelOnboardingStep],
+    step_results: list[ModelStepResult],
+) -> tuple[list[str], list[str]]:
+    verified_caps: list[str] = []
+    unmet_caps: list[str] = []
+    for step, step_res in zip(steps, step_results, strict=True):
+        target = verified_caps if step_res.passed else unmet_caps
+        target.extend(step.produces_capabilities)
+    return verified_caps, unmet_caps
+
+
+def _status_from_step_results(
+    step_results: list[ModelStepResult],
+) -> EnumOnboardingStatus:
+    if all(r.passed for r in step_results):
+        return EnumOnboardingStatus.PASSED
+    if any(r.message == "Skipped due to previous failure" for r in step_results):
+        return EnumOnboardingStatus.BLOCKED
+    if any(r.passed for r in step_results):
+        return EnumOnboardingStatus.PARTIAL
+    return EnumOnboardingStatus.FAILED
+
+
 async def _handle_dag(
     input_model: ModelOnboardingInput,
 ) -> ModelOnboardingOutput:
@@ -165,55 +222,32 @@ async def _handle_dag(
 
     for step in steps:
         if failed and not input_model.continue_on_failure:
-            step_results.append(
-                ModelStepResult(
-                    step_key=step.step_key,
-                    passed=False,
-                    message="Skipped due to previous failure",
-                )
-            )
+            step_results.append(_skipped_step_result(step))
             continue
 
-        if step.verification:
-            spec = ModelVerificationSpec(
-                check_type=step.verification.check_type,
-                target=step.verification.target,
-                timeout_seconds=step.verification.timeout_seconds or 10,
-            )
-            result = await execute_verification(spec)
-            step_results.append(
-                ModelStepResult(
-                    step_key=step.step_key,
-                    passed=result.passed,
-                    message=result.message,
-                    elapsed_ms=result.elapsed_ms,
-                )
-            )
-            if result.passed:
-                completed_steps.append(step)
-            else:
-                failed = True
-        else:
-            step_results.append(
-                ModelStepResult(
-                    step_key=step.step_key,
-                    passed=True,
-                    message="No verification defined",
-                )
-            )
+        step_result = await _execute_dag_step(step)
+        step_results.append(step_result)
+        if step_result.passed:
             completed_steps.append(step)
+        else:
+            failed = True
 
     # Render output — pass all steps (not just completed) so failed/skipped appear
     renderer = RendererOnboardingMarkdown()
     rendered = renderer.render(steps, step_results, title="Onboarding Progress")
 
-    all_passed = all(r.passed for r in step_results)
+    verified_caps, unmet_caps = _collect_capability_evidence(steps, step_results)
+    status = _status_from_step_results(step_results)
+
     return ModelOnboardingOutput(
-        success=all_passed,
+        success=status == EnumOnboardingStatus.PASSED,
         total_steps=len(steps),
         completed_steps=len(completed_steps),
         step_results=step_results,
         rendered_output=rendered,
+        status=status,
+        verified_capabilities=verified_caps,
+        unmet_capabilities=unmet_caps,
     )
 
 
