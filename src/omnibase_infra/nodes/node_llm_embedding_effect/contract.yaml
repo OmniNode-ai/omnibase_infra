@@ -10,8 +10,8 @@
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 name: "node_llm_embedding_effect"
 node_type: "EFFECT_GENERIC"
 description: >
