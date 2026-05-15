@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11069
+title: "Add OverlayFileLoader with error taxonomy for overlay YAML parsing"
+summary: "Introduces OverlayFileLoader and 6 overlay-specific error types in omnibase_infra.runtime.overlay. All overlay YAML parsing goes through this loader — no direct yaml.safe_load elsewhere."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Unit and integration tests for OverlayFileLoader covering all error paths and permission modes."
+    command: "uv run pytest tests/unit/runtime/overlay/ tests/integration/runtime/test_overlay_file_loader_integration.py -v"
+  - kind: manual
+    description: "Deploy-gate proof: OverlayFileLoader importable from the deployed runtime image."
+    command: >-
+      deploy: docker exec omninode-runtime python -c "from omnibase_infra.runtime.overlay import OverlayFileLoader, OverlayNotFoundError, OverlaySchemaInvalidError, OverlayPermissionError; print('overlay module OK')"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-unit-tests
+    description: "Unit tests cover all 8 loader paths including permission modes and error types."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/overlay/ tests/integration/runtime/test_overlay_file_loader_integration.py -v"
+  - id: dod-deploy-proof
+    description: "Post-merge deploy proof: OverlayFileLoader and error types importable from runtime container."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy: docker exec omninode-runtime python -c "from omnibase_infra.runtime.overlay import OverlayFileLoader, OverlayNotFoundError, OverlaySchemaInvalidError, OverlayPermissionError; print('overlay module OK')"
