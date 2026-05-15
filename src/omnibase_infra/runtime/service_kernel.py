@@ -834,6 +834,56 @@ async def bootstrap() -> int:
                     parameter="event_bus.type",
                 )
 
+        # 2c. Load overlay config (OMN-11069)
+        # Overlay is the primary config path. Falls back to legacy env vars with
+        # a deprecation warning when overlay file is absent but env vars are present.
+        # Raises OverlayNotFoundError on cold-start (no overlay, no env vars).
+        _overlay_path = Path(
+            os.environ.get(
+                "ONEX_OVERLAY_PATH",
+                str(Path.home() / ".omnibase" / "overlay.yaml"),
+            )
+        )
+        _require_overlay = os.environ.get("ONEX_REQUIRE_OVERLAY", "").lower() == "true"
+        try:
+            from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
+            from omnibase_infra.runtime.overlay.errors import (
+                OverlayNotFoundError as _OverlayNotFoundError,
+            )
+
+            _overlay_result = load_overlay_config(
+                overlay_path=_overlay_path,
+                contracts_dir=contracts_dir,
+                require_overlay=_require_overlay,
+            )
+            if _overlay_result is not None:
+                _injection = _overlay_result.apply_to_environment()
+                logger.info(
+                    "Overlay config loaded: source=%s injected=%d skipped=%d (correlation_id=%s)",
+                    _overlay_result.manifest.config_source,
+                    len(_injection.injected_keys),
+                    len(_injection.skipped_existing_keys),
+                    correlation_id,
+                )
+                import tempfile
+
+                _manifest_dir = Path(
+                    os.environ.get("ONEX_MANIFEST_DIR", tempfile.gettempdir())
+                )
+                _manifest_dir.mkdir(parents=True, exist_ok=True)
+                _manifest_path = _manifest_dir / "overlay_resolution_manifest.json"
+                _manifest_path.write_text(
+                    _overlay_result.manifest.model_dump_json(indent=2)
+                )
+        except _OverlayNotFoundError:
+            raise
+        except (OSError, ValueError, ImportError) as _overlay_exc:
+            logger.warning(
+                "Overlay config load failed (non-fatal, continuing with env vars): %s (correlation_id=%s)",
+                _overlay_exc,
+                correlation_id,
+            )
+
         # 3. Create event bus
         # Dispatch based on configuration or environment variable:
         # - ONEX_EVENT_BUS_TYPE env var overrides config.event_bus.type
