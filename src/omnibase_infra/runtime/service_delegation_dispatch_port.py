@@ -24,18 +24,12 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
-from omnibase_infra.topics import (
-    SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND,
-    SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED,
-)
 
 _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
-_DEFAULT_COMMAND_TOPIC = SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND
-_DEFAULT_RESPONSE_TOPIC = SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,12 +178,12 @@ class RuntimeDelegationDispatchPort:
                 if value is not None
             },
             correlation_id=correlation_id,
-            response_topic=self._response_topic or _default_response_topic(),
+            response_topic=self._response_topic or selected.route.terminal_events[0],
             timeout_seconds=_DEFAULT_TIMEOUT_SECONDS if wait else 1.0,
         )
         broker = RuntimePatternBBroker(
             self._event_bus,
-            command_topic=self._command_topic or _default_command_topic(),
+            command_topic=self._command_topic or selected.route.command_topic,
             routes=routes,
         )
         _route, result = await broker.dispatch_request(command)
@@ -198,14 +192,6 @@ class RuntimeDelegationDispatchPort:
             payload=result.payload,
             error_message=result.error_message,
         )
-
-
-def _default_command_topic() -> str:
-    return _DEFAULT_COMMAND_TOPIC
-
-
-def _default_response_topic() -> str:
-    return _DEFAULT_RESPONSE_TOPIC
 
 
 __all__ = ["RuntimeDelegationDispatchPort"]

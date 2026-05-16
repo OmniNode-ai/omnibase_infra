@@ -195,10 +195,17 @@ def _validate_bifrost_delegation_config(path: Path) -> None:
             f"Bifrost delegation config has undeclared backend_id entries: {path}"
         )
 
+    validated_defaults: list[str] = []
+    for backend_id in default_backends:
+        if not isinstance(backend_id, str) or not backend_id.strip():
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config default_backends entries must be "
+                f"non-empty strings: {path}"
+            )
+        validated_defaults.append(backend_id)
+
     unknown_defaults = {
-        backend_id
-        for backend_id in default_backends
-        if isinstance(backend_id, str) and backend_id not in backend_ids
+        backend_id for backend_id in validated_defaults if backend_id not in backend_ids
     }
     if unknown_defaults:
         raise ProtocolConfigurationError(
@@ -206,22 +213,38 @@ def _validate_bifrost_delegation_config(path: Path) -> None:
             f"backend(s): {sorted(unknown_defaults)}"
         )
 
-    rule_ids: list[object] = []
+    rule_ids: list[str] = []
     for rule in routing_rules:
         if not isinstance(rule, dict):
             raise ProtocolConfigurationError(
                 f"Bifrost delegation config routing rule must be a mapping: {path}"
             )
-        rule_ids.append(rule.get("rule_id"))
+        rule_id = rule.get("rule_id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config routing rule_id must be a non-empty "
+                f"string: {path}"
+            )
+        rule_ids.append(rule_id)
+
         rule_backend_ids = rule.get("backend_ids", [])
         if not isinstance(rule_backend_ids, list):
             raise ProtocolConfigurationError(
                 "Bifrost delegation config routing rule backend_ids must be a list"
             )
+        validated_rule_backend_ids: list[str] = []
+        for backend_id in rule_backend_ids:
+            if not isinstance(backend_id, str) or not backend_id.strip():
+                raise ProtocolConfigurationError(
+                    "Bifrost delegation config routing rule backend_ids entries "
+                    f"must be non-empty strings: {path}"
+                )
+            validated_rule_backend_ids.append(backend_id)
+
         unknown_rule_backends = {
             backend_id
-            for backend_id in rule_backend_ids
-            if isinstance(backend_id, str) and backend_id not in backend_ids
+            for backend_id in validated_rule_backend_ids
+            if backend_id not in backend_ids
         }
         if unknown_rule_backends:
             raise ProtocolConfigurationError(

@@ -104,11 +104,13 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     )
     captured_timeout_seconds: list[float] = []
     captured_payloads: list[dict[str, object]] = []
+    captured_broker_kwargs: list[dict[str, object]] = []
 
     class FakeBroker:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             self.args = _args
             self.kwargs = _kwargs
+            captured_broker_kwargs.append(dict(_kwargs))
 
         async def dispatch_request(
             self, command: ModelDispatchBusCommand
@@ -148,6 +150,7 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     assert captured_timeout_seconds == [600.0]
     assert captured_payloads[0]["prompt"] == "probe"
     assert captured_payloads[0]["task_type"] == "document"
+    assert captured_broker_kwargs[0]["command_topic"] == route.command_topic
 
 
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:

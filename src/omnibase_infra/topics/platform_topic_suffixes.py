@@ -770,24 +770,6 @@ Producer: NodeGmailIntentPollerEffect / HandlerGmailIntentPoll
 Consumer: omniintelligence intent classification pipeline
 """
 
-SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND: str = (
-    "onex.cmd.omnimarket.pattern-b-dispatch.v1"
-)
-"""Topic suffix for Pattern B dispatch commands sent to omnimarket.
-
-Published by RuntimeDelegationDispatchPort without importing omnimarket at
-runtime. The omnimarket Pattern B broker consumes this command topic.
-"""
-
-SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED: str = (
-    "onex.evt.omnimarket.pattern-b-dispatch-completed.v1"
-)
-"""Topic suffix for Pattern B dispatch completion events from omnimarket.
-
-Used as the request/response topic for RuntimeDelegationDispatchPort while
-keeping omnibase_infra installable without the omnimarket package.
-"""
-
 SUFFIX_OMNIMEMORY_REWARD_ASSIGNED: str = "onex.evt.omnimemory.reward-assigned.v1"
 """Topic suffix for reward assignment events (OMN-2927).
 
@@ -981,23 +963,6 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
-    ),
-    # Pattern B delegation bridge topics (1 partition - request/response per task)
-    ModelTopicSpec(
-        suffix=SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "86400000",
-            "cleanup.policy": "delete",
-        },  # 1 day - commands are short-lived
-    ),
-    ModelTopicSpec(
-        suffix=SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "86400000",
-            "cleanup.policy": "delete",
-        },  # 1 day - responses are short-lived
     ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
