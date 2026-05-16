@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal, overload
 
 from omnibase_core.enums.enum_overlay_scope import EnumOverlayScope
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
@@ -50,6 +51,42 @@ def _classify_key(key: str) -> EnumInfraTransportType | None:
         if key.startswith(prefix):
             return transport
     return None
+
+
+@overload
+def overlay_from_env_dict(
+    env_dict: dict[str, str],
+    *,
+    output_path: Path,
+    environment: str = ...,
+    scope: str | EnumOverlayScope = ...,
+    allow_unclassified: bool = ...,
+    return_warnings: bool = ...,
+) -> Path: ...
+
+
+@overload
+def overlay_from_env_dict(
+    env_dict: dict[str, str],
+    *,
+    output_path: None = ...,
+    environment: str = ...,
+    scope: str | EnumOverlayScope = ...,
+    allow_unclassified: bool = ...,
+    return_warnings: Literal[False] = ...,
+) -> ModelOverlayFile: ...
+
+
+@overload
+def overlay_from_env_dict(
+    env_dict: dict[str, str],
+    *,
+    output_path: None = ...,
+    environment: str = ...,
+    scope: str | EnumOverlayScope = ...,
+    allow_unclassified: bool = ...,
+    return_warnings: Literal[True],
+) -> tuple[ModelOverlayFile, list[str]]: ...
 
 
 def overlay_from_env_dict(
