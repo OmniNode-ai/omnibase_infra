@@ -107,6 +107,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: market.skill-proof,workflow.orchestration,runtime.main
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       KAFKA_INSTANCE_ID: stability-test-main
+      BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
@@ -136,6 +137,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: effects.consumer,market.skill-proof,runtime.effects
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
       KAFKA_INSTANCE_ID: stability-test-effects
+      BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
     ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
@@ -165,6 +167,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: workflow.dispatch,contract.update,runtime.worker
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
       KAFKA_INSTANCE_ID: stability-test-worker
+      BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
     volumes: !override
       - worker_logs:/app/logs
