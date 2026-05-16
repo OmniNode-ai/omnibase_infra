@@ -1,14 +1,55 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+"""Classify environment key-value pairs into overlay files."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
+from omnibase_core.enums.enum_overlay_scope import EnumOverlayScope
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
-
-from .overlay_writer import OverlayWriter
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.runtime.config_discovery.transport_config_map import (
+    TransportConfigMap,
+)
+from omnibase_infra.runtime.overlay.overlay_writer import OverlayWriter
 
 _DEFAULT_OVERLAY_OUTPUT = Path.home() / ".omnibase" / "overlay.yaml"
+
+_PREFIX_TO_TRANSPORT: dict[str, EnumInfraTransportType] = {
+    "FS_": EnumInfraTransportType.FILESYSTEM,
+    "GRAPH_": EnumInfraTransportType.GRAPH,
+    "GRPC_": EnumInfraTransportType.GRPC,
+    "HTTP_": EnumInfraTransportType.HTTP,
+    "INFISICAL_": EnumInfraTransportType.INFISICAL,
+    "KAFKA_": EnumInfraTransportType.KAFKA,
+    "LLM_": EnumInfraTransportType.LLM,
+    "MCP_": EnumInfraTransportType.MCP,
+    "POSTGRES_": EnumInfraTransportType.DATABASE,
+    "QDRANT_": EnumInfraTransportType.QDRANT,
+    "REDIS_": EnumInfraTransportType.VALKEY,
+    "VALKEY_": EnumInfraTransportType.VALKEY,
+}
+
+
+def _build_reverse_key_map() -> dict[str, EnumInfraTransportType]:
+    result: dict[str, EnumInfraTransportType] = {}
+    for transport in EnumInfraTransportType:
+        for key in TransportConfigMap.keys_for_transport(transport):
+            result[key] = transport
+    return result
+
+
+_EXACT_KEY_MAP: dict[str, EnumInfraTransportType] = _build_reverse_key_map()
+
+
+def _classify_key(key: str) -> EnumInfraTransportType | None:
+    if key in _EXACT_KEY_MAP:
+        return _EXACT_KEY_MAP[key]
+    for prefix, transport in _PREFIX_TO_TRANSPORT.items():
+        if key.startswith(prefix):
+            return transport
+    return None
 
 
 def overlay_from_env_dict(
@@ -16,27 +57,50 @@ def overlay_from_env_dict(
     *,
     output_path: Path | None = None,
     environment: str = "local",
-    scope: str = "env",
-) -> Path:
-    """Generate an overlay YAML file from an env var dict.
+    scope: str | EnumOverlayScope = EnumOverlayScope.ENV,
+    allow_unclassified: bool = False,
+    return_warnings: bool = False,
+) -> ModelOverlayFile | tuple[ModelOverlayFile, list[str]] | Path:
+    """Classify env keys into a ModelOverlayFile, optionally writing it to disk."""
+    transports: dict[str, dict[str, str]] = {}
+    services: dict[str, dict[str, str]] = {}
+    warnings: list[str] = []
 
-    Used by onboarding to produce the initial overlay file from discovered
-    or user-supplied configuration values.
+    for key, value in env_dict.items():
+        transport = _classify_key(key)
+        if transport is not None:
+            section = transport.value
+            if section not in transports:
+                transports[section] = {}
+            transports[section][key] = value
+        elif allow_unclassified:
+            if "unclassified" not in services:
+                services["unclassified"] = {}
+            services["unclassified"][key] = value
+        else:
+            warnings.append(
+                f"Key '{key}' could not be classified into any transport section. "
+                "It will be omitted from the overlay. Pass allow_unclassified=True "
+                "to place it in services.unclassified."
+            )
 
-    Production/default onboarding targets ~/.omnibase/overlay.yaml.
-    Tests and automation MUST pass explicit temp output paths to avoid
-    mutating real state.
-    """
-    if output_path is None:
-        output_path = _DEFAULT_OVERLAY_OUTPUT
-
+    scope_value = scope.value if isinstance(scope, EnumOverlayScope) else scope
     overlay = ModelOverlayFile.model_validate(
         {
-            "overlay_version": "1.0.0",
             "environment": environment,
-            "scope": scope,
-            "transports": {"custom": env_dict},
+            "overlay_version": "1.0.0",
+            "scope": scope_value,
+            "services": services,
+            "transports": transports,
         }
     )
-    OverlayWriter().write(overlay, output_path)
-    return output_path
+
+    if output_path is not None:
+        OverlayWriter().write(overlay, output_path)
+        return output_path
+    if return_warnings:
+        return overlay, warnings
+    return overlay
+
+
+__all__ = ["overlay_from_env_dict"]

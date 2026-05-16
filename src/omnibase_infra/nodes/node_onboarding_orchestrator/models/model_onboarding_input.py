@@ -46,6 +46,14 @@ class ModelOnboardingInput(BaseModel):
         default=None,
         description="Explicit path for env write; required when dry_run=False",
     )
+    overlay_output_path: str | None = Field(
+        default=None,
+        description="Path for overlay YAML write; derived from env_output_path when None",
+    )
+    legacy_env_output: bool = Field(
+        default=True,
+        description="When True, also write legacy .env file alongside overlay output",
+    )
 
     @model_validator(mode="after")
     def _enforce_env_output_path_when_writing(self) -> ModelOnboardingInput:

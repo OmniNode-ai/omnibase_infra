@@ -190,6 +190,46 @@ class TestHandlerInteractivePath:
         assert output.env_output_path_written == str(target)
         assert output.dry_run is False
 
+    @pytest.mark.asyncio
+    async def test_dry_run_false_writes_overlay_and_sets_path(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+        tmp_path: object,
+    ) -> None:
+        """dry_run=False writes overlay YAML and sets overlay_output_path_written."""
+        from pathlib import Path
+
+        target = Path(str(tmp_path)) / "test.env"
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=False,
+            env_output_path=str(target),
+        )
+        output = await handle_onboarding(
+            input_model, input_adapter=local_no_llm_adapter
+        )
+
+        assert output.overlay_output_path_written is not None
+        overlay_path = Path(output.overlay_output_path_written)
+        assert overlay_path.exists()
+        assert overlay_path.suffix == ".yaml"
+
+    @pytest.mark.asyncio
+    async def test_dry_run_true_overlay_output_path_written_is_none(
+        self,
+        local_no_llm_adapter: AdapterFakeInput,
+    ) -> None:
+        """dry_run=True must leave overlay_output_path_written as None."""
+        input_model = ModelOnboardingInput(
+            policy_name="interactive_onboarding",
+            dry_run=True,
+        )
+        output = await handle_onboarding(
+            input_model, input_adapter=local_no_llm_adapter
+        )
+
+        assert output.overlay_output_path_written is None
+
     async def test_dry_run_false_without_env_output_path_raises(
         self,
         local_no_llm_adapter: AdapterFakeInput,

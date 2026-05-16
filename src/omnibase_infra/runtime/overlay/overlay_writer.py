@@ -63,3 +63,6 @@ class OverlayWriter:
             with suppress(OSError):
                 tmp_path.unlink()
             raise
+
+
+__all__ = ["OverlayWriter"]
