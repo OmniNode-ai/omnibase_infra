@@ -31,10 +31,29 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.utils.util_runtime_packages import (
+    get_active_runtime_packages,
+    is_runtime_package_active,
+    is_runtime_topic_active,
+)
 
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "onex.nodes"
+
+
+def _contract_targets_active_runtime_packages(
+    contract: ModelDiscoveredContract,
+    active_packages: frozenset[str] | None,
+) -> bool:
+    """Return True when a contract's event-bus topics stay within the active runtime surface."""
+    if contract.event_bus is None:
+        return True
+
+    all_topics = tuple(contract.event_bus.subscribe_topics) + tuple(
+        contract.event_bus.publish_topics
+    )
+    return all(is_runtime_topic_active(topic, active_packages) for topic in all_topics)
 
 
 def discover_contracts() -> ModelAutoWiringManifest:
@@ -53,11 +72,18 @@ def discover_contracts() -> ModelAutoWiringManifest:
     """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
+    active_packages = get_active_runtime_packages()
 
     for ep in entry_points(group=ENTRY_POINT_GROUP):
         dist = ep.dist
         dist_name = dist.name if dist is not None else "unknown"
         dist_version = dist.version if dist is not None else "0.0.0"
+        if not is_runtime_package_active(dist_name, active_packages):
+            logger.debug(
+                "Skipping contract discovery for inactive runtime package '%s'",
+                dist_name,
+            )
+            continue
 
         try:
             node_cls = ep.load()
@@ -118,6 +144,14 @@ def discover_contracts() -> ModelAutoWiringManifest:
             )
             continue
 
+        if not _contract_targets_active_runtime_packages(contract, active_packages):
+            logger.info(
+                "Skipping contract '%s' from '%s' because it targets an inactive runtime package domain",
+                contract.name,
+                dist_name,
+            )
+            continue
+
         contracts.append(contract)
         logger.info(
             "Discovered contract: %s (%s) from %s %s",
@@ -149,6 +183,7 @@ def discover_contracts_from_paths(
     """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
+    active_packages = get_active_runtime_packages()
 
     for path in contract_paths:
         name = path.parent.name
@@ -167,6 +202,13 @@ def discover_contracts_from_paths(
                     package_name="local",
                     error=f"Failed to parse contract: {exc}",
                 )
+            )
+            continue
+        if not _contract_targets_active_runtime_packages(contract, active_packages):
+            logger.info(
+                "Skipping contract '%s' from explicit path %s because it targets an inactive runtime package domain",
+                contract.name,
+                path,
             )
             continue
         contracts.append(contract)

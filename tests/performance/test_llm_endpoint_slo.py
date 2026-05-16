@@ -31,8 +31,8 @@ Endpoint Configuration:
     standard OmniNode multi-server LLM architecture:
 
     - LLM_CODER_URL:    http://192.168.86.201:8000  (RTX 5090)
-    - LLM_EMBEDDING_URL: http://192.168.86.201:8002 (RTX 4090)
-    - LLM_QWEN_72B_URL: http://192.168.86.200:8100  (Mac Studio M2 Ultra)
+    - LLM_EMBEDDING_URL: http://192.168.86.201:8100 (RTX 4090)
+    - LLM_QWEN_72B_URL: http://192.168.86.200:8101  (Mac Studio M2 Ultra)
     - LLM_VISION_URL:   http://192.168.86.200:8102   (Mac Studio M2 Ultra)
     - LLM_QWEN_14B_URL: http://192.168.86.100:8200   (Mac Mini M2 Pro)
 
@@ -90,8 +90,8 @@ pytestmark = [
 
 # Endpoint URLs from env with OmniNode defaults
 CODER_14B_URL = os.getenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-EMBEDDING_URL = os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.201:8002")
-QWEN_72B_URL = os.getenv("LLM_QWEN_72B_URL", "http://192.168.86.200:8100")
+EMBEDDING_URL = os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.201:8100")
+QWEN_72B_URL = os.getenv("LLM_QWEN_72B_URL", "http://192.168.86.200:8101")
 VISION_URL = os.getenv("LLM_VISION_URL", "http://192.168.86.200:8102")
 QWEN_14B_URL = os.getenv("LLM_QWEN_14B_URL", "http://192.168.86.100:8200")
 

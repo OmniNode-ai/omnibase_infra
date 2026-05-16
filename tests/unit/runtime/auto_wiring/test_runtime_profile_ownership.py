@@ -35,13 +35,18 @@ def _contract(
     )
 
 
-def test_unscoped_contracts_remain_owned_by_every_runtime_profile() -> None:
+def test_unscoped_contracts_default_to_main_runtime_profile() -> None:
     manifest = ModelAutoWiringManifest(contracts=(_contract("legacy_node"),))
 
-    result = filter_manifest_for_runtime_profile(manifest, "main")
+    main_result = filter_manifest_for_runtime_profile(manifest, "main")
+    effects_result = filter_manifest_for_runtime_profile(manifest, "effects")
 
-    assert [contract.name for contract in result.manifest.contracts] == ["legacy_node"]
-    assert result.skipped_contracts == ()
+    assert [contract.name for contract in main_result.manifest.contracts] == [
+        "legacy_node"
+    ]
+    assert main_result.skipped_contracts == ()
+    assert effects_result.manifest.contracts == ()
+    assert effects_result.skipped_contracts == ("legacy_node",)
 
 
 def test_contract_runtime_profiles_select_single_owner() -> None:
@@ -96,6 +101,7 @@ handler_routing:
 event_bus:
   subscribe_topics:
     - onex.cmd.omnimarket.build-loop-orchestrator-start.v1
+terminal_event: onex.evt.omnimarket.build-loop-orchestrator-completed.v1
 """.strip(),
         encoding="utf-8",
     )
@@ -104,3 +110,7 @@ event_bus:
 
     assert manifest.total_errors == 0
     assert manifest.contracts[0].runtime_profiles == ("effects",)
+    assert (
+        manifest.contracts[0].terminal_event
+        == "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+    )

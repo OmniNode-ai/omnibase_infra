@@ -103,7 +103,7 @@ def _completion_request(**overrides: Any) -> ModelLlmInferenceRequest:
 def _embedding_request(**overrides: Any) -> ModelLlmInferenceRequest:
     """Build a valid EMBEDDING request with sensible defaults."""
     defaults: dict[str, Any] = {
-        "base_url": "http://192.168.86.201:8002",
+        "base_url": "http://192.168.86.201:8100",
         "model": "gte-qwen2",
         "operation_type": EnumLlmOperationType.EMBEDDING,
         "prompt": "Embed this text",

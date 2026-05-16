@@ -69,7 +69,7 @@ The two nodes are structurally independent ONEX Effect nodes with their own cont
 |------------------|--------|------|-------|---------|----------|
 | `LLM_CODER_URL` | 192.168.86.201 (RTX 5090) | 8000 | Qwen3-Coder-30B-A3B AWQ-4bit | 64K tokens | Long-context code analysis, repo-level tasks |
 | `LLM_CODER_FAST_URL` | 192.168.86.201 (RTX 4090) | 8001 | Qwen3-14B-AWQ | 40K tokens | Mid-tier inference, routing classification |
-| `LLM_EMBEDDING_URL` | 192.168.86.200 (M2 Ultra) | 8100 | Qwen3-Embedding-8B-4bit | — | Embeddings for RAG and semantic search |
+| `LLM_EMBEDDING_URL` | 192.168.86.201 (RTX 4090) | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | — | Embeddings for RAG and semantic search |
 | `LLM_DEEPSEEK_R1_URL` | 192.168.86.200 (M2 Ultra) | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | — | Async reasoning, code review, analysis |
 
 All endpoints are on the `192.168.86.0/24` subnet (the default CIDR allowlist). Requests to any IP outside this range are rejected before an HTTP call is made.
@@ -258,7 +258,7 @@ handler = HandlerEmbeddingOpenaiCompatible(target_name="qwen3-embedding")
 
 response: ModelLlmEmbeddingResponse = await handler.execute(
     ModelLlmEmbeddingRequest(
-        base_url="http://192.168.86.200:8100",
+        base_url="http://192.168.86.201:8100",
         model="qwen3-embedding-8b",
         texts=("text to embed", "another text"),
         dimensions=1024,           # optional
@@ -390,7 +390,7 @@ LLM_CODER_FAST_URL=http://192.168.86.201:8001   # Qwen3-14B (40K context)
 LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101  # DeepSeek-R1 (reasoning)
 
 # Embedding endpoint
-LLM_EMBEDDING_URL=http://192.168.86.200:8100    # Qwen3-Embedding-8B
+LLM_EMBEDDING_URL=http://192.168.86.201:8100    # gte-Qwen2-1.5B embeddings
 
 # Security
 LOCAL_LLM_SHARED_SECRET=<rotate-regularly>       # HMAC signing key
@@ -412,7 +412,7 @@ To add a new inference target (e.g., a fine-tuned model on a different port):
 
 1. Set the URL in `.env`:
    ```bash
-   LLM_MYMODEL_URL=http://192.168.86.201:8002
+   LLM_MYMODEL_URL=http://192.168.86.201:8100
    ```
 
 2. Ensure the target IP is within `LLM_ENDPOINT_CIDR_ALLOWLIST`.

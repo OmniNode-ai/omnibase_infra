@@ -91,7 +91,7 @@ def _completion_kwargs(**overrides: object) -> dict[str, object]:
 def _embedding_kwargs(**overrides: object) -> dict[str, object]:
     """Return minimal valid kwargs for an EMBEDDING request."""
     defaults: dict[str, object] = {
-        "base_url": "http://192.168.86.201:8002",
+        "base_url": "http://192.168.86.201:8100",
         "model": "gte-qwen2-1.5b",
         "operation_type": EnumLlmOperationType.EMBEDDING,
         "prompt": "embed this text",

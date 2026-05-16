@@ -11,7 +11,7 @@ manifest. The fixture contains at least one handler per branch:
 
     * RESOLVED_VIA_NODE_REGISTRY       — materialized explicit dep map
     * RESOLVED_VIA_CONTAINER           — container.get_service returns instance
-    * RESOLVED_VIA_EVENT_BUS           — ``__init__(self, event_bus)``
+    * RESOLVED_VIA_KNOWN_PARAMS        — ``__init__(self, event_bus)`` (OMN-10278: subsumes old RESOLVED_VIA_EVENT_BUS)
     * RESOLVED_VIA_ZERO_ARG            — zero-arg constructor
     * RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP — node not hosted here
 
@@ -412,12 +412,13 @@ class TestFullAutoWiringExercisesResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER
         )
 
-        # Event-bus branch
+        # Event-bus branch — resolves via RESOLVED_VIA_KNOWN_PARAMS since OMN-10278
+        # (RESOLVED_VIA_KNOWN_PARAMS subsumes the old single-param event_bus path)
         event_bus_contract = _find_contract(report, "node_event_bus_owned")
         assert len(event_bus_contract.wirings) == 1
         assert (
             event_bus_contract.wirings[0].resolution_outcome
-            is EnumHandlerResolutionOutcome.RESOLVED_VIA_EVENT_BUS
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_KNOWN_PARAMS
         )
 
         # Zero-arg branch
@@ -458,10 +459,12 @@ class TestFullAutoWiringExercisesResolver:
             f"precedence path; observed: {observed_outcomes!r}"
         )
         # Stronger: observed set equals expected full-branch coverage.
+        # Note: RESOLVED_VIA_EVENT_BUS was subsumed by RESOLVED_VIA_KNOWN_PARAMS
+        # in OMN-10278; single-param event_bus handlers now resolve via KNOWN_PARAMS.
         expected_outcomes = {
             EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER,
-            EnumHandlerResolutionOutcome.RESOLVED_VIA_EVENT_BUS,
+            EnumHandlerResolutionOutcome.RESOLVED_VIA_KNOWN_PARAMS,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_ZERO_ARG,
             EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP,
         }

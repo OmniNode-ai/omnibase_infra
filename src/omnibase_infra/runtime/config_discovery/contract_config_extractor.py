@@ -78,6 +78,8 @@ _TRANSPORT_ALIASES: dict[str, EnumInfraTransportType] = {
     "auth_gate": EnumInfraTransportType.RUNTIME,
     # "ledger_projection" -> pure COMPUTE, projects events into audit ledger
     "ledger_projection": EnumInfraTransportType.RUNTIME,
+    # "build_loop_projection" -> pure COMPUTE, projects terminal events into audit append intents
+    "build_loop_projection": EnumInfraTransportType.RUNTIME,
     # "validation_ledger_projection" -> pure COMPUTE, projects validation events
     "validation_ledger_projection": EnumInfraTransportType.RUNTIME,
     # "rrh_validate" -> pure COMPUTE, evaluates RRH validation rules
