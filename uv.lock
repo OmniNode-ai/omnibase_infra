@@ -2176,8 +2176,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "omnibase-core"
-version = "0.40.2"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main#c059c67906368ec01e8966256c0a12b67e2818b3" }
+version = "0.41.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main#3a41c2d1b721e90258ee752bd151b0908386211b" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
