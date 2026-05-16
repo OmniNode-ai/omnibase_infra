@@ -70,8 +70,15 @@ class TestOverlayBootIntegration:
         from omnibase_infra.runtime.overlay.errors import OverlayNotFoundError
 
         monkeypatch.setenv("ONEX_OVERLAY_PATH", str(tmp_path / "missing.yaml"))
-        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
-        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        # Clear all transport indicator vars so _has_transport_env_vars() returns False
+        for var in (
+            "KAFKA_BOOTSTRAP_SERVERS",
+            "POSTGRES_HOST",
+            "POSTGRES_PASSWORD",
+            "VALKEY_URL",
+            "INFISICAL_ADDR",
+        ):
+            monkeypatch.delenv(var, raising=False)
         with pytest.raises(OverlayNotFoundError):
             load_overlay_config(contracts_dir=contracts_dir)
 
