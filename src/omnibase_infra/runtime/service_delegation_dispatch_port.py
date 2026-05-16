@@ -7,12 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
-
-from omnimarket.nodes.node_delegation_orchestrator.models.model_delegation_request import (
-    ModelDelegationRequest,
-)
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
@@ -29,12 +24,18 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
+from omnibase_infra.topics import (
+    SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND,
+    SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED,
+)
 
 _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
+_DEFAULT_COMMAND_TOPIC = SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMMAND
+_DEFAULT_RESPONSE_TOPIC = SUFFIX_OMNIMARKET_PATTERN_B_DISPATCH_COMPLETED
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,21 +164,25 @@ class RuntimeDelegationDispatchPort:
 
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
-        request = ModelDelegationRequest(
-            prompt=prompt,
-            task_type=cast("Literal['test', 'document', 'research']", task_type),
-            source_session_id=source_session_id,
-            source_file_path=source_file_path,
-            correlation_id=correlation_id,
-            max_tokens=max_tokens,
-            emitted_at=datetime.now(UTC),
-            output_schema_key=output_schema_key,
-        )
+        request_payload = {
+            "prompt": prompt,
+            "task_type": task_type,
+            "source_session_id": source_session_id,
+            "source_file_path": source_file_path,
+            "correlation_id": str(correlation_id),
+            "max_tokens": max_tokens,
+            "emitted_at": datetime.now(UTC).isoformat(),
+            "output_schema_key": output_schema_key,
+        }
 
         command = ModelDispatchBusCommand(
             command_name=selected.alias,
             requester=_REQUESTER,
-            payload=request.model_dump(mode="json", exclude_none=True),
+            payload={
+                key: value
+                for key, value in request_payload.items()
+                if value is not None
+            },
             correlation_id=correlation_id,
             response_topic=self._response_topic or _default_response_topic(),
             timeout_seconds=_DEFAULT_TIMEOUT_SECONDS if wait else 1.0,
@@ -196,15 +201,11 @@ class RuntimeDelegationDispatchPort:
 
 
 def _default_command_topic() -> str:
-    from omnimarket.adapters.codex.runtime_client import default_command_topic
-
-    return default_command_topic()
+    return _DEFAULT_COMMAND_TOPIC
 
 
 def _default_response_topic() -> str:
-    from omnimarket.adapters.codex.runtime_client import default_response_topic
-
-    return default_response_topic()
+    return _DEFAULT_RESPONSE_TOPIC
 
 
 __all__ = ["RuntimeDelegationDispatchPort"]

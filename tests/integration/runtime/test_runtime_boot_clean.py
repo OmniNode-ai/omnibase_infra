@@ -29,7 +29,7 @@ from omnibase_infra.runtime.service_message_dispatch_engine import (
 pytestmark = [pytest.mark.integration]
 
 MAIN_RUNTIME_PROFILE = "main"
-OMNIMARKET_PACKAGE = "omnimarket"
+OMNIBASE_INFRA_PACKAGE = "omnibase_infra"
 EXCLUDED_MAIN_PROFILE_NODES = frozenset(
     {
         "node_intelligence_orchestrator",
@@ -84,27 +84,22 @@ async def test_wire_from_manifest_main_profile_no_crash() -> None:
     assert len(report.results) == manifest.total_discovered
 
 
-def test_manifest_includes_omnimarket_contracts() -> None:
-    """The main-profile boot gate is not vacuous: omnimarket is present.
-
-    Asserts a representative slice of well-known omnimarket workflow nodes.
-    `merge_sweep` was split into `merge_sweep_compute` + state-reducer + arm-effect
-    in OMN-10791 wave; this assertion was updated to match the new node layout.
-    """
+def test_manifest_includes_infra_contracts() -> None:
+    """The main-profile boot gate is not vacuous in an infra-only install."""
     manifest = _main_profile_manifest()
 
-    omnimarket_contracts = {
+    infra_contracts = {
         contract.name
         for contract in manifest.contracts
-        if contract.package_name == OMNIMARKET_PACKAGE
+        if contract.package_name == OMNIBASE_INFRA_PACKAGE
     }
 
-    assert omnimarket_contracts
+    assert infra_contracts
     assert {
-        "build_loop",
-        "merge_sweep_compute",
-        "runtime_sweep",
-    }.issubset(omnimarket_contracts)
+        "node_artifact_reconciliation_orchestrator",
+        "node_build_loop_projection_compute",
+        "node_event_bus_wiring_effect",
+    }.issubset(infra_contracts)
 
 
 def test_main_profile_excludes_memory_and_intelligence() -> None:
