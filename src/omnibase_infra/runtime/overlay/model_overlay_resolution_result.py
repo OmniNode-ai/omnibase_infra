@@ -32,9 +32,8 @@ class ModelOverlayResolutionResult(BaseModel):
         for key, value in self.resolved.items():
             if key in os.environ:
                 logger.warning(
-                    "Overlay key %s already set in environment (existing=%s); skipping",
+                    "Overlay key %s already set in environment; skipping overlay injection",
                     key,
-                    os.environ[key],
                 )
                 skipped.append(key)
             else:

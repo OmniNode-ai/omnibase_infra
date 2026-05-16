@@ -91,9 +91,7 @@ class TestOverlayWriter:
         with caplog.at_level(logging.WARNING):
             OverlayWriter().write(overlay, target)
         assert any(
-            "secret" in r.message.lower()
-            or "PASSWORD" in r.message
-            or "600" in r.message
+            "secret" in r.message.lower() or "PASSWORD" in r.message
             for r in caplog.records
         )
 

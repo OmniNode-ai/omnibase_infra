@@ -41,7 +41,7 @@ class OverlayFileLoader:
 
                 raise OverlayPermissionError(
                     f"Overlay file {path} has group/other read permissions. "
-                    "Restrict with: chmod 600 {path}"
+                    f"Restrict with: chmod 600 {path}"
                 )
         try:
             raw = yaml.safe_load(path.read_text())
