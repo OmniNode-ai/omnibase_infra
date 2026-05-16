@@ -1364,6 +1364,7 @@ class TestKafkaEventBusConsumerGroupId:
                 match="Consumer group ID is required",
             ):
                 await event_bus._start_consumer_for_topic("test-topic", "   ")
+            assert event_bus._pending_consumer_keys == set()
 
     @pytest.mark.asyncio
     async def test_empty_group_id_raises_error(self, mock_producer: AsyncMock) -> None:
@@ -1381,6 +1382,35 @@ class TestKafkaEventBusConsumerGroupId:
                 match="Consumer group ID is required",
             ):
                 await event_bus._start_consumer_for_topic("test-topic", "")
+            assert event_bus._pending_consumer_keys == set()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_consumer_start_stops_consumer(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Cancelled consumer startup must not leave an AIOKafkaConsumer open."""
+        mock_consumer.start = AsyncMock(side_effect=asyncio.CancelledError())
+        consumer_cls = MagicMock(return_value=mock_consumer)
+
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            with pytest.raises(asyncio.CancelledError):
+                await event_bus._start_consumer_for_topic("test-topic", "test-group")
+
+        mock_consumer.stop.assert_awaited_once()
+        assert event_bus._pending_consumer_keys == set()
+        assert event_bus._group_consumers == {}
 
     @pytest.mark.asyncio
     async def test_group_id_not_double_suffixed(

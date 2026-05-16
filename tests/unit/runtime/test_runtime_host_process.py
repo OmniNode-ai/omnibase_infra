@@ -818,6 +818,53 @@ class TestRuntimeHostProcessLifecycle:
         assert process._is_starting is False
         assert process.is_running is False
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_startup_failure_runs_shutdown_cleanup(self) -> None:
+        """Failed startup must release resources created before the error."""
+
+        process = RuntimeHostProcess(config=make_runtime_config())
+        startup_error = RuntimeError("startup boom")
+        cleanup = AsyncMock()
+
+        async def failing_start_runtime() -> None:
+            raise startup_error
+
+        with (
+            patch.object(process, "_start_runtime", failing_start_runtime),
+            patch.object(process, "stop", cleanup),
+        ):
+            with pytest.raises(RuntimeError, match="startup boom"):
+                await process.start()
+
+        cleanup.assert_awaited_once()
+        assert process._startup_task is None
+        assert process._is_starting is False
+        assert process.is_running is False
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_startup_cleanup_error_preserves_original_failure(self) -> None:
+        """Cleanup errors after failed startup must not mask the root cause."""
+
+        process = RuntimeHostProcess(config=make_runtime_config())
+        cleanup = AsyncMock(side_effect=RuntimeError("cleanup boom"))
+
+        async def failing_start_runtime() -> None:
+            raise RuntimeError("startup boom")
+
+        with (
+            patch.object(process, "_start_runtime", failing_start_runtime),
+            patch.object(process, "stop", cleanup),
+        ):
+            with pytest.raises(RuntimeError, match="startup boom"):
+                await process.start()
+
+        cleanup.assert_awaited_once()
+        assert process._startup_task is None
+        assert process._is_starting is False
+        assert process.is_running is False
+
     @pytest.mark.asyncio
     async def test_stop_calls_shutdown_on_all_handlers(self) -> None:
         """Test that stop() calls shutdown() on all registered handlers.
