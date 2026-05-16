@@ -96,6 +96,23 @@ jobs:
             echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
           fi
 
+      - name: Set up Python for AWS CLI
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Ensure AWS CLI is available
+        shell: bash
+        run: |
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+
+          python -m pip install --user 'awscli>=1.33,<2'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/aws" --version
+
       - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
         uses: aws-actions/configure-aws-credentials@v6
         with:
