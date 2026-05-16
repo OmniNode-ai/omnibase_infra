@@ -1,0 +1,236 @@
+# docker-compose.prod.yml
+# Isolated production runtime lane overlay.
+#
+# This overlay intentionally creates its own compose project, network, volumes,
+# container names, ports, runtime IDs, and Kafka consumer groups. It is meant to
+# run beside the local and stability-test lanes without sharing state.
+#
+# Requires Docker Compose v2.24.4 or later for !override merge semantics.
+name: omnibase-infra-prod
+services:
+  postgres:
+    container_name: omnibase-infra-prod-postgres
+    ports: !override
+      - "${PROD_POSTGRES_EXTERNAL_PORT:-25436}:5432"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=postgres"
+      - "com.omninode.layer=infrastructure"
+  redpanda:
+    container_name: omnibase-infra-prod-redpanda
+    command: !override
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - ${PROD_REDPANDA_MEMORY:-8G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_EXTERNAL_PORT:-49092}
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_PANDAPROXY_PORT:-48082}
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    ports: !override
+      - "${PROD_REDPANDA_EXTERNAL_PORT:-49092}:19092"
+      - "${PROD_REDPANDA_ADMIN_PORT:-39644}:9644"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=redpanda"
+      - "com.omninode.layer=infrastructure"
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-prod-redpanda-partition-cap
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=redpanda-partition-cap"
+      - "com.omninode.layer=infrastructure"
+  valkey:
+    container_name: omnibase-infra-prod-valkey
+    ports: !override
+      - "${PROD_VALKEY_EXTERNAL_PORT:-36379}:6379"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=valkey"
+      - "com.omninode.layer=infrastructure"
+  keycloak:
+    profiles: !override ["prod-disabled"]
+  infisical:
+    profiles: !override ["prod-disabled"]
+  forward-migration:
+    container_name: omnibase-infra-prod-forward-migration
+    restart: "no"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=forward-migration"
+      - "com.omninode.layer=infrastructure"
+  migration-gate:
+    container_name: omnibase-infra-prod-migration-gate
+    restart: "no"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=migration-gate"
+      - "com.omninode.layer=infrastructure"
+  intelligence-migration:
+    container_name: omnibase-infra-prod-intelligence-migration
+    restart: "no"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=intelligence-migration"
+      - "com.omninode.layer=infrastructure"
+  omninode-runtime:
+    container_name: omninode-prod-runtime
+    restart: unless-stopped
+    depends_on:
+      intelligence-migration:
+        condition: service_completed_successfully
+      redpanda-partition-cap:
+        condition: service_completed_successfully
+    environment:
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
+      ONEX_ENVIRONMENT: prod
+      ONEX_STATE_ROOT: /app/data/.onex_state_prod
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: prod-main
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/prod/main
+      ONEX_RUNTIME_CAPABILITIES: market.skill-proof,workflow.orchestration,runtime.main
+      ONEX_GROUP_ID: onex-prod-runtime-main
+      KAFKA_INSTANCE_ID: prod-main
+      BIFROST_VERIFY_ENDPOINTS: "0"
+      OTEL_SERVICE_NAME: omninode-prod-runtime-main
+    ports: !override
+      - "${PROD_RUNTIME_MAIN_PORT:-28085}:8085"
+    volumes: !override
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=runtime-main"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.runtime.address=runtime://omninode-pc/prod/main"
+      - "com.omninode.runtime.id=prod-main"
+  runtime-effects:
+    container_name: omninode-prod-runtime-effects
+    restart: unless-stopped
+    environment:
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
+      ONEX_ENVIRONMENT: prod
+      ONEX_STATE_ROOT: /app/data/.onex_state_prod
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: prod-effects
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/prod/effects
+      ONEX_RUNTIME_CAPABILITIES: effects.consumer,market.skill-proof,runtime.effects
+      ONEX_GROUP_ID: onex-prod-runtime-effects
+      KAFKA_INSTANCE_ID: prod-effects
+      BIFROST_VERIFY_ENDPOINTS: "0"
+      OTEL_SERVICE_NAME: omninode-prod-runtime-effects
+    ports: !override
+      - "${PROD_RUNTIME_EFFECTS_PORT:-28086}:8085"
+    volumes: !override
+      - effects_logs:/app/logs
+      - effects_data:/app/data
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=runtime-effects"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.runtime.address=runtime://omninode-pc/prod/effects"
+      - "com.omninode.runtime.id=prod-effects"
+  runtime-worker:
+    container_name: omninode-prod-runtime-worker
+    restart: unless-stopped
+    environment:
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
+      ONEX_ENVIRONMENT: prod
+      ONEX_STATE_ROOT: /app/data/.onex_state_prod
+      ONEX_BOX_ID: omninode-pc
+      ONEX_RUNTIME_ID: prod-worker
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/prod/worker
+      ONEX_RUNTIME_CAPABILITIES: workflow.dispatch,contract.update,runtime.worker
+      ONEX_GROUP_ID: onex-prod-runtime-workers
+      KAFKA_INSTANCE_ID: prod-worker
+      BIFROST_VERIFY_ENDPOINTS: "0"
+      OTEL_SERVICE_NAME: omninode-prod-runtime-worker
+    volumes: !override
+      - worker_logs:/app/logs
+      - prod_worker_data:/app/data
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=runtime-worker"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.runtime.address=runtime://omninode-pc/prod/worker"
+      - "com.omninode.runtime.id=prod-worker"
+  agent-actions-consumer:
+    profiles: !override ["prod-disabled"]
+  skill-lifecycle-consumer:
+    profiles: !override ["prod-disabled"]
+  context-audit-consumer:
+    profiles: !override ["prod-disabled"]
+  intelligence-api:
+    profiles: !override ["prod-disabled"]
+  omninode-contract-resolver:
+    profiles: !override ["prod-disabled"]
+  phoenix:
+    profiles: !override ["prod-disabled"]
+  autoheal:
+    profiles: !override ["prod-disabled"]
+volumes:
+  postgres_data:
+    name: omnibase-infra-prod-postgres-data
+  redpanda_data:
+    name: omnibase-infra-prod-redpanda-data
+  valkey_data:
+    name: omnibase-infra-prod-valkey-data
+  keycloak_data:
+    name: omnibase-infra-prod-keycloak-data
+  runtime_data:
+    name: omninode-prod-runtime-data
+  runtime_logs:
+    name: omninode-prod-runtime-logs
+  effects_logs:
+    name: omninode-prod-effects-logs
+  effects_data:
+    name: omninode-prod-effects-data
+  worker_logs:
+    name: omninode-prod-worker-logs
+  prod_worker_data:
+    name: omninode-prod-worker-data
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-prod-network
+    driver: bridge
+  omnimemory-network:
+    name: omnibase-infra-prod-omnimemory-network
+    driver: bridge
+    external: false
