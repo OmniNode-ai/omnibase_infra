@@ -38,6 +38,14 @@ class ModelSelectedDelegationRoute:
     route: RuntimeLocalIngressRoute
 
 
+def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
+    return (
+        route.contract_name == _DELEGATION_CONTRACT_NAME
+        and bool(route.command_topic)
+        and len(route.terminal_events) >= 2
+    )
+
+
 def _select_delegation_route(
     routes: Mapping[str, RuntimeLocalIngressRoute],
 ) -> ModelSelectedDelegationRoute:
@@ -51,7 +59,7 @@ def _select_delegation_route(
             f".{_DELEGATION_CONTRACT_NAME}.{_DELEGATION_OPERATION_ALIAS}"
         ):
             continue
-        if len(route.terminal_events) < 2:
+        if not _has_delegation_terminal_interface(route):
             continue
         candidates[route.contract_path] = (alias, route)
 
@@ -69,7 +77,11 @@ def _select_delegation_route(
         return ModelSelectedDelegationRoute(alias=alias, route=route)
 
     fallback_route = routes.get(_DELEGATION_OPERATION_ALIAS)
-    if not candidates and fallback_route is not None:
+    if (
+        not candidates
+        and fallback_route is not None
+        and _has_delegation_terminal_interface(fallback_route)
+    ):
         return ModelSelectedDelegationRoute(
             alias=_DELEGATION_OPERATION_ALIAS,
             route=fallback_route,

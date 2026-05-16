@@ -359,8 +359,10 @@ def render_bifrost_delegation_contract(
             backend.pop("base_url_env", None)
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    _validate_bifrost_delegation_config(target)
+    staged_target = target.with_suffix(f"{target.suffix}.tmp")
+    staged_target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    _validate_bifrost_delegation_config(staged_target)
+    staged_target.replace(target)
     return target
 
 

@@ -29,11 +29,17 @@ def _route(
     *,
     package_name: str,
     terminal_events: tuple[str, ...],
+    command_topic: str | None = None,
+    contract_name: str = "node_delegation_orchestrator",
 ) -> RuntimeLocalIngressRoute:
     return RuntimeLocalIngressRoute(
-        node_name="node_delegation_orchestrator",
-        contract_name="node_delegation_orchestrator",
-        command_topic=f"onex.cmd.{package_name}.delegation-request.v1",
+        node_name=contract_name,
+        contract_name=contract_name,
+        command_topic=(
+            command_topic
+            if command_topic is not None
+            else f"onex.cmd.{package_name}.delegation-request.v1"
+        ),
         event_type=f"{package_name}.delegation-request",
         terminal_event=terminal_events[0] if terminal_events else None,
         terminal_events=terminal_events,
@@ -89,6 +95,34 @@ def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> 
         selected.alias
         == "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
     )
+
+
+def test_select_delegation_route_rejects_invalid_public_fallback() -> None:
+    routes = {
+        "delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(),
+            command_topic="onex.cmd.omnimarket.delegation-request.v1",
+        ),
+    }
+
+    with pytest.raises(RuntimeError, match="delegation dispatch route"):
+        _select_delegation_route(routes)
+
+
+def test_select_delegation_route_accepts_valid_public_fallback() -> None:
+    route = _route(
+        package_name="omnimarket",
+        terminal_events=(
+            "onex.evt.omnimarket.delegation-completed.v1",
+            "onex.evt.omnimarket.delegation-failed.v1",
+        ),
+    )
+
+    selected = _select_delegation_route({"delegation.orchestrate": route})
+
+    assert selected.alias == "delegation.orchestrate"
+    assert selected.route is route
 
 
 @pytest.mark.asyncio
