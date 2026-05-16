@@ -1,0 +1,28 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11061"
+title: "Refresh runtime delegation compatibility"
+summary: >
+  Refresh the runtime omnibase_compat source pin so delegation wire DTOs are available in the runtime image, and keep the stability-test Bifrost verifier override aligned with live runtime lane behavior.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "Delegation dispatch, result routing, and intent topic integration tests pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_dispatch_result_applier_topic_routing.py tests/integration/runtime/test_delegation_intent_topic_routing_integration.py -q"
+  - id: "dod-deploy"
+    description: >
+      Runtime deploy validation completed on 192.168.86.201 for prod, stability-test, and regular lanes; delegation smoke tests completed with quality_passed=true using the local vLLM endpoint.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy evidence: prod/stability/regular runtime delegation smoke passed on 192.168.86.201; endpoint=http://192.168.86.201:8000; model=cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
