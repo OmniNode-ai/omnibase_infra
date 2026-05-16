@@ -1,0 +1,52 @@
+# OMN-11104 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract and release receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier for runtime-path changes.
+schema_version: "1.0.0"
+ticket_id: "OMN-11104"
+title: "Release omnibase_infra v0.36.0"
+summary: "Release v0.36.0 runtime compatibility, dependency-neutral tests, and deploy gate evidence"
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "runtime"
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused runtime dependency-neutral release tests pass"
+    command: "uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/integration/runtime/test_pattern_b_broker_omnimarket.py tests/integration/runtime/test_runtime_boot_clean.py tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/onboarding/test_onboarding_verification_semantics.py -q"
+  - kind: "ci"
+    description: "Central OCC release evidence merged in onex_change_control PR #1058"
+    command: "gh pr view 1058 --repo OmniNode-ai/onex_change_control --json state,mergeCommit -q '.state'"
+  - kind: "manual"
+    description: "Post-merge deploy validation re-applies regular and stability runtimes"
+    command: "deploy omninode-runtime and omninode-runtime-stability after merge, then verify runtime health and Pattern B topic dispatch readiness"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Focused runtime dependency-neutral release tests pass locally"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/integration/runtime/test_pattern_b_broker_omnimarket.py tests/integration/runtime/test_runtime_boot_clean.py tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/onboarding/test_onboarding_verification_semantics.py -q"
+  - id: "dod-002"
+    description: "Raw topic literal and touched-file pre-commit gates pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python scripts/validation/check_topic_literals.py --baseline scripts/validation/topic_literal_baseline.txt && uv run pre-commit run --files src/omnibase_infra/runtime/service_delegation_dispatch_port.py src/omnibase_infra/runtime/render_bifrost_delegation_contract.py src/omnibase_infra/runtime/version_compatibility.py src/omnibase_infra/topics/platform_topic_suffixes.py src/omnibase_infra/topics/__init__.py tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/onboarding/test_onboarding_verification_semantics.py tests/integration/runtime/test_runtime_boot_clean.py tests/integration/runtime/test_pattern_b_broker_omnimarket.py"
+  - id: "dod-003"
+    description: "Central OCC release contract and receipts merged"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh pr view 1058 --repo OmniNode-ai/onex_change_control --json state,mergeCommit -q '.state'"
+  - id: "dod-deploy"
+    description: "Runtime deploy validation for v0.36.0 after the release PR merges using an inline Pattern B command envelope sample"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime and omninode-runtime-stability after merge; printf '%s\n' '{\"payload\":{\"command_name\":\"omnimarket.node_delegation_orchestrator.delegation.orchestrate\",\"requester\":\"deploy-validation\",\"payload\":{\"prompt\":\"OMN-11104 Pattern B deploy validation\",\"task_type\":\"test\",\"correlation_id\":\"00000000-0000-4000-8000-000000011104\",\"max_tokens\":16},\"correlation_id\":\"00000000-0000-4000-8000-000000011104\",\"response_topic\":\"onex.evt.omnimarket.pattern-b-dispatch-completed.v1\",\"timeout_seconds\":1.0},\"correlation_id\":\"00000000-0000-4000-8000-000000011104\",\"event_type\":\"onex.cmd.omnimarket.pattern-b-dispatch.v1\",\"source_tool\":\"deploy-validation\",\"target_tool\":\"pattern-b-broker\"}' | docker exec -i omninode-runtime rpk topic produce onex.cmd.omnimarket.pattern-b-dispatch.v1"

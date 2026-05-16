@@ -67,7 +67,7 @@ async def test_verification_named_infra_steps_resolve_through_handler() -> None:
         "python3 --version",
         "uv --version",
         "omnibase_core",
-        "localhost:5436",
-        "localhost:19092",
+        "${POSTGRES_HOST}:${POSTGRES_PORT}",
+        "${REDPANDA_HOST}:${REDPANDA_PORT}",
         "uv run python -c \"from omnibase_infra.event_bus import get_bus; print('ok')\"",
     ]

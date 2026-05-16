@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -170,6 +171,47 @@ def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
     assert rendered == target
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert loaded["backends"][0]["endpoint_url"] == _http_url("pre-rendered.local:8000")
+
+
+@pytest.mark.parametrize(
+    ("mutator", "match"),
+    [
+        (
+            lambda data: data.__setitem__("default_backends", [["not", "hashable"]]),
+            "default_backends entries",
+        ),
+        (
+            lambda data: data["routing_rules"][0].__setitem__("rule_id", ["bad"]),
+            "routing rule_id",
+        ),
+        (
+            lambda data: data["routing_rules"][0].__setitem__(
+                "backend_ids",
+                [["not", "hashable"]],
+            ),
+            "backend_ids entries",
+        ),
+    ],
+)
+@pytest.mark.unit
+def test_existing_populated_target_rejects_malformed_backend_ids(
+    tmp_path: Path,
+    mutator: Callable[[dict[str, object]], None],
+    match: str,
+) -> None:
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+    target = _source_contract(tmp_path / "target.yaml")
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    data["backends"][0]["endpoint_url"] = _http_url("pre-rendered.local:8000")
+    mutator(data)
+    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ProtocolConfigurationError, match=match):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={},
+        )
 
 
 @pytest.mark.unit

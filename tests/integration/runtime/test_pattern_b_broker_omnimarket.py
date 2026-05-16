@@ -9,10 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep import (
-    AislopSweepRequest,
-    NodeAislopSweep,
-)
 
 from omnibase_core.dispatch.dispatch_bus_client import DispatchBusClient
 from omnibase_core.models.dispatch.model_dispatch_bus_route import (
@@ -26,6 +22,14 @@ from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRout
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = pytest.mark.integration
+pytest.importorskip(
+    "omnimarket",
+    reason="omnimarket is no longer an omnibase_infra runtime dependency",
+)
+from omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep import (
+    AislopSweepRequest,
+    NodeAislopSweep,
+)
 
 
 def _route() -> RuntimeLocalIngressRoute:
