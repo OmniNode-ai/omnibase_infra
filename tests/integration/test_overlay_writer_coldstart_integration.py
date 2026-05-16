@@ -56,11 +56,7 @@ class TestOverlayWriterColdStartIntegration:
         target = tmp_path / "secure.yaml"
         OverlayWriter().write(overlay, target)
 
-        mode = target.stat().st_mode
-        assert not (mode & stat.S_IRGRP)
-        assert not (mode & stat.S_IWGRP)
-        assert not (mode & stat.S_IROTH)
-        assert not (mode & stat.S_IWOTH)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
     def test_cold_start_overlay_present_resolves(self, tmp_path: Path) -> None:
         overlay = ModelOverlayFile.model_validate(
