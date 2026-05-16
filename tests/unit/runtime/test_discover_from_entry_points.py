@@ -114,12 +114,15 @@ def _make_entry_point(
     name: str,
     value: str,
     group: str = "onex.domain_plugins",
+    dist_name: str = "omnibase_infra",
 ) -> MagicMock:
     """Create a mock entry-point object."""
     ep = MagicMock()
     ep.name = name
     ep.value = value
     ep.group = group
+    ep.dist = MagicMock()
+    ep.dist.name = dist_name
     return ep
 
 
@@ -252,6 +255,27 @@ class TestDiscoverFromEntryPoints:
         assert report.entries[0].status == "namespace_rejected"
         assert "malicious_pkg.evil" in report.entries[0].reason
         # load() should NOT have been called (pre-import security)
+        ep.load.assert_not_called()
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_inactive_runtime_package_is_skipped(
+        self, mock_ep: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Inactive runtime packages are skipped before import/instantiation."""
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        ep = _make_entry_point(
+            "legacy-claude",
+            "omniclaude.plugins.plugin_claude:PluginClaude",
+            dist_name="omniclaude",
+        )
+        mock_ep.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert report.discovered_count == 1
+        assert report.accepted == ()
+        assert report.entries == ()
         ep.load.assert_not_called()
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")

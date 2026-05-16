@@ -58,6 +58,42 @@ class TopicCarryingEvent(BaseModel):
     value: str = "x"
 
 
+class ModelRoutingIntent(BaseModel):
+    """Stub delegation routing intent from omnimarket."""
+
+    intent: str = "routing_reducer"
+
+
+class ModelInferenceIntent(BaseModel):
+    """Stub delegation inference intent from omnimarket."""
+
+    intent: str = "llm_inference"
+
+
+class ModelInvocationCommand(BaseModel):
+    """Stub delegation remote-agent invocation command from omnibase_core."""
+
+    intent: str = "remote_agent_invoke"
+
+
+class ModelQualityGateIntent(BaseModel):
+    """Stub delegation quality-gate intent from omnimarket."""
+
+    intent: str = "quality_gate"
+
+
+class ModelBaselineIntent(BaseModel):
+    """Stub delegation baseline intent from omnimarket."""
+
+    intent: str = "baseline_comparison"
+
+
+class ModelDelegationResult(BaseModel):
+    """Stub terminal delegation result payload."""
+
+    content: str = "done"
+
+
 def _make_result(**overrides: object) -> ModelDispatchResult:
     defaults: dict[str, object] = {
         "status": EnumDispatchStatus.SUCCESS,
@@ -305,6 +341,59 @@ class TestPublishPathTopicRouting:
         assert mock_bus.publish_envelope.call_count == 2
         topics = [c.kwargs["topic"] for c in mock_bus.publish_envelope.call_args_list]
         assert topics == ["active-topic", "accepted-topic"]
+
+
+class TestDelegationIntentTopicRouting:
+    """Regression coverage for OMN-11095 delegation terminal contamination."""
+
+    @pytest.mark.asyncio
+    async def test_delegation_intermediate_intents_do_not_fall_back_to_completed_topic(
+        self,
+    ) -> None:
+        mock_bus = AsyncMock()
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        result = _make_result(
+            output_events=[
+                ModelRoutingIntent(),
+                ModelInvocationCommand(),
+                ModelInferenceIntent(),
+                ModelQualityGateIntent(),
+                ModelBaselineIntent(),
+            ],
+        )
+
+        await applier.apply(result)
+
+        topics = [c.kwargs["topic"] for c in mock_bus.publish_envelope.call_args_list]
+        assert topics == [
+            "onex.cmd.omnibase-infra.delegation-routing-request.v1",
+            "onex.cmd.omnibase-infra.remote-agent-invoke.v1",
+            "onex.cmd.omnibase-infra.delegation-inference-request.v1",
+            "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1",
+            "onex.cmd.omnibase-infra.baseline-comparison-request.v1",
+        ]
+        assert completed_topic not in topics
+
+    @pytest.mark.asyncio
+    async def test_delegation_terminal_topic_keeps_terminal_payload_only(self) -> None:
+        mock_bus = AsyncMock()
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        result = _make_result(output_events=[ModelDelegationResult()])
+
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == completed_topic
+        assert isinstance(call_kwargs["envelope"].payload, ModelDelegationResult)
 
 
 # ---------------------------------------------------------------------------

@@ -475,6 +475,8 @@ _DB_URL_ENV_MAP: dict[str, str] = {
     "omnibase_infra": "OMNIBASE_INFRA_DB_URL",
 }
 
+_OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
+
 _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
     "node-heartbeat": "heartbeat",
     "node-introspection": "introspection",
@@ -702,8 +704,14 @@ def _make_projection_dispatch_callback(
     ) -> ModelDispatchResult | None:
         db_url = os.environ.get(db_url_env, "")
         if not db_url:
-            logger.error(
-                "Projection handler skipped: %s not set (database=%s)",
+            log_level = (
+                logging.INFO
+                if database in _OPTIONAL_PROJECTION_DATABASES
+                else logging.ERROR
+            )
+            logger.log(
+                log_level,
+                "Projection handler inactive: %s not set (database=%s)",
                 db_url_env,
                 database,
             )
@@ -1833,39 +1841,24 @@ async def _subscribe_contract_topics(
         "ProtocolEventBusSubscriber", event_bus
     )
     effective_result_applier = result_applier
+    output_topic = _select_dispatch_result_output_topic(contract)
     if (
         effective_result_applier is None
         and contract.event_bus is not None
-        and contract.event_bus.publish_topics
+        and output_topic is not None
         and not _contract_declares_db_io(contract)
     ):
-        output_topic: str | None = None
-        if len(contract.event_bus.publish_topics) == 1:
-            output_topic = contract.event_bus.publish_topics[0]
-        elif contract.terminal_event in contract.event_bus.publish_topics:
-            output_topic = contract.terminal_event
-        else:
-            logger.warning(
-                "Auto-wired contract declares multiple publish topics but no "
-                "terminal_event default for handler output application: "
-                "contract=%s publish_topics=%s terminal_event=%s",
-                contract.name,
-                contract.event_bus.publish_topics,
-                contract.terminal_event,
-            )
-
-        if output_topic is not None:
-            # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
-            # the type for mypy and provides a runtime use of the import (avoiding
-            # CodeQL py/unused-import false positive when cast() is the only ref).
-            assert isinstance(event_bus, ProtocolEventBusLike), (
-                f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
-            )
-            effective_result_applier = DispatchResultApplier(
-                event_bus=event_bus,
-                output_topic=output_topic,
-                allowed_output_topics=contract.event_bus.publish_topics,
-            )
+        # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
+        # the type for mypy and provides a runtime use of the import (avoiding
+        # CodeQL py/unused-import false positive when cast() is the only ref).
+        assert isinstance(event_bus, ProtocolEventBusLike), (
+            f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
+        )
+        effective_result_applier = DispatchResultApplier(
+            event_bus=event_bus,
+            output_topic=output_topic,
+            allowed_output_topics=contract.event_bus.publish_topics,
+        )
     node_identity = ModelNodeIdentity(
         env=environment,
         service=contract.package_name,
@@ -1909,6 +1902,24 @@ async def _subscribe_contract_topics(
         )
 
     return topics_subscribed
+
+
+def _select_dispatch_result_output_topic(
+    contract: ModelDiscoveredContract,
+) -> str | None:
+    """Choose the fallback output topic for generic dispatch results.
+
+    Prefer the contract's declared terminal_event when it is also publishable.
+    Otherwise fall back to the first publish topic to preserve older contracts.
+    """
+    if contract.event_bus is None or not contract.event_bus.publish_topics:
+        return None
+    if (
+        contract.terminal_event
+        and contract.terminal_event in contract.event_bus.publish_topics
+    ):
+        return contract.terminal_event
+    return contract.event_bus.publish_topics[0]
 
 
 async def _wire_single_contract(

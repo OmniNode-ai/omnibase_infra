@@ -23,10 +23,10 @@ hardcoded_env:
   BUS_ID: local
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
+  ONEX_ACTIVE_RUNTIME_PACKAGES: omnibase_infra,omnimarket
   VALKEY_HOST: valkey
   VALKEY_PORT: '6379'
-  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
-  OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
   USE_EVENT_ROUTING: 'true'
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-runtime-effects
@@ -56,8 +56,6 @@ volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
   - ../contracts:/app/contracts:ro
-extra_networks:
-  - omnimemory-network
 depends_on:
   - service: omninode-runtime
     condition: service_healthy

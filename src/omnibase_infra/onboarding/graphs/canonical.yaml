@@ -96,7 +96,7 @@ steps:
     estimated_duration_seconds: 120
     verification:
       check_type: "tcp_probe"
-      target: "localhost:5436"
+      target: "${POSTGRES_HOST}:${POSTGRES_PORT}"
       timeout_seconds: 30
       description: "PostgreSQL is accepting connections on external port"
   - step_key: "check_event_bus"
@@ -110,7 +110,7 @@ steps:
     estimated_duration_seconds: 30
     verification:
       check_type: "tcp_probe"
-      target: "localhost:19092"
+      target: "${REDPANDA_HOST}:${REDPANDA_PORT}"
       timeout_seconds: 15
       description: "Redpanda is accepting connections on external port"
   - step_key: "check_node_bus_connection"
@@ -152,7 +152,7 @@ steps:
     estimated_duration_seconds: 60
     verification:
       check_type: "http_health"
-      target: "http://localhost:3000"
+      target: "http://${OMNIDASH_HOST}:${OMNIDASH_PORT}"
       timeout_seconds: 30
       description: "Omnidash is serving on port 3000"
   - step_key: "install_omnimarket"

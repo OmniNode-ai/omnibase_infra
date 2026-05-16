@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -18,6 +20,22 @@ from pathlib import Path
 from omnibase_infra.probes.capability_probe import http_health_check, socket_check
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
 from omnibase_infra.probes.protocol_verification_spec import VerificationSpec
+
+_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _interpolate_env(target: str) -> str:
+    """Expand ${VAR} references in target from environment.
+
+    Raises:
+        KeyError: If a referenced variable is not set in the environment.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        var = match.group(1)
+        return os.environ[var]
+
+    return _ENV_VAR_RE.sub(_replace, target)
 
 
 async def _check_command_exit_0(target: str, timeout: int) -> tuple[bool, str]:
@@ -113,8 +131,10 @@ async def execute_verification(spec: VerificationSpec) -> ModelVerificationResul
         msg = f"Unknown check_type: {spec.check_type}"
         raise ValueError(msg)
 
+    target = _interpolate_env(spec.target)
+
     start = time.monotonic()
-    passed, message = await handler(spec.target, spec.timeout_seconds)
+    passed, message = await handler(target, spec.timeout_seconds)
     elapsed_ms = int((time.monotonic() - start) * 1000)
 
     return ModelVerificationResult(
@@ -126,4 +146,4 @@ async def execute_verification(spec: VerificationSpec) -> ModelVerificationResul
     )
 
 
-__all__ = ["execute_verification"]
+__all__ = ["_interpolate_env", "execute_verification"]

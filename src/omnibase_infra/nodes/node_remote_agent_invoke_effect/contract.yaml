@@ -21,6 +21,8 @@ node_type: "EFFECT_GENERIC"
 description: >
   Remote-agent invocation effect node for the A2A delegation bridge. Consumes invocation commands emitted by the delegation orchestrator, delegates task submission and watch operations to protocol-specific handlers, persists remote task state, and emits lifecycle events back to the orchestration pipeline. Runtime auto-wiring may construct the A2A handler without injected repository, lifecycle sink, or target registry dependencies; that mode fails closed before network submission when no target is registered.
 
+runtime_profiles:
+  - workers
 input_model:
   name: "ModelInvocationCommand"
   module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"

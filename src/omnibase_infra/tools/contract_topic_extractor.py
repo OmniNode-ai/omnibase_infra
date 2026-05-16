@@ -29,6 +29,11 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel
 
+from omnibase_infra.utils.util_runtime_packages import (
+    get_active_runtime_packages,
+    is_runtime_package_active,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -680,6 +685,12 @@ class ContractTopicExtractor:
         """
         accumulated: dict[str, ModelContractTopicEntry] = {}
         seen_package_roots: dict[str, Path] = {}
+        active_packages = get_active_runtime_packages()
+        approved_packages = tuple(
+            pkg
+            for pkg in approved_packages
+            if is_runtime_package_active(pkg, active_packages)
+        )
 
         for pkg_name in approved_packages:
             contract_paths = self._discover_package_contracts(pkg_name)

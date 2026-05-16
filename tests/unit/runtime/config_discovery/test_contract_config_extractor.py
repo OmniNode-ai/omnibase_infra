@@ -308,6 +308,7 @@ class TestTransportAliasesNewEntries:
         [
             ("architecture_validation", EnumInfraTransportType.RUNTIME),
             ("auth_gate", EnumInfraTransportType.RUNTIME),
+            ("build_loop_projection", EnumInfraTransportType.RUNTIME),
             ("ledger_projection", EnumInfraTransportType.RUNTIME),
             ("validation_ledger_projection", EnumInfraTransportType.RUNTIME),
             ("rrh_validate", EnumInfraTransportType.RUNTIME),

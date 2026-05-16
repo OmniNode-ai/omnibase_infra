@@ -648,7 +648,8 @@ services:
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
-      - ${ONEX_LOCAL_RUNTIME_SOCKET_DIR:-/data/omninode/runtime-local-ingress}:/run/onex-runtime
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

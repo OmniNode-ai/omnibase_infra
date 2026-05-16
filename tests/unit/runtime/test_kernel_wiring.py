@@ -77,6 +77,20 @@ class TestKernelDispatchEngineWiring:
 class TestKernelSubscriptionConfiguration:
     """Test that kernel subscriptions use correct required_for_readiness flags."""
 
+    def test_contract_registry_subscription_wiring_disabled_for_effects(self) -> None:
+        from omnibase_infra.runtime.service_kernel import (
+            _contract_registry_subscription_wiring_disabled,
+        )
+
+        assert _contract_registry_subscription_wiring_disabled("effects") is True
+
+    def test_contract_registry_subscription_wiring_enabled_for_main(self) -> None:
+        from omnibase_infra.runtime.service_kernel import (
+            _contract_registry_subscription_wiring_disabled,
+        )
+
+        assert _contract_registry_subscription_wiring_disabled("main") is False
+
     @pytest.mark.asyncio
     async def test_all_kernel_subscriptions_are_readiness_required(self) -> None:
         """Verify the kernel marks all its subscriptions as required_for_readiness.

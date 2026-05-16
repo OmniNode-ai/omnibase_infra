@@ -46,7 +46,7 @@ class ModelLlmEmbeddingRequest(BaseModel):
 
     Example:
         >>> req = ModelLlmEmbeddingRequest(
-        ...     base_url="http://192.168.86.201:8002",
+        ...     base_url="http://192.168.86.201:8100",
         ...     model="gte-qwen2-1.5b",
         ...     texts=("Hello, world!",),
         ... )

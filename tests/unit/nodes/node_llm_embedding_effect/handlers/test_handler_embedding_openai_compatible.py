@@ -49,7 +49,7 @@ pytestmark = [pytest.mark.unit]
 def _make_request(**overrides: object) -> ModelLlmEmbeddingRequest:
     """Create a valid embedding request with optional overrides."""
     defaults: dict[str, object] = {
-        "base_url": "http://192.168.86.201:8002",
+        "base_url": "http://192.168.86.201:8100",
         "model": "gte-qwen2-1.5b",
         "texts": ("Hello, world!",),
         "max_retries": 0,
@@ -248,7 +248,7 @@ class TestUrlAndPayloadConstruction:
         """URL is {base_url}/v1/embeddings."""
         handler = HandlerEmbeddingOpenaiCompatible()
         mock_data = _openai_response([[0.1, 0.2]])
-        request = _make_request(base_url="http://192.168.86.201:8002")
+        request = _make_request(base_url="http://192.168.86.201:8100")
 
         with patch.object(
             handler, "_execute_llm_http_call", new_callable=AsyncMock
@@ -257,14 +257,14 @@ class TestUrlAndPayloadConstruction:
             await handler.execute(request)
 
         call_kwargs = mock_call.call_args
-        assert call_kwargs.kwargs["url"] == "http://192.168.86.201:8002/v1/embeddings"
+        assert call_kwargs.kwargs["url"] == "http://192.168.86.201:8100/v1/embeddings"
 
     @pytest.mark.anyio
     async def test_url_strips_trailing_slash(self) -> None:
         """Trailing slash in base_url is stripped before appending path."""
         handler = HandlerEmbeddingOpenaiCompatible()
         mock_data = _openai_response([[0.1, 0.2]])
-        request = _make_request(base_url="http://192.168.86.201:8002/")
+        request = _make_request(base_url="http://192.168.86.201:8100/")
 
         with patch.object(
             handler, "_execute_llm_http_call", new_callable=AsyncMock
@@ -273,7 +273,7 @@ class TestUrlAndPayloadConstruction:
             await handler.execute(request)
 
         call_kwargs = mock_call.call_args
-        assert call_kwargs.kwargs["url"] == "http://192.168.86.201:8002/v1/embeddings"
+        assert call_kwargs.kwargs["url"] == "http://192.168.86.201:8100/v1/embeddings"
 
     @pytest.mark.anyio
     async def test_payload_without_dimensions(self) -> None:

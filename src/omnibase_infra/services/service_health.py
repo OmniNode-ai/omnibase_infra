@@ -60,6 +60,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
+from inspect import isawaitable
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
@@ -419,6 +420,41 @@ class ServiceHealth:
             "ServiceHealth attached runtime after early startup",
             extra={"port": self._port, "host": self._host},
         )
+
+    async def _try_attach_runtime_from_container(self) -> bool:
+        """Resolve and attach runtime from the container when available."""
+        if self._runtime is not None or self._container is None:
+            return self._runtime is not None
+
+        service_registry = getattr(self._container, "service_registry", None)
+        if service_registry is None:
+            return False
+
+        try_resolve = getattr(service_registry, "try_resolve_service", None)
+        if not callable(try_resolve):
+            return False
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            RuntimeHostProcess,
+        )
+
+        try:
+            resolution = try_resolve(RuntimeHostProcess)
+            if not isawaitable(resolution):
+                return False
+            runtime = await resolution
+        except Exception:  # noqa: BLE001 — degraded startup: best-effort recovery
+            logger.debug(
+                "ServiceHealth could not resolve RuntimeHostProcess from container yet",
+                exc_info=True,
+            )
+            return False
+
+        if runtime is None:
+            return False
+
+        self.attach_runtime(runtime)
+        return True
 
     def _log_health_transition(
         self,
@@ -904,6 +940,7 @@ class ServiceHealth:
         _ = request
 
         try:
+            await self._try_attach_runtime_from_container()
             if self._runtime is None:
                 self._log_health_transition(
                     status="degraded",
@@ -1081,6 +1118,7 @@ class ServiceHealth:
             correlation_id = generate_correlation_id()
 
         try:
+            await self._try_attach_runtime_from_container()
             readiness_details = await self.runtime.readiness_check(
                 correlation_id=correlation_id,
             )

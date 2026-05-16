@@ -160,6 +160,7 @@ from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
 )
+from omnibase_infra.utils.util_runtime_packages import get_active_runtime_packages
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -562,6 +563,33 @@ class PluginLoaderContractSource(ProtocolContractSource):
 # =========================================================================
 # Package-Node Subscription Wiring (OMN-7410)
 # =========================================================================
+
+
+def _package_node_subscription_wiring_disabled() -> bool:
+    """Return True when legacy package-node subscription wiring should stay off.
+
+    Marketplace/auto-wiring is the sole supported runtime entry point once an
+    active runtime package allowlist is configured. The older package-tree scan
+    path otherwise reintroduces contracts outside the filtered marketplace
+    surface and can cause secondary runtimes to subscribe to work they do not
+    own.
+    """
+    if os.environ.get("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "").lower() == "true":
+        return True
+    return get_active_runtime_packages() is not None
+
+
+def _baseline_subscription_wiring_disabled(runtime_profile: str | None = None) -> bool:
+    """Return True when baseline contract-registry consumers should stay off.
+
+    The contract registration baseline topics are a control-plane concern owned
+    by the primary runtime. Secondary profiles such as ``effects`` and
+    ``workers`` should not join those shared consumer groups, otherwise they can
+    fail readiness on unassigned partitions they do not need to serve.
+    """
+    if runtime_profile is None:
+        runtime_profile = os.environ.get("RUNTIME_PROFILE", "main")
+    return runtime_profile.strip().lower() != "main"
 
 
 def _discover_package_node_contracts(package_root: Path) -> list[dict[str, object]]:
@@ -1715,14 +1743,26 @@ class RuntimeHostProcess:
             if self._shutdown_requested.is_set():
                 logger.info("RuntimeHostProcess startup cancelled by shutdown")
                 return
+            await self._cleanup_after_startup_failure()
             raise
         except Exception:
             self._is_running = False
+            await self._cleanup_after_startup_failure()
             raise
         finally:
             if self._startup_task is startup_task:
                 self._startup_task = None
             self._is_starting = False
+
+    async def _cleanup_after_startup_failure(self) -> None:
+        """Release partially-started resources after start() fails."""
+        try:
+            await self.stop()
+        except Exception as cleanup_error:  # noqa: BLE001 - preserve startup failure
+            logger.warning(
+                "RuntimeHostProcess cleanup after startup failure failed: %s",
+                sanitize_error_message(cleanup_error),
+            )
 
     async def _start_runtime(self) -> None:
         """Start the runtime host.
@@ -5694,11 +5734,11 @@ class RuntimeHostProcess:
 
         .. versionadded:: OMN-7410
         """
-        if (
-            os.environ.get("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "").lower()
-            == "true"
-        ):
-            logger.info("Package-node subscription wiring disabled by env flag")
+        if _package_node_subscription_wiring_disabled():
+            logger.info(
+                "Package-node subscription wiring disabled; marketplace auto-wiring "
+                "is the sole runtime entry point"
+            )
             return
 
         if not self._event_bus or not self._dispatch_engine:
@@ -5789,6 +5829,14 @@ class RuntimeHostProcess:
         .. versionadded:: 0.8.0
             Created for event-driven contract discovery.
         """
+        if _baseline_subscription_wiring_disabled():
+            logger.info(
+                "Baseline contract-registry subscription wiring skipped for "
+                "runtime profile '%s'",
+                os.environ.get("RUNTIME_PROFILE", "main"),
+            )
+            return
+
         # Guard: only wire if KafkaContractSource is active
         if self._kafka_contract_source is None:
             logger.debug(

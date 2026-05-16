@@ -56,6 +56,7 @@ import os
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
+from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 
 # =============================================================================
 # PLATFORM-RESERVED TOPIC SUFFIXES
@@ -1895,12 +1896,20 @@ def _omnimemory_enabled() -> bool:
 
 ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ALL_PLATFORM_TOPIC_SPECS
-    + ALL_INTELLIGENCE_TOPIC_SPECS
-    + (ALL_OMNIMEMORY_TOPIC_SPECS if _omnimemory_enabled() else ())
+    + (
+        ALL_INTELLIGENCE_TOPIC_SPECS
+        if is_runtime_package_active("omniintelligence")
+        else ()
+    )
+    + (
+        ALL_OMNIMEMORY_TOPIC_SPECS
+        if _omnimemory_enabled() and is_runtime_package_active("omnimemory")
+        else ()
+    )
     + ALL_OMNIBASE_INFRA_TOPIC_SPECS
     + ALL_VALIDATION_TOPIC_SPECS
     + ALL_OMNINODE_ROUTING_TOPIC_SPECS
-    + ALL_OMNICLAUDE_TOPIC_SPECS
+    + (ALL_OMNICLAUDE_TOPIC_SPECS if is_runtime_package_active("omniclaude") else ())
 )
 """All topic specs to be provisioned by TopicProvisioner at startup.
 

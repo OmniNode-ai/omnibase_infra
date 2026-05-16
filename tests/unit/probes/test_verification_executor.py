@@ -15,7 +15,10 @@ import pytest
 
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
 from omnibase_infra.probes.model_verification_spec import ModelVerificationSpec
-from omnibase_infra.probes.verification_executor import execute_verification
+from omnibase_infra.probes.verification_executor import (
+    _interpolate_env,
+    execute_verification,
+)
 
 
 class TestCommandExit0:
@@ -210,3 +213,53 @@ class TestUnknownCheckType:
         )
         with pytest.raises(ValueError, match="Unknown check_type"):
             await execute_verification(spec)
+
+
+class TestInterpolateEnv:
+    """Tests for _interpolate_env (OMN-11064)."""
+
+    def test_no_vars_unchanged(self) -> None:
+        assert _interpolate_env("localhost:5432") == "localhost:5432"
+
+    def test_single_var_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("POSTGRES_HOST", "192.168.86.201")
+        assert _interpolate_env("${POSTGRES_HOST}") == "192.168.86.201"
+
+    def test_two_vars_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("POSTGRES_HOST", "192.168.86.201")
+        monkeypatch.setenv("POSTGRES_PORT", "5436")
+        assert (
+            _interpolate_env("${POSTGRES_HOST}:${POSTGRES_PORT}")
+            == "192.168.86.201:5436"
+        )
+
+    def test_var_in_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OMNIDASH_HOST", "192.168.86.201")
+        monkeypatch.setenv("OMNIDASH_PORT", "3000")
+        assert (
+            _interpolate_env("http://${OMNIDASH_HOST}:${OMNIDASH_PORT}")
+            == "http://192.168.86.201:3000"
+        )
+
+    def test_missing_var_raises_key_error(self) -> None:
+        with pytest.raises(KeyError):
+            _interpolate_env("${NONEXISTENT_VAR_XYZ_12345}")
+
+    @pytest.mark.asyncio
+    async def test_execute_verification_interpolates_target(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """execute_verification expands ${VAR} in target before probing."""
+        monkeypatch.setenv("POSTGRES_HOST", "192.168.86.201")
+        monkeypatch.setenv("POSTGRES_PORT", "5436")
+        spec = ModelVerificationSpec(
+            check_type="tcp_probe",
+            target="${POSTGRES_HOST}:${POSTGRES_PORT}",
+        )
+        with patch(
+            "omnibase_infra.probes.verification_executor.socket_check",
+            return_value=True,
+        ) as mock_socket:
+            result = await execute_verification(spec)
+        assert result.passed is True
+        mock_socket.assert_called_once_with("192.168.86.201", 5436, timeout=10.0)

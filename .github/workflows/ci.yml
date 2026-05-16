@@ -19,6 +19,12 @@ env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
+  # uv resolves several pinned git dependencies during CI.  The self-hosted
+  # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
+  # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: "http.version"
+  GIT_CONFIG_VALUE_0: "HTTP/1.1"
   # Large transitive wheels such as torch and CUDA packages can exceed uv's
   # default timeout on self-hosted runners during sibling-boundary jobs.
   UV_HTTP_TIMEOUT: "600"

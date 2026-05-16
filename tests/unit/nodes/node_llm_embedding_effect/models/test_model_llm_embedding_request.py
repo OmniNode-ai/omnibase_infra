@@ -40,7 +40,7 @@ pytestmark = [pytest.mark.unit]
 def _valid_kwargs() -> dict[str, object]:
     """Return minimal valid kwargs for constructing a request."""
     return {
-        "base_url": "http://192.168.86.201:8002",
+        "base_url": "http://192.168.86.201:8100",
         "model": "gte-qwen2-1.5b",
         "texts": ("Hello, world!",),
     }
@@ -57,7 +57,7 @@ class TestModelLlmEmbeddingRequestConstruction:
     def test_minimal_valid_construction(self) -> None:
         """Minimal kwargs produce a valid request with defaults."""
         req = ModelLlmEmbeddingRequest(**_valid_kwargs())
-        assert req.base_url == "http://192.168.86.201:8002"
+        assert req.base_url == "http://192.168.86.201:8100"
         assert req.model == "gte-qwen2-1.5b"
         assert req.texts == ("Hello, world!",)
         assert req.dimensions is None

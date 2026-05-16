@@ -52,8 +52,17 @@ from pydantic import BaseModel
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus, EnumInfraTransportType
+from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+    EnumOmnibaseInfraTopic,
+)
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_DELEGATION_BASELINE_COMPARISON,
+    TOPIC_DELEGATION_INFERENCE_REQUEST,
+    TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
+    TOPIC_DELEGATION_ROUTING_REQUEST,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -71,6 +80,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 logger = logging.getLogger(__name__)
+
+_DELEGATION_INTENT_TOPIC_BY_CLASS: dict[str, str] = {
+    "ModelBaselineIntent": TOPIC_DELEGATION_BASELINE_COMPARISON,
+    "ModelInferenceIntent": TOPIC_DELEGATION_INFERENCE_REQUEST,
+    "ModelInvocationCommand": EnumOmnibaseInfraTopic.CMD_REMOTE_AGENT_INVOKE_V1.value,
+    "ModelQualityGateIntent": TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
+    "ModelRoutingIntent": TOPIC_DELEGATION_ROUTING_REQUEST,
+}
 
 
 class DispatchResultApplier:
@@ -256,19 +273,24 @@ class DispatchResultApplier:
 
     def _resolve_mapped_output_topic(self, event: BaseModel) -> str:
         """Resolve output topic from configured class maps or fallback topic."""
-        if not self._output_topic_map:
-            return self._output_topic
         class_name = type(event).__name__
+        delegation_intent_topic = _DELEGATION_INTENT_TOPIC_BY_CLASS.get(class_name)
+        if not self._output_topic_map:
+            return delegation_intent_topic or self._output_topic
         short_name = class_name.removeprefix("Model")
         return self._output_topic_map.get(
             short_name,
-            self._output_topic_map.get(class_name, self._output_topic),
+            self._output_topic_map.get(
+                class_name,
+                delegation_intent_topic or self._output_topic,
+            ),
         )
 
     def _allowed_output_topics(self) -> set[str]:
         """Return contract-derived topics the applier may publish to."""
         return {
             self._output_topic,
+            *_DELEGATION_INTENT_TOPIC_BY_CLASS.values(),
             *self._output_topic_map.values(),
             *self._topic_router.values(),
             *self._allowed_output_topic_set,

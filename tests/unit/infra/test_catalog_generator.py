@@ -93,25 +93,25 @@ def test_generated_compose_includes_network_and_volumes() -> None:
 
 
 @pytest.mark.unit
-def test_runtime_effects_has_omnimemory_network() -> None:
-    """runtime-effects must join omnimemory-network so PluginMemory can reach Memgraph."""
+def test_runtime_effects_stays_on_default_network() -> None:
+    """runtime-effects should only join the default runtime bridge."""
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])
     compose = generate_compose(resolved)
     svc_networks = compose["services"]["runtime-effects"]["networks"]
-    assert "omnimemory-network" in svc_networks
-    assert "omnibase-infra-network" in svc_networks
+    assert svc_networks == ["omnibase-infra-network"]
 
 
 @pytest.mark.unit
-def test_extra_networks_declared_external_in_top_level() -> None:
-    """Extra networks must appear as external in the top-level networks block."""
+def test_runtime_bundle_has_no_external_networks() -> None:
+    """The reduced runtime bundle should not declare external helper networks."""
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])
     compose = generate_compose(resolved)
     top_networks = compose["networks"]
-    assert "omnimemory-network" in top_networks
-    assert top_networks["omnimemory-network"]["external"] is True
+    assert top_networks == {
+        "omnibase-infra-network": {"name": "omnibase-infra-network", "driver": "bridge"}
+    }
 
 
 @pytest.mark.unit
@@ -122,4 +122,6 @@ def test_extra_networks_absent_for_services_without_them() -> None:
     compose = generate_compose(resolved)
     pg_networks = compose["services"]["postgres"]["networks"]
     assert pg_networks == ["omnibase-infra-network"]
-    assert "omnimemory-network" not in compose["networks"]
+    assert compose["networks"] == {
+        "omnibase-infra-network": {"name": "omnibase-infra-network", "driver": "bridge"}
+    }

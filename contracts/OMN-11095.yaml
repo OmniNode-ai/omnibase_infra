@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11095
+title: "Prevent delegation intent terminal topic fallback"
+summary: "Route intermediate delegation intent payloads (routing, inference, quality-gate, baseline, remote-agent invocation) to their per-class command topics so the terminal delegation-completed topic only carries terminal ModelDelegationResult envelopes."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused unit + integration tests cover dispatch-result topic selection for routing, inference, quality-gate, baseline, and terminal delegation events."
+    command: "uv run pytest tests/unit/runtime/test_dispatch_result_applier_topic_routing.py tests/integration/runtime/test_delegation_intent_topic_routing_integration.py -q"
+  - kind: manual
+    description: "Deploy-gate proof: after merge and approved runtime restart, the .201 delegation smoke shows exactly one terminal ModelDelegationResult envelope on onex.evt.omnibase-infra.delegation-completed.v1 for the test correlation, with no intermediate intent payloads."
+    command: >-
+      deploy: set -euo pipefail; CORR_ID=$(python3 -c 'import uuid; print(uuid.uuid4())'); printf '{"command_name":"delegate_skill","requester":"deploy-gate","payload":{"skill_id":"smoke","prompt":"OMN-11095 verification"},"correlation_id":"%s","response_topic":"onex.evt.omnimarket.delegate-skill-completed.v1","timeout_seconds":30}\n' "$CORR_ID" | docker exec -i omnibase-infra-redpanda rpk topic produce onex.cmd.omnimarket.delegate-skill.v1; timeout 30s docker exec omnibase-infra-redpanda rpk topic consume onex.evt.omnibase-infra.delegation-completed.v1 --offset start 2>/dev/null | grep "$CORR_ID" | wc -l | awk '{exit ($1 == 1 ? 0 : 1)}'
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-focused-tests
+    description: "Focused unit + integration tests prove the dispatch result applier routes intermediate delegation intents to their per-class command topics and reserves the terminal completed topic for ModelDelegationResult payloads."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_dispatch_result_applier_topic_routing.py tests/integration/runtime/test_delegation_intent_topic_routing_integration.py -q"
+  - id: dod-deploy-proof
+    description: "Post-merge deploy proof: rpk topic consume on the infra terminal completed topic returns exactly one terminal envelope (the ModelDelegationResult) for a fresh smoke correlation, with zero intermediate intent payloads."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy: set -euo pipefail; CORR_ID=$(python3 -c 'import uuid; print(uuid.uuid4())'); printf '{"command_name":"delegate_skill","requester":"deploy-gate","payload":{"skill_id":"smoke","prompt":"OMN-11095 verification"},"correlation_id":"%s","response_topic":"onex.evt.omnimarket.delegate-skill-completed.v1","timeout_seconds":30}\n' "$CORR_ID" | docker exec -i omnibase-infra-redpanda rpk topic produce onex.cmd.omnimarket.delegate-skill.v1; timeout 30s docker exec omnibase-infra-redpanda rpk topic consume onex.evt.omnibase-infra.delegation-completed.v1 --offset start 2>/dev/null | grep "$CORR_ID" | wc -l | awk '{exit ($1 == 1 ? 0 : 1)}'

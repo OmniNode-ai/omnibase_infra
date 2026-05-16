@@ -1,0 +1,43 @@
+# OMN-9877 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-9877"
+title: "feat(OMN-9877): clean up runtime projection wiring"
+summary: >-
+  Cleans up runtime projection wiring: refactors auto-wiring handler dispatch result application to use _select_dispatch_result_output_topic helper, adds util_runtime_packages for runtime package activation checks, updates service_kernel to use is_runtime_package_active for skill-manifest root discovery, fixes embedding effect example URL (8002→8100), and improves service_runtime_health_monitor contract discovery.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Auto-wiring and health monitor unit tests pass"
+    command: >-
+      uv run pytest tests/unit/runtime/auto_wiring/ tests/unit/services/test_service_runtime_health_monitor.py -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1596"
+    command: "gh pr checks 1596 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-9877"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-9877.yaml"
+  - id: "dod-unit-tests"
+    description: "Auto-wiring output topic selection and health monitor unit tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/auto_wiring/ tests/unit/services/test_service_runtime_health_monitor.py tests/unit/infra/test_runtime_bundle_decomposition.py -q
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation: changes are internal refactors to auto-wiring logic, runtime package detection, and service health monitoring. No new Kafka topics, no schema changes, no API surface changes. Runtime restart picks up changes automatically on next deploy.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy-gate: runtime wiring cleanup — no new topics or schema changes; restart deploys changes"

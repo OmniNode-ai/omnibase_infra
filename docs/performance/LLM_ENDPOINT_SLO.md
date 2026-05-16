@@ -17,13 +17,13 @@ performance baselines (see [ADR-004](../decisions/adr-004-performance-baseline-t
 |---------------------|------|------|-------|--------|
 | `LLM_CODER_URL` | 192.168.86.201 | 8000 | Qwen3-Coder-30B-A3B-Instruct AWQ-4bit | Running |
 | `LLM_CODER_FAST_URL` | 192.168.86.201 | 8001 | Qwen3-14B-AWQ | Running |
-| `LLM_EMBEDDING_URL` | 192.168.86.200 | 8100 | Qwen3-Embedding-8B-4bit | Running |
+| `LLM_EMBEDDING_URL` | 192.168.86.201 | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | Running |
 | `LLM_DEEPSEEK_R1_URL` | 192.168.86.200 | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | Running |
 | `LLM_SMALL_URL` | 192.168.86.105 | TBD | Qwen2.5-Coder-7B-Instruct MLX-4bit | Port TBD |
 
 Hardware:
-- **192.168.86.201**: Linux GPU server — RTX 5090 (port 8000) + RTX 4090 (port 8001)
-- **192.168.86.200**: Mac Studio M2 Ultra — embeddings (port 8100) + reasoning (port 8101)
+- **192.168.86.201**: Linux GPU server — coder (ports 8000, 8001) + embeddings (port 8100)
+- **192.168.86.200**: Mac Studio M2 Ultra — reasoning (port 8101)
 - **192.168.86.105**: MacBook Air M4 — lightweight/portable (port TBD)
 
 ---
@@ -84,7 +84,7 @@ import os
 def select_llm_endpoint(task: str, token_count: int) -> str:
     """Select LLM endpoint based on task type and context size."""
     if task == "embedding":
-        return os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.200:8100")
+        return os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.201:8100")
     if task == "reasoning":
         return os.getenv("LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101")
     if task == "code" and token_count > 40_000:
@@ -100,7 +100,7 @@ def select_llm_endpoint(task: str, token_count: int) -> str:
 # Check all endpoints
 curl -s http://192.168.86.201:8000/health  # Coder (30B, 64K)
 curl -s http://192.168.86.201:8001/health  # Coder Fast (14B, 40K)
-curl -s http://192.168.86.200:8100/health  # Embeddings
+curl -s http://192.168.86.201:8100/health  # Embeddings
 curl -s http://192.168.86.200:8101/health  # DeepSeek-R1 reasoning
 
 # Expected: HTTP 200 with {"status": "ok"} or similar
