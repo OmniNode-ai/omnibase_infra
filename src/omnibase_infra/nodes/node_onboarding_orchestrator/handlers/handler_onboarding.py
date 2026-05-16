@@ -121,7 +121,9 @@ async def _handle_interactive(
         target_path = Path(input_model.env_output_path)
 
         # Generate and write overlay YAML as primary output
-        overlay = overlay_from_env_dict(result.env_dict, environment="dev")
+        overlay = overlay_from_env_dict(
+            result.env_dict, environment="dev", return_warnings=False
+        )
         overlay_path = (
             Path(input_model.overlay_output_path)
             if input_model.overlay_output_path is not None
