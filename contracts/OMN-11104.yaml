@@ -9,7 +9,6 @@ is_seam_ticket: false
 interface_change: true
 interfaces_touched:
   - "events"
-  - "runtime"
   - "public_api"
 evidence_requirements:
   - kind: "tests"
