@@ -2054,6 +2054,16 @@ pattern_exemptions:
       - docs/patterns/reducer_pattern.md
     ticket: OMN-1653
   - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_contract_registered'
+    violation_pattern: 'has 7 parameters'
+    reason: >
+      Extended reducer handler signature adding data_provenance (OMN-11201). The 7 parameters are: self, state (immutable input), event (typed domain event), Kafka position (topic/partition/offset) for idempotency, and data_provenance for projection tracking. This remains the canonical ONEX reducer handler pattern.
+
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+      - docs/patterns/reducer_pattern.md
+    ticket: OMN-11201
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_contract_deregistered'
     violation_pattern: 'has 6 parameters'
     reason: Same as _on_contract_registered - standard reducer handler signature.
