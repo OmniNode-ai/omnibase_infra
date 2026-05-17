@@ -74,7 +74,8 @@ def overlay_from_env_dict(
     scope: str | EnumOverlayScope = ...,
     allow_unclassified: bool = ...,
     return_warnings: Literal[False] = ...,
-) -> ModelOverlayFile: ...
+) -> ModelOverlayFile:
+    pass
 
 
 @overload
@@ -86,7 +87,8 @@ def overlay_from_env_dict(
     scope: str | EnumOverlayScope = ...,
     allow_unclassified: bool = ...,
     return_warnings: Literal[True],
-) -> tuple[ModelOverlayFile, list[str]]: ...
+) -> tuple[ModelOverlayFile, list[str]]:
+    pass
 
 
 def overlay_from_env_dict(
