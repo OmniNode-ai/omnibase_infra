@@ -165,12 +165,14 @@ class RuntimeDelegationDispatchPort:
         source_session_id: str | None,
         wait: bool,
         output_schema_key: str | None = None,
+        quality_contract_mode: str = "extend_task_class",
+        acceptance_criteria: tuple[str, ...] = (),
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
 
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
-        request_payload = {
+        request_payload: dict[str, object] = {
             "prompt": prompt,
             "task_type": task_type,
             "source_session_id": source_session_id,
@@ -179,6 +181,8 @@ class RuntimeDelegationDispatchPort:
             "max_tokens": max_tokens,
             "emitted_at": datetime.now(UTC).isoformat(),
             "output_schema_key": output_schema_key,
+            "quality_contract_mode": quality_contract_mode,
+            "acceptance_criteria": list(acceptance_criteria),
         }
 
         command = ModelDispatchBusCommand(
