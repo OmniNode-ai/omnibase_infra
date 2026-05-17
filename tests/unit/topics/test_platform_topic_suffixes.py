@@ -160,7 +160,7 @@ class TestPlatformTopicSuffixes:
         """Registration snapshots suffix should have correct format."""
         assert (
             SUFFIX_REGISTRATION_SNAPSHOTS
-            == "onex.snapshot.platform.registration-snapshots.v1"
+            == "onex.evt.platform.registration-snapshots.v1"
         )
 
     def test_node_registration_acked_suffix_format(self) -> None:
