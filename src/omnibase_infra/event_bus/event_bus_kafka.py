@@ -1647,6 +1647,7 @@ class EventBusKafka(
             topic,
             bootstrap_servers=self._bootstrap_servers,
             group_id=effective_group_id,
+            group_instance_id=self._config.group_instance_id,
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,
