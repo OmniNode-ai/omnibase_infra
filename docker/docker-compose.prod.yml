@@ -116,6 +116,7 @@ services:
       OMNIMEMORY_ENABLED: ""
       OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: prod
+      KAFKA_ENVIRONMENT: prod
       ONEX_STATE_ROOT: /app/data/.onex_state_prod
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-main
@@ -144,6 +145,7 @@ services:
       OMNIMEMORY_ENABLED: ""
       OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: prod
+      KAFKA_ENVIRONMENT: prod
       ONEX_STATE_ROOT: /app/data/.onex_state_prod
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-effects
@@ -172,6 +174,7 @@ services:
       OMNIMEMORY_ENABLED: ""
       OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: prod
+      KAFKA_ENVIRONMENT: prod
       ONEX_STATE_ROOT: /app/data/.onex_state_prod
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-worker

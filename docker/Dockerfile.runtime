@@ -384,6 +384,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libpq5 \
     # Curl for health checks
     curl \
+    # GitHub CLI for runtime-owned PR lifecycle inventory and merge gates
+    gh \
     # CA certificates for HTTPS connections
     ca-certificates \
     # Tini - minimal init system for proper signal handling as PID 1
