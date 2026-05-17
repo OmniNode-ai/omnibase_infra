@@ -125,10 +125,15 @@ def test_select_delegation_route_accepts_valid_public_fallback() -> None:
     assert selected.route is route
 
 
-@pytest.mark.asyncio
-async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contract(
+async def _dispatch_with_fake_broker(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    **dispatch_kwargs: object,
+) -> tuple[
+    RuntimeLocalIngressRoute,
+    list[dict[str, object]],
+    list[float],
+    list[dict[str, object]],
+]:
     route = _route(
         package_name="omnimarket",
         terminal_events=(
@@ -170,21 +175,63 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
         },
     )
 
+    dispatch_args = {
+        "prompt": "probe",
+        "task_type": "document",
+        "correlation_id": uuid4(),
+        "max_tokens": 512,
+        "source_file_path": None,
+        "source_session_id": None,
+        "wait": True,
+        "output_schema_key": None,
+    } | dispatch_kwargs
     await port.dispatch(
-        prompt="probe",
-        task_type="document",
-        correlation_id=uuid4(),
-        max_tokens=512,
-        source_file_path=None,
-        source_session_id=None,
-        wait=True,
-        output_schema_key=None,
+        **dispatch_args,  # type: ignore[arg-type]
+    )
+    return route, captured_payloads, captured_timeout_seconds, captured_broker_kwargs
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route, payloads, timeout_seconds, broker_kwargs = await _dispatch_with_fake_broker(
+        monkeypatch
     )
 
-    assert captured_timeout_seconds == [600.0]
-    assert captured_payloads[0]["prompt"] == "probe"
-    assert captured_payloads[0]["task_type"] == "document"
-    assert captured_broker_kwargs[0]["command_topic"] == route.command_topic
+    assert timeout_seconds == [600.0]
+    assert payloads[0]["prompt"] == "probe"
+    assert payloads[0]["task_type"] == "document"
+    assert broker_kwargs[0]["command_topic"] == route.command_topic
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_forwards_quality_contract_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The port must accept and forward quality_contract_mode and acceptance_criteria."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch,
+        quality_contract_mode="replace_task_class",
+        acceptance_criteria=("response_non_empty", "plain_text_only"),
+    )
+
+    assert payloads[0]["quality_contract_mode"] == "replace_task_class"
+    assert payloads[0]["acceptance_criteria"] == [
+        "response_non_empty",
+        "plain_text_only",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_defaults_quality_contract_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When kwargs omitted, payload carries wire-model defaults."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(monkeypatch)
+
+    assert payloads[0]["quality_contract_mode"] == "extend_task_class"
+    assert payloads[0]["acceptance_criteria"] == []
 
 
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
