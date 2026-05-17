@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
 from omnibase_core.models.overlay.model_overlay_resolution_manifest import (

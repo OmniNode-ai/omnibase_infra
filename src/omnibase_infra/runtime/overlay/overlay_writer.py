@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 import yaml
@@ -67,8 +68,6 @@ class OverlayWriter:
             tmp_path.chmod(0o600)
             tmp_path.replace(target_path)
         except Exception:
-            try:
+            with suppress(OSError):
                 tmp_path.unlink()
-            except OSError:
-                pass
             raise

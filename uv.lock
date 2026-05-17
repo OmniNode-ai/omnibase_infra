@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -2176,8 +2176,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "omnibase-core"
-version = "0.40.2"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main#c059c67906368ec01e8966256c0a12b67e2818b3" }
+version = "0.41.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=main#6406ab7ad8a3b0fa4b6f884b2442e4286f3b2c54" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
