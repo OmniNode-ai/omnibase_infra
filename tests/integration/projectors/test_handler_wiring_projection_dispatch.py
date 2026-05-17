@@ -69,6 +69,56 @@ def test_projection_dispatch_bridge_injects_db_and_event_type() -> None:
 
 
 @pytest.mark.integration
+def test_projection_dispatch_bridge_non_platform_topic_passes_raw_event_type() -> None:
+    """Non-platform projection handlers (e.g. HandlerProjectionDelegation) must not
+    raise when the topic segment doesn't map to a known platform event type.
+
+    Before the fix: _derive_projection_event_type raised ValueError for
+    onex.evt.omniclaude.task-delegated.v1, blocking delegation events from
+    ever reaching the DB.
+    After the fix: the raw segment is passed as _event_type; handlers with
+    extra="ignore" (like HandlerProjectionDelegation) discard it safely.
+    """
+    received: list[dict] = []
+
+    class FakeDelegationHandler:
+        def handle(self, input_data: dict) -> dict:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    handler = FakeDelegationHandler()
+    callback = _make_projection_dispatch_callback(
+        handler, db_tables, ("onex.evt.omniclaude.task-delegated.v1",)
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {
+        "correlation_id": "dc1e67e3-a267-4438-b16a-2514676f69b6",
+        "task_type": "code-review",
+        "delegated_to": "smoke-test-agent",
+    }
+    envelope.event_type = "omniclaude.task-delegated"
+
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://postgres:test@localhost:5436/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1, "Handler should have been called exactly once"
+    assert received[0]["_db"] is fake_adapter, "_db must be injected"
+    assert received[0]["_event_type"] == "task-delegated", (
+        "raw segment passthrough for non-platform topics"
+    )
+    assert received[0].get("task_type") == "code-review", "payload preserved"
+
+
+@pytest.mark.integration
 def test_projection_dispatch_bridge_no_call_when_db_url_missing() -> None:
     """Projection handler is NOT called when OMNIDASH_ANALYTICS_DB_URL is unset.
 

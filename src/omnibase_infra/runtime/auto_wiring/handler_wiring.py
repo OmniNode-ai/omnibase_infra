@@ -510,11 +510,10 @@ def _derive_projection_event_type(
         if segment in _TOPIC_TO_EVENT_TYPE:
             return _TOPIC_TO_EVENT_TYPE[segment]
 
-    raise ValueError(
-        "Unknown projection event type from "
-        f"topic={topic_candidate!r} event_type={envelope_event_type!r} — "
-        f"must resolve to one of {sorted(_TOPIC_TO_EVENT_TYPE)!r}"
-    )
+    # Handlers that don't use _event_type (e.g. HandlerProjectionDelegation) receive
+    # the raw segment as a passthrough. Only platform-registration projection handlers
+    # require the mapped form.
+    return segment_candidates[0] if segment_candidates else ""
 
 
 def _materialized_dispatch_trace_value(
