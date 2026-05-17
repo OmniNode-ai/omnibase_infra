@@ -131,7 +131,7 @@ def verify_topics() -> None:
 @verify.command("snapshots")
 @click.option(
     "--topic",
-    default="onex.snapshot.platform.registration-snapshots.v1",
+    default="onex.evt.platform.registration-snapshots.v1",
     help="Snapshot topic to verify.",
     show_default=True,
 )

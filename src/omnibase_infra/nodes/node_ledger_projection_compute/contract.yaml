@@ -51,7 +51,7 @@ event_bus:
     # Runtime coordination
     - "onex.intent.platform.runtime-tick.v1"
     # State snapshots
-    - "onex.snapshot.platform.registration-snapshots.v1"
+    - "onex.evt.platform.registration-snapshots.v1"
   # Audit consumer - read-only, non-processing consumption for ledger persistence
   consumer_purpose: "audit"
   # Start from earliest offset to capture all historical events

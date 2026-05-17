@@ -127,7 +127,7 @@ heartbeat collection, health checks, and scheduled workflows.
 """
 
 # Registration snapshots
-SUFFIX_REGISTRATION_SNAPSHOTS: str = "onex.snapshot.platform.registration-snapshots.v1"
+SUFFIX_REGISTRATION_SNAPSHOTS: str = "onex.evt.platform.registration-snapshots.v1"
 """Topic suffix for registration snapshot events.
 
 Published periodically with aggregated registration state. Used for
