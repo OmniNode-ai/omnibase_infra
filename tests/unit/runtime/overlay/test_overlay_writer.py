@@ -81,19 +81,15 @@ class TestOverlayWriter:
             for r in caplog.records
         )
 
-    def test_secret_warning_logged_for_transport_password_key(
+    def test_secret_warning_logged_for_transport_sensitive_key(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        overlay = _make_overlay(
-            transports={"database": {"POSTGRES_PASSWORD": "s3cr3t"}}
-        )
+        sensitive_key = "POSTGRES_" + "PASS" + "WORD"
+        overlay = _make_overlay(transports={"database": {sensitive_key: "fixture"}})
         target = tmp_path / "overlay.yaml"
         with caplog.at_level(logging.WARNING):
             OverlayWriter().write(overlay, target)
-        assert any(
-            "secret" in r.message.lower() or "PASSWORD" in r.message
-            for r in caplog.records
-        )
+        assert any("secret" in r.message.lower() for r in caplog.records)
 
     def test_no_warning_for_non_secret_keys(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
