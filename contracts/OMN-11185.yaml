@@ -1,0 +1,29 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11185"
+title: "Remove ONEX_ACTIVE_RUNTIME_PACKAGES gate from projection consumer discovery"
+summary: >
+  Fix _contract_targets_active_runtime_packages to only check publish_topics against the ONEX_ACTIVE_RUNTIME_PACKAGES allowlist. Previously both subscribe_topics and publish_topics were checked, which incorrectly blocked projection consumers (like node_projection_delegation) that subscribe to onex.evt.omniclaude.* topics but do not publish into that domain. Subscribing is read-only; only publishing into a domain requires the producer package to be active.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched:
+  - "discovery"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "All unit and integration tests pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py tests/integration/test_projection_consumer_discovery_gate.py -v"
+  - id: "dod-deploy"
+    description: >
+      Runtime deploy: after merging, rebuild omninode-runtime image on 192.168.86.201. node_projection_delegation consumer activates and joins the delegation consumer group without requiring omniclaude in ONEX_ACTIVE_RUNTIME_PACKAGES.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: rpk group describe local.omnimarket.projection_delegation.consume.1.0.0 && docker exec omninode-runtime python -c 'from omnibase_infra.runtime.auto_wiring.discovery import _contract_targets_active_runtime_packages; print(\"gate fixed\")'"
