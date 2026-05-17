@@ -3,6 +3,10 @@
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 class TestOverlayOnboardingIntegration:
     def test_overlay_from_env_dict_produces_loadable_overlay(

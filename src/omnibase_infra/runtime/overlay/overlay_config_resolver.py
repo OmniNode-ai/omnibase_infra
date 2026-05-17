@@ -10,7 +10,7 @@ import yaml
 
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
 
-from .errors import RequiredConfigMissingError
+from .errors import ContractParseError, RequiredConfigMissingError
 from .model_overlay_resolution_result import ModelOverlayResolutionResult
 
 logger = logging.getLogger(__name__)
@@ -67,18 +67,36 @@ class OverlayConfigResolver:
         )
 
     def _extract_required_keys(self) -> set[str]:
-        """Extract required env keys from contract YAML dependency declarations."""
+        """Extract required env keys from contract YAML dependency declarations.
+
+        Fails closed: any unreadable, unparseable, or malformed contract raises
+        ContractParseError. Silently skipping bad contracts under-reports
+        required_keys and lets boot succeed with missing config (defeats the
+        purpose of the resolver).
+        """
         required: set[str] = set()
         for contract_path in self._contracts_dir.rglob("contract.yaml"):
             try:
                 raw = yaml.safe_load(contract_path.read_text())
-            except (yaml.YAMLError, OSError):
-                continue
+            except OSError as exc:
+                raise ContractParseError(
+                    f"Failed to read contract at {contract_path}: {exc}"
+                ) from exc
+            except yaml.YAMLError as exc:
+                raise ContractParseError(
+                    f"Failed to parse contract YAML at {contract_path}: {exc}"
+                ) from exc
             if not isinstance(raw, dict):
-                continue
+                raise ContractParseError(
+                    f"Contract at {contract_path} must be a YAML mapping, "
+                    f"got {type(raw).__name__}"
+                )
             deps = raw.get("dependencies", [])
             if not isinstance(deps, list):
-                continue
+                raise ContractParseError(
+                    f"Contract at {contract_path} has non-list 'dependencies' field, "
+                    f"got {type(deps).__name__}"
+                )
             for dep in deps:
                 if isinstance(dep, dict) and dep.get("type") == "environment":
                     key = dep.get("key")

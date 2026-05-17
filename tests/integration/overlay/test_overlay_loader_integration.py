@@ -8,6 +8,8 @@ import yaml
 
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
 
+pytestmark = pytest.mark.integration
+
 
 class TestOverlayFileLoaderIntegration:
     """Integration tests for OverlayFileLoader — validates YAML parsing,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import tempfile
 from pathlib import Path
 
@@ -15,8 +14,6 @@ from omnibase_infra.runtime.config_discovery.transport_config_map import (
 )
 
 logger = logging.getLogger(__name__)
-
-_SECRET_PATTERN = re.compile(r"PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL", re.IGNORECASE)
 
 
 class OverlayWriter:
@@ -33,9 +30,9 @@ class OverlayWriter:
     ) -> None:
         transports = self._classify_by_transport(env_dict)
 
-        secret_count = sum(1 for key in env_dict if _SECRET_PATTERN.search(key))
-        if secret_count:
-            logger.warning("Overlay contains %d secret-pattern keys", secret_count)
+        # Overlay legitimately stores credential-like keys (POSTGRES_PASSWORD etc.).
+        # The chmod 600 below is the protection; verbose counts of "secret-pattern keys"
+        # leak nothing useful and trip CodeQL clear-text-logging heuristics.
 
         overlay_data = {
             "overlay_version": "1.0.0",

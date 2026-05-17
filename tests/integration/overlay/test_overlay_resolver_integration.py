@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 
 class TestOverlayConfigResolverIntegration:
     """Integration tests for OverlayConfigResolver — validates that resolution

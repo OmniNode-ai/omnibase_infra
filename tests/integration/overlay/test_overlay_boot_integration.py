@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 class TestOverlayBootIntegration:
     """Integration tests for boot_overlay — validates that boot_overlay.py
@@ -59,6 +61,9 @@ class TestOverlayBootIntegration:
 
         monkeypatch.setenv("ONEX_OVERLAY_PATH", "/nonexistent/overlay.yaml")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "existing:9092")
+        # Ensure ONEX_REQUIRE_OVERLAY does not leak from the ambient env or a
+        # prior test; if true it would override migration mode and raise.
+        monkeypatch.delenv("ONEX_REQUIRE_OVERLAY", raising=False)
         result = load_overlay_config(contracts_dir=contracts_dir)
         assert result is None
 

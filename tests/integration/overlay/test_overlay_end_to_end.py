@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 class TestOverlayEndToEnd:
     """End-to-end: generate overlay via writer → load → resolve → inject → verify manifest.

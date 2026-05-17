@@ -17,3 +17,11 @@ class OverlayPermissionError(PermissionError):
 
 class RequiredConfigMissingError(ValueError):
     """Contract requires config keys that neither overlay nor environment provides."""
+
+
+class ContractParseError(ValueError):
+    """A contract file under contracts_dir is unreadable, unparseable, or malformed.
+
+    Resolver fails closed on this error rather than silently skipping bad contracts,
+    which would under-report required_keys and let boot succeed with missing config.
+    """

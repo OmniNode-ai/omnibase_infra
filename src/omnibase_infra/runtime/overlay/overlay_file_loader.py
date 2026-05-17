@@ -25,28 +25,40 @@ class OverlayFileLoader:
         self._require_restricted = require_restricted_permissions
 
     def load(self, path: Path) -> ModelOverlayFile:
-        if not path.exists():
+        if not path.is_file():
+            if path.exists():
+                raise OverlaySchemaInvalidError(
+                    f"Overlay path {path} exists but is not a regular file."
+                )
             raise OverlayNotFoundError(
                 f"Overlay file not found: {path}. Run onboarding to generate one."
             )
 
         self._check_permissions(path)
 
+        # Parser/validator error text can echo overlay contents (including secret
+        # values inside YAML keys). Log the raw exception once at DEBUG and raise
+        # a sanitized message containing only the file path.
         try:
             raw = yaml.safe_load(path.read_text())
         except yaml.YAMLError as exc:
-            raise OverlaySchemaInvalidError(f"Invalid YAML in {path}: {exc}") from exc
+            logger.debug("YAML parse error for %s: %s", path, exc)
+            raise OverlaySchemaInvalidError(
+                f"Invalid YAML in {path}. See debug logs for details."
+            ) from exc
 
         if not isinstance(raw, dict):
             raise OverlaySchemaInvalidError(
-                f"Overlay must be a YAML mapping, got {type(raw).__name__}"
+                f"Overlay at {path} must be a YAML mapping, got {type(raw).__name__}"
             )
 
         try:
             return ModelOverlayFile.model_validate(raw)
         except ValidationError as exc:
+            logger.debug("Overlay schema validation failed for %s: %s", path, exc)
             raise OverlaySchemaInvalidError(
-                f"Overlay schema validation failed for {path}: {exc}"
+                f"Overlay schema validation failed for {path}. "
+                "See debug logs for details."
             ) from exc
 
     def _check_permissions(self, path: Path) -> None:
