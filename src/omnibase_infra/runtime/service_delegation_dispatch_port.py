@@ -7,12 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
-
-from omnimarket.nodes.node_delegation_orchestrator.models.model_delegation_request import (
-    ModelDelegationRequest,
-)
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
@@ -43,6 +38,14 @@ class ModelSelectedDelegationRoute:
     route: RuntimeLocalIngressRoute
 
 
+def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
+    return (
+        route.contract_name == _DELEGATION_CONTRACT_NAME
+        and bool(route.command_topic)
+        and len(route.terminal_events) >= 2
+    )
+
+
 def _select_delegation_route(
     routes: Mapping[str, RuntimeLocalIngressRoute],
 ) -> ModelSelectedDelegationRoute:
@@ -56,7 +59,7 @@ def _select_delegation_route(
             f".{_DELEGATION_CONTRACT_NAME}.{_DELEGATION_OPERATION_ALIAS}"
         ):
             continue
-        if len(route.terminal_events) < 2:
+        if not _has_delegation_terminal_interface(route):
             continue
         candidates[route.contract_path] = (alias, route)
 
@@ -74,7 +77,11 @@ def _select_delegation_route(
         return ModelSelectedDelegationRoute(alias=alias, route=route)
 
     fallback_route = routes.get(_DELEGATION_OPERATION_ALIAS)
-    if not candidates and fallback_route is not None:
+    if (
+        not candidates
+        and fallback_route is not None
+        and _has_delegation_terminal_interface(fallback_route)
+    ):
         return ModelSelectedDelegationRoute(
             alias=_DELEGATION_OPERATION_ALIAS,
             route=fallback_route,
@@ -163,28 +170,32 @@ class RuntimeDelegationDispatchPort:
 
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
-        request = ModelDelegationRequest(
-            prompt=prompt,
-            task_type=cast("Literal['test', 'document', 'research']", task_type),
-            source_session_id=source_session_id,
-            source_file_path=source_file_path,
-            correlation_id=correlation_id,
-            max_tokens=max_tokens,
-            emitted_at=datetime.now(UTC),
-            output_schema_key=output_schema_key,
-        )
+        request_payload = {
+            "prompt": prompt,
+            "task_type": task_type,
+            "source_session_id": source_session_id,
+            "source_file_path": source_file_path,
+            "correlation_id": str(correlation_id),
+            "max_tokens": max_tokens,
+            "emitted_at": datetime.now(UTC).isoformat(),
+            "output_schema_key": output_schema_key,
+        }
 
         command = ModelDispatchBusCommand(
             command_name=selected.alias,
             requester=_REQUESTER,
-            payload=request.model_dump(mode="json", exclude_none=True),
+            payload={
+                key: value
+                for key, value in request_payload.items()
+                if value is not None
+            },
             correlation_id=correlation_id,
-            response_topic=self._response_topic or _default_response_topic(),
+            response_topic=self._response_topic or selected.route.terminal_events[0],
             timeout_seconds=_DEFAULT_TIMEOUT_SECONDS if wait else 1.0,
         )
         broker = RuntimePatternBBroker(
             self._event_bus,
-            command_topic=self._command_topic or _default_command_topic(),
+            command_topic=self._command_topic or selected.route.command_topic,
             routes=routes,
         )
         _route, result = await broker.dispatch_request(command)
@@ -193,18 +204,6 @@ class RuntimeDelegationDispatchPort:
             payload=result.payload,
             error_message=result.error_message,
         )
-
-
-def _default_command_topic() -> str:
-    from omnimarket.adapters.codex.runtime_client import default_command_topic
-
-    return default_command_topic()
-
-
-def _default_response_topic() -> str:
-    from omnimarket.adapters.codex.runtime_client import default_response_topic
-
-    return default_response_topic()
 
 
 __all__ = ["RuntimeDelegationDispatchPort"]

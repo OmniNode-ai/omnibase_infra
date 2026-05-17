@@ -21,9 +21,6 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
-from omnimarket.adapters.llm.bifrost.config_loader_bifrost_delegation import (
-    load_bifrost_delegation_config,
-)
 
 from omnibase_infra.errors import ProtocolConfigurationError
 
@@ -170,6 +167,97 @@ def _strip_render_hint_fields(path: Path) -> None:
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
+def _validate_bifrost_delegation_config(path: Path) -> None:
+    data = _load_yaml(path)
+    backends = data.get("backends")
+    routing_rules = data.get("routing_rules")
+    default_backends = data.get("default_backends", [])
+    if not isinstance(backends, list):
+        raise ProtocolConfigurationError(
+            f"Bifrost delegation config must declare backends: {path}"
+        )
+    if not isinstance(routing_rules, list):
+        raise ProtocolConfigurationError(
+            f"Bifrost delegation config must declare routing_rules: {path}"
+        )
+    if not isinstance(default_backends, list):
+        raise ProtocolConfigurationError(
+            f"Bifrost delegation config default_backends must be a list: {path}"
+        )
+
+    backend_ids = {
+        backend.get("backend_id")
+        for backend in backends
+        if isinstance(backend, dict) and isinstance(backend.get("backend_id"), str)
+    }
+    if len(backend_ids) != len(backends):
+        raise ProtocolConfigurationError(
+            f"Bifrost delegation config has undeclared backend_id entries: {path}"
+        )
+
+    validated_defaults: list[str] = []
+    for backend_id in default_backends:
+        if not isinstance(backend_id, str) or not backend_id.strip():
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config default_backends entries must be "
+                f"non-empty strings: {path}"
+            )
+        validated_defaults.append(backend_id)
+
+    unknown_defaults = {
+        backend_id for backend_id in validated_defaults if backend_id not in backend_ids
+    }
+    if unknown_defaults:
+        raise ProtocolConfigurationError(
+            "Bifrost delegation config default_backends references undeclared "
+            f"backend(s): {sorted(unknown_defaults)}"
+        )
+
+    rule_ids: list[str] = []
+    for rule in routing_rules:
+        if not isinstance(rule, dict):
+            raise ProtocolConfigurationError(
+                f"Bifrost delegation config routing rule must be a mapping: {path}"
+            )
+        rule_id = rule.get("rule_id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config routing rule_id must be a non-empty "
+                f"string: {path}"
+            )
+        rule_ids.append(rule_id)
+
+        rule_backend_ids = rule.get("backend_ids", [])
+        if not isinstance(rule_backend_ids, list):
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config routing rule backend_ids must be a list"
+            )
+        validated_rule_backend_ids: list[str] = []
+        for backend_id in rule_backend_ids:
+            if not isinstance(backend_id, str) or not backend_id.strip():
+                raise ProtocolConfigurationError(
+                    "Bifrost delegation config routing rule backend_ids entries "
+                    f"must be non-empty strings: {path}"
+                )
+            validated_rule_backend_ids.append(backend_id)
+
+        unknown_rule_backends = {
+            backend_id
+            for backend_id in validated_rule_backend_ids
+            if backend_id not in backend_ids
+        }
+        if unknown_rule_backends:
+            raise ProtocolConfigurationError(
+                "Bifrost delegation config routing rule references undeclared "
+                f"backend(s): {sorted(unknown_rule_backends)}"
+            )
+
+    if len(rule_ids) != len(set(rule_ids)):
+        raise ProtocolConfigurationError(
+            "Bifrost delegation config contains duplicate routing rule_id values"
+        )
+
+
 def _load_render_source(
     *,
     should_verify: bool,
@@ -237,7 +325,7 @@ def render_bifrost_delegation_contract(
 
     if not should_verify and _has_populated_endpoint(target):
         _strip_render_hint_fields(target)
-        load_bifrost_delegation_config(target)
+        _validate_bifrost_delegation_config(target)
         return target
 
     data = _load_render_source(
@@ -271,8 +359,10 @@ def render_bifrost_delegation_contract(
             backend.pop("base_url_env", None)
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    load_bifrost_delegation_config(target)
+    staged_target = target.with_suffix(f"{target.suffix}.tmp")
+    staged_target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    _validate_bifrost_delegation_config(staged_target)
+    staged_target.replace(target)
     return target
 
 

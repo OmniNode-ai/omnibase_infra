@@ -29,11 +29,17 @@ def _route(
     *,
     package_name: str,
     terminal_events: tuple[str, ...],
+    command_topic: str | None = None,
+    contract_name: str = "node_delegation_orchestrator",
 ) -> RuntimeLocalIngressRoute:
     return RuntimeLocalIngressRoute(
-        node_name="node_delegation_orchestrator",
-        contract_name="node_delegation_orchestrator",
-        command_topic=f"onex.cmd.{package_name}.delegation-request.v1",
+        node_name=contract_name,
+        contract_name=contract_name,
+        command_topic=(
+            command_topic
+            if command_topic is not None
+            else f"onex.cmd.{package_name}.delegation-request.v1"
+        ),
         event_type=f"{package_name}.delegation-request",
         terminal_event=terminal_events[0] if terminal_events else None,
         terminal_events=terminal_events,
@@ -91,6 +97,34 @@ def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> 
     )
 
 
+def test_select_delegation_route_rejects_invalid_public_fallback() -> None:
+    routes = {
+        "delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(),
+            command_topic="onex.cmd.omnimarket.delegation-request.v1",
+        ),
+    }
+
+    with pytest.raises(RuntimeError, match="delegation dispatch route"):
+        _select_delegation_route(routes)
+
+
+def test_select_delegation_route_accepts_valid_public_fallback() -> None:
+    route = _route(
+        package_name="omnimarket",
+        terminal_events=(
+            "onex.evt.omnimarket.delegation-completed.v1",
+            "onex.evt.omnimarket.delegation-failed.v1",
+        ),
+    )
+
+    selected = _select_delegation_route({"delegation.orchestrate": route})
+
+    assert selected.alias == "delegation.orchestrate"
+    assert selected.route is route
+
+
 @pytest.mark.asyncio
 async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contract(
     monkeypatch: pytest.MonkeyPatch,
@@ -104,11 +138,13 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     )
     captured_timeout_seconds: list[float] = []
     captured_payloads: list[dict[str, object]] = []
+    captured_broker_kwargs: list[dict[str, object]] = []
 
     class FakeBroker:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             self.args = _args
             self.kwargs = _kwargs
+            captured_broker_kwargs.append(dict(_kwargs))
 
         async def dispatch_request(
             self, command: ModelDispatchBusCommand
@@ -148,6 +184,7 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     assert captured_timeout_seconds == [600.0]
     assert captured_payloads[0]["prompt"] == "probe"
     assert captured_payloads[0]["task_type"] == "document"
+    assert captured_broker_kwargs[0]["command_topic"] == route.command_topic
 
 
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Integration sentinel for the omnibase-spi 0.20.6 runtime protocol floor.
+"""Integration sentinel for the omnibase-spi 0.21.0 runtime protocol floor.
 
 OMN-10169 raises the dependency floor because runtime auto-wiring imports
 ``omnibase_spi.protocols.runtime``. The fallback compatibility matrix must
@@ -30,7 +30,7 @@ def _minimum_for(package: str, matrix: Sequence[VersionConstraint]) -> str:
 
 
 @pytest.mark.integration
-def test_omnibase_spi_runtime_protocols_match_0206_floor() -> None:
+def test_omnibase_spi_runtime_protocols_match_0210_floor() -> None:
     """The declared and fallback SPI floors both expose runtime protocols."""
     from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
         ProtocolHandlerOwnershipQuery,
@@ -39,7 +39,7 @@ def test_omnibase_spi_runtime_protocols_match_0206_floor() -> None:
         ProtocolHandlerResolver,
     )
 
-    assert _minimum_for("omnibase_spi", VERSION_MATRIX) == "0.20.6"
-    assert _minimum_for("omnibase_spi", _FALLBACK_MATRIX) == "0.20.6"
+    assert _minimum_for("omnibase_spi", VERSION_MATRIX) == "0.21.0"
+    assert _minimum_for("omnibase_spi", _FALLBACK_MATRIX) == "0.21.0"
     assert hasattr(ProtocolHandlerResolver, "__class_getitem__")
     assert hasattr(ProtocolHandlerOwnershipQuery, "__class_getitem__")

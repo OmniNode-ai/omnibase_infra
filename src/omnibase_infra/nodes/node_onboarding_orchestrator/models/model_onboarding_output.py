@@ -71,6 +71,10 @@ class ModelOnboardingOutput(BaseModel):
         default=None,
         description="Path written to if dry_run=False; None otherwise",
     )
+    overlay_output_path_written: str | None = Field(
+        default=None,
+        description="Path where overlay YAML was written, if generated",
+    )
 
 
 __all__ = ["ModelOnboardingOutput"]
