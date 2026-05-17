@@ -94,6 +94,9 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "ONEX_SERVICE_CLIENT_SECRET",
         # Linear API — injected via Infisical at runtime
         "LINEAR_API_KEY",
+        # GitHub API/CLI auth — injected via Infisical at runtime
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
         # Qdrant vector store API key — credential, sourced from Infisical
         "QDRANT_API_KEY",
     }
