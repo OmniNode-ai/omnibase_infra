@@ -6,8 +6,7 @@ summary: >
 
 is_seam_ticket: false
 interface_change: false
-interfaces_touched:
-  - "discovery"
+interfaces_touched: []
 emergency_bypass:
   enabled: false
   justification: ""
