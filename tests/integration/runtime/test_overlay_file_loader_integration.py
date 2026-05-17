@@ -34,13 +34,13 @@ transports:
   kafka:
     KAFKA_BOOTSTRAP_SERVERS: kafka.test.local:9092
 secrets:
-  INFISICAL_ADDR: 'http://infisical.test.local:8880'
+  INFISICAL_ADDR: 'https://infisical.test.local:8880'
 services:
   omniclaude:
     ENABLE_POSTGRES: 'true'
 llm:
   coder:
-    url: 'http://llm.test.local:8000'
+    url: 'https://llm.test.local:8000'
 """
 
 
@@ -58,9 +58,9 @@ class TestOverlayFileLoaderIntegration:
             result.transports["kafka"]["KAFKA_BOOTSTRAP_SERVERS"]
             == "kafka.test.local:9092"
         )
-        assert result.secrets["INFISICAL_ADDR"] == "http://infisical.test.local:8880"
+        assert result.secrets["INFISICAL_ADDR"] == "https://infisical.test.local:8880"
         assert result.services["omniclaude"]["ENABLE_POSTGRES"] == "true"
-        assert result.llm["coder"]["url"] == "http://llm.test.local:8000"
+        assert result.llm["coder"]["url"] == "https://llm.test.local:8000"
 
     def test_content_hash_stable_on_reload(self, tmp_path: Path) -> None:
         p = tmp_path / "overlay.yaml"

@@ -83,7 +83,7 @@ class TestOverlayFromEnv:
             "VALKEY_HOST": "192.168.86.201",
             "VALKEY_PORT": "16379",
             "KAFKA_GROUP_ID": "my-group",
-            "INFISICAL_ADDR": "http://192.168.86.201:8880",
+            "INFISICAL_ADDR": "https://192.168.86.201:8880",
         }
         overlay = overlay_from_env_dict(env_dict, environment="dev")
         assert "valkey" in overlay.transports
