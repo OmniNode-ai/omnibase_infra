@@ -191,6 +191,7 @@ import hashlib
 import logging
 import os
 import random
+import socket
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -1642,12 +1643,31 @@ class EventBusKafka(
                     f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
                 )
 
+        # Derive static group membership ID (OMN-7601).
+        # Use explicit override from contract config if provided; otherwise
+        # auto-derive from effective_group_id + hostname so each consumer on
+        # each host gets a stable identity without requiring an env var.
+        # Hostname characters outside [a-zA-Z0-9._-] are replaced with '-' to
+        # stay within Kafka's allowed character set.
+        if self._config.group_instance_id is not None:
+            resolved_group_instance_id = self._config.group_instance_id
+        else:
+            raw_hostname = socket.gethostname()
+            safe_hostname = "".join(
+                c if c.isalnum() or c in "._-" else "-" for c in raw_hostname
+            )
+            resolved_group_instance_id = f"{effective_group_id}.{safe_hostname}"
+            if len(resolved_group_instance_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+                resolved_group_instance_id = resolved_group_instance_id[
+                    :KAFKA_CONSUMER_GROUP_MAX_LENGTH
+                ]
+
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=self._bootstrap_servers,
             group_id=effective_group_id,
-            group_instance_id=self._config.group_instance_id,
+            group_instance_id=resolved_group_instance_id,
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,

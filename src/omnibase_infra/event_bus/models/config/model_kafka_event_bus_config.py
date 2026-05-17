@@ -95,16 +95,6 @@ Environment Variables:
             so each container gets unique consumer group membership and
             proper Kafka partition assignment in multi-container dev environments.
 
-    Static Group Membership (OMN-7601):
-        KAFKA_GROUP_INSTANCE_ID: Static group membership ID (optional)
-            Default: None (dynamic membership)
-            Example: "omninode-runtime-1", "runtime-worker-2"
-            When set, passed as group_instance_id to AIOKafkaConsumer. Kafka
-            treats this consumer as a static member and waits session_timeout_ms
-            before reassigning partitions on disconnect, preventing rebalance
-            storms caused by brief container restarts or heartbeat jitter.
-            Derive from container hostname (e.g., from the HOSTNAME env var).
-
     Reconnect Backoff Settings (OMN-2916):
         KAFKA_RECONNECT_BACKOFF_MS: Initial reconnect backoff in milliseconds (integer, >= 0)
             Default: 2000
@@ -624,17 +614,17 @@ class ModelKafkaEventBusConfig(BaseModel):
             )
         return v
 
-    # Static group membership for rebalance storm prevention (OMN-7601)
+    # Static group membership override (OMN-7601).
+    # When None (default), EventBusKafka auto-derives from effective_group_id + hostname.
     group_instance_id: str | None = Field(
         default=None,
         description=(
-            "Static group membership ID passed directly to AIOKafkaConsumer as "
-            "group_instance_id. When set, Kafka treats this consumer as a static "
-            "member — the broker waits for session_timeout_ms before reassigning "
-            "partitions on disconnect, preventing rebalance storms caused by brief "
-            "container restarts or heartbeat jitter. Derive from container hostname "
-            "or set via KAFKA_GROUP_INSTANCE_ID env var. When None (default), "
-            "standard dynamic membership is used."
+            "Explicit static group membership ID override. When set, passed directly "
+            "to AIOKafkaConsumer as group_instance_id. When None (default), "
+            "EventBusKafka auto-derives the value from the effective consumer group "
+            "ID and socket.gethostname(), producing a stable per-consumer-per-host "
+            "identity. Never populate this from os.environ — use contract config or "
+            "leave None to use auto-derivation."
         ),
     )
 
@@ -868,7 +858,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_MAX_POLL_INTERVAL_MS": "max_poll_interval_ms",
             "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
             "KAFKA_INSTANCE_ID": "instance_id",
-            "KAFKA_GROUP_INSTANCE_ID": "group_instance_id",
             "KAFKA_SECURITY_PROTOCOL": "security_protocol",
             "KAFKA_SASL_MECHANISM": "sasl_mechanism",
             "KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL": "sasl_oauthbearer_token_endpoint_url",
