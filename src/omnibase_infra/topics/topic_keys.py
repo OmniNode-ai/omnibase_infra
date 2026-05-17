@@ -165,6 +165,12 @@ CONSUMER_RESTART_CMD: Final[str] = "CONSUMER_RESTART_CMD"
 RUNTIME_HEALTH_CHECK: Final[str] = "RUNTIME_HEALTH_CHECK"
 """Runtime health check events from ServiceRuntimeHealthMonitor."""
 
+PROJECTION_FRESHNESS_DEGRADED: Final[str] = "PROJECTION_FRESHNESS_DEGRADED"
+"""Projection freshness SLA breach events from ServiceFreshnessMonitor."""
+
+PROJECTION_FRESHNESS_RECOVERED: Final[str] = "PROJECTION_FRESHNESS_RECOVERED"
+"""Projection freshness recovery events from ServiceFreshnessMonitor."""
+
 # ==============================================================================
 # Runtime Error Topics
 # ==============================================================================
@@ -266,6 +272,8 @@ __all__: list[str] = [
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",
     "DISPATCH_OUTCOME_EVALUATED",
+    "PROJECTION_FRESHNESS_DEGRADED",
+    "PROJECTION_FRESHNESS_RECOVERED",
     "EFFECTIVENESS_INVALIDATION",
     "ERROR_TRIAGED",
     "EVAL_COMPLETED",

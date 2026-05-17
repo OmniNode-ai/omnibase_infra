@@ -150,6 +150,13 @@ class ServiceTopicRegistry:
             topic_keys.RUNTIME_HEALTH_CHECK: (
                 "onex.evt.omnibase-infra.runtime-health-check.v1"
             ),
+            # Projection freshness SLA monitoring
+            topic_keys.PROJECTION_FRESHNESS_DEGRADED: (
+                "onex.evt.omnibase-infra.projection-freshness-degraded.v1"
+            ),
+            topic_keys.PROJECTION_FRESHNESS_RECOVERED: (
+                "onex.evt.omnibase-infra.projection-freshness-recovered.v1"
+            ),
             # Runtime error
             topic_keys.RUNTIME_ERROR: ("onex.evt.omnibase-infra.runtime-error.v1"),
             topic_keys.ERROR_TRIAGED: ("onex.evt.omnibase-infra.error-triaged.v1"),
