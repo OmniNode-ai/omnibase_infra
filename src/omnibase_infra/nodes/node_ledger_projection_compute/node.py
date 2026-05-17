@@ -21,7 +21,7 @@ Subscribed Topics (via contract.yaml):
     - onex.cmd.platform.request-introspection.v1
     - onex.evt.platform.fsm-state-transitions.v1
     - onex.intent.platform.runtime-tick.v1
-    - onex.snapshot.platform.registration-snapshots.v1
+    - onex.evt.platform.registration-snapshots.v1
 
 Ticket: OMN-1648, OMN-1726
 """

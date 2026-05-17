@@ -54,12 +54,12 @@ class TestCLIRegistryCommands:
         assert "onex" in result.output.lower()
 
     def test_list_topics_shows_all_kinds(self) -> None:
-        """list-topics shows Event, Command, Intent, Snapshot kinds."""
+        """list-topics shows Event and Command kinds."""
         runner = CliRunner()
         result = runner.invoke(cli, ["registry", "list-topics"])
         assert result.exit_code == 0
         assert "Event" in result.output
-        assert "Snapshot" in result.output
+        assert "Command" in result.output
 
     def test_validate_group_still_works(self) -> None:
         """Existing validate commands still work."""

@@ -40,3 +40,22 @@ def test_all_suffix_constants_importable_from_topics() -> None:
             assert hasattr(topics_pkg, name), (
                 f"{name} listed in __all__ but not importable"
             )
+
+
+@pytest.mark.integration
+def test_registration_snapshots_topic_follows_onex_grammar() -> None:
+    """SUFFIX_REGISTRATION_SNAPSHOTS must use onex.evt.* grammar, not onex.snapshot.* (OMN-9211)."""
+    from omnibase_infra.topics.platform_topic_suffixes import (
+        SUFFIX_REGISTRATION_SNAPSHOTS,
+    )
+
+    assert SUFFIX_REGISTRATION_SNAPSHOTS.startswith("onex.evt."), (
+        f"Registration snapshots topic must use onex.evt.* kind, got: {SUFFIX_REGISTRATION_SNAPSHOTS}"
+    )
+    parts = SUFFIX_REGISTRATION_SNAPSHOTS.split(".")
+    assert len(parts) == 5, (
+        f"Topic must have 5 segments (onex.<kind>.<producer>.<event>.v<N>), got: {SUFFIX_REGISTRATION_SNAPSHOTS}"
+    )
+    assert (
+        SUFFIX_REGISTRATION_SNAPSHOTS == "onex.evt.platform.registration-snapshots.v1"
+    ), f"Unexpected topic value: {SUFFIX_REGISTRATION_SNAPSHOTS}"

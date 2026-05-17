@@ -21,6 +21,10 @@ from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
     get_postgres_dsn,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_NODE_INTROSPECTION,
+    SUFFIX_REGISTRATION_SNAPSHOTS,
+)
 
 console = Console()
 
@@ -131,7 +135,7 @@ def verify_topics() -> None:
 @verify.command("snapshots")
 @click.option(
     "--topic",
-    default="onex.snapshot.platform.registration-snapshots.v1",
+    default=SUFFIX_REGISTRATION_SNAPSHOTS,
     help="Snapshot topic to verify.",
     show_default=True,
 )
@@ -198,7 +202,7 @@ def verify_snapshots(topic: str) -> None:
 @verify.command("idempotency")
 @click.option(
     "--topic",
-    default="onex.evt.platform.node-introspection.v1",  # onex-topic-allow: pending contract auto-wiring
+    default=SUFFIX_NODE_INTROSPECTION,
     help="Introspection topic.",
     show_default=True,
 )
