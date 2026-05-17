@@ -1,0 +1,44 @@
+# OMN-11108 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11108"
+title: "feat(OMN-11108): overlay config infrastructure (Wave 2/3)"
+summary: >-
+  Adds the overlay config infrastructure under src/omnibase_infra/runtime/overlay/: OverlayFileLoader (YAML parse + chmod 600), OverlayConfigResolver (PURE resolution against contract dependencies[], fails-closed on bad contracts), boot_overlay (sole env mutation authority), OverlayWriter (deterministic atomic write), overlay_from_env (onboarding helper), plus ModelOnboardingOutput extension.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: "tests"
+    description: "20 overlay integration tests pass on PR #1623"
+    command: >-
+      uv run pytest tests/integration/overlay/ -v
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1623"
+    command: "gh pr checks 1623 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-11108"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-11108.yaml"
+  - id: "dod-overlay-integration-tests"
+    description: "20 overlay integration tests pass on PR #1623"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/overlay/ -v"
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation: overlay infrastructure modules importable from the omninode-runtime image after deploy of PR #1623. Canonical OCC receipt at drift/dod_receipts/OMN-11108/dod-overlay-runtime-deploy in OCC#1079.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          docker exec omninode-runtime python -c "from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config; print('overlay deploy ok')"
