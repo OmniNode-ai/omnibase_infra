@@ -467,6 +467,145 @@ class TestPluginManagedSkipsRuntimeHostSubscription:
         assert "node_normal_worker" in wired_names
 
 
+class TestPatternBDispatchTopicNotConsumedByGenericDispatcher:
+    """OMN-11066: Pattern B dispatch topic must not be consumed by the generic dispatcher.
+
+    The node_runtime_orchestrator contract declares
+    ``onex.cmd.omnibase-infra.pattern-b-dispatch.v1`` as a subscribe_topic
+    owned by RuntimePatternBBroker (plugin_managed).  If plugin_managed is
+    absent or False, _wire_package_node_subscriptions routes the topic through
+    the generic dispatch engine, which has no dispatcher registered for it and
+    DLQs every message.
+    """
+
+    def test_node_runtime_orchestrator_contract_has_plugin_managed(self) -> None:
+        """node_runtime_orchestrator/contract.yaml must declare plugin_managed: true."""
+        import yaml
+
+        import omnibase_infra as _pkg
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+        )
+
+        package_root = Path(_pkg.__file__).parent
+        contracts = _discover_package_node_contracts(package_root)
+
+        orchestrator = next(
+            (c for c in contracts if c.get("name") == "node_runtime_orchestrator"),
+            None,
+        )
+        assert orchestrator is not None, (
+            "node_runtime_orchestrator contract not found in package"
+        )
+        event_bus = orchestrator.get("event_bus")
+        assert isinstance(event_bus, dict), (
+            "node_runtime_orchestrator must have an event_bus section"
+        )
+        assert event_bus.get("plugin_managed") is True, (
+            "node_runtime_orchestrator event_bus must set plugin_managed: true "
+            "so RuntimePatternBBroker is the sole consumer of "
+            "onex.cmd.omnibase-infra.pattern-b-dispatch.v1 (OMN-11066)"
+        )
+        assert "onex.cmd.omnibase-infra.pattern-b-dispatch.v1" in (
+            event_bus.get("subscribe_topics") or []
+        ), "pattern-b-dispatch topic must remain declared in subscribe_topics"
+
+    @pytest.mark.asyncio
+    async def test_pattern_b_dispatch_topic_skipped_when_plugin_managed(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """When plugin_managed=true, generic dispatcher does not subscribe to Pattern B topic.
+
+        Reproduces the no-dispatcher DLQ path from OMN-11066: without
+        plugin_managed the generic runtime route subscribes to
+        onex.cmd.omnibase-infra.pattern-b-dispatch.v1, finds no dispatcher,
+        and routes to DLQ.  With plugin_managed=true the contract is skipped.
+        """
+        node = tmp_path / "nodes" / "node_runtime_orchestrator" / "contract.yaml"
+        node.parent.mkdir(parents=True)
+        node.write_text(
+            textwrap.dedent("""\
+            name: "node_runtime_orchestrator"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              plugin_managed: true
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"
+              publish_topics:
+                - "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        (
+            wired,
+            _skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 0, "Pattern B dispatch topic must not be wired via generic path"
+        assert skipped_no_topics == 1
+        mock_event_bus_wiring.wire_subscriptions.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pattern_b_dispatch_topic_consumed_by_generic_without_plugin_managed(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """Without plugin_managed, generic dispatcher would subscribe — reproduces DLQ root cause."""
+        node = tmp_path / "nodes" / "node_runtime_orchestrator" / "contract.yaml"
+        node.parent.mkdir(parents=True)
+        node.write_text(
+            textwrap.dedent("""\
+            name: "node_runtime_orchestrator"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"
+              publish_topics:
+                - "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        (
+            wired,
+            _skipped_existing,
+            _skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 1, (
+            "Without plugin_managed, generic path subscribes — "
+            "this is the pre-fix DLQ root cause"
+        )
+        mock_event_bus_wiring.wire_subscriptions.assert_called_once()
+
+
 class TestDiscoverPackageNodeContracts:
     """Tests for _discover_package_node_contracts."""
 
