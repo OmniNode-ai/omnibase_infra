@@ -1649,6 +1649,11 @@ class EventBusKafka(
         # each host gets a stable identity without requiring an env var.
         # Hostname characters outside [a-zA-Z0-9._-] are replaced with '-' to
         # stay within Kafka's allowed character set.
+        #
+        # When truncation is required, a hash suffix derived from both the group
+        # ID and hostname preserves host uniqueness — plain slicing would drop the
+        # hostname and cause FencedInstanceIdException when multiple hosts share a
+        # long group ID prefix.
         if self._config.group_instance_id is not None:
             resolved_group_instance_id = self._config.group_instance_id
         else:
@@ -1656,11 +1661,28 @@ class EventBusKafka(
             safe_hostname = "".join(
                 c if c.isalnum() or c in "._-" else "-" for c in raw_hostname
             )
-            resolved_group_instance_id = f"{effective_group_id}.{safe_hostname}"
-            if len(resolved_group_instance_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
-                resolved_group_instance_id = resolved_group_instance_id[
-                    :KAFKA_CONSUMER_GROUP_MAX_LENGTH
-                ]
+            candidate = f"{effective_group_id}.{safe_hostname}"
+            if len(candidate) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+                resolved_group_instance_id = candidate
+            else:
+                host_hash = hashlib.sha256(
+                    f"{effective_group_id}|{safe_hostname}".encode()
+                ).hexdigest()[:8]
+                # Reserve room for separator + hash (9 chars: "." + 8 hex digits).
+                host_budget = (
+                    KAFKA_CONSUMER_GROUP_MAX_LENGTH
+                    - len(effective_group_id)
+                    - len(host_hash)
+                    - 2  # "." separator + "-" before hash
+                )
+                if host_budget > 0:
+                    resolved_group_instance_id = f"{effective_group_id}.{safe_hostname[:host_budget]}-{host_hash}"
+                else:
+                    # No room for any hostname characters — use group prefix + hash.
+                    prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
+                    resolved_group_instance_id = (
+                        f"{effective_group_id[:prefix_budget]}-{host_hash}"
+                    )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(

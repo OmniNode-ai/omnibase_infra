@@ -19,10 +19,13 @@ import pytest
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
+_TEST_BOOTSTRAP = "localhost:19092"
+
 
 @pytest.fixture
 def kafka_config_with_explicit_instance_id() -> ModelKafkaEventBusConfig:
     return ModelKafkaEventBusConfig(
+        bootstrap_servers=_TEST_BOOTSTRAP,
         session_timeout_ms=60000,
         heartbeat_interval_ms=20000,
         group_instance_id="omninode-runtime-1",
@@ -32,6 +35,7 @@ def kafka_config_with_explicit_instance_id() -> ModelKafkaEventBusConfig:
 @pytest.fixture
 def kafka_config_default() -> ModelKafkaEventBusConfig:
     return ModelKafkaEventBusConfig(
+        bootstrap_servers=_TEST_BOOTSTRAP,
         session_timeout_ms=45000,
         heartbeat_interval_ms=15000,
         group_instance_id=None,
