@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11131"
+title: "Phase 2: Delegation Projection Activation"
+summary: >
+  Fix _derive_projection_event_type to allow non-platform topics (onex.evt.omniclaude.task-delegated.v1) through projection dispatch without raising ValueError. This unblocks HandlerProjectionDelegation from processing delegation events and writing rows to delegation_events table.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "topics"
+  - "events"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "All 3 projection dispatch integration tests pass on the PR branch."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/projectors/test_handler_wiring_projection_dispatch.py -v"
+  - id: "dod-deploy"
+    description: >
+      Runtime deploy required: rebuild omninode-runtime image on 192.168.86.201 after PR #1625 merges. Rolling restart of omninode-runtime, omninode-runtime-effects, omninode-prod-runtime. Projection consumer local.omnimarket.projection_delegation.consume.1.0.0 re-joins and processes task-delegated events without ValueError. delegation_events table accumulates real rows.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.auto_wiring.handler_wiring import _derive_projection_event_type; r=_derive_projection_event_type(\"\",\"onex.evt.omniclaude.task-delegated.v1\"); print(r)' && rpk group describe local.omnimarket.projection_delegation.consume.1.0.0"
