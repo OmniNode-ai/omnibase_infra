@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Runtime Manifest Reducer Node (OMN-11197)
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "node_runtime_manifest_reducer"
+node_type: "REDUCER_GENERIC"
+description: "Append-only reducer that persists runtime manifests to PostgreSQL. Receives runtime-manifest-published events and inserts one row per startup into runtime_manifests."
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing runtime manifest event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing projection intents."
+event_bus:
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.runtime-manifest-published.v1"
+  publish_topics: []
+intent_emission:
+  enabled: true
+  intents:
+    - intent_type: "postgres.insert_runtime_manifest"
+      target_pattern: "postgres://runtime_manifests/{runtime_profile}"
+      payload_model: "ModelPayloadInsertRuntimeManifest"
+      payload_module: "omnibase_infra.nodes.node_runtime_manifest_reducer.models.model_payload_insert_runtime_manifest"
+      description: "INSERT runtime manifest row into PostgreSQL runtime_manifests table (append-only, never UPDATE)"
+node_capabilities:
+  processing: true
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+metadata:
+  description: "Append-only reducer persisting runtime startup manifests to PostgreSQL."
+  author: "OmniNode Team"
+  created: "2026-05-17"
+  updated: "2026-05-17"
+  tags:
+    - "reducer"
+    - "runtime-manifest"
+    - "projection"
+    - "append-only"
+  related_tickets:
+    - "OMN-11197"
+    - "OMN-11188"
