@@ -21,6 +21,7 @@ from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
     get_postgres_dsn,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_REGISTRATION_SNAPSHOTS
 
 console = Console()
 
@@ -131,7 +132,7 @@ def verify_topics() -> None:
 @verify.command("snapshots")
 @click.option(
     "--topic",
-    default="onex.evt.platform.registration-snapshots.v1",
+    default=SUFFIX_REGISTRATION_SNAPSHOTS,
     help="Snapshot topic to verify.",
     show_default=True,
 )
