@@ -50,8 +50,6 @@ from pathlib import Path
 # fmt: off
 _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- runtime/service emitted topics pending service contract ownership split (OMN-9877) ---
-    "onex.evt.omnibase-infra.runtime-health-check.v1": "service_runtime_health_monitor emits before service contracts are represented as node contract.yaml surfaces | owner: jonah | expiry: 2026-06-15",
-    "onex.evt.platform.registration-completed.v1": "registration completion is still emitted by service/runtime registration path pending contract ownership split | owner: jonah | expiry: 2026-06-15",
     # --- omniclaude skill cmd topics (migrating via topics.yaml, OMN-4592/OMN-4594) ---
     "onex.cmd.omniclaude.action-logging.v1": "pre-migration skill topic; topics.yaml covers this once OMN-4594 wired | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omniclaude.agent-observability.v1": "pre-migration skill topic; topics.yaml covers this once OMN-4594 wired | owner: jonah | expiry: 2026-06-01",
