@@ -805,9 +805,10 @@ async def _emit_projection_terminal_event(
             )
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Failed to emit projection terminal event: topic=%s error=%s",
+            "Failed to emit projection terminal event: topic=%s error_type=%s error=%s",
             terminal_event,
-            exc,
+            type(exc).__name__,
+            _sanitize_exc(exc),
         )
 
 
