@@ -72,13 +72,13 @@ class OverlayConfigResolver:
     ) -> ModelOverlayResolutionResult:
         env_pairs = overlay.all_env_pairs()
         if not isinstance(requirements, ModelConfigRequirements):
-            resolved = dict(sorted(env_pairs.items()))
+            all_resolved = dict(sorted(env_pairs.items()))
             manifest = ModelOverlayResolutionManifest(
                 overlay_file_hash=overlay.content_hash(),
                 overlay_version=overlay.overlay_version,
                 overlay_scope_stack=(overlay.scope.value,),
                 contract_requirements_hash=_requirements_path_hash(requirements),
-                resolved_config_hash=_resolved_config_hash(resolved),
+                resolved_config_hash=_resolved_config_hash(all_resolved),
                 resolved_transports=tuple(sorted(overlay.transports.keys())),
                 required_transports=tuple(sorted(overlay.transports.keys())),
                 runtime_version=_runtime_version(),
@@ -86,7 +86,7 @@ class OverlayConfigResolver:
                 config_source="overlay",
             )
             return ModelOverlayResolutionResult(
-                resolved=resolved,
+                resolved=all_resolved,
                 missing=(),
                 manifest=manifest,
             )
