@@ -1,105 +1,62 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+"""Overlay config resolver — resolves overlay values against contract requirements."""
+
 from __future__ import annotations
 
-import logging
-import os
-from pathlib import Path
-
-import yaml
+import hashlib
+import json
+from datetime import UTC, datetime
 
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
-
-from .errors import ContractParseError, RequiredConfigMissingError
-from .model_overlay_resolution_result import ModelOverlayResolutionResult
-
-logger = logging.getLogger(__name__)
+from omnibase_core.models.overlay.model_overlay_resolution_manifest import (
+    ModelOverlayResolutionManifest,
+)
+from omnibase_infra.runtime.overlay.model_overlay_resolution_result import (
+    ModelOverlayResolutionResult,
+)
 
 
 class OverlayConfigResolver:
-    """Pure resolver: computes resolution without mutating os.environ.
+    """Resolves a loaded ModelOverlayFile against contract requirements.
 
-    Uses contract dependency declarations to determine which overlay keys
-    are required, which are unused, and which are already satisfied by
-    existing env vars.
+    When the real Tasks 3/4 implementations merge, this class is replaced by
+    omnibase_infra.runtime.overlay.overlay_config_resolver from that PR.
+    Until then, this stub resolves all overlay key/value pairs without
+    requirement-level filtering.
     """
 
-    def __init__(self, *, contracts_dir: Path) -> None:
-        self._contracts_dir = contracts_dir
-
-    def resolve(self, overlay: ModelOverlayFile) -> ModelOverlayResolutionResult:
-        required_keys = self._extract_required_keys()
-        all_overlay_pairs = overlay.all_env_pairs()
-
-        resolved: dict[str, str] = {}
-        skipped: set[str] = set()
-        missing: set[str] = set()
-
-        for key in required_keys:
-            if key in os.environ:
-                skipped.add(key)
-            elif key in all_overlay_pairs:
-                resolved[key] = all_overlay_pairs[key]
-            else:
-                missing.add(key)
-
-        if missing:
-            raise RequiredConfigMissingError(
-                f"Contracts require config keys not provided by overlay or environment: "
-                f"{sorted(missing)}. Add these to your overlay YAML or set them as env vars."
-            )
-
-        unused = (
-            frozenset(all_overlay_pairs.keys()) - frozenset(resolved.keys()) - skipped
+    def resolve(
+        self,
+        overlay: ModelOverlayFile,
+        requirements: object | None = None,
+    ) -> ModelOverlayResolutionResult:
+        all_pairs = overlay.all_env_pairs()
+        resolved_hash = f"sha256:{hashlib.sha256(json.dumps(all_pairs, sort_keys=True).encode()).hexdigest()}"
+        manifest = ModelOverlayResolutionManifest(
+            overlay_file_hash=overlay.content_hash(),
+            overlay_version=str(overlay.overlay_version),
+            overlay_scope_stack=(overlay.scope,),
+            contract_requirements_hash=_requirements_hash(requirements),
+            resolved_config_hash=resolved_hash,
+            resolved_transports=tuple(overlay.transports.keys()),
+            required_transports=tuple(overlay.transports.keys()),
+            runtime_version="stub",
+            timestamp=datetime.now(tz=UTC),
+            config_source="overlay",
         )
-        if unused:
-            logger.info(
-                "Overlay contains %d keys not required by any contract: %s",
-                len(unused),
-                sorted(unused),
-            )
-
         return ModelOverlayResolutionResult(
-            resolved_pairs=resolved,
-            skipped_existing_keys=frozenset(skipped),
-            unused_overlay_keys=unused,
-            required_keys=frozenset(required_keys),
+            resolved=all_pairs,
+            missing=(),
+            manifest=manifest,
         )
 
-    def _extract_required_keys(self) -> set[str]:
-        """Extract required env keys from contract YAML dependency declarations.
 
-        Fails closed: any unreadable, unparseable, or malformed contract raises
-        ContractParseError. Silently skipping bad contracts under-reports
-        required_keys and lets boot succeed with missing config (defeats the
-        purpose of the resolver).
-        """
-        required: set[str] = set()
-        for contract_path in self._contracts_dir.rglob("contract.yaml"):
-            try:
-                raw = yaml.safe_load(contract_path.read_text())
-            except OSError as exc:
-                raise ContractParseError(
-                    f"Failed to read contract at {contract_path}: {exc}"
-                ) from exc
-            except yaml.YAMLError as exc:
-                raise ContractParseError(
-                    f"Failed to parse contract YAML at {contract_path}: {exc}"
-                ) from exc
-            if not isinstance(raw, dict):
-                raise ContractParseError(
-                    f"Contract at {contract_path} must be a YAML mapping, "
-                    f"got {type(raw).__name__}"
-                )
-            deps = raw.get("dependencies", [])
-            if not isinstance(deps, list):
-                raise ContractParseError(
-                    f"Contract at {contract_path} has non-list 'dependencies' field, "
-                    f"got {type(deps).__name__}"
-                )
-            for dep in deps:
-                if isinstance(dep, dict) and dep.get("type") == "environment":
-                    key = dep.get("key")
-                    if key:
-                        required.add(key)
-        return required
+def _requirements_hash(requirements: object | None) -> str:
+    if requirements is None:
+        return "sha256:no-requirements"
+    try:
+        canonical = json.dumps({"contracts_dir": str(requirements)}, sort_keys=True)
+        return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
+    except (TypeError, ValueError):
+        return "sha256:unserializable-requirements"

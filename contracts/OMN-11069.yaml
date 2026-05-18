@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11069
+title: "feat(OMN-11069): Contract-overlay configuration — replace .env with contract overlays"
+summary: >-
+  Wire the existing overlay infrastructure into runtime boot and onboarding so that contracts + overlays replace .env files as the single configuration source of truth. Implements OverlayWriter, cold-start detection via load_overlay_config(), 12 unit tests, 6 integration tests.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: "OverlayWriter unit tests (8) and cold-start detection unit tests (4) all pass."
+    command: "uv run pytest tests/unit/runtime/overlay/test_overlay_writer.py tests/unit/runtime/overlay/test_cold_start.py -v"
+  - kind: tests
+    description: "Integration tests for OverlayWriter + cold-start pipeline pass (6 tests)."
+    command: "uv run pytest tests/integration/test_overlay_writer_coldstart_integration.py -v"
+  - kind: manual
+    description: "Deploy-gate proof: OverlayWriter importable from runtime image after merge."
+    command: >-
+      deploy: docker exec omninode-runtime python -c "from omnibase_infra.runtime.overlay.overlay_writer import OverlayWriter; print('deploy-ok')"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-overlay-writer-tests
+    description: "12 unit tests + 6 integration tests for OverlayWriter + cold-start detection pass."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/overlay/test_overlay_writer.py tests/unit/runtime/overlay/test_cold_start.py tests/integration/test_overlay_writer_coldstart_integration.py -v --tb=short"
+  - id: dod-deploy-proof
+    description: "OverlayWriter importable from omninode-runtime container after deploy."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy: docker exec omninode-runtime python -c "from omnibase_infra.runtime.overlay.overlay_writer import OverlayWriter; print('deploy-ok')"

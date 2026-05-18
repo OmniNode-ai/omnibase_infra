@@ -107,6 +107,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
     "INFISICAL_REDIS_URL": "redis://valkey:6379",
+    "GITHUB_TOKEN": "render-only-github-token",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),
@@ -236,6 +237,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["OMNIMEMORY_ENABLED"] == ""
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
+        assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert "image" not in services[service_name]
         assert services[service_name]["restart"] == "unless-stopped"

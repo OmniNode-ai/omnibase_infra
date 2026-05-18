@@ -1093,6 +1093,7 @@ class TestDockerComposeProfiles:
                 "ONEX_REGISTRATION_AUTO_ACK": "true",
                 "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
                 "LINEAR_API_KEY": "test-linear-api-key",
+                "GITHUB_TOKEN": "test-github-token",
                 # OMN-7979: LLM endpoint URLs added with :? fail-fast to
                 # activate PluginLlm in runtime containers.
                 "LLM_CODER_URL": "http://llm-coder.test:8000",

@@ -91,7 +91,7 @@ event_bus:
     - "onex.cmd.platform.node-registration-acked.v1"
     - "onex.cmd.platform.topic-catalog-query.v1"
     - "onex.cmd.platform.request-introspection.v1"
-    - "onex.snapshot.platform.registration-snapshots.v1"
+    - "onex.evt.platform.registration-snapshots.v1"
 # Feature Flags [OMN-5584]
 # Platform-housed flags: multiple services depend on these, so they live in
 # the central registration orchestrator contract.

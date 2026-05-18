@@ -46,14 +46,21 @@ def _contract_targets_active_runtime_packages(
     contract: ModelDiscoveredContract,
     active_packages: frozenset[str] | None,
 ) -> bool:
-    """Return True when a contract's event-bus topics stay within the active runtime surface."""
+    """Return True when a contract's publish topics stay within the active runtime surface.
+
+    Only publish_topics are checked because a contract that publishes into a
+    package domain IS part of that package's producer surface and should only
+    be loaded when the package is active.  subscribe_topics are read-only
+    consumption — a projection or reducer can subscribe to topics from an
+    inactive producer package without that package needing to be active.
+    """
     if contract.event_bus is None:
         return True
 
-    all_topics = tuple(contract.event_bus.subscribe_topics) + tuple(
-        contract.event_bus.publish_topics
+    return all(
+        is_runtime_topic_active(topic, active_packages)
+        for topic in contract.event_bus.publish_topics
     )
-    return all(is_runtime_topic_active(topic, active_packages) for topic in all_topics)
 
 
 def discover_contracts() -> ModelAutoWiringManifest:

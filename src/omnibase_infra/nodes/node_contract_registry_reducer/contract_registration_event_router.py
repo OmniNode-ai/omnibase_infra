@@ -451,10 +451,28 @@ class ContractRegistrationEventRouter:
             )
 
             # Build event metadata from Kafka message
+            # Extract data_provenance from envelope metadata tags; fall back to "unknown"
+            provenance_raw = raw_envelope.metadata.tags.get(
+                "data_provenance", "unknown"
+            )
+            provenance_value = (
+                provenance_raw
+                if isinstance(provenance_raw, str)
+                and provenance_raw
+                in (
+                    "demo_seeded",
+                    "demo_projected_shortcut",
+                    "measured",
+                    "estimated",
+                    "unknown",
+                )
+                else "unknown"
+            )
             event_metadata: dict[str, JsonType] = {
                 "topic": msg.topic,
                 "partition": msg.partition or 0,
                 "offset": int(msg.offset) if msg.offset else 0,
+                "data_provenance": provenance_value,
             }
 
             # Call reducer

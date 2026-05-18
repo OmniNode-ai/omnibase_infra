@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
+
 from .overlay_writer import OverlayWriter
 
 _DEFAULT_OVERLAY_OUTPUT = Path.home() / ".omnibase" / "overlay.yaml"
@@ -28,11 +30,13 @@ def overlay_from_env_dict(
     if output_path is None:
         output_path = _DEFAULT_OVERLAY_OUTPUT
 
-    writer = OverlayWriter()
-    writer.write(
-        env_dict=env_dict,
-        output_path=output_path,
-        environment=environment,
-        scope=scope,
+    overlay = ModelOverlayFile.model_validate(
+        {
+            "overlay_version": "1.0.0",
+            "environment": environment,
+            "scope": scope,
+            "transports": {"custom": env_dict},
+        }
     )
+    OverlayWriter().write(overlay, output_path)
     return output_path

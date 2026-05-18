@@ -1,0 +1,38 @@
+# OMN-11130 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-11130
+title: "Provide GitHub CLI auth to runtime PR lifecycle sweep"
+summary: "Runtime containers install the GitHub CLI and receive GITHUB_TOKEN/GH_TOKEN so skill-based PR lifecycle inventory and merge gates can run through the Pattern-B runtime path."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Runtime env anchor and env parity checks prove GitHub token passthrough is declared and treated as secret."
+    command: "uv run pytest tests/ci/test_runtime_env_anchor.py tests/ci/test_env_parity.py tests/ci/test_compose_required_env_coverage.py -q"
+  - kind: manual
+    description: "Deploy proof requires runtime image rebuild, container recreation, gh auth inside runtime containers, and a pr_lifecycle_orchestrator dry-run inventory through the runtime broker."
+    command: "deploy: docker build -f docker/Dockerfile.runtime -t runtime:latest . && docker compose -f docker/docker-compose.generated.yml up -d omninode-runtime runtime-effects && docker exec omninode-runtime gh auth status && runtime broker inventory returns open PRs"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-env-tests
+    description: "Runtime env anchor, env parity, and required-env coverage tests pass with GITHUB_TOKEN/GH_TOKEN included."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/ci/test_runtime_env_anchor.py tests/ci/test_env_parity.py tests/ci/test_compose_required_env_coverage.py -q"
+  - id: dod-compose-config
+    description: "Docker compose config validates with the protected runtime env file loaded."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "docker compose -f docker/docker-compose.generated.yml config --quiet"
+  - id: dod-deploy-gate
+    description: "Deployable runtime change — rolling rebuild/recreate of omninode-runtime and runtime-effects is required so the final image contains gh and the containers receive GH_TOKEN."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: docker exec omninode-runtime gh auth status && runtime broker pr_lifecycle_orchestrator inventory reports open PRs"

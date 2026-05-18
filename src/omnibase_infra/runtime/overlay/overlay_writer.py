@@ -1,89 +1,65 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+"""Atomic overlay YAML writer with secure permissions and deterministic output."""
+
 from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 import yaml
 
-from omnibase_infra.runtime.config_discovery.transport_config_map import (
-    TransportConfigMap,
-)
+from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
 
 logger = logging.getLogger(__name__)
 
+_SECRET_KEY_PATTERN = re.compile(
+    r"(PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)", re.IGNORECASE
+)
+
+
+def _contains_secret_keys(overlay: ModelOverlayFile) -> bool:
+    key_sections = (
+        overlay.secrets.keys(),
+        *(vals.keys() for vals in overlay.transports.values()),
+        *(vals.keys() for vals in overlay.services.values()),
+        *(vals.keys() for vals in overlay.llm.values()),
+    )
+    return any(
+        _SECRET_KEY_PATTERN.search(key) for section in key_sections for key in section
+    )
+
 
 class OverlayWriter:
-    def __init__(self) -> None:
-        self._transport_map = TransportConfigMap()
+    """Writes ModelOverlayFile instances to YAML with atomic write and chmod 600."""
 
-    def write(
-        self,
-        *,
-        env_dict: dict[str, str],
-        output_path: Path,
-        environment: str,
-        scope: str,
-    ) -> None:
-        transports = self._classify_by_transport(env_dict)
+    def write(self, overlay: ModelOverlayFile, target_path: Path) -> None:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Overlay legitimately stores credential-like keys (POSTGRES_PASSWORD etc.).
-        # The chmod 600 below is the protection; verbose counts of "secret-pattern keys"
-        # leak nothing useful and trip CodeQL clear-text-logging heuristics.
+        if _contains_secret_keys(overlay):
+            logger.warning(
+                "Writing overlay to %s which contains keys matching secret patterns "
+                "(PASSWORD/SECRET/TOKEN/KEY/CREDENTIAL). File will be chmod 600.",
+                target_path,
+            )
 
-        overlay_data = {
-            "overlay_version": "1.0.0",
-            "environment": environment,
-            "scope": scope,
-            "transports": transports,
-        }
+        data = overlay.model_dump(mode="json")
+        content = yaml.safe_dump(data, sort_keys=True, allow_unicode=True)
 
-        # Atomic write: tempfile + rename
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_path_str = tempfile.mkstemp(
-            dir=str(output_path.parent), suffix=".yaml.tmp"
+            dir=target_path.parent, prefix=".overlay_tmp_", suffix=".yaml"
         )
         tmp_path = Path(tmp_path_str)
         try:
             with os.fdopen(fd, "w") as f:
-                yaml.safe_dump(
-                    overlay_data, f, sort_keys=True, default_flow_style=False
-                )
+                f.write(content)
             tmp_path.chmod(0o600)
-            tmp_path.replace(output_path)
-        except BaseException:
-            if tmp_path.exists():
+            tmp_path.replace(target_path)
+        except Exception:
+            with suppress(OSError):
                 tmp_path.unlink()
             raise
-
-    def _classify_by_transport(
-        self, env_dict: dict[str, str]
-    ) -> dict[str, dict[str, str]]:
-        """Classify env keys into transport buckets. Sorted iteration for determinism."""
-        from omnibase_infra.enums import EnumInfraTransportType
-
-        result: dict[str, dict[str, str]] = {}
-        classified_keys: set[str] = set()
-
-        # Sorted enum iteration ensures deterministic output regardless of enum definition order
-        for transport in sorted(EnumInfraTransportType, key=lambda t: t.value):
-            transport_keys = self._transport_map.keys_for_transport(transport)
-            bucket: dict[str, str] = {}
-            for key in sorted(transport_keys):
-                if key in env_dict:
-                    bucket[key] = env_dict[key]
-                    classified_keys.add(key)
-            if bucket:
-                result[transport.value] = bucket
-
-        # Unclassified keys in sorted order
-        unclassified = {
-            k: env_dict[k] for k in sorted(env_dict.keys()) if k not in classified_keys
-        }
-        if unclassified:
-            result["custom"] = unclassified
-
-        return result

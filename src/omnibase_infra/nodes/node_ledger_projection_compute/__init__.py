@@ -25,7 +25,7 @@ Subscribed Topics:
     - onex.cmd.platform.request-introspection.v1
     - onex.evt.platform.fsm-state-transitions.v1
     - onex.intent.platform.runtime-tick.v1
-    - onex.snapshot.platform.registration-snapshots.v1
+    - onex.evt.platform.registration-snapshots.v1
 
 Consumer Configuration:
     - consumer_purpose: "audit" (non-processing, read-only)

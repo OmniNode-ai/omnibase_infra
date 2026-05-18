@@ -158,6 +158,11 @@ x-runtime-env: &runtime-env
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-0}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
+  # GitHub API/CLI auth for runtime-owned PR lifecycle inventory and merge gates.
+  # gh reads GH_TOKEN in non-interactive containers; handlers using HTTP clients
+  # read GITHUB_TOKEN.
+  GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
+  GH_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
   # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---
   # Infisical vars are only present when the secrets bundle is selected.
   # --- Container-internal service addresses (OMN-5381: same invariant as OMN-3431 for Kafka) ---

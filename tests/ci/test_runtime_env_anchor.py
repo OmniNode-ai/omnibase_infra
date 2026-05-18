@@ -46,6 +46,8 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "ONEX_LOG_LEVEL",
         "ONEX_ENVIRONMENT",
         "USE_EVENT_ROUTING",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
         "VALKEY_HOST",
         "VALKEY_PORT",
     }

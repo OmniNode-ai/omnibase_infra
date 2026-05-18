@@ -127,7 +127,7 @@ heartbeat collection, health checks, and scheduled workflows.
 """
 
 # Registration snapshots
-SUFFIX_REGISTRATION_SNAPSHOTS: str = "onex.snapshot.platform.registration-snapshots.v1"
+SUFFIX_REGISTRATION_SNAPSHOTS: str = "onex.evt.platform.registration-snapshots.v1"
 """Topic suffix for registration snapshot events.
 
 Published periodically with aggregated registration state. Used for
@@ -560,6 +560,20 @@ Producer: WiringHealthChecker (OMN-5292)
 Consumer: omnidash /wiring-health dashboard
 """
 
+SUFFIX_RUNTIME_MANIFEST_PUBLISHED: str = (
+    "onex.evt.omnibase-infra.runtime-manifest-published.v1"
+)
+"""Topic suffix for runtime manifest publication events.
+
+Published once per kernel startup, after all startup phases complete:
+contract discovery, ownership validation, handler registration, and topic
+ownership. Carries a ModelRuntimeManifest payload with contract_hash and
+topology_hash for drift detection.
+
+Producer: service_kernel.bootstrap() (OMN-11196)
+Consumer: omnidash platform-registry dashboard; drift detector (future)
+"""
+
 SUFFIX_CIRCUIT_BREAKER_STATE: str = "onex.evt.omnibase-infra.circuit-breaker.v1"
 """Topic suffix for circuit breaker state transition events.
 
@@ -808,6 +822,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Baselines ROI computation results (1 partition — low-throughput, per-cohort)
     ModelTopicSpec(
         suffix=SUFFIX_BASELINES_COMPUTED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Runtime manifest publication (1 partition — once per startup, OMN-11196)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",

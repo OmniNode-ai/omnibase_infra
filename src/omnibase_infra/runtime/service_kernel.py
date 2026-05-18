@@ -2255,6 +2255,7 @@ async def bootstrap() -> int:
         auto_wiring_report = None
         claimed_topic_patterns: set[str] = set()
         auto_wiring_manifest_for_subscriptions = None
+        auto_wiring_manifest_discovered = None  # OMN-11198: full discovery result
         lifecycle_executor = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
@@ -2268,6 +2269,9 @@ async def bootstrap() -> int:
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
             manifest = discover_contracts()
+            auto_wiring_manifest_discovered = (
+                manifest  # OMN-11198: captured for introspection
+            )
             logger.info(
                 "Auto-wiring discovery: %d contracts found, %d errors "
                 "(correlation_id=%s)",
@@ -2824,6 +2828,17 @@ async def bootstrap() -> int:
                 )
         health_server.attach_runtime(runtime)
 
+        # OMN-11198: Expose the auto-wiring manifest on /v1/introspection/manifest.
+        # Prefer the filtered manifest (actual subscriptions); fall back to the full
+        # discovery result when filtering was skipped.
+        _introspection_manifest = (
+            auto_wiring_manifest_for_subscriptions
+            if auto_wiring_manifest_for_subscriptions is not None
+            else auto_wiring_manifest_discovered
+        )
+        if _introspection_manifest is not None:
+            health_server.attach_manifest(_introspection_manifest)
+
         # 7. Setup graceful shutdown
         shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -3233,6 +3248,62 @@ async def bootstrap() -> int:
         # (OMN-3591).
         for handler in logging.root.handlers:
             handler.flush()
+
+        # 9.8. Emit runtime manifest snapshot (OMN-11196).
+        # Published once per startup after all phases complete.
+        # Non-fatal: failures are logged and the kernel continues.
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            try:
+                from omnibase_core.models.events.model_event_envelope import (
+                    ModelEventEnvelope,
+                )
+                from omnibase_infra.runtime.manifest_builder import (
+                    build_runtime_manifest,
+                )
+                from omnibase_infra.topics import SUFFIX_RUNTIME_MANIFEST_PUBLISHED
+
+                _manifest_topic = TopicResolver().resolve(
+                    SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
+                    correlation_id=correlation_id,
+                )
+                _runtime_profile_for_manifest = os.getenv("RUNTIME_PROFILE", "main")
+                _image_digest = os.getenv("ONEX_IMAGE_DIGEST")
+                _runtime_manifest = build_runtime_manifest(
+                    report=auto_wiring_report,
+                    manifest=auto_wiring_manifest_for_subscriptions,
+                    runtime_profile=_runtime_profile_for_manifest,
+                    image_digest=_image_digest,
+                )
+                _manifest_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                    payload=_runtime_manifest,
+                    correlation_id=correlation_id,
+                    event_type="runtime-manifest-published",
+                    source_tool="service_kernel",
+                )
+                await event_bus.publish_envelope(
+                    envelope=_manifest_envelope,
+                    topic=_manifest_topic,
+                )
+                logger.info(
+                    "Runtime manifest published (topic=%s, correlation_id=%s)",
+                    _manifest_topic,
+                    correlation_id,
+                )
+            except ImportError:
+                logger.debug(
+                    "ModelRuntimeManifest not available in omnibase_core — "
+                    "manifest emission skipped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: manifest emission is non-critical
+                logger.warning(
+                    "Failed to emit runtime manifest (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
 
         # Explicit run-loop entry log (OMN-3591)
         # This message confirms the kernel reached the blocking wait and did
