@@ -3572,6 +3572,37 @@ class RuntimeHostProcess:
 
         subcontract = ModelEventBusSubcontract.model_validate(event_bus_data)
         if subcontract.subscribe_topics:
+            # Provision new contract's topics before subscribing (OMN-11242).
+            # Best-effort: failure logs a warning but never blocks materialization.
+            _bootstrap = (
+                self._event_bus._bootstrap_servers  # type: ignore[union-attr]
+                if isinstance(self._event_bus, EventBusKafka)
+                else ""
+            )
+            if _bootstrap:
+                try:
+                    from omnibase_infra.event_bus.service_topic_manager import (
+                        TopicProvisioner,
+                    )
+
+                    _contracts_root = (
+                        self._contract_paths[0] if self._contract_paths else Path()
+                    )
+                    _provisioner = TopicProvisioner(
+                        bootstrap_servers=_bootstrap,
+                        contracts_root=_contracts_root,
+                    )
+                    for _topic in subcontract.subscribe_topics:
+                        await _provisioner.ensure_topic_exists(topic_name=_topic)
+                except Exception:  # noqa: BLE001 — boundary: best-effort, never blocks
+                    logger.warning(
+                        "Topic pre-provisioning failed for live contract (non-blocking): "
+                        "node=%s topics=%s",
+                        node_name,
+                        subcontract.subscribe_topics,
+                        exc_info=True,
+                    )
+
             await self._event_bus_wiring.wire_subscriptions(
                 subcontract=subcontract,
                 node_name=node_name,
