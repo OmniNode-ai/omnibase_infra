@@ -890,6 +890,112 @@ class MessageDispatchEngine:
         """
         return self._frozen
 
+    def _register_dispatcher_dynamic(
+        self,
+        dispatcher_id: str,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None = None,
+    ) -> None:
+        """Register a dispatcher post-freeze for dynamic contract materialization.
+
+        Identical to register_dispatcher() but skips the is_frozen check.
+        Does not support node_kind or operation_bindings — dynamic materialization
+        wires handlers that do not require context injection or operation binding.
+
+        INVARIANT: Only callable through validated contract materialization
+        (via _commit_handler_wiring with dynamic_materialization_authorized=True).
+        General application code must never call this directly — doing so bypasses
+        contract validation and security policy.
+
+        Thread-safe: acquires _registration_lock. Duplicate IDs still rejected.
+        """
+        if not dispatcher_id or not dispatcher_id.strip():
+            raise ModelOnexError(
+                message="Dispatcher ID cannot be empty or whitespace.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        if dispatcher is None or not callable(dispatcher):
+            raise ModelOnexError(
+                message=f"Dispatcher for '{dispatcher_id}' must be callable. "
+                f"Got {type(dispatcher).__name__}.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        try:
+            category = coerce_message_category(category)
+        except ValueError as exc:
+            raise ModelOnexError(
+                message=str(exc),
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            ) from exc
+
+        with self._registration_lock:
+            if dispatcher_id in self._dispatchers:
+                raise ModelOnexError(
+                    message=f"Dispatcher with ID '{dispatcher_id}' is already registered. "
+                    "Cannot register duplicate dispatcher ID.",
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+
+            accepts_context = self._dispatcher_accepts_context(dispatcher)
+            entry = DispatchEntryInternal(
+                dispatcher_id=dispatcher_id,
+                dispatcher=dispatcher,
+                category=category,
+                message_types=message_types,
+                node_kind=None,
+                accepts_context=accepts_context,
+                operation_bindings=None,
+            )
+            self._dispatchers[dispatcher_id] = entry
+            self._dispatchers_by_category[category].append(dispatcher_id)
+
+            self._logger.info(
+                "Dynamically registered dispatcher '%s' (category=%s, types=%s)",
+                dispatcher_id,
+                category.value,
+                message_types,
+            )
+
+    def _register_route_dynamic(self, route: ModelDispatchRoute) -> None:
+        """Register a route post-freeze for dynamic contract materialization.
+
+        Identical to register_route() but skips the is_frozen check.
+        Validates that the referenced dispatcher exists (may be dynamically registered).
+
+        INVARIANT: Only callable through validated contract materialization.
+        See _register_dispatcher_dynamic docstring.
+        """
+        if route is None:
+            raise ModelOnexError(
+                message="Cannot register None route. ModelDispatchRoute is required.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        with self._registration_lock:
+            if route.route_id in self._routes:
+                raise ModelOnexError(
+                    message=f"Route with ID '{route.route_id}' is already registered. "
+                    "Cannot register duplicate route ID.",
+                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+                )
+            rid = _get_route_dispatcher_id(route)
+            if rid not in self._dispatchers:
+                raise ModelOnexError(
+                    message=f"Route '{route.route_id}' references dispatcher "
+                    f"'{rid}' which is not registered.",
+                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                )
+            self._routes[route.route_id] = route
+            self._logger.info(
+                "Dynamically registered route '%s' (pattern=%s, dispatcher=%s)",
+                route.route_id,
+                route.topic_pattern,
+                rid,
+            )
+
     def _build_log_context(
         self, **kwargs: Unpack[ModelLogContextKwargs]
     ) -> dict[str, PrimitiveValue]:

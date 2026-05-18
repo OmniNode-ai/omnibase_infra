@@ -2226,6 +2226,7 @@ def _prepare_handler_wiring(
 def _commit_handler_wiring(
     prepared: PreparedWiring,
     dispatch_engine: object,
+    dynamic_materialization_authorized: bool = False,
 ) -> tuple[str, list[str]]:
     """Register a prepared handler wiring with the dispatch engine (side effects only).
 
@@ -2240,6 +2241,11 @@ def _commit_handler_wiring(
     keeps async-incompatible handlers off the dispatch engine so they
     cannot poison runtime-effects boot.
 
+    When ``dynamic_materialization_authorized=True`` and the engine is frozen,
+    the private dynamic registration methods are used instead of the standard
+    ones. This flag MUST only be set by ``materialize_cached_contract()`` after
+    full contract validation — never by general application code (OMN-11246).
+
     Returns:
         Tuple of (dispatcher_id, list of route_ids registered). Returns
         ``("", [])`` for skip / quarantined entries.
@@ -2247,20 +2253,38 @@ def _commit_handler_wiring(
     if prepared.is_skip or prepared.is_quarantined:
         return "", []
 
+    from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+    from omnibase_core.models.errors import ModelOnexError
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
     engine = dispatch_engine
     if isinstance(engine, MessageDispatchEngine):
-        engine.register_dispatcher(
-            dispatcher_id=prepared.dispatcher_id,
-            dispatcher=prepared.dispatcher,
-            category=prepared.category,
-            message_types=prepared.message_types,
-        )
-        for route in prepared.routes:
-            engine.register_route(route)
+        if engine.is_frozen:
+            if not dynamic_materialization_authorized:
+                raise ModelOnexError(
+                    message="Post-freeze registration requires explicit dynamic "
+                    "materialization authorization.",
+                    error_code=EnumCoreErrorCode.INVALID_STATE,
+                )
+            engine._register_dispatcher_dynamic(
+                dispatcher_id=prepared.dispatcher_id,
+                dispatcher=prepared.dispatcher,
+                category=prepared.category,
+                message_types=prepared.message_types,
+            )
+            for route in prepared.routes:
+                engine._register_route_dynamic(route)
+        else:
+            engine.register_dispatcher(
+                dispatcher_id=prepared.dispatcher_id,
+                dispatcher=prepared.dispatcher,
+                category=prepared.category,
+                message_types=prepared.message_types,
+            )
+            for route in prepared.routes:
+                engine.register_route(route)
 
     return prepared.dispatcher_id, prepared.route_ids
 
