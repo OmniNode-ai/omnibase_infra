@@ -208,6 +208,17 @@ jobs:
             exit 1
           fi
 
+      - name: Run database migrations (compose mode)
+        if: inputs.mode == 'compose'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # OMNIBASE_INFRA_DB_URL was set in the resolve_pg step to:
+          #   postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra
+          # The runner is now on omnibase-infra-network so omnibase-infra-postgres
+          # resolves by container-name DNS.
+          uv run python scripts/run-migrations.py
+
       - name: Stage contracts outside /home (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
