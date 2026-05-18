@@ -274,6 +274,7 @@ class DictBundleAdapter:
 
 __all__: list[str] = [
     "DictBundleAdapter",
+    "JsonPayload",
     "ProtocolEvidenceBundle",
     "write_evidence_bundle",
 ]
