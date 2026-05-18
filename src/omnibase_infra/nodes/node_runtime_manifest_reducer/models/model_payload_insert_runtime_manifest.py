@@ -7,7 +7,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.utils.util_pydantic_validators import (
+    validate_timezone_aware_datetime,
+)
 
 
 class ModelPayloadInsertRuntimeManifest(BaseModel):
@@ -37,6 +41,11 @@ class ModelPayloadInsertRuntimeManifest(BaseModel):
     ownership_violations: list[dict[str, object]] = Field(default_factory=list)
     image_digest: str | None = Field(default=None)
     started_at: datetime = Field(...)
+
+    @field_validator("started_at")
+    @classmethod
+    def _validate_started_at_tz(cls, v: datetime) -> datetime:
+        return validate_timezone_aware_datetime(v)
 
 
 __all__ = ["ModelPayloadInsertRuntimeManifest"]
