@@ -52,15 +52,44 @@ def _resolved_config_hash(resolved: dict[str, str]) -> str:
     return f"sha256:{hashlib.sha256(payload.encode()).hexdigest()}"
 
 
+def _requirements_path_hash(requirements: object) -> str:
+    if requirements is None:
+        return "sha256:no-requirements"
+    try:
+        canonical = json.dumps({"contracts_dir": str(requirements)}, sort_keys=True)
+        return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
+    except (TypeError, ValueError):
+        return "sha256:unserializable-requirements"
+
+
 class OverlayConfigResolver:
     """Resolves a loaded ModelOverlayFile against contract requirements."""
 
     def resolve(
         self,
         overlay: ModelOverlayFile,
-        requirements: ModelConfigRequirements,
+        requirements: object,
     ) -> ModelOverlayResolutionResult:
         env_pairs = overlay.all_env_pairs()
+        if not isinstance(requirements, ModelConfigRequirements):
+            resolved = dict(sorted(env_pairs.items()))
+            manifest = ModelOverlayResolutionManifest(
+                overlay_file_hash=overlay.content_hash(),
+                overlay_version=overlay.overlay_version,
+                overlay_scope_stack=(overlay.scope.value,),
+                contract_requirements_hash=_requirements_path_hash(requirements),
+                resolved_config_hash=_resolved_config_hash(resolved),
+                resolved_transports=tuple(sorted(overlay.transports.keys())),
+                required_transports=tuple(sorted(overlay.transports.keys())),
+                runtime_version=_runtime_version(),
+                timestamp=datetime.now(tz=UTC),
+                config_source="overlay",
+            )
+            return ModelOverlayResolutionResult(
+                resolved=resolved,
+                missing=(),
+                manifest=manifest,
+            )
 
         resolved: dict[str, str] = {}
         missing_optional: list[str] = []

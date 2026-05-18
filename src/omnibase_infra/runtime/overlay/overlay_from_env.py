@@ -59,7 +59,7 @@ def overlay_from_env_dict(
     *,
     output_path: Path,
     environment: str = ...,
-    scope: str | EnumOverlayScope = ...,
+    scope: object = ...,
     allow_unclassified: bool = ...,
     return_warnings: bool = ...,
 ) -> Path: ...
@@ -71,7 +71,7 @@ def overlay_from_env_dict(
     *,
     output_path: None = ...,
     environment: str = ...,
-    scope: str | EnumOverlayScope = ...,
+    scope: object = ...,
     allow_unclassified: bool = ...,
     return_warnings: Literal[False] = ...,
 ) -> ModelOverlayFile:
@@ -84,7 +84,7 @@ def overlay_from_env_dict(
     *,
     output_path: None = ...,
     environment: str = ...,
-    scope: str | EnumOverlayScope = ...,
+    scope: object = ...,
     allow_unclassified: bool = ...,
     return_warnings: Literal[True],
 ) -> tuple[ModelOverlayFile, list[str]]:
@@ -96,10 +96,10 @@ def overlay_from_env_dict(
     *,
     output_path: Path | None = None,
     environment: str = "local",
-    scope: str | EnumOverlayScope = EnumOverlayScope.ENV,
+    scope: object = EnumOverlayScope.ENV,
     allow_unclassified: bool = False,
     return_warnings: bool = False,
-) -> ModelOverlayFile | tuple[ModelOverlayFile, list[str]] | Path:
+) -> object:
     """Classify env keys into a ModelOverlayFile, optionally writing it to disk."""
     transports: dict[str, dict[str, str]] = {}
     services: dict[str, dict[str, str]] = {}
@@ -123,7 +123,7 @@ def overlay_from_env_dict(
                 "to place it in services.unclassified."
             )
 
-    scope_value = scope.value if isinstance(scope, EnumOverlayScope) else scope
+    scope_value = scope.value if isinstance(scope, EnumOverlayScope) else str(scope)
     overlay = ModelOverlayFile.model_validate(
         {
             "environment": environment,
