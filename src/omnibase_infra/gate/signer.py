@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from importlib import import_module
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 from omnibase_core.gate.receipt_canonical import canonical_receipt_payload
 from omnibase_core.models.gate.model_omnigate_receipt import ModelOmniGateReceipt

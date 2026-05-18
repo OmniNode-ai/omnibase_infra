@@ -92,7 +92,7 @@ def execute_validator(
             validator_ref.id,
             EnumReceiptStatus.FAIL,
             duration_ms,
-            f"Validator {validator_ref.id} raised {type(exc).__name__}: {exc}",
+            f"Validator {validator_ref.id} raised {type(exc).__name__}",
         )
 
 
@@ -150,12 +150,15 @@ def _validator_result(
     duration_ms: int,
     stdout_preview: str,
 ) -> ModelOmniGateCheckResult:
+    from omnibase_infra.gate.executor import redact_if_secret_bearing
+
+    redacted = redact_if_secret_bearing(stdout_preview)
     return ModelOmniGateCheckResult(
         name=validator_id,
         command=f"validator:{validator_id}",
         status=status,
         duration_ms=duration_ms,
-        stdout_preview=stdout_preview[:4096] if stdout_preview else None,
+        stdout_preview=redacted[:4096] if redacted else None,
         stdout_hash=None,
     )
 

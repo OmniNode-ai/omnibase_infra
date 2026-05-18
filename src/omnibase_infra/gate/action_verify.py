@@ -88,7 +88,7 @@ def verify_pr_receipt(
             return _decision(
                 ok=False,
                 action=_FAIL_ACTION,
-                reason=f"Invalid OmniGate receipt: {exc}",
+                reason=f"Invalid OmniGate receipt: {type(exc).__name__}",
             )
 
         receipt_diff_hash = _get_str_attr(receipt, "diff_hash")
@@ -120,7 +120,7 @@ def verify_pr_receipt(
         return _decision(
             ok=False,
             action=_FAIL_ACTION,
-            reason=f"OmniGate verifier failed closed: {exc}",
+            reason=f"OmniGate verifier failed closed: {type(exc).__name__}",
         )
 
 
@@ -286,12 +286,16 @@ def _decision(
     }
 
 
+_GIT_CAT_FILE_TIMEOUT_SECONDS = 10
+
+
 def _verify_commit_object(repo_path: Path, sha: str) -> None:
     subprocess.run(
         ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
         cwd=repo_path,
         check=True,
         capture_output=True,
+        timeout=_GIT_CAT_FILE_TIMEOUT_SECONDS,
     )
 
 

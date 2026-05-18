@@ -150,7 +150,20 @@ def _looks_secret_bearing(output: str) -> bool:
     return any(pattern.search(output) for pattern in _SECRET_PATTERNS)
 
 
+_SECRET_REDACTED_PLACEHOLDER = "<redacted: output appears to contain a secret>"
+
+
+def redact_if_secret_bearing(output: str | None) -> str | None:
+    """Public helper: replace a secret-bearing string with a fixed placeholder."""
+    if output is None:
+        return None
+    if _looks_secret_bearing(output):
+        return _SECRET_REDACTED_PLACEHOLDER
+    return output
+
+
 __all__ = [
     "SecretBearingOutputError",
     "execute_checks",
+    "redact_if_secret_bearing",
 ]
