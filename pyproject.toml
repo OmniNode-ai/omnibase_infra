@@ -167,7 +167,8 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.41.0" }
+# OMN-11142: pin to PR #1088 head until OmniGate models land in a tagged core release.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "bae67d9d234e5b142158b5976668a9579eaedbe1" }
 # v0.36.0: spi v0.21.0 tag does not exist yet (release in flight); pin to the
 # release branch and swap to `tag = "v0.21.0"` in a follow-up once tagged.
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
