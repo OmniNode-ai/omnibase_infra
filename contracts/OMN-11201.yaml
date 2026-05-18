@@ -6,12 +6,7 @@ summary: >
 
 is_seam_ticket: false
 interface_change: true
-interfaces_touched:
-  - "contracts table schema"
-  - "topics table schema"
-  - "registration_projections table schema"
-  - "ModelPayloadUpsertContract"
-  - "HandlerPostgresContractUpsert"
+interfaces_touched: []
 emergency_bypass:
   enabled: false
   justification: ""
@@ -30,4 +25,4 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "deploy: docker exec omninode-postgres psql -U omnibase -d omnibase_infra -c \"SELECT column_name FROM information_schema.columns WHERE table_name='contracts' AND column_name='data_provenance'\""
+        check_value: "deploy: docker exec omninode-postgres psql -U omnibase -d omnibase_infra -c \"SELECT table_name, column_name FROM information_schema.columns WHERE column_name='data_provenance' AND table_name IN ('contracts','topics','registration_projections') ORDER BY table_name\""
