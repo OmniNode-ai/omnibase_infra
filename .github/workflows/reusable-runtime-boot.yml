@@ -101,13 +101,22 @@ jobs:
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
             effective="${{ inputs.compose_pg_port }}"
-            # Compose mode: redpanda external listener maps to localhost:19092
-            # per the KAFKA_PORT default in docker-compose.e2e.yml.
-            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:19092" >> "$GITHUB_ENV"
-            # Allow localhost broker so the runtime's allowlist guard passes.
-            echo "KAFKA_BROKER_ALLOWLIST=localhost:" >> "$GITHUB_ENV"
-            # DB URL for compose postgres (external port published by e2e compose).
-            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@localhost:${{ inputs.compose_pg_port }}/omnibase_infra" >> "$GITHUB_ENV"
+            # Compose mode: self-hosted CI runners run inside Docker containers
+            # that share the Docker daemon with the compose stack via socket
+            # mount (/var/run/docker.sock). Port bindings (localhost:5433,
+            # localhost:19092) are on the HOST machine, not reachable from the
+            # runner container.
+            #
+            # Instead we connect the runner container directly to the compose
+            # network (omnibase-infra-network) and reach services by their
+            # container names on their INTERNAL ports.
+            #
+            # Kafka: redpanda internal listener is at redpanda:9092.
+            echo "KAFKA_BOOTSTRAP_SERVERS=redpanda:9092" >> "$GITHUB_ENV"
+            # Allow the redpanda internal hostname so the allowlist guard passes.
+            echo "KAFKA_BROKER_ALLOWLIST=redpanda:" >> "$GITHUB_ENV"
+            # DB URL via compose container name + internal postgres port.
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra" >> "$GITHUB_ENV"
           else
             effective="${{ inputs.pg_port }}"
           fi
@@ -161,30 +170,43 @@ jobs:
           set -euo pipefail
           POSTGRES_PORT="${{ inputs.compose_pg_port }}" \
             docker compose -f docker/docker-compose.e2e.yml up -d postgres redpanda
-          # Wait for both services to be healthy INSIDE compose AND reachable from
-          # the host. The runtime runs on the host and connects to localhost:PG_PORT
-          # and localhost:19092 — we must confirm those host-side ports are open
-          # before launching, otherwise HandlerDb / auto_configure fail instantly.
-          PG_HOST_PORT="${{ inputs.compose_pg_port }}"
-          KAFKA_HOST_PORT="19092"
+
+          # Self-hosted CI runners run inside Docker containers that share the
+          # host Docker daemon via /var/run/docker.sock. Port bindings on the
+          # host (localhost:5433, localhost:19092) are NOT reachable from the
+          # runner container. Connect the runner to the compose network so the
+          # runtime can reach services by container name on internal ports.
+          RUNNER_ID=$(cat /proc/self/cgroup 2>/dev/null \
+            | grep -oP '(?<=docker/)([0-9a-f]{64})' | head -1 || true)
+          if [[ -z "$RUNNER_ID" ]]; then
+            RUNNER_ID=$(hostname)
+          fi
+          echo "Runner container ID/name: ${RUNNER_ID}"
+          docker network connect omnibase-infra-network "${RUNNER_ID}" 2>/dev/null \
+            || echo "network connect skipped (may already be connected or not in Docker)"
+
+          # Wait for both compose services to be healthy via docker exec.
+          # No localhost TCP check needed — we reach them by container name.
           for i in $(seq 1 90); do
             pg_ok=false
             kafka_ok=false
-            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1 \
-               && bash -c ">/dev/tcp/localhost/${PG_HOST_PORT}" 2>/dev/null; then
+            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
               pg_ok=true
             fi
-            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1 \
-               && bash -c ">/dev/tcp/localhost/${KAFKA_HOST_PORT}" 2>/dev/null; then
+            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1; then
               kafka_ok=true
             fi
             if $pg_ok && $kafka_ok; then
-              echo "compose infra healthy and host ports reachable after ${i}s"
+              echo "compose infra healthy after ${i}s"
               break
             fi
             echo "waiting... pg=${pg_ok} kafka=${kafka_ok} (${i}s)"
             sleep 1
           done
+          if ! $pg_ok || ! $kafka_ok; then
+            echo "::error::compose services not healthy after 90s — pg=${pg_ok} kafka=${kafka_ok}"
+            exit 1
+          fi
 
       - name: Stage contracts outside /home (compose mode)
         if: inputs.mode == 'compose'
