@@ -12,6 +12,7 @@ The service exposes:
     - GET /health: Returns runtime liveness status as JSON (process alive)
     - GET /ready: Returns runtime readiness status as JSON (can serve traffic)
     - GET /health/detailed: Returns verbose per-component diagnostics (OMN-519)
+    - GET /v1/introspection/manifest: Returns auto-wiring manifest JSON (OMN-11198)
 
 Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
@@ -96,6 +97,9 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
+        ModelAutoWiringManifest,
+    )
     from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
@@ -304,6 +308,9 @@ class ServiceHealth:
         self._site: web.TCPSite | None = None
         self._is_running: bool = False
 
+        # OMN-11198: Manifest attached after startup for introspection endpoint
+        self._manifest: ModelAutoWiringManifest | None = None
+
         # OMN-519: Track last successful health check timestamps per component
         self._last_healthy_timestamps: dict[str, str] = {}
         # Track health phase transitions so frequent probes do not flood logs.
@@ -418,6 +425,15 @@ class ServiceHealth:
         self._runtime = runtime
         logger.info(
             "ServiceHealth attached runtime after early startup",
+            extra={"port": self._port, "host": self._host},
+        )
+
+    def attach_manifest(self, manifest: ModelAutoWiringManifest) -> None:
+        """Attach the auto-wiring manifest for the introspection endpoint (OMN-11198)."""
+        self._manifest = manifest
+        logger.info(
+            "ServiceHealth attached manifest (%d contracts)",
+            manifest.total_discovered,
             extra={"port": self._port, "host": self._host},
         )
 
@@ -679,6 +695,10 @@ class ServiceHealth:
             self._app.router.add_get("/health/detailed", self._handle_health_detailed)
             # OMN-10860: Skill dispatch endpoint
             self._app.router.add_post("/skill", self._handle_skill)
+            # OMN-11198: Manifest introspection endpoint (internal only)
+            self._app.router.add_get(
+                "/v1/introspection/manifest", self._handle_introspection_manifest
+            )
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -700,7 +720,13 @@ class ServiceHealth:
                 extra={
                     "host": self._host,
                     "port": self._port,
-                    "endpoints": ["/health", "/ready", "/health/detailed", "/skill"],
+                    "endpoints": [
+                        "/health",
+                        "/ready",
+                        "/health/detailed",
+                        "/skill",
+                        "/v1/introspection/manifest",
+                    ],
                     "version": self._version,
                 },
             )
@@ -1512,6 +1538,33 @@ class ServiceHealth:
                 status=503,
                 content_type="application/json",
             )
+
+    async def _handle_introspection_manifest(
+        self, request: web.Request
+    ) -> web.Response:
+        """Handle GET /v1/introspection/manifest (internal only, OMN-11198).
+
+        Returns the auto-wiring manifest as JSON so operators can inspect which
+        contracts were discovered at startup without SSHing into the container.
+
+        HTTP Status Codes:
+            - 200: Manifest is available; body is the full manifest JSON.
+            - 503: Manifest not yet built (startup not complete).
+        """
+        _ = request
+
+        if self._manifest is None:
+            return web.Response(
+                text='{"error": "manifest not yet built", "status": "starting"}',
+                status=503,
+                content_type="application/json",
+            )
+
+        return web.Response(
+            text=self._manifest.model_dump_json(),
+            status=200,
+            content_type="application/json",
+        )
 
 
 __all__: list[str] = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "ServiceHealth"]

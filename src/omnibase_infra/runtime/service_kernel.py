@@ -2255,6 +2255,7 @@ async def bootstrap() -> int:
         auto_wiring_report = None
         claimed_topic_patterns: set[str] = set()
         auto_wiring_manifest_for_subscriptions = None
+        auto_wiring_manifest_discovered = None  # OMN-11198: full discovery result
         lifecycle_executor = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
@@ -2268,6 +2269,9 @@ async def bootstrap() -> int:
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
             manifest = discover_contracts()
+            auto_wiring_manifest_discovered = (
+                manifest  # OMN-11198: captured for introspection
+            )
             logger.info(
                 "Auto-wiring discovery: %d contracts found, %d errors "
                 "(correlation_id=%s)",
@@ -2823,6 +2827,17 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
         health_server.attach_runtime(runtime)
+
+        # OMN-11198: Expose the auto-wiring manifest on /v1/introspection/manifest.
+        # Prefer the filtered manifest (actual subscriptions); fall back to the full
+        # discovery result when filtering was skipped.
+        _introspection_manifest = (
+            auto_wiring_manifest_for_subscriptions
+            if auto_wiring_manifest_for_subscriptions is not None
+            else auto_wiring_manifest_discovered
+        )
+        if _introspection_manifest is not None:
+            health_server.attach_manifest(_introspection_manifest)
 
         # 7. Setup graceful shutdown
         shutdown_event = asyncio.Event()
