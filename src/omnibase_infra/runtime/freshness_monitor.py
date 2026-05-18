@@ -141,10 +141,7 @@ class ServiceFreshnessMonitor:
         self._running = False
         if self._task is not None:
             self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
         logger.info("ServiceFreshnessMonitor stopped")
 
@@ -244,8 +241,6 @@ class ServiceFreshnessMonitor:
             try:
                 await asyncio.sleep(self._check_interval)
                 await self.run_once()
-            except asyncio.CancelledError:
-                break
             except Exception:  # noqa: BLE001 — never crash the loop
                 logger.warning(
                     "ServiceFreshnessMonitor loop iteration failed (will retry in %ds)",
