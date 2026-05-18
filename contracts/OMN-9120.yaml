@@ -4,7 +4,10 @@
 # This file is the per-repo deploy-evidence carrier only.
 schema_version: '1.0.0'
 ticket_id: OMN-9120
-summary: 'CI Gate — Runtime Boot Smoke Test'
+title: CI Gate — Runtime Boot Smoke Test
+summary: >
+  Wires the existing reusable-runtime-boot.yml workflow into ci.yml as a caller job (runtime-boot-smoke). The workflow boots the runtime in compose mode after the test suite passes and asserts /health, 60s stability, startup log cleanliness, and consumer group membership. ci-summary includes runtime-boot-smoke as a hard merge gate.
+
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
