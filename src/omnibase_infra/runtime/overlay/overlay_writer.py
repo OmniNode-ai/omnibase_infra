@@ -23,23 +23,15 @@ _SECRET_KEY_PATTERN = re.compile(
 
 
 def _contains_secret_keys(overlay: ModelOverlayFile) -> bool:
-    for section in (overlay.secrets,):
-        for k in section:
-            if _SECRET_KEY_PATTERN.search(k):
-                return True
-    for transport_vals in overlay.transports.values():
-        for k in transport_vals:
-            if _SECRET_KEY_PATTERN.search(k):
-                return True
-    for svc_vals in overlay.services.values():
-        for k in svc_vals:
-            if _SECRET_KEY_PATTERN.search(k):
-                return True
-    for llm_vals in overlay.llm.values():
-        for k in llm_vals:
-            if _SECRET_KEY_PATTERN.search(k):
-                return True
-    return bool(overlay.secrets)
+    key_sections = (
+        overlay.secrets.keys(),
+        *(vals.keys() for vals in overlay.transports.values()),
+        *(vals.keys() for vals in overlay.services.values()),
+        *(vals.keys() for vals in overlay.llm.values()),
+    )
+    return any(
+        _SECRET_KEY_PATTERN.search(key) for section in key_sections for key in section
+    )
 
 
 class OverlayWriter:

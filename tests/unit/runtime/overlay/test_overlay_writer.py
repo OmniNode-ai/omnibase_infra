@@ -103,3 +103,12 @@ class TestOverlayWriter:
         with caplog.at_level(logging.WARNING):
             OverlayWriter().write(overlay, target)
         assert not any("secret" in r.message.lower() for r in caplog.records)
+
+    def test_no_warning_for_non_matching_secret_section_key(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        overlay = _make_overlay(secrets={"INFISICAL_CLIENT_ID": "client-id"})
+        target = tmp_path / "overlay.yaml"
+        with caplog.at_level(logging.WARNING):
+            OverlayWriter().write(overlay, target)
+        assert not any("secret" in r.message.lower() for r in caplog.records)
