@@ -45,7 +45,7 @@ def _make_contract(
     sla_seconds: int = 30,
     freshness_field: str = "last_seen_at",
     freshness_source_table: str = "test_table",
-    behavior: EnumDegradedBehavior = EnumDegradedBehavior.SERVE_STALE,
+    behavior: EnumDegradedBehavior = EnumDegradedBehavior.SERVE_STALE_WITH_WARNING,
 ) -> ModelProjectionContract:
     return ModelProjectionContract(
         projection_name=name,
@@ -135,7 +135,7 @@ class TestDegradationEvent:
         contract = _make_contract(
             name="my_proj",
             sla_seconds=30,
-            behavior=EnumDegradedBehavior.SERVE_STALE,
+            behavior=EnumDegradedBehavior.SERVE_STALE_WITH_WARNING,
         )
 
         async def query(table: str, field: str) -> datetime:
@@ -150,7 +150,7 @@ class TestDegradationEvent:
         assert evt.projection_name == "my_proj"
         assert evt.sla_seconds == 30
         assert evt.actual_staleness_seconds > 30
-        assert evt.degraded_behavior == "serve_stale"
+        assert evt.degraded_behavior == "serve_stale_with_warning"
         assert evt.source_contract_hash  # non-empty string
         assert isinstance(evt.observed_at, datetime)
 
