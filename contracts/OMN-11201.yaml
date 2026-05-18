@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11201"
+title: "Add data_provenance column to projection tables"
+summary: >
+  Add data_provenance TEXT column (default 'unknown') to contracts, topics, and registration_projections tables via migration 078. Thread the new field through ModelPayloadUpsertContract, HandlerPostgresContractUpsert, the reducer, and the projection models so projection consumers can reason about data quality origin (demo_seeded, demo_projected_shortcut, measured, estimated, unknown).
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "contracts table schema"
+  - "topics table schema"
+  - "registration_projections table schema"
+  - "ModelPayloadUpsertContract"
+  - "HandlerPostgresContractUpsert"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "Unit and integration tests pass for data_provenance plumbing."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_data_provenance_flow.py tests/integration/projections/test_data_provenance_integration.py -v"
+  - id: "dod-deploy"
+    description: >
+      Deploy: after merging, run migration 078 on 192.168.86.201 and verify the data_provenance column exists on all three projection tables.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-postgres psql -U omnibase -d omnibase_infra -c \"SELECT column_name FROM information_schema.columns WHERE table_name='contracts' AND column_name='data_provenance'\""
