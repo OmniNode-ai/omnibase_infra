@@ -1258,7 +1258,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 "Contract materialization failed",
                 extra={
                     "node_name": node_name,
-                    "error": sanitize_error_message(str(exc)),
+                    "error": sanitize_error_message(exc),
                     "error_type": type(exc).__name__,
                 },
             )
