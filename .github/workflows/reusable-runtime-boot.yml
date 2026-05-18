@@ -122,8 +122,18 @@ jobs:
         if: inputs.mode == 'compose'
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends jq curl postgresql-client
+          # Self-hosted runners (omnibase-ci) already have jq, curl, and psql
+          # installed; skip apt when they're present to avoid sudo requirement.
+          missing=()
+          command -v jq    >/dev/null 2>&1 || missing+=(jq)
+          command -v curl  >/dev/null 2>&1 || missing+=(curl)
+          command -v psql  >/dev/null 2>&1 || missing+=(postgresql-client)
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends "${missing[@]}"
+          else
+            echo "jq, curl, psql already available — skipping apt install"
+          fi
           # rpk is executed via `docker exec` against the compose-managed
           # omnibase-infra-redpanda container, so a host-level rpk install is
           # unnecessary in compose mode.
