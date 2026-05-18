@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
