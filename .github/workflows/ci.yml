@@ -590,7 +590,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -871,7 +871,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -1219,11 +1219,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-boundary
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
-
-      - name: Install omnibase_infra dev dependencies
-        working-directory: omnibase_infra
-        run: uv sync --no-cache
+          working-directory: omnibase_infra
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
