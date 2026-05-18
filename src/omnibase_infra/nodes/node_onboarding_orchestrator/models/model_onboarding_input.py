@@ -57,11 +57,30 @@ class ModelOnboardingInput(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_env_output_path_when_writing(self) -> ModelOnboardingInput:
-        """Reject dry_run=False with no env_output_path at construction time."""
-        if not self.dry_run and (
-            self.env_output_path is None or not self.env_output_path.strip()
-        ):
-            msg = "env_output_path is required when dry_run=False"
+        """Reject write mode unless at least one requested output path is valid."""
+        if self.dry_run:
+            return self
+
+        has_env_path = self.env_output_path is not None and bool(
+            self.env_output_path.strip()
+        )
+        has_overlay_path = self.overlay_output_path is not None and bool(
+            self.overlay_output_path.strip()
+        )
+        if self.env_output_path is not None and not has_env_path:
+            msg = "env_output_path cannot be blank"
+            raise ValueError(msg)
+        if self.overlay_output_path is not None and not has_overlay_path:
+            msg = "overlay_output_path cannot be blank"
+            raise ValueError(msg)
+        if self.legacy_env_output and not has_env_path:
+            msg = "env_output_path is required when legacy_env_output=True"
+            raise ValueError(msg)
+        if not has_env_path and not has_overlay_path:
+            msg = (
+                "overlay_output_path is required when dry_run=False and "
+                "legacy_env_output=False"
+            )
             raise ValueError(msg)
         return self
 

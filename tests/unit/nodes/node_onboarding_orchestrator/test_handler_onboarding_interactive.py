@@ -244,6 +244,32 @@ class TestHandlerInteractivePath:
                 env_output_path=None,
             )
 
+    def test_dry_run_false_blank_env_output_path_raises(self) -> None:
+        """Provided env_output_path must not be blank."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="env_output_path cannot be blank"):
+            ModelOnboardingInput(
+                policy_name="interactive_onboarding",
+                dry_run=False,
+                env_output_path="   ",
+                overlay_output_path="overlay.yaml",
+            )
+
+    def test_dry_run_false_blank_overlay_output_path_raises(self) -> None:
+        """Provided overlay_output_path must not be blank."""
+        from pydantic import ValidationError
+
+        with pytest.raises(
+            ValidationError, match="overlay_output_path cannot be blank"
+        ):
+            ModelOnboardingInput(
+                policy_name="interactive_onboarding",
+                dry_run=False,
+                env_output_path="onboarding.env",
+                overlay_output_path="   ",
+            )
+
     @pytest.mark.asyncio
     async def test_interactive_without_adapter_raises(self) -> None:
         """Interactive policy without input_adapter raises OnboardingHandlerError."""
