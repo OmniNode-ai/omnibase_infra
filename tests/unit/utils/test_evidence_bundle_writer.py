@@ -81,6 +81,31 @@ class TestEvidenceBundleDirectoryCreation:
         with pytest.raises(ValueError, match="correlation_id"):
             write_evidence_bundle(tmp_path, bundle)
 
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "../escape",
+            "nested/path",
+            "back\\slash",
+            ".",
+            "..",
+            ".hidden",
+            "/absolute",
+        ],
+    )
+    def test_correlation_id_path_traversal_rejected(
+        self, tmp_path: Path, bad_id: str
+    ) -> None:
+        bundle = {"correlation_id": bad_id, "run_manifest": {}}
+        with pytest.raises(ValueError, match="single path segment"):
+            write_evidence_bundle(tmp_path, bundle)
+
+    def test_existing_bundle_dir_raises_file_exists(self, tmp_path: Path) -> None:
+        bundle = _make_minimal_bundle("corr-replay")
+        write_evidence_bundle(tmp_path, bundle)
+        with pytest.raises(FileExistsError, match="already exists"):
+            write_evidence_bundle(tmp_path, bundle)
+
 
 @pytest.mark.unit
 class TestEvidenceBundleArtifactsWritten:

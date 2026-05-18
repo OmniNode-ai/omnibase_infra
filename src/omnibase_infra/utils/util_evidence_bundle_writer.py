@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Protocol, cast, runtime_checkable
 
 from omnibase_core.types import JsonType
@@ -131,9 +131,26 @@ def write_evidence_bundle(evidence_root: Path, bundle: object) -> Path:
     correlation_id: str = adapted.correlation_id
     if not correlation_id:
         raise ValueError("bundle.correlation_id must be non-empty")
+    if (
+        "/" in correlation_id
+        or "\\" in correlation_id
+        or correlation_id in {".", ".."}
+        or correlation_id.startswith(".")
+        or PurePosixPath(correlation_id).is_absolute()
+        or PureWindowsPath(correlation_id).is_absolute()
+    ):
+        raise ValueError(
+            "bundle.correlation_id must be a single path segment without "
+            f"separators or traversal markers; got: {correlation_id!r}",
+        )
 
     bundle_dir = evidence_root / correlation_id
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    if bundle_dir.exists():
+        raise FileExistsError(
+            f"Evidence bundle already exists at {bundle_dir}; refusing to "
+            "overwrite a previously written bundle for this correlation_id",
+        )
+    bundle_dir.mkdir(parents=True)
 
     artifact_entries: list[JsonPayload] = []
     write_counter = 0
