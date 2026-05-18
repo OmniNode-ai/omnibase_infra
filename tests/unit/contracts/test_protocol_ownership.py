@@ -155,6 +155,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
+    # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
+    "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

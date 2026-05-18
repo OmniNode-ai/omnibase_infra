@@ -189,15 +189,12 @@ class TestArtifactManifest:
         bundle = _make_full_bundle("corr-recompute")
         bundle_dir = write_evidence_bundle(tmp_path, bundle)
         proof_text = (bundle_dir / _PROOF_SUMMARY).read_text()
-        # Extract sha256 from proof_summary.md
-        recorded_sha: str | None = None
+        recorded_sha = ""
         for line in proof_text.splitlines():
             if "artifact_manifest_sha256" in line:
-                # line: **artifact_manifest_sha256**: `<hex>`
                 recorded_sha = line.split("`")[1]
                 break
-        if recorded_sha is None:
-            pytest.fail("artifact_manifest_sha256 not found in proof_summary.md")
+        assert recorded_sha, "artifact_manifest_sha256 not found in proof_summary.md"
 
         actual_sha = _sha256(bundle_dir / _ARTIFACT_MANIFEST)
         assert actual_sha == recorded_sha

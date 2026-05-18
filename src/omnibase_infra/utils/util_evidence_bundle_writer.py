@@ -51,26 +51,32 @@ class ProtocolEvidenceBundle(Protocol):
     @property
     def correlation_id(self) -> str:
         """Unique correlation ID for this run; used as the bundle directory name."""
+        ...
 
     @property
     def run_manifest(self) -> JsonPayload:
         """Run-level metadata (node, version, timestamps, plan slug, etc.)."""
+        ...
 
     @property
     def contract_snapshot(self) -> JsonPayload | None:
         """Snapshot of the contract YAML at execution time, or None."""
+        ...
 
     @property
     def input(self) -> JsonPayload | None:
         """Node input payload, or None."""
+        ...
 
     @property
     def output(self) -> JsonPayload | None:
         """Node output payload, or None."""
+        ...
 
     @property
     def verifier_result(self) -> JsonPayload | None:
         """Optional verifier / DoD check result, or None."""
+        ...
 
 
 def _sha256_file(path: Path) -> str:
@@ -207,8 +213,7 @@ def write_evidence_bundle(evidence_root: Path, bundle: object) -> Path:
     ]
     for entry in artifact_entries:
         proof_lines.append(
-            f"- `{entry['filename']}` (write_order={entry['write_order']}, "
-            f"sha256=`{entry['sha256']}`)"
+            f"- `{entry['filename']}` (write_order={entry['write_order']}, sha256=`{entry['sha256']}`)"
         )
     completeness_text = (
         "This file is the atomicity sentinel. Its presence means all declared "
