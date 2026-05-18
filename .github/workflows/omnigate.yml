@@ -1,0 +1,63 @@
+name: OmniGate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.fork == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch trusted PR refs
+        run: |
+          git fetch --no-tags origin "${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags "${{ github.event.pull_request.head.repo.clone_url }}" "${{ github.event.pull_request.head.sha }}"
+          git cat-file -e "${{ github.event.pull_request.base.sha }}^{commit}"
+          git cat-file -e "${{ github.event.pull_request.head.sha }}^{commit}"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OmniGate
+        run: |
+          if [ "${OMNIGATE_INSTALL_MODE:-repo-local}" = "published" ]; then
+            pip install omnigate==0.1.0
+          elif [ -d ./omnibase_core ] && [ -d ./omnibase_infra ]; then
+            pip install -e ./omnibase_core -e ./omnibase_infra
+          else
+            pip install -e .
+          fi
+
+      - name: Checkout trusted base config
+        run: |
+          git show "${{ github.event.pull_request.base.sha }}:.omnigate.yaml" > /tmp/omnigate.base.yaml
+
+      - name: Verify receipt
+        run: |
+          python -m omnibase_infra.gate.action_verify \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repo-path . \
+            --config /tmp/omnigate.base.yaml \
+            --decision-out /tmp/omnigate-decision.json
+
+      - name: Upload decision artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnigate-decision
+          path: /tmp/omnigate-decision.json
+
+  # Deferred to v0.2:
+  # A trusted write-token workflow may read the decision artifact and apply
+  # labels, comments, or close actions. It must not checkout or execute PR
+  # branch code and needs its own threat-model task.
