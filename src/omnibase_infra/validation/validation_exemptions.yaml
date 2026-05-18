@@ -3081,6 +3081,17 @@ pattern_exemptions:
       - docker/migrations/forward/075_create_waste_findings.sql (rule_id VARCHAR(64))
     ticket: OMN-10341
   # ==========================================================================
+  # Dynamic Materialization Result (OMN-11244)
+  # ==========================================================================
+  - file_pattern: 'model_dynamic_materialization\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name in ModelDynamicMaterializationResult is the canonical node name string (e.g., "node_registration_orchestrator") identifying which cached contract was materialized. It is the contract's own semantic name, not a foreign-key reference to a database entity. The cache key is the node name; no UUID ID + display_name pattern applies here.
+
+    documentation:
+      - src/omnibase_infra/runtime/models/model_dynamic_materialization.py
+    ticket: OMN-11244
+  # ==========================================================================
   # Contract Verification Models (OMN-7042)
   # ==========================================================================
   # contract_name is a canonical identifier string (e.g., "node_registration_orchestrator")
@@ -3526,3 +3537,14 @@ union_exemptions:
       - CLAUDE.md (Type Annotation Conventions - Union patterns)
       - Standard JSON config pattern (RFC 8259)
     ticket: null
+  # ==========================================================================
+  # Dynamic Materialization Result Exemptions (OMN-11244)
+  # ==========================================================================
+  - file_pattern: 'model_dynamic_materialization\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is the cache key (node identifier string, e.g. "claude_hook_effect") used to look up the descriptor in KafkaContractCache.get(). It is NOT a reference to a Contract entity — it is a status field on a value-object result model echoing back which key was materialized. No UUID + display_name decomposition applies to a cache-key echo field.
+
+    documentation:
+      - OMN-11244 (event-driven contract materialization)
+    ticket: OMN-11244
