@@ -188,23 +188,21 @@ class TestHandlerUpsertMergeGateQuarantine:
             }
         )
 
-        with (
-            patch.dict(
-                "os.environ",
-                {"LINEAR_API_KEY": "test-key", "LINEAR_TEAM_ID": "team-123"},
-            ),
-            patch(
-                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-                "handler_upsert_merge_gate.httpx.AsyncClient"
-            ) as mock_client_cls,
-        ):
+        with patch(
+            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+            "handler_upsert_merge_gate.httpx.AsyncClient"
+        ) as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
 
-            handler = HandlerUpsertMergeGate(pool)
+            handler = HandlerUpsertMergeGate(
+                pool,
+                linear_api_key="test-key",
+                linear_team_id="team-123",
+            )
             result = await handler.handle(payload, uuid4())
 
         assert result.success is True
@@ -255,20 +253,15 @@ class TestHandlerUpsertMergeGateQuarantine:
 
     @pytest.mark.asyncio
     async def test_quarantine_without_linear_config_still_succeeds(self) -> None:
-        """QUARANTINE without LINEAR_API_KEY skips ticket, upsert still succeeds."""
+        """QUARANTINE without injected Linear config skips ticket, upsert still succeeds."""
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value={"was_insert": True})
         pool = create_mock_pool_with_conn(conn)
 
         payload = make_gate_payload(decision="QUARANTINE")
 
-        with patch.dict(
-            "os.environ",
-            {"LINEAR_API_KEY": "", "LINEAR_TEAM_ID": ""},
-            clear=False,
-        ):
-            handler = HandlerUpsertMergeGate(pool)
-            result = await handler.handle(payload, uuid4())
+        handler = HandlerUpsertMergeGate(pool)
+        result = await handler.handle(payload, uuid4())
 
         assert result.success is True
 
@@ -281,23 +274,21 @@ class TestHandlerUpsertMergeGateQuarantine:
 
         payload = make_gate_payload(decision="QUARANTINE")
 
-        with (
-            patch.dict(
-                "os.environ",
-                {"LINEAR_API_KEY": "test-key", "LINEAR_TEAM_ID": "team-123"},
-            ),
-            patch(
-                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-                "handler_upsert_merge_gate.httpx.AsyncClient"
-            ) as mock_client_cls,
-        ):
+        with patch(
+            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+            "handler_upsert_merge_gate.httpx.AsyncClient"
+        ) as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
             mock_client_cls.return_value = mock_client
 
-            handler = HandlerUpsertMergeGate(pool)
+            handler = HandlerUpsertMergeGate(
+                pool,
+                linear_api_key="test-key",
+                linear_team_id="team-123",
+            )
             result = await handler.handle(payload, uuid4())
 
         # Upsert succeeded even though Linear failed
@@ -432,10 +423,93 @@ class TestTierAContractGateProfile:
         assert len(profile.rules) == 13
 
 
+# =============================================================================
+# Tests: injected Linear config (OMN-10814)
+# =============================================================================
+
+
+class TestHandlerUpsertMergeGateInjectedConfig:
+    """Test that injected linear_api_key/linear_team_id take precedence over env vars."""
+
+    @pytest.mark.asyncio
+    async def test_injected_api_key_used_over_env_var(self) -> None:
+        """Constructor-injected linear_api_key is used; env var is not read."""
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(return_value={"was_insert": True})
+        pool = create_mock_pool_with_conn(conn)
+
+        violations = [
+            ModelMergeGateViolation(
+                rule_code="RRH-1001",
+                severity="FAIL",
+                message="Working tree is dirty",
+            ),
+        ]
+        payload = make_gate_payload(decision="QUARANTINE", violations=violations)
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = MagicMock(
+            return_value={
+                "data": {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {"id": "i1", "identifier": "OMN-1", "url": "http://x"},
+                    }
+                }
+            }
+        )
+
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+                "handler_upsert_merge_gate.httpx.AsyncClient"
+            ) as mock_client_cls,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            handler = HandlerUpsertMergeGate(
+                pool,
+                linear_api_key="injected-key",
+                linear_team_id="injected-team",
+            )
+            result = await handler.handle(payload, uuid4())
+
+        assert result.success is True
+        mock_client.post.assert_called_once()
+        post_kwargs = mock_client.post.call_args[1]
+        assert post_kwargs["headers"]["Authorization"] == "injected-key"
+
+    @pytest.mark.asyncio
+    async def test_no_injected_config_skips_linear_ticket(self) -> None:
+        """Without injected linear config, QUARANTINE upsert succeeds but Linear is skipped."""
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(return_value={"was_insert": True})
+        pool = create_mock_pool_with_conn(conn)
+
+        payload = make_gate_payload(decision="QUARANTINE")
+
+        with patch(
+            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+            "handler_upsert_merge_gate.httpx.AsyncClient"
+        ) as mock_client_cls:
+            handler = HandlerUpsertMergeGate(pool)
+            result = await handler.handle(payload, uuid4())
+
+        assert result.success is True
+        mock_client_cls.assert_not_called()
+
+
 __all__: list[str] = [
     "TestHandlerUpsertMergeGateSuccess",
     "TestHandlerUpsertMergeGateQuarantine",
     "TestHandlerUpsertMergeGateErrors",
     "TestModelMergeGateResult",
     "TestTierAContractGateProfile",
+    "TestHandlerUpsertMergeGateInjectedConfig",
 ]
