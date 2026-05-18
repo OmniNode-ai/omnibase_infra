@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from importlib.metadata import EntryPoint, entry_points
+from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from omnibase_core.enums.ticket.enum_receipt_status import EnumReceiptStatus
 from omnibase_core.models.common.model_validation_result import ModelValidationResult
@@ -57,8 +57,7 @@ def resolve_validator(validator_id: str) -> object | None:
     """Resolve a validator from entry points first, then built-ins."""
     for entry_point in entry_points(group=ENTRY_POINT_GROUP):
         if entry_point.name == validator_id:
-            typed_entry_point = cast("EntryPoint", entry_point)
-            loaded_validator: object = typed_entry_point.load()
+            loaded_validator: object = entry_point.load()
             return loaded_validator
     return _BUILTIN_VALIDATORS.get(validator_id)
 

@@ -21,10 +21,7 @@ class OmniGateSigner:
 
     def serialize_for_signing(self, receipt: ModelOmniGateReceipt) -> bytes:
         """Return the canonical receipt bytes covered by the signature."""
-        return cast(
-            "bytes",
-            canonical_receipt_payload(receipt, exclude_signature=True),
-        )
+        return canonical_receipt_payload(receipt, exclude_signature=True)
 
     def sign(self, receipt: ModelOmniGateReceipt) -> ModelOmniGateReceipt:
         """Return a receipt copy with a Sigstore bundle JSON string."""
