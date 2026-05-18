@@ -101,6 +101,9 @@ jobs:
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
             effective="${{ inputs.compose_pg_port }}"
+            # Compose mode: redpanda external listener maps to localhost:19092
+            # per the KAFKA_PORT default in docker-compose.e2e.yml.
+            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:19092" >> "$GITHUB_ENV"
           else
             effective="${{ inputs.pg_port }}"
           fi
