@@ -3354,6 +3354,17 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/onboarding/model_interactive_policy.py
     ticket: OMN-10782
+  # ==========================================================================
+  # Dynamic Materialization Result Exemptions (OMN-11244)
+  # ==========================================================================
+  - file_pattern: 'model_dynamic_materialization\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is the cache key (node identifier string, e.g. "claude_hook_effect") used to look up the descriptor in KafkaContractCache.get(). It is NOT a reference to a Contract entity — it is a status field on a value-object result model echoing back which key was materialized. No UUID + display_name decomposition applies to a cache-key echo field.
+
+    documentation:
+      - OMN-11244 (event-driven contract materialization)
+    ticket: OMN-11244
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -3526,14 +3537,3 @@ union_exemptions:
       - CLAUDE.md (Type Annotation Conventions - Union patterns)
       - Standard JSON config pattern (RFC 8259)
     ticket: null
-  # ==========================================================================
-  # Dynamic Materialization Result Exemptions (OMN-11244)
-  # ==========================================================================
-  - file_pattern: 'model_dynamic_materialization\.py'
-    violation_pattern: "Field 'contract_name' might reference an entity"
-    reason: >
-      contract_name is the cache key (node identifier string, e.g. "claude_hook_effect") used to look up the descriptor in KafkaContractCache.get(). It is NOT a reference to a Contract entity — it is a status field on a value-object result model echoing back which key was materialized. No UUID + display_name decomposition applies to a cache-key echo field.
-
-    documentation:
-      - OMN-11244 (event-driven contract materialization)
-    ticket: OMN-11244
