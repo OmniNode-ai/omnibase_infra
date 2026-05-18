@@ -49,7 +49,7 @@ def check_scripts(scripts_dir: Path) -> list[str]:
     """Return list of warning strings for scripts missing provenance."""
     warnings: list[str] = []
 
-    candidates = sorted(scripts_dir.glob("*.py"))
+    candidates = sorted(scripts_dir.rglob("*.py"))
     for path in candidates:
         if not _is_seed_or_demo(path):
             continue
