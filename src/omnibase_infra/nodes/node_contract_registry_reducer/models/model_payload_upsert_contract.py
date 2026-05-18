@@ -84,6 +84,14 @@ class ModelPayloadUpsertContract(BaseModel):
 
     is_active: bool = Field(default=True, description="Whether contract is active.")
 
+    data_provenance: str = Field(
+        default="unknown",
+        description=(
+            "Origin of projected data. Valid values: "
+            "demo_seeded, demo_projected_shortcut, measured, estimated, unknown."
+        ),
+    )
+
     registered_at: datetime = Field(..., description="Registration timestamp.")
 
     last_seen_at: datetime = Field(..., description="Last heartbeat timestamp.")

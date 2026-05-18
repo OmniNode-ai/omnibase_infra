@@ -277,6 +277,15 @@ class ModelRegistrationProjection(BaseModel):
         description="Timestamp of last projection update",
     )
 
+    # Data provenance (OMN-11201)
+    data_provenance: str = Field(
+        default="unknown",
+        description=(
+            "Origin of projected data. Valid values: "
+            "demo_seeded, demo_projected_shortcut, measured, estimated, unknown."
+        ),
+    )
+
     # Tracing
     correlation_id: UUID | None = Field(
         default=None,

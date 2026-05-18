@@ -215,6 +215,23 @@ class ContractRegistryReducer:
         partition = int(partition_raw) if isinstance(partition_raw, (int, str)) else 0
         offset = int(offset_raw) if isinstance(offset_raw, (int, str)) else 0
 
+        # Extract data_provenance; fall back to "unknown" for absent/unrecognised values
+        _VALID_PROVENANCE = frozenset(
+            {
+                "demo_seeded",
+                "demo_projected_shortcut",
+                "measured",
+                "estimated",
+                "unknown",
+            }
+        )
+        provenance_raw = event_metadata.get("data_provenance", "unknown")
+        data_provenance = (
+            str(provenance_raw)
+            if isinstance(provenance_raw, str) and provenance_raw in _VALID_PROVENANCE
+            else "unknown"
+        )
+
         # Warn if metadata is incomplete (could cause idempotency issues)
         if not topic or partition_raw is None or offset_raw is None:
             _logger.warning(
@@ -243,7 +260,9 @@ class ContractRegistryReducer:
         # model routing where the union type is exhaustive and statically checked.
         # See: CLAUDE.md (Protocol Resolution - external type exceptions)
         if isinstance(event, ModelContractRegisteredEvent):
-            return self._on_contract_registered(state, event, topic, partition, offset)
+            return self._on_contract_registered(
+                state, event, topic, partition, offset, data_provenance
+            )
         elif isinstance(event, ModelContractDeregisteredEvent):
             return self._on_contract_deregistered(
                 state, event, topic, partition, offset
@@ -263,6 +282,7 @@ class ContractRegistryReducer:
         topic: str,
         partition: int,
         offset: int,
+        data_provenance: str = "unknown",
     ) -> ModelReducerOutput[ModelContractRegistryState]:
         """Handle contract registration - upsert contract and extract topics.
 
@@ -278,6 +298,7 @@ class ContractRegistryReducer:
             topic: Kafka topic.
             partition: Kafka partition.
             offset: Kafka offset.
+            data_provenance: Validated provenance value from event metadata.
 
         Returns:
             ModelReducerOutput with new state and PostgreSQL intents.
@@ -294,7 +315,9 @@ class ContractRegistryReducer:
         intents: list[ModelIntent] = []
 
         # Intent 1: Upsert contract record
-        upsert_intent = self._build_upsert_contract_intent(event, correlation_id)
+        upsert_intent = self._build_upsert_contract_intent(
+            event, correlation_id, data_provenance
+        )
         intents.append(upsert_intent)
 
         # Intent 2+: Extract and update topics from contract_yaml
@@ -588,12 +611,14 @@ class ContractRegistryReducer:
         self,
         event: ModelContractRegisteredEvent,
         correlation_id: UUID,
+        data_provenance: str = "unknown",
     ) -> ModelIntent:
         """Build PostgreSQL upsert intent for contract record.
 
         Args:
             event: Contract registered event with typed fields.
             correlation_id: Correlation ID for tracing.
+            data_provenance: Validated provenance value for the projection row.
 
         Returns:
             ModelIntent for postgres.upsert_contract.
@@ -612,6 +637,7 @@ class ContractRegistryReducer:
             contract_yaml=event.contract_yaml,
             source_node_id=str(event.source_node_id) if event.source_node_id else None,
             is_active=True,
+            data_provenance=data_provenance,
             registered_at=event.timestamp,
             last_seen_at=event.timestamp,
         )
