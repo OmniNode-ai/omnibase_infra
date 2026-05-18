@@ -118,21 +118,22 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Install CLI dependencies (jq, curl, postgres-client)
+      - name: Install CLI dependencies (jq, curl)
         if: inputs.mode == 'compose'
         run: |
           set -euo pipefail
-          # Self-hosted runners (omnibase-ci) already have jq, curl, and psql
-          # installed; skip apt when they're present to avoid sudo requirement.
+          # Self-hosted runners (omnibase-ci) already have jq and curl; skip
+          # apt-get (sudo unavailable on container runners).  psql is invoked
+          # via `docker exec` against omnibase-infra-postgres so no host psql
+          # is needed.
           missing=()
-          command -v jq    >/dev/null 2>&1 || missing+=(jq)
-          command -v curl  >/dev/null 2>&1 || missing+=(curl)
-          command -v psql  >/dev/null 2>&1 || missing+=(postgresql-client)
+          command -v jq   >/dev/null 2>&1 || missing+=(jq)
+          command -v curl >/dev/null 2>&1 || missing+=(curl)
           if [[ ${#missing[@]} -gt 0 ]]; then
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends "${missing[@]}"
           else
-            echo "jq, curl, psql already available — skipping apt install"
+            echo "jq and curl already available — skipping apt install"
           fi
           # rpk is executed via `docker exec` against the compose-managed
           # omnibase-infra-redpanda container, so a host-level rpk install is
@@ -349,16 +350,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
-            export PGPASSWORD="test-password"
+            # Use docker exec so no host psql is required (container runners
+            # may not have psql and may not have sudo to install it).
+            count=$(docker exec -e PGPASSWORD=test-password omnibase-infra-postgres \
+              psql -h localhost -p 5432 -U postgres -d "${POSTGRES_DATABASE}" \
+              -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'" \
+              | tr -d '[:space:]')
           else
             if [[ -z "${REAL_PG_PASSWORD:-}" ]]; then
               echo "::error::Missing secret: RUNTIME_PG_PASSWORD (required in real mode)"
               exit 1
             fi
             export PGPASSWORD="${REAL_PG_PASSWORD}"
+            count=$(psql -h "${RUNTIME_HOST}" -p "${PG_PORT}" -U postgres -d "${POSTGRES_DATABASE}" \
+              -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'")
           fi
-          count=$(psql -h "${RUNTIME_HOST}" -p "${PG_PORT}" -U postgres -d "${POSTGRES_DATABASE}" \
-            -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'")
           echo "active_fresh_registrations=${count}"
           echo "active_fresh_registrations=${count}" >> "$GITHUB_OUTPUT"
           if [[ "${count}" -le 0 ]]; then
