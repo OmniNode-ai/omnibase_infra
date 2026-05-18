@@ -10,10 +10,9 @@ pytestmark = pytest.mark.integration
 
 
 class TestOverlayBootIntegration:
-    """Integration tests for boot_overlay — validates that boot_overlay.py
-    is the SOLE authority for os.environ mutation during overlay loading."""
+    """Integration tests for overlay load, resolve, and explicit env injection."""
 
-    def test_load_overlay_config_injects_env(
+    def test_load_overlay_config_resolves_env_pairs(
         self,
         sample_overlay_yaml: Path,
         contracts_dir: Path,
@@ -21,81 +20,87 @@ class TestOverlayBootIntegration:
     ) -> None:
         from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
 
-        monkeypatch.setenv("ONEX_OVERLAY_PATH", str(sample_overlay_yaml))
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         monkeypatch.delenv("POSTGRES_HOST", raising=False)
 
-        result = load_overlay_config(contracts_dir=contracts_dir)
+        result = load_overlay_config(
+            overlay_path=sample_overlay_yaml,
+            contracts_dir=contracts_dir,
+        )
         assert result is not None
-        # boot_overlay is where env mutation happens
+        assert result.resolved["KAFKA_BOOTSTRAP_SERVERS"] == "localhost:9092"
+        assert result.resolved["POSTGRES_HOST"] == "localhost"
+        assert "KAFKA_BOOTSTRAP_SERVERS" not in os.environ
+
+        injection = result.apply_to_environment()
+        assert "KAFKA_BOOTSTRAP_SERVERS" in injection.injected_keys
         assert os.environ["KAFKA_BOOTSTRAP_SERVERS"] == "localhost:9092"
         assert os.environ["POSTGRES_HOST"] == "localhost"
 
-    def test_load_overlay_config_writes_manifest(
+    def test_load_overlay_config_returns_manifest(
         self,
         sample_overlay_yaml: Path,
         contracts_dir: Path,
-        tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
 
-        manifest_path = tmp_path / "overlay_resolution_manifest.json"
-        monkeypatch.setenv("ONEX_OVERLAY_PATH", str(sample_overlay_yaml))
-        monkeypatch.setenv("ONEX_OVERLAY_MANIFEST_PATH", str(manifest_path))
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
-        load_overlay_config(contracts_dir=contracts_dir)
-        assert manifest_path.exists()
-        import json
-
-        manifest = json.loads(manifest_path.read_text())
-        assert "stable_identity_hash" in manifest
-        assert "resolved_pairs_hash" in manifest
+        result = load_overlay_config(
+            overlay_path=sample_overlay_yaml,
+            contracts_dir=contracts_dir,
+        )
+        assert result is not None
+        assert result.manifest.config_source == "overlay"
+        assert result.manifest.overlay_file_hash
+        assert result.manifest.resolved_config_hash
+        assert result.manifest.stable_identity_hash()
 
     def test_missing_overlay_with_env_vars_returns_none(
-        self, contracts_dir: Path, monkeypatch: pytest.MonkeyPatch
+        self, contracts_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Migration mode: no overlay file but env vars present → returns None."""
+        """Migration mode: no overlay file but env vars present -> returns None."""
         from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
 
-        monkeypatch.setenv("ONEX_OVERLAY_PATH", "/nonexistent/overlay.yaml")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "existing:9092")
-        # Ensure ONEX_REQUIRE_OVERLAY does not leak from the ambient env or a
-        # prior test; if true it would override migration mode and raise.
-        monkeypatch.delenv("ONEX_REQUIRE_OVERLAY", raising=False)
-        result = load_overlay_config(contracts_dir=contracts_dir)
+        result = load_overlay_config(
+            overlay_path=tmp_path / "missing.yaml",
+            contracts_dir=contracts_dir,
+        )
         assert result is None
 
     def test_missing_overlay_no_env_raises(
         self, contracts_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Greenfield: no overlay, no env vars → error with onboarding instructions."""
+        """Greenfield: no overlay, no env vars -> error with onboarding instructions."""
         from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
         from omnibase_infra.runtime.overlay.errors import OverlayNotFoundError
 
-        monkeypatch.setenv("ONEX_OVERLAY_PATH", str(tmp_path / "missing.yaml"))
-        # Clear all transport indicator vars so _has_transport_env_vars() returns False
         for var in (
             "KAFKA_BOOTSTRAP_SERVERS",
             "POSTGRES_HOST",
             "POSTGRES_PASSWORD",
-            "VALKEY_URL",
-            "INFISICAL_ADDR",
+            "VALKEY_HOST",
         ):
             monkeypatch.delenv(var, raising=False)
-        with pytest.raises(OverlayNotFoundError):
-            load_overlay_config(contracts_dir=contracts_dir)
+        with pytest.raises(OverlayNotFoundError, match="fresh install"):
+            load_overlay_config(
+                overlay_path=tmp_path / "missing.yaml",
+                contracts_dir=contracts_dir,
+            )
 
     def test_require_overlay_overrides_migration_mode(
-        self, contracts_dir: Path, monkeypatch: pytest.MonkeyPatch
+        self, contracts_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ONEX_REQUIRE_OVERLAY=true raises even when env vars exist."""
+        """require_overlay=True raises even when legacy env vars exist."""
         from omnibase_infra.runtime.overlay.boot_overlay import load_overlay_config
         from omnibase_infra.runtime.overlay.errors import OverlayNotFoundError
 
-        monkeypatch.setenv("ONEX_OVERLAY_PATH", "/nonexistent/overlay.yaml")
-        monkeypatch.setenv("ONEX_REQUIRE_OVERLAY", "true")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "exists:9092")
-        with pytest.raises(OverlayNotFoundError, match="ONEX_REQUIRE_OVERLAY=true"):
-            load_overlay_config(contracts_dir=contracts_dir)
+        with pytest.raises(OverlayNotFoundError, match="required but not found"):
+            load_overlay_config(
+                overlay_path=tmp_path / "missing.yaml",
+                contracts_dir=contracts_dir,
+                require_overlay=True,
+            )
