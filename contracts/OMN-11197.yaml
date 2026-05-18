@@ -1,0 +1,32 @@
+# OMN-11197 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-11197
+title: "Add runtime_manifests projection table and handler"
+summary: "Adds the runtime_manifests projection table via migration 078 and a postgres INSERT handler that consumes runtime-manifest-published events and persists one row per startup (append-only, ON CONFLICT DO NOTHING dedup)."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Unit tests cover successful INSERT, ON CONFLICT DO NOTHING dedup, SQL parameter ordering, and pool error path."
+    command: "uv run pytest tests/unit/nodes/node_runtime_manifest_reducer -v"
+  - kind: manual
+    description: "Deploy-gate proof: forward migration 078 + new reducer node. Runtime image rebuild required post-merge; migration applied on startup."
+    command: "deploy-gate: runtime image rebuild required post-merge; migration 078_create_runtime_manifests.sql applied via runtime startup migration runner"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-tests
+    description: "Unit coverage for runtime_manifests INSERT handler passes."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/node_runtime_manifest_reducer -v"
+  - id: dod-deploy-runtime-image
+    description: "Deploy scope: new reducer node + forward migration; next omninode-runtime image build carries both."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: next omninode-runtime image build carries node_runtime_manifest_reducer and migration 078_create_runtime_manifests.sql; rolling restart on .201 activates the projection table"
