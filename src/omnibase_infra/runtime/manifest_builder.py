@@ -10,7 +10,7 @@ topology for observability and drift detection.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -91,31 +91,35 @@ def build_runtime_manifest(
             contract_hash=contract_hash,
         )
 
-    wired_contracts = tuple(
-        _to_manifest_contract(r) for r in results_by_outcome[EnumWiringOutcome.WIRED]
+    wired_results = sorted(
+        results_by_outcome[EnumWiringOutcome.WIRED],
+        key=lambda r: (r.contract_name, r.package_name),
     )
-    skipped_contracts = tuple(
-        _to_manifest_contract(r) for r in results_by_outcome[EnumWiringOutcome.SKIPPED]
+    skipped_results = sorted(
+        results_by_outcome[EnumWiringOutcome.SKIPPED],
+        key=lambda r: (r.contract_name, r.package_name),
     )
-    failed_contracts = tuple(
-        _to_manifest_contract(r) for r in results_by_outcome[EnumWiringOutcome.FAILED]
+    failed_results = sorted(
+        results_by_outcome[EnumWiringOutcome.FAILED],
+        key=lambda r: (r.contract_name, r.package_name),
     )
 
-    # Collect all publish topics from wired results
+    wired_contracts = tuple(_to_manifest_contract(r) for r in wired_results)
+    skipped_contracts = tuple(_to_manifest_contract(r) for r in skipped_results)
+    failed_contracts = tuple(_to_manifest_contract(r) for r in failed_results)
+
     owned_command_topics: set[str] = set()
-    for result in results_by_outcome[EnumWiringOutcome.WIRED]:
+    for result in wired_results:
         discovered = contract_by_name.get(result.contract_name)
         if discovered and discovered.event_bus:
             owned_command_topics.update(discovered.event_bus.publish_topics)
 
-    # Collect all subscribe topics from wired results
     subscribed_event_topics: set[str] = set()
-    for result in results_by_outcome[EnumWiringOutcome.WIRED]:
+    for result in wired_results:
         subscribed_event_topics.update(result.topics_subscribed)
 
-    # Collect all wired handlers from wired results
     handlers: list[ModelManifestHandler] = []
-    for result in results_by_outcome[EnumWiringOutcome.WIRED]:
+    for result in wired_results:
         discovered = contract_by_name.get(result.contract_name)
         if not discovered or not discovered.handler_routing:
             continue

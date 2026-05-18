@@ -94,7 +94,7 @@ def _make_wired_result(
     wirings = tuple(
         ModelWiringOutcome(
             handler_name=h,
-            resolution_outcome=EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTRACT,
+            resolution_outcome=EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER,
         )
         for h in handlers
     )
