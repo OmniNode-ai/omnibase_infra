@@ -36,7 +36,7 @@ CONTRACT_REGISTRY_PROJECTION = ModelProjectionContract(
     freshness_sla_seconds=30,
     freshness_field="last_seen_at",
     freshness_source_table="contracts",
-    degraded_semantics=EnumDegradedBehavior.SERVE_STALE,
+    degraded_semantics=EnumDegradedBehavior.SERVE_STALE_WITH_WARNING,
     cursor=_KAFKA_OFFSET_CURSOR,
     ordering_contract_ref=None,
 )
@@ -53,7 +53,7 @@ TOPIC_REGISTRY_PROJECTION = ModelProjectionContract(
     freshness_sla_seconds=30,
     freshness_field="last_seen_at",
     freshness_source_table="topics",
-    degraded_semantics=EnumDegradedBehavior.SERVE_STALE,
+    degraded_semantics=EnumDegradedBehavior.SERVE_STALE_WITH_WARNING,
     cursor=_KAFKA_OFFSET_CURSOR,
     ordering_contract_ref=None,
 )
@@ -77,7 +77,7 @@ REGISTRATION_PROJECTION = ModelProjectionContract(
     freshness_sla_seconds=60,
     freshness_field="updated_at",
     freshness_source_table="registration_projections",
-    degraded_semantics=EnumDegradedBehavior.SERVE_STALE,
+    degraded_semantics=EnumDegradedBehavior.SERVE_STALE_WITH_WARNING,
     cursor=_KAFKA_OFFSET_CURSOR,
     ordering_contract_ref=None,
 )

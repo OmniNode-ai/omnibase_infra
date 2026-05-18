@@ -37,7 +37,7 @@ class TestProjectionContractRegistry:
         assert c.freshness_field == "last_seen_at"
         assert c.freshness_source_table == "contracts"
         assert c.freshness_sla_seconds == 30
-        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE
+        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE_WITH_WARNING
         assert c.cursor.cursor_type == "kafka_offset"
         assert c.cursor.supports_replay is True
         assert len(c.source_topics) > 0
@@ -48,7 +48,7 @@ class TestProjectionContractRegistry:
         assert c.freshness_field == "last_seen_at"
         assert c.freshness_source_table == "topics"
         assert c.freshness_sla_seconds == 30
-        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE
+        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE_WITH_WARNING
         assert c.cursor.cursor_type == "kafka_offset"
         assert c.cursor.supports_replay is True
 
@@ -58,7 +58,7 @@ class TestProjectionContractRegistry:
         assert c.freshness_field == "updated_at"
         assert c.freshness_source_table == "registration_projections"
         assert c.freshness_sla_seconds == 60
-        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE
+        assert c.degraded_semantics == EnumDegradedBehavior.SERVE_STALE_WITH_WARNING
         assert c.cursor.cursor_type == "kafka_offset"
         assert c.cursor.supports_replay is True
 
