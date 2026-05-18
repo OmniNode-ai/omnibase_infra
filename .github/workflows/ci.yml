@@ -1090,6 +1090,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # ============================================================================
+  # Runtime Boot Smoke Test (OMN-9120)
+  # Calls the reusable reusable-runtime-boot.yml workflow in compose mode.
+  # Runs after the full test suite passes so a boot regression doesn't compete
+  # with flaky unit tests for signal. Self-hosted runners have Docker available;
+  # public-fork runs fall back to ubuntu-latest which also has Docker.
+  # ============================================================================
+  runtime-boot-smoke:
+    name: Runtime Boot Smoke (compose)
+    needs: [tests-gate]
+    if: needs.tests-gate.result == 'success'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: compose
+    secrets: inherit
+
   ci-summary:
     name: CI Summary
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1100,7 +1116,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
+    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate, runtime-boot-smoke]
     if: always()
 
     steps:
@@ -1122,6 +1138,7 @@ jobs:
           migrationrequiredcheck="${{ needs.migration-required-check.result }}"
           compliance="${{ needs.compliance.result }}"
           contractsync="${{ needs.contract-sync-gate.result }}"
+          runtimeboot="${{ needs.runtime-boot-smoke.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -1138,7 +1155,8 @@ jobs:
              [[ "$migrationintegration" == "success" || "$migrationintegration" == "skipped" ]] && \
              [[ "$migrationrequiredcheck" == "success" ]] && \
              [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
-             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
+             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]] && \
+             [[ "$runtimeboot" == "success" || "$runtimeboot" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
             echo "Code Quality: Passed"
@@ -1156,6 +1174,7 @@ jobs:
             echo "Writer-Migration Coupling Check: Passed"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
+            echo "Runtime Boot Smoke: $runtimeboot"
             exit 0
           else
             echo "Checks failed"
@@ -1175,6 +1194,7 @@ jobs:
             echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
+            echo "Runtime Boot Smoke: $runtimeboot"
             exit 1
           fi
 
