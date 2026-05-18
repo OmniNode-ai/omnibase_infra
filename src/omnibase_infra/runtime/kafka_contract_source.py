@@ -71,6 +71,7 @@ Error Codes:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 from pathlib import Path
@@ -110,6 +111,7 @@ from omnibase_infra.runtime.models.model_dynamic_materialization import (
     ModelDynamicMaterializationResult,
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
+from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -1057,14 +1059,18 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 reason=EnumMaterializationRejection.PARSE_FAILURE,
             )
 
-        # Compute canonical hash for idempotency keying.
-        contract_yaml_raw = (
-            descriptor.contract_path or f"kafka://{self._environment}/{node_name}"
+        # Compute canonical hash from contract content for idempotency keying.
+        # Hash the contract_config dict (parsed YAML content) so version conflicts
+        # are detected by actual content change, not stable filesystem path.
+        content_repr = json.dumps(
+            descriptor.contract_config or {}, sort_keys=True, default=str
         )
-        raw_bytes = contract_yaml_raw.encode("utf-8")
+        raw_bytes = content_repr.encode("utf-8")
         canon_hash = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
 
         # Idempotency + version-conflict gate (thread-safe).
+        # Reserve the key before wiring to prevent concurrent calls from both
+        # passing the gate and wiring twice.  Key is cleared on failure.
         with self._materialization_lock:
             key = (node_name, canon_hash)
             if key in self._materialized_contracts:
@@ -1091,6 +1097,8 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                     status=EnumMaterializationStatus.REJECTED,
                     reason=EnumMaterializationRejection.VERSION_CONFLICT,
                 )
+            # Reserve: prevents concurrent calls with same key from both wiring.
+            self._materialized_contracts.add(key)
 
         from omnibase_infra.runtime.auto_wiring.handler_wiring import (
             _wire_single_contract,
@@ -1176,7 +1184,8 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             )
 
         # Synthetic contract_path for Kafka-sourced contracts (not on filesystem).
-        synthetic_path = Path(f"/kafka/{self._environment}/{node_name}/contract.yaml")
+        effective_env = environment or self._environment
+        synthetic_path = Path(f"/kafka/{effective_env}/{node_name}/contract.yaml")
 
         contract = ModelDiscoveredContract(
             name=node_name,
@@ -1205,8 +1214,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             )
 
             if result.outcome == EnumWiringOutcome.WIRED:
-                with self._materialization_lock:
-                    self._materialized_contracts.add((node_name, canon_hash))
+                # Key was already reserved before wiring; no second add needed.
                 logger.info(
                     "Contract materialized into live dispatch engine",
                     extra={
@@ -1225,6 +1233,9 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                     status=EnumMaterializationStatus.MATERIALIZED,
                 )
 
+            # Wiring skipped — release the reservation so a future retry can attempt.
+            with self._materialization_lock:
+                self._materialized_contracts.discard(key)
             logger.warning(
                 "Contract materialization skipped",
                 extra={
@@ -1240,11 +1251,14 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             )
 
         except Exception as exc:  # noqa: BLE001 — wiring boundary; log and return REJECTED
+            # Release the reservation so a future retry can attempt.
+            with self._materialization_lock:
+                self._materialized_contracts.discard(key)
             logger.warning(
                 "Contract materialization failed",
                 extra={
                     "node_name": node_name,
-                    "error": str(exc),
+                    "error": sanitize_error_message(str(exc)),
                     "error_type": type(exc).__name__,
                 },
             )

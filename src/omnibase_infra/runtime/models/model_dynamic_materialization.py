@@ -31,7 +31,7 @@ class ModelDynamicMaterializationResult(BaseModel):
     topology data populated on successful materialization.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     contract_name: str = Field(..., description="Contract name that was materialized")
     status: EnumMaterializationStatus = Field(
