@@ -137,8 +137,16 @@ jobs:
           command -v jq   >/dev/null 2>&1 || missing+=(jq)
           command -v curl >/dev/null 2>&1 || missing+=(curl)
           if [[ ${#missing[@]} -gt 0 ]]; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends "${missing[@]}"
+            if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends "${missing[@]}"
+            elif [[ "$(id -u)" -eq 0 ]]; then
+              apt-get update
+              apt-get install -y --no-install-recommends "${missing[@]}"
+            else
+              echo "::error::jq/curl missing and cannot install: no sudo and not running as root"
+              exit 1
+            fi
           else
             echo "jq and curl already available — skipping apt install"
           fi
