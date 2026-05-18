@@ -161,13 +161,28 @@ jobs:
           set -euo pipefail
           POSTGRES_PORT="${{ inputs.compose_pg_port }}" \
             docker compose -f docker/docker-compose.e2e.yml up -d postgres redpanda
-          # Wait for redpanda admin API + postgres to become responsive.
-          for i in $(seq 1 60); do
+          # Wait for both services to be healthy INSIDE compose AND reachable from
+          # the host. The runtime runs on the host and connects to localhost:PG_PORT
+          # and localhost:19092 — we must confirm those host-side ports are open
+          # before launching, otherwise HandlerDb / auto_configure fail instantly.
+          PG_HOST_PORT="${{ inputs.compose_pg_port }}"
+          KAFKA_HOST_PORT="19092"
+          for i in $(seq 1 90); do
+            pg_ok=false
+            kafka_ok=false
+            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1 \
+               && bash -c ">/dev/tcp/localhost/${PG_HOST_PORT}" 2>/dev/null; then
+              pg_ok=true
+            fi
             if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1 \
-               && docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
-              echo "compose infra healthy after ${i}s"
+               && bash -c ">/dev/tcp/localhost/${KAFKA_HOST_PORT}" 2>/dev/null; then
+              kafka_ok=true
+            fi
+            if $pg_ok && $kafka_ok; then
+              echo "compose infra healthy and host ports reachable after ${i}s"
               break
             fi
+            echo "waiting... pg=${pg_ok} kafka=${kafka_ok} (${i}s)"
             sleep 1
           done
 
