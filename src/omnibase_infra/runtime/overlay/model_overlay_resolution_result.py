@@ -1,39 +1,45 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+"""Resolution result model for overlay config resolver."""
+
 from __future__ import annotations
 
-import hashlib
-import json
+import logging
+import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.overlay.model_overlay_resolution_manifest import (
+    ModelOverlayResolutionManifest,
+)
+from omnibase_infra.runtime.overlay.model_overlay_env_injection_result import (
+    ModelOverlayEnvInjectionResult,
+)
+
+logger = logging.getLogger(__name__)
+
 
 class ModelOverlayResolutionResult(BaseModel):
-    """Pure resolution output — no side effects. Boot layer consumes this to mutate env."""
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    resolved: dict[str, str] = Field(default_factory=dict)
+    missing: tuple[str, ...] = Field(default_factory=tuple)
+    manifest: ModelOverlayResolutionManifest
 
-    resolved_pairs: dict[str, str] = Field(
-        default_factory=dict,
-        description="Keys that should be injected (overlay provides, env does not have).",
-    )
-    skipped_existing_keys: frozenset[str] = Field(
-        default_factory=frozenset,
-        description="Keys the overlay provides but env already has — skip to preserve existing.",
-    )
-    unused_overlay_keys: frozenset[str] = Field(
-        default_factory=frozenset,
-        description="Keys in overlay that no contract requires — visibility into stale config.",
-    )
-    required_keys: frozenset[str] = Field(
-        default_factory=frozenset,
-        description="All keys contracts require (for audit/manifest).",
-    )
-
-    @property
-    def resolved_pairs_hash(self) -> str:
-        """Deterministic SHA-256 of resolved_pairs for replay verification."""
-        canonical = json.dumps(
-            dict(sorted(self.resolved_pairs.items())), sort_keys=True
+    def apply_to_environment(self) -> ModelOverlayEnvInjectionResult:
+        injected: list[str] = []
+        skipped: list[str] = []
+        for key, value in self.resolved.items():
+            if key in os.environ:
+                logger.warning(
+                    "Overlay key %s already set in environment; skipping overlay injection",
+                    key,
+                )
+                skipped.append(key)
+            else:
+                os.environ[key] = value
+                injected.append(key)
+        return ModelOverlayEnvInjectionResult(
+            injected_keys=tuple(injected),
+            skipped_existing_keys=tuple(skipped),
         )
-        return hashlib.sha256(canonical.encode()).hexdigest()
