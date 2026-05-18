@@ -80,7 +80,9 @@ def test_artifact_manifest_hash_is_deterministic_across_writes(
     a = _hashes_by_name("corr-a")
     b = _hashes_by_name("corr-b")
     shared = set(a) & set(b)
-    for name in shared - {"run_manifest.json"}:
+    comparable = shared - {"run_manifest.json"}
+    assert comparable, "no comparable artifacts found across bundles"
+    for name in comparable:
         assert a[name] == b[name], f"{name} hash drifted between identical bundles"
 
 
