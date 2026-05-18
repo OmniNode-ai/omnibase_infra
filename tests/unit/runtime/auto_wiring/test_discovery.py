@@ -434,6 +434,91 @@ class TestDiscoverContractsFromPaths:
         assert manifest.total_discovered == 0
         assert manifest.total_errors == 0
 
+    @pytest.mark.unit
+    def test_projection_consumer_subscribing_to_inactive_package_domain_is_included(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Projection consumers that subscribe to topics from inactive packages must load.
+
+        OMN-11185: node_projection_delegation subscribes to onex.evt.omniclaude.*
+        to materialize views but does NOT publish to omniclaude.  The env var gate
+        must not block read-only consumers — only producers targeting inactive domains
+        should be filtered.
+        """
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        node_dir = tmp_path / "projection_delegation"
+        node_dir.mkdir()
+        path = node_dir / "contract.yaml"
+        path.write_text(
+            dedent("""\
+                name: "node_projection_delegation"
+                node_type: "REDUCER_GENERIC"
+                contract_version:
+                  major: 1
+                  minor: 0
+                  patch: 0
+                node_version: "1.0.0"
+                description: "Projection consumer for delegation events from omniclaude"
+                event_bus:
+                  subscribe_topics:
+                    - "onex.evt.omniclaude.delegation-dispatched.v1"
+                    - "onex.evt.omniclaude.delegation-completed.v1"
+                  publish_topics: []
+                  consumer_purpose: "projection"
+            """)
+        )
+
+        manifest = discover_contracts_from_paths([path])
+
+        assert manifest.total_discovered == 1
+        assert manifest.total_errors == 0
+        assert manifest.contracts[0].name == "node_projection_delegation"
+
+    @pytest.mark.unit
+    def test_discover_contracts_includes_projection_consumer_for_inactive_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Entry-point discovery must include projection consumers from inactive package domains.
+
+        OMN-11185: package is omnimarket (active), contract subscribes to omniclaude
+        topics (inactive) but publishes nothing — must not be filtered.
+        """
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        (tmp_path / "contract.yaml").write_text(
+            dedent("""\
+                name: "node_projection_delegation"
+                node_type: "REDUCER_GENERIC"
+                contract_version:
+                  major: 1
+                  minor: 0
+                  patch: 0
+                node_version: "1.0.0"
+                description: "Projection consumer for delegation events"
+                event_bus:
+                  subscribe_topics:
+                    - "onex.evt.omniclaude.delegation-dispatched.v1"
+                  publish_topics: []
+                  consumer_purpose: "projection"
+            """)
+        )
+        module_file = tmp_path / "node.py"
+        module_file.write_text("")
+
+        cls = type("NodeProjectionDelegation", (), {"process": lambda self: None})
+        ep = _make_entry_point(
+            "node_projection_delegation", node_cls=cls, dist_name="omnimarket"
+        )
+
+        with (
+            patch(_EP_MODULE, return_value=[ep]),
+            patch("inspect.getfile", return_value=str(module_file)),
+        ):
+            manifest = discover_contracts()
+
+        assert manifest.total_discovered == 1
+        assert manifest.total_errors == 0
+        assert manifest.contracts[0].name == "node_projection_delegation"
+
 
 class TestModelAutoWiringManifest:
     """Tests for manifest query methods."""
