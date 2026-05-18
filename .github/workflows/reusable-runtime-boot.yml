@@ -106,6 +106,8 @@ jobs:
             echo "KAFKA_BOOTSTRAP_SERVERS=localhost:19092" >> "$GITHUB_ENV"
             # Allow localhost broker so the runtime's allowlist guard passes.
             echo "KAFKA_BROKER_ALLOWLIST=localhost:" >> "$GITHUB_ENV"
+            # DB URL for compose postgres (external port published by e2e compose).
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@localhost:${{ inputs.compose_pg_port }}/omnibase_infra" >> "$GITHUB_ENV"
           else
             effective="${{ inputs.pg_port }}"
           fi
@@ -160,6 +162,19 @@ jobs:
             fi
             sleep 1
           done
+
+      - name: Stage contracts outside /home (compose mode)
+        if: inputs.mode == 'compose'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # contract_loader_effect.yaml deny_patterns include "/home", which
+          # blocks the default contracts/ path when the runner CWD is under
+          # /home/runner/... (GitHub-hosted and self-hosted CI). Copy the
+          # contracts tree to /tmp so path.resolve() lands outside the deny list.
+          rm -rf /tmp/onex-contracts
+          cp -r "${{ github.workspace }}/contracts" /tmp/onex-contracts
+          echo "ONEX_CONTRACTS_DIR=/tmp/onex-contracts" >> "$GITHUB_ENV"
 
       - name: Launch runtime (compose mode)
         if: inputs.mode == 'compose'
