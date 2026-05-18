@@ -1044,6 +1044,8 @@ jobs:
     steps:
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
+        env:
+          OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         with:
           checks: "migration-conflicts"
           warn-only: "false"
