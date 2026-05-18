@@ -144,6 +144,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_RUNNER_HEALTH_SNAPSHOT,
     SUFFIX_RUNTIME_ERROR,
     SUFFIX_RUNTIME_HEALTH_CHECK,
+    SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
     SUFFIX_RUNTIME_TICK,
     SUFFIX_SERVICE_HEARTBEAT,
     SUFFIX_TOPIC_CATALOG_CHANGED,
@@ -241,6 +242,8 @@ __all__: list[str] = [
     "SUFFIX_CONSUMER_RESTART_CMD",
     "SUFFIX_RUNTIME_HEALTH_CHECK",
     "SUFFIX_RUNTIME_ERROR",
+    # Runtime manifest publication (OMN-11196)
+    "SUFFIX_RUNTIME_MANIFEST_PUBLISHED",
     # DLQ aggregation topic (OMN-6136)
     "SUFFIX_PLATFORM_DLQ_MESSAGE",
     # OmniNode routing topics (OMN-7810)

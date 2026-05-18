@@ -3249,6 +3249,62 @@ async def bootstrap() -> int:
         for handler in logging.root.handlers:
             handler.flush()
 
+        # 9.8. Emit runtime manifest snapshot (OMN-11196).
+        # Published once per startup after all phases complete.
+        # Non-fatal: failures are logged and the kernel continues.
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            try:
+                from omnibase_core.models.events.model_event_envelope import (
+                    ModelEventEnvelope,
+                )
+                from omnibase_infra.runtime.manifest_builder import (
+                    build_runtime_manifest,
+                )
+                from omnibase_infra.topics import SUFFIX_RUNTIME_MANIFEST_PUBLISHED
+
+                _manifest_topic = TopicResolver().resolve(
+                    SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
+                    correlation_id=correlation_id,
+                )
+                _runtime_profile_for_manifest = os.getenv("RUNTIME_PROFILE", "main")
+                _image_digest = os.getenv("ONEX_IMAGE_DIGEST")
+                _runtime_manifest = build_runtime_manifest(
+                    report=auto_wiring_report,
+                    manifest=auto_wiring_manifest_for_subscriptions,
+                    runtime_profile=_runtime_profile_for_manifest,
+                    image_digest=_image_digest,
+                )
+                _manifest_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                    payload=_runtime_manifest,
+                    correlation_id=correlation_id,
+                    event_type="runtime-manifest-published",
+                    source_tool="service_kernel",
+                )
+                await event_bus.publish_envelope(
+                    envelope=_manifest_envelope,
+                    topic=_manifest_topic,
+                )
+                logger.info(
+                    "Runtime manifest published (topic=%s, correlation_id=%s)",
+                    _manifest_topic,
+                    correlation_id,
+                )
+            except ImportError:
+                logger.debug(
+                    "ModelRuntimeManifest not available in omnibase_core — "
+                    "manifest emission skipped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: manifest emission is non-critical
+                logger.warning(
+                    "Failed to emit runtime manifest (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+
         # Explicit run-loop entry log (OMN-3591)
         # This message confirms the kernel reached the blocking wait and did
         # not exit prematurely during bootstrap. If this message is absent

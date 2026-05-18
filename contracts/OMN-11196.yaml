@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11196"
+title: "Build and emit runtime manifest at startup"
+summary: >
+  Adds manifest_builder.py that converts ModelAutoWiringReport + ModelAutoWiringManifest into a ModelRuntimeManifest. Wires the builder into service_kernel.bootstrap() to publish the manifest once per startup on onex.evt.omnibase-infra.runtime-manifest-published.v1.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "topics"
+  - "events"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "Unit tests for manifest builder pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_manifest_builder.py -v"
+  - id: "dod-deploy"
+    description: >
+      Runtime deploy required: rebuild omninode-runtime image on 192.168.86.201 after merge. Rolling restart of omninode-runtime. Verify manifest event published on startup via rpk topic consume.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.manifest_builder import build_runtime_manifest; print(\"ok\")' && rpk topic produce onex.evt.omnibase-infra.runtime-manifest-published.v1 --dry-run"
