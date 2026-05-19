@@ -348,6 +348,5 @@ async def test_handler_outside_allowed_namespace_wiring_fails_gracefully() -> No
         event_bus=bus,
         environment="test",
     )
-    # Either wiring is rejected or the handler fails to instantiate;
-    # either way the status must not be MATERIALIZED.
-    assert result.status != EnumMaterializationStatus.MATERIALIZED
+    assert result.status == EnumMaterializationStatus.REJECTED
+    assert result.reason == EnumMaterializationRejection.HANDLER_ALLOWLIST
