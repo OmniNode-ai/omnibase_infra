@@ -128,6 +128,7 @@ from omnibase_infra.enums.enum_registry_response_status import (
 from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_run_variant import EnumRunVariant
+from omnibase_infra.enums.enum_runtime_backend import EnumRuntimeBackend
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
 from omnibase_infra.enums.enum_session_lifecycle_state import (
@@ -195,6 +196,7 @@ __all__: list[str] = [
     "EnumResponseStatus",
     "EnumRetryErrorCategory",
     "EnumRunVariant",
+    "EnumRuntimeBackend",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
     "EnumSessionLifecycleState",

@@ -1,0 +1,40 @@
+# OMN-8701 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-8701
+title: "Ensure all nodes run when Kafka runtime is down via local runtime fallback"
+summary: "NodeInvocationAdapter with LOCAL/DEPLOYED/AUTO backends. LOCAL mode dispatches via in-memory event bus + typed local state store. AUTO probes deployed bus health and falls back to LOCAL when Kafka is unreachable."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+  - events
+evidence_requirements:
+  - kind: tests
+    description: "22 unit tests + 5 integration tests prove LOCAL dispatch, AUTO fallback when Kafka is down or health check raises, chain_orchestrator coverage, and state store auditability."
+    command: "uv run pytest tests/unit/runtime/test_node_invocation_adapter.py tests/integration/test_node_invocation_adapter_local_fallback.py -q"
+  - kind: manual
+    description: "NodeInvocationAdapter is library code with no deployed service — deploy gate satisfied by runtime test run verifying fallback behavior under simulated Kafka outage."
+    command: "deploy: uv run pytest tests/integration/test_node_invocation_adapter_local_fallback.py -q --no-header"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-unit-tests
+    description: "22 unit tests for NodeInvocationAdapter covering LOCAL/DEPLOYED/AUTO paths and state store operations."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_node_invocation_adapter.py -q"
+  - id: dod-integration-tests
+    description: "5 integration tests simulating Kafka runtime unavailable — delegation and chain_orchestrator nodes both route through LOCAL in-memory fallback."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/integration/test_node_invocation_adapter_local_fallback.py -q"
+  - id: dod-deploy-evidence
+    description: "NodeInvocationAdapter is a runtime library adapter — no new containerised service. Deploy evidence: integration tests run against the in-memory fallback path which is activated when Kafka is unreachable."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: uv run pytest tests/integration/test_node_invocation_adapter_local_fallback.py -q --no-header"
