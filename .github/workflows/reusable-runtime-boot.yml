@@ -235,6 +235,13 @@ jobs:
       - name: Launch runtime (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
+        env:
+          # Fresh Redpanda brokers exhibit metadata propagation lag — topics are
+          # created successfully but aiokafka's _wait_on_metadata retries for
+          # several seconds before partition metadata becomes available. Extend
+          # the consumer start timeout from the default 30s to 120s so the
+          # runtime does not crash while Redpanda catches up.
+          KAFKA_TIMEOUT_SECONDS: "120"
         run: |
           set -euo pipefail
           # Background the runtime so subsequent health-wait steps can probe it.
@@ -246,6 +253,8 @@ jobs:
       - name: Launch runtime-effects (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
+        env:
+          KAFKA_TIMEOUT_SECONDS: "120"
         run: |
           set -euo pipefail
           # runtime-effects listens on :8086 and consumes under a distinct
