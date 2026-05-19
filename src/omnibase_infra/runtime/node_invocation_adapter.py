@@ -77,7 +77,6 @@ import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 # OMN-7077: EventBusInmemory, ModelEventHeaders, and ModelEventMessage have
@@ -102,9 +101,6 @@ logger = logging.getLogger(__name__)
 # Default health probe timeout — deliberately short so AUTO mode fails fast
 # when the runtime is genuinely down rather than blocking the caller.
 _HEALTH_PROBE_TIMEOUT_SECONDS = 2.0
-
-# Sentinel returned by local dispatch when no subscriber handles the command.
-_LOCAL_DISPATCH_NO_HANDLER = "local_no_handler"
 
 
 class NodeInvocationAdapter:

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -238,13 +238,6 @@ async def test_local_dispatch_subscriber_fires_terminal_event() -> None:
     """When a real subscriber handles the command and publishes a terminal event,
     the adapter receives and returns that event payload."""
     cid = uuid4()
-    store = ModelLocalStateStore()
-
-    # We create a custom adapter subclass that registers a handler before dispatch
-    # by monkeypatching _run_local_bus_round_trip to add a subscriber.
-    #
-    # Simpler: use EventBusInmemory directly to verify the publish → subscribe
-    # round-trip, then verify the adapter returns correct evidence.
 
     # Standalone in-memory bus test proving publish→subscribe semantics
     bus = EventBusInmemory(environment="local", group="test")
