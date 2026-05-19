@@ -13,6 +13,35 @@ from omnibase_infra.verification.verify_registration import (
     _check_projection_state_via_db,
 )
 
+_LIVE_REGISTRATION_PROJECTION_COLUMNS: tuple[str, ...] = (
+    "entity_id",
+    "domain",
+    "current_state",
+    "node_type",
+    "node_version",
+    "capabilities",
+    "contract_type",
+    "intent_types",
+    "protocols",
+    "capability_tags",
+    "contract_version",
+    "subscribe_topics",
+    "publish_topics",
+    "ack_deadline",
+    "liveness_deadline",
+    "last_heartbeat_at",
+    "ack_timeout_emitted_at",
+    "liveness_timeout_emitted_at",
+    "last_applied_event_id",
+    "last_applied_offset",
+    "last_applied_sequence",
+    "last_applied_partition",
+    "registered_at",
+    "updated_at",
+    "correlation_id",
+    "data_provenance",
+)
+
 
 @pytest.mark.unit
 def test_projection_state_validates_schema_before_querying() -> None:
@@ -83,3 +112,49 @@ def test_projection_state_passes_when_schema_valid_and_data_present() -> None:
 
     result = _check_projection_state_via_db("test_contract", db_query_fn)
     assert result.verdict == EnumValidationVerdict.PASS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "contract_name",
+    [
+        "node_registration_orchestrator",
+        "node_registration_reducer",
+        "node_registration_storage_effect",
+    ],
+)
+def test_projection_state_passes_for_registration_contracts_with_live_schema_shape(
+    contract_name: str,
+) -> None:
+    """OMN-9539/9540/9541: live-shaped rows must not false-negative as empty."""
+
+    def db_query_fn(sql: str) -> list[dict[str, str]]:
+        if "information_schema.columns" in sql:
+            assert "table_schema = 'public'" in sql
+            return [
+                {"column_name": column}
+                for column in _LIVE_REGISTRATION_PROJECTION_COLUMNS
+            ]
+        return [
+            {
+                "entity_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "current_state": "active",
+                "node_type": "orchestrator",
+            },
+            {
+                "entity_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "current_state": "active",
+                "node_type": "reducer",
+            },
+            {
+                "entity_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                "current_state": "active",
+                "node_type": "effect",
+            },
+        ]
+
+    result = _check_projection_state_via_db(contract_name, db_query_fn)
+
+    assert result.verdict == EnumValidationVerdict.PASS
+    assert "Found 3/3 rows in terminal states" in result.evidence
+    assert "No rows found in registration_projections" not in result.evidence

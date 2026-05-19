@@ -182,6 +182,7 @@ UNCOVERED_MODELS: dict[str, str] = {
     # tests/unit/runtime/models/test_model_runtime_aggregate_health.py
     "ModelEventBusAggregateHealth": "Round-trip covered in test_model_runtime_aggregate_health; extra='allow' complicates generic factory",
     "ModelRuntimeAggregateHealth": "Round-trip covered in test_model_runtime_aggregate_health; extra='allow' complicates generic factory",
+    "ModelDynamicMaterializationResult": "Covered by test_kafka_contract_source_materialization.py",
 }
 
 

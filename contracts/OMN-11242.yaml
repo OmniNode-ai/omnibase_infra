@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11242"
+title: "Wire TopicProvisioner into runtime kernel startup"
+summary: >
+  Pre-provision Kafka topics during runtime startup and live contract materialization while preserving best-effort startup semantics.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - topics
+  - protocols
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "Focused unit and integration tests prove startup/live materialization topic provisioning behavior."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_topic_provisioner_integration.py tests/unit/runtime/test_live_contract_materialization.py::TestWireLiveHandlerSubscriptions::test_wire_live_subscriptions_calls_wiring tests/integration/runtime/test_topic_provisioner_live_materialization.py -q"
+  - id: "dod-deploy"
+    description: >
+      Deploy validation: after merge, redeploy omninode-runtime and verify live materialization can pre-provision a subscribed topic before wiring.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python - <<'PY'\nfrom omnibase_infra.event_bus.service_topic_manager import TopicProvisioner\nprint(TopicProvisioner.__name__)\nPY"

@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11247"
+title: "Post-freeze contract registration listener in RuntimeHostProcess"
+summary: >
+  Adds a RuntimeHostProcess listener for node-registration events after the dispatch engine freezes, caching validated contracts from KafkaContractSource and materializing the corresponding handler into the live runtime.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "topics"
+  - "events"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-focused-tests"
+    description: "Unit and integration tests cover dynamic registration listener subscription, registration, deregistration, and materialization behavior."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_runtime_host_dynamic_registration.py tests/integration/test_runtime_host_dynamic_registration.py -q"
+  - id: "dod-deploy-proof"
+    description: >
+      Runtime deploy proof after merge: rebuild omninode-runtime on 192.168.86.201, restart with approval, publish a node-registration event, and verify the dynamic-contract listener consumer group receives the event and the runtime materializes the handler without restart.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess; print(RuntimeHostProcess.__name__)' && rpk group describe local.omnibase-infra.test-node-dynamic-contract-listener.consume.1.0.0"

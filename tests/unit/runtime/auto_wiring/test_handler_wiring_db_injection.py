@@ -213,3 +213,178 @@ def test_projection_callback_logs_type_error_not_raises(
 
     assert result is None
     assert any("TypeError" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Tests: terminal event emission (OMN-11187)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_projection_callback_emits_terminal_event_on_success() -> None:
+    """After a successful projection, terminal event is published to event_bus."""
+    import json
+    import uuid
+
+    published: list[tuple] = []
+    test_correlation_id = uuid.uuid4()
+
+    class FakeHandler:
+        def handle(self, input_data: dict) -> dict:
+            return {"rows_upserted": 1}
+
+    class FakeEventBus:
+        async def publish(self, topic: str, key: object, value: bytes) -> None:
+            published.append((topic, key, value))
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    handler = FakeHandler()
+    fake_bus = FakeEventBus()
+    terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        event_bus=fake_bus,
+        terminal_event=terminal_topic,
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"task_type": "code-review"}
+    envelope.correlation_id = test_correlation_id
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert len(published) == 1
+    topic_published, _, raw_bytes = published[0]
+    assert topic_published == terminal_topic
+    parsed = json.loads(raw_bytes.decode("utf-8"))
+    assert parsed["event_type"] == terminal_topic
+    assert parsed["correlation_id"] == str(test_correlation_id)
+
+
+@pytest.mark.unit
+def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> None:
+    """When handler raises, no terminal event is emitted."""
+    published: list[tuple] = []
+
+    class FailingHandler:
+        def handle(self, input_data: dict) -> dict:
+            raise RuntimeError("db failure")
+
+    class FakeEventBus:
+        async def publish(self, topic: str, key: object, value: bytes) -> None:
+            published.append((topic, key, value))
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    handler = FailingHandler()
+    fake_bus = FakeEventBus()
+    terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        (),
+        event_bus=fake_bus,
+        terminal_event=terminal_topic,
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {}
+    envelope.correlation_id = "test-corr-id"
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert len(published) == 0
+
+
+@pytest.mark.unit
+def test_projection_callback_no_terminal_event_when_bus_is_none() -> None:
+    """When event_bus is None, no terminal event is emitted (no error)."""
+
+    class FakeHandler:
+        def handle(self, input_data: dict) -> dict:
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    handler = FakeHandler()
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        (),
+        event_bus=None,
+        terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {}
+    envelope.correlation_id = "test-corr-id"
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            result = asyncio.run(callback(envelope))
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_projection_callback_terminal_event_publish_failure_does_not_propagate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """If terminal event publish fails, error is logged but not raised."""
+    import uuid
+
+    class FakeHandler:
+        def handle(self, input_data: dict) -> dict:
+            return {"rows_upserted": 1}
+
+    class BrokenEventBus:
+        async def publish(self, topic: str, key: object, value: bytes) -> None:
+            raise OSError("kafka unavailable")
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    handler = FakeHandler()
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        (),
+        event_bus=BrokenEventBus(),
+        terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {}
+    envelope.correlation_id = uuid.uuid4()
+    fake_adapter = MagicMock()
+
+    with caplog.at_level(
+        logging.ERROR, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
+    ):
+        with patch(
+            _PATCH_ENVIRON_GET,
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+                result = asyncio.run(callback(envelope))
+
+    assert result is None
+    assert any("projection terminal event" in r.message.lower() for r in caplog.records)

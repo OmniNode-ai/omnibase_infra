@@ -326,7 +326,7 @@ class TestVerifyRegistrationFails:
         )
         assert proj_check.verdict == EnumValidationVerdict.FAIL
 
-    def test_fail_when_db_raises(self) -> None:
+    def test_quarantine_when_db_raises(self) -> None:
         def failing_db(sql: str) -> list[dict[str, Any]]:
             raise ConnectionError("Connection refused")
 
@@ -336,7 +336,7 @@ class TestVerifyRegistrationFails:
             watermark_fn=_make_watermark_fn(),
             contract_path=_CONTRACT_PATH,
         )
-        assert report.overall_verdict == EnumValidationVerdict.FAIL
+        assert report.overall_verdict == EnumValidationVerdict.QUARANTINE
 
     def test_fail_when_kafka_admin_raises(self) -> None:
         def failing_kafka(_group_id: str) -> set[str]:
