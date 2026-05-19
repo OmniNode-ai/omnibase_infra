@@ -1699,139 +1699,231 @@ class EventBusKafka(
             **self._build_auth_kwargs(),
         )
 
-        try:
-            await asyncio.wait_for(
-                consumer.start(),
-                timeout=self._timeout_seconds,
-            )
+        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError during
+        # consumer.start() when partition metadata has not yet propagated to the
+        # broker the client is connected to, even if the topic was just created
+        # successfully by another client. This is not a permanent error — it
+        # resolves once metadata propagates (typically within a few seconds).
+        #
+        # aiokafka raises UnknownTopicOrPartitionError from _wait_topics(), which
+        # is called inside consumer.start(). This propagates out of asyncio.wait_for
+        # before the timeout fires, so KAFKA_TIMEOUT_SECONDS does not help.
+        #
+        # Fix: retry UnknownTopicOrPartitionError with exponential backoff within
+        # the timeout budget. Each failed attempt stops and discards the consumer;
+        # a fresh AIOKafkaConsumer is created for each retry to avoid stale state.
+        metadata_retry_deadline = (
+            asyncio.get_event_loop().time() + self._timeout_seconds
+        )
+        metadata_retry_backoff = 2.0  # seconds; doubles each attempt, capped at 10s
 
-            self._pending_consumer_keys.discard(consumer_key)
-            self._group_consumers[consumer_key] = consumer
-            self._refresh_topic_consumer_views(topic)
+        while True:
+            try:
+                await asyncio.wait_for(
+                    consumer.start(),
+                    timeout=self._timeout_seconds,
+                )
+                break  # success — exit retry loop
 
-            # Start background task to consume messages with correlation tracking
-            task = asyncio.create_task(
-                self._consume_loop(topic, group_id, correlation_id)
-            )
-            self._group_consumer_tasks[consumer_key] = task
-            self._refresh_topic_consumer_views(topic)
-
-            logger.info(
-                f"Started consumer for topic {topic}",
-                extra={
-                    "topic": topic,
-                    "group_id": effective_group_id,
-                    "correlation_id": str(correlation_id),
-                    "servers": sanitized_servers,
-                },
-            )
-
-            # Emit consumer started health event (OMN-5518)
-            if self._health_emitter is not None:
+            except asyncio.CancelledError:
+                self._pending_consumer_keys.discard(consumer_key)
                 try:
-                    await self._health_emitter.emit_event(
-                        consumer_identity=f"eventbus.{topic}",
-                        consumer_group=effective_group_id,
-                        topic=topic,
-                        event_type=EnumConsumerHealthEventType.CONSUMER_STARTED,
-                        severity=EnumConsumerHealthSeverity.INFO,
-                        correlation_id=correlation_id,
-                        service_label="EventBusKafka",
+                    await consumer.stop()
+                except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "Cleanup failed for cancelled Kafka consumer start (topic=%s): %s",
+                        topic,
+                        cleanup_err,
+                        exc_info=True,
                     )
-                except Exception:  # noqa: BLE001 - best-effort emission
+                raise
+
+            except UnknownTopicOrPartitionError as e:
+                # Transient metadata propagation lag — stop the failed consumer,
+                # wait briefly, and retry if still within the timeout budget.
+                try:
+                    await consumer.stop()
+                except Exception as cleanup_err:  # noqa: BLE001
                     logger.debug(
-                        "Failed to emit consumer started health event", exc_info=True
+                        "Cleanup after UnknownTopicOrPartitionError (topic=%s): %s",
+                        topic,
+                        cleanup_err,
                     )
 
-        except asyncio.CancelledError:
-            self._pending_consumer_keys.discard(consumer_key)
-            try:
-                await consumer.stop()
-            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                remaining = metadata_retry_deadline - asyncio.get_event_loop().time()
+                if remaining <= metadata_retry_backoff:
+                    # Out of budget — propagate as timeout
+                    self._pending_consumer_keys.discard(consumer_key)
+                    timeout_ctx = ModelTimeoutErrorContext(
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="start_consumer",
+                        target_name=f"kafka.{topic}",
+                        correlation_id=correlation_id,
+                        timeout_seconds=self._timeout_seconds,
+                    )
+                    logger.exception(
+                        f"Timeout waiting for topic metadata for {topic} after {self._timeout_seconds}s "
+                        f"(UnknownTopicOrPartitionError on all retries)",
+                        extra={
+                            "topic": topic,
+                            "group_id": group_id,
+                            "correlation_id": str(correlation_id),
+                            "timeout_seconds": self._timeout_seconds,
+                            "servers": sanitized_servers,
+                            "error_type": "UnknownTopicOrPartitionError",
+                        },
+                    )
+                    raise InfraTimeoutError(
+                        f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s "
+                        f"(topic metadata unavailable after all retries)",
+                        context=timeout_ctx,
+                        topic=topic,
+                        servers=sanitized_servers,
+                    ) from e
+
                 logger.warning(
-                    "Cleanup failed for cancelled Kafka consumer start (topic=%s): %s",
+                    "Topic metadata not yet available for %s (UnknownTopicOrPartitionError); "
+                    "retrying in %.1fs (%.0fs remaining in budget)",
                     topic,
-                    cleanup_err,
-                    exc_info=True,
+                    metadata_retry_backoff,
+                    remaining,
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "correlation_id": str(correlation_id),
+                    },
                 )
-            raise
+                await asyncio.sleep(metadata_retry_backoff)
+                metadata_retry_backoff = min(metadata_retry_backoff * 2, 10.0)
 
-        except TimeoutError as e:
-            self._pending_consumer_keys.discard(consumer_key)
-            # Clean up consumer on failure to prevent resource leak
-            try:
-                await consumer.stop()
-            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                # Recreate consumer for the next attempt — a consumer that failed
+                # start() cannot be restarted.
+                consumer = AIOKafkaConsumer(
                     topic,
-                    cleanup_err,
-                    exc_info=True,
-                )
-
-            # Propagate timeout error to surface startup failures (differentiate from connection errors)
-            timeout_ctx = ModelTimeoutErrorContext(
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="start_consumer",
-                target_name=f"kafka.{topic}",
-                correlation_id=correlation_id,
-                timeout_seconds=self._timeout_seconds,
-            )
-            logger.exception(
-                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
-                extra={
-                    "topic": topic,
-                    "group_id": group_id,
-                    "correlation_id": str(correlation_id),
-                    "timeout_seconds": self._timeout_seconds,
-                    "servers": sanitized_servers,
-                    "error_type": "timeout",
-                },
-            )
-            raise InfraTimeoutError(
-                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
-                context=timeout_ctx,
-                topic=topic,
-                servers=sanitized_servers,
-            ) from e
-
-        except Exception as e:
-            self._pending_consumer_keys.discard(consumer_key)
-            # Clean up consumer on failure to prevent resource leak
-            try:
-                await consumer.stop()
-            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
-                    topic,
-                    cleanup_err,
-                    exc_info=True,
+                    bootstrap_servers=self._bootstrap_servers,
+                    group_id=effective_group_id,
+                    group_instance_id=resolved_group_instance_id,
+                    auto_offset_reset=self._config.auto_offset_reset,
+                    enable_auto_commit=self._config.enable_auto_commit,
+                    session_timeout_ms=self._config.session_timeout_ms,
+                    heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                    max_poll_interval_ms=self._config.max_poll_interval_ms,
+                    retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._build_auth_kwargs(),
                 )
 
-            # Propagate connection error to surface startup failures (differentiate from timeout)
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="start_consumer",
-                target_name=f"kafka.{topic}",
-            )
-            logger.exception(
-                f"Failed to start consumer for topic {topic}: {e}",
-                extra={
-                    "topic": topic,
-                    "group_id": group_id,
-                    "correlation_id": str(correlation_id),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "servers": sanitized_servers,
-                },
-            )
-            raise InfraConnectionError(
-                f"Failed to start consumer for topic {topic}: {e}",
-                context=context,
-                topic=topic,
-                servers=sanitized_servers,
-            ) from e
+            except TimeoutError as e:
+                self._pending_consumer_keys.discard(consumer_key)
+                # Clean up consumer on failure to prevent resource leak
+                try:
+                    await consumer.stop()
+                except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                        topic,
+                        cleanup_err,
+                        exc_info=True,
+                    )
+
+                # Propagate timeout error to surface startup failures (differentiate from connection errors)
+                timeout_ctx = ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start_consumer",
+                    target_name=f"kafka.{topic}",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                )
+                logger.exception(
+                    f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "correlation_id": str(correlation_id),
+                        "timeout_seconds": self._timeout_seconds,
+                        "servers": sanitized_servers,
+                        "error_type": "timeout",
+                    },
+                )
+                raise InfraTimeoutError(
+                    f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
+                    context=timeout_ctx,
+                    topic=topic,
+                    servers=sanitized_servers,
+                ) from e
+
+            except Exception as e:
+                self._pending_consumer_keys.discard(consumer_key)
+                # Clean up consumer on failure to prevent resource leak
+                try:
+                    await consumer.stop()
+                except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                        topic,
+                        cleanup_err,
+                        exc_info=True,
+                    )
+
+                # Propagate connection error to surface startup failures (differentiate from timeout)
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start_consumer",
+                    target_name=f"kafka.{topic}",
+                )
+                logger.exception(
+                    f"Failed to start consumer for topic {topic}: {e}",
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "correlation_id": str(correlation_id),
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "servers": sanitized_servers,
+                    },
+                )
+                raise InfraConnectionError(
+                    f"Failed to start consumer for topic {topic}: {e}",
+                    context=context,
+                    topic=topic,
+                    servers=sanitized_servers,
+                ) from e
+
+        self._pending_consumer_keys.discard(consumer_key)
+        self._group_consumers[consumer_key] = consumer
+        self._refresh_topic_consumer_views(topic)
+
+        # Start background task to consume messages with correlation tracking
+        task = asyncio.create_task(self._consume_loop(topic, group_id, correlation_id))
+        self._group_consumer_tasks[consumer_key] = task
+        self._refresh_topic_consumer_views(topic)
+
+        logger.info(
+            f"Started consumer for topic {topic}",
+            extra={
+                "topic": topic,
+                "group_id": effective_group_id,
+                "correlation_id": str(correlation_id),
+                "servers": sanitized_servers,
+            },
+        )
+
+        # Emit consumer started health event (OMN-5518)
+        if self._health_emitter is not None:
+            try:
+                await self._health_emitter.emit_event(
+                    consumer_identity=f"eventbus.{topic}",
+                    consumer_group=effective_group_id,
+                    topic=topic,
+                    event_type=EnumConsumerHealthEventType.CONSUMER_STARTED,
+                    severity=EnumConsumerHealthSeverity.INFO,
+                    correlation_id=correlation_id,
+                    service_label="EventBusKafka",
+                )
+            except Exception:  # noqa: BLE001 - best-effort emission
+                logger.debug(
+                    "Failed to emit consumer started health event", exc_info=True
+                )
 
     def _refresh_topic_consumer_views(self, topic: str) -> None:
         """Refresh compatibility maps keyed only by topic.
