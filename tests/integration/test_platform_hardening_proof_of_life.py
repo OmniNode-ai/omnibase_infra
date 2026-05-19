@@ -11,7 +11,8 @@ Exercises four data flows introduced by the OMN-11188 platform hardening epic:
 
 Models from OMN-11190/11191/11192 are not yet in the installed omnibase_core
 (v0.41.0); they are defined inline here until those PRs merge and the pin advances.
-EnumDataProvenance and EnumDegradedBehavior ship in omnibase_core v0.41.0 (OMN-11189).
+EnumDataProvenance and EnumDegradedBehavior are local until the published
+omnibase_core package contains the OMN-11189 modules.
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
 
-from omnibase_core.enums.enum_data_provenance import EnumDataProvenance
-from omnibase_core.enums.enum_degraded_behavior import EnumDegradedBehavior
+from omnibase_infra.enums.enum_data_provenance import EnumDataProvenance
+from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
 
 # ---------------------------------------------------------------------------
 # Inline model definitions (mirror OMN-11190 / 11191 / 11192 PRs)

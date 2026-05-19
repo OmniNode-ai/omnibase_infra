@@ -34,10 +34,6 @@ concurrency:
   group: build-runtime-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-permissions:
-  id-token: write
-  contents: read
-
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
@@ -48,6 +44,9 @@ env:
 jobs:
   build-and-push:
     name: Build and push runtime image
+    permissions:
+      id-token: write
+      contents: read
     # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -164,7 +163,8 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             VCS_REF=${{ github.sha }}
-            RUNTIME_SOURCE_HASH=${{ steps.meta.outputs.sha_short }}
+            # OMN-9139: use full SHA (not sha_short) for exact attest-source-hash verification
+            RUNTIME_SOURCE_HASH=${{ github.sha }}
             UV_VERSION=${{ env.UV_VERSION }}
 
       - name: Run Trivy vulnerability scanner
@@ -265,3 +265,13 @@ jobs:
           echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> Use the digest above (not a tag) for the Phase 4 kustomize image override." >> $GITHUB_STEP_SUMMARY
+
+  # OMN-9139: Verify RUNTIME_SOURCE_HASH baked into ECR image is valid and matches HEAD.
+  # REQUIRED status check — no bypass, no skip tokens.
+  attest-source-hash:
+    name: Attest Source Hash (OMN-9139)
+    needs: build-and-push
+    uses: ./.github/workflows/attest-source-hash.yml
+    with:
+      runtime_source_hash: ${{ github.sha }}
+      expected_commit_sha: ${{ github.sha }}

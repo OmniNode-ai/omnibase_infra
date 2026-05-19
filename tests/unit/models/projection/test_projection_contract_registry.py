@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_core.enums.enum_degraded_behavior import EnumDegradedBehavior
-from omnibase_core.models.projection.model_projection_contract import (
+from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
+from omnibase_infra.models.projection.model_projection_contract import (
     ModelProjectionContract,
 )
 from omnibase_infra.models.projection.projection_contract_registry import (

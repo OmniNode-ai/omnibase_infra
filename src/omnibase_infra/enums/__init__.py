@@ -25,6 +25,8 @@ Exports:
     EnumContractCheckType: Runtime contract check types (REGISTRATION, SUBSCRIPTION, PUBLICATION, etc.)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumCostTier: Cost tier for LLM backend routing (LOW, MID, HIGH)
+    EnumDataProvenance: Origin quality classification for projected values
+    EnumDegradedBehavior: Fallback strategy for stale or unavailable projections
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
     EnumExecutionShapeViolation: Specific execution shape violation types
@@ -85,10 +87,12 @@ from omnibase_infra.enums.enum_context_section_category import (
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_cost_tier import EnumCostTier
+from omnibase_infra.enums.enum_data_provenance import EnumDataProvenance
 from omnibase_infra.enums.enum_declarative_node_violation import (
     EnumDeclarativeNodeViolation,
 )
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
+from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
 from omnibase_infra.enums.enum_eval_finding_category import EnumEvalFindingCategory
@@ -162,6 +166,8 @@ __all__: list[str] = [
     "EnumContractCheckType",
     "EnumContractType",
     "EnumDeclarativeNodeViolation",
+    "EnumDataProvenance",
+    "EnumDegradedBehavior",
     "EnumDedupeStrategy",
     "EnumDispatchStatus",
     "EnumEnvironment",

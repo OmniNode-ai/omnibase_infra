@@ -166,7 +166,6 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c87e101c0d8db8b21a8f6f6a3f54c8f5d7760199" }
 # v0.36.0: spi v0.21.0 tag does not exist yet (release in flight); pin to the
 # release branch and swap to `tag = "v0.21.0"` in a follow-up once tagged.
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
@@ -519,6 +518,7 @@ node_runner_health_snapshot_effect = "omnibase_infra.nodes.node_runner_health_sn
 node_runner_usage_effect = "omnibase_infra.nodes.node_runner_usage_effect"
 node_runtime_error_triage_effect = "omnibase_infra.nodes.node_runtime_error_triage_effect"
 node_runtime_orchestrator = "omnibase_infra.nodes.node_runtime_orchestrator"
+node_runtime_source_attestor_effect = "omnibase_infra.nodes.node_runtime_source_attestor_effect"
 node_savings_estimation_compute = "omnibase_infra.nodes.node_savings_estimation_compute"
 node_scope_extract_compute = "omnibase_infra.nodes.node_scope_extract_compute"
 node_scope_file_read_effect = "omnibase_infra.nodes.node_scope_file_read_effect"

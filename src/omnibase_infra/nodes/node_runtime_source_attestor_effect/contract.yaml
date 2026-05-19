@@ -1,0 +1,127 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-9139: Deployed-artifact source-hash attestation
+#
+# ONEX Node Contract
+# Node: NodeRuntimeSourceAttestorEffect
+#
+# Subscribes to onex.evt.runtime.booted.v1, compares runtime_source_hash
+# against current main HEAD, and emits friction events when drift > threshold.
+#
+# Related Tickets:
+#   - OMN-9139: Deployed-artifact source-hash attestation
+#   - OMN-9122: runtime_sweep (consumes this signal)
+name: "node_runtime_source_attestor_effect"
+contract_name: "node_runtime_source_attestor_effect"
+node_name: "node_runtime_source_attestor_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node that subscribes to onex.evt.runtime.booted.v1 and verifies runtime_source_hash against the current main HEAD for each repo via git ls-remote. On drift exceeding the configured threshold (default 5 commits), emits a friction event to .onex_state/friction/ and flags the container for the morning-report surface. On unknown or empty hash, treats as infinite drift (always alert). Integrates with OMN-9122 runtime_sweep.
+
+# Event bus
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.runtime-booted.v1"
+  publish_topics: []
+# I/O models
+input_model:
+  name: "ModelRuntimeBootedEvent"
+  module: "omnibase_infra.models.health.model_runtime_booted_event"
+  description: "Boot-time attestation event carrying runtime_source_hash and python_package_hashes."
+output_model:
+  name: "ModelSourceAttestationResult"
+  module: "omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation"
+  description: "Attestation verdict: compliant, drifted, or unknown_hash."
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "attest_source_hash"
+      handler:
+        name: "HandlerSourceAttestation"
+        module: "omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation"
+      description: "Compare runtime_source_hash against main HEAD; emit friction on drift"
+      output_fields:
+        - container_ref
+        - runtime_source_hash
+        - verdict
+        - commit_distance
+        - friction_path
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 2000
+    max_delay_ms: 16000
+    exponential_base: 2
+    retry_on:
+      - "GIT_REMOTE_ERROR"
+  error_types:
+    - name: "GIT_REMOTE_ERROR"
+      description: "git ls-remote failed to reach origin"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "UNKNOWN_HASH"
+      description: "runtime_source_hash is 'unknown' or empty — build defect"
+      recoverable: false
+      retry_strategy: "none"
+# IO operations
+io_operations:
+  - operation: "attest_source_hash"
+    description: "Verify deployed hash against main HEAD"
+    input_fields:
+      - container_ref
+      - runtime_source_hash
+      - booted_at
+      - python_package_hashes
+      - compose_project
+    output_fields:
+      - container_ref
+      - runtime_source_hash
+      - verdict
+      - commit_distance
+      - friction_path
+# Dependencies
+dependencies:
+  - name: "drift_threshold"
+    type: "environment"
+    description: "Maximum allowed commits between runtime_source_hash and main HEAD (default 5)"
+    required: false
+  - name: "repo_url"
+    type: "environment"
+    description: "GitHub repo URL for git ls-remote HEAD resolution"
+    required: false
+# Feature flags
+feature_flags:
+  - name: "ENABLE_SOURCE_ATTESTATION"
+    env_var: "ENABLE_SOURCE_ATTESTATION"
+    default: "true"
+    description: "Master gate for source hash attestation checks"
+# Metadata
+metadata:
+  description: "Verifies deployed artifact source hash against main HEAD; emits friction events on drift exceeding configurable threshold"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-05-19"
+  updated: "2026-05-19"
+  tags:
+    - effect
+    - attestation
+    - source-hash
+    - runtime
+    - drift-detection
+    - omn-9139
