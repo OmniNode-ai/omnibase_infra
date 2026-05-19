@@ -1,0 +1,28 @@
+# OMN-11241 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-11241
+title: "Post-freeze dynamic registration epic"
+summary: "Epic-level deploy evidence for runtime handler materialization after dispatch engine freeze."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+  - events
+evidence_requirements:
+  - kind: tests
+    description: "OMN-11246 verifies the concrete post-freeze dynamic registration behavior under this epic."
+    command: "uv run pytest tests/unit/runtime/test_dispatch_engine_post_freeze.py tests/integration/runtime/test_dispatch_engine_post_freeze_dynamic_registration.py -q"
+  - kind: manual
+    description: "Runtime deploy validation for the post-freeze dynamic registration epic."
+    command: "deploy: after authorized runtime rollout, materialize a contract after dispatch engine freeze and confirm dispatch reaches the dynamically registered handler."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-deploy-dynamic-registration-epic
+    description: "Deploy evidence for post-freeze dynamic registration behavior covered by OMN-11246."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: after authorized runtime rollout, materialize a contract after dispatch engine freeze and confirm dispatch reaches the dynamically registered handler."
