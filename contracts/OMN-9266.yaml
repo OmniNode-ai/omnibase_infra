@@ -1,0 +1,29 @@
+# OMN-9266 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-9266"
+title: "Cite ServiceHealth aggregate response shape model for health endpoint"
+summary: "Typed runtime health response models for the :8085/health aggregate response shape."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "protocols"
+  - "events"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-health-model-tests"
+    description: "Runtime aggregate health model tests and serialization round-trip coverage pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/models/test_model_serialization_roundtrip.py tests/unit/runtime/models/test_model_runtime_aggregate_health.py -q"
+  - id: "dod-deploy"
+    description: "Deploy validation plan for runtime health response shape model; no live runtime restart was performed in this PR."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: after merge, verify docker exec omninode-runtime python -c 'from omnibase_infra.runtime.models import ModelRuntimeAggregateHealth; print(ModelRuntimeAggregateHealth.__name__)'"
