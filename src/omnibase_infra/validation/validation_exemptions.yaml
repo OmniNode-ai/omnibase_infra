@@ -3365,6 +3365,21 @@ pattern_exemptions:
     documentation:
       - OMN-11244 (event-driven contract materialization)
     ticket: OMN-11244
+  # ==========================================================================
+  # HandlerRunnerHealthCollector Naming Exemption (OMN-11273)
+  # ==========================================================================
+  # HandlerRunnerHealthCollector is an observability collector that follows
+  # CLAUDE.md Handler<Name> naming convention and exposes handler_id,
+  # handler_type, and handler_category consistent with the ONEX handler system.
+  - file_pattern: 'handler_runner_health_collector\.py'
+    class_pattern: "Class name 'HandlerRunnerHealthCollector'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerRunnerHealthCollector is a standalone observability collector that follows the CLAUDE.md Handler<Name> naming convention. Ticket OMN-11273 explicitly specifies this class name as the required implementation target.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-11273
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
