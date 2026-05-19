@@ -74,8 +74,9 @@ import hashlib
 import json
 import logging
 import threading
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol, cast, get_args, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, get_args, runtime_checkable
 from uuid import UUID, uuid4
 
 import yaml
@@ -110,6 +111,15 @@ from omnibase_infra.runtime.enums.enum_materialization_status import (
 from omnibase_infra.runtime.models.model_dynamic_materialization import (
     ModelDynamicMaterializationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
+    from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
+        ModelEventBusWiring,
+    )
+    from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
+        ModelHandlerRouting,
+    )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 from omnibase_infra.utils import sanitize_error_message
 
@@ -1015,6 +1025,158 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             )
             return False
 
+    @staticmethod
+    def _canonical_contract_hash(descriptor: ModelHandlerDescriptor) -> str:
+        content_repr = json.dumps(
+            descriptor.contract_config or {}, sort_keys=True, default=str
+        )
+        raw_bytes = content_repr.encode("utf-8")
+        return "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
+
+    def _reserve_materialization_key(
+        self, node_name: str, canon_hash: str
+    ) -> ModelDynamicMaterializationResult | tuple[str, str]:
+        with self._materialization_lock:
+            key = (node_name, canon_hash)
+            if key in self._materialized_contracts:
+                return ModelDynamicMaterializationResult(
+                    contract_name=node_name,
+                    contract_hash=canon_hash,
+                    status=EnumMaterializationStatus.ALREADY_MATERIALIZED,
+                )
+
+            existing_hashes = [
+                existing_hash
+                for existing_node, existing_hash in self._materialized_contracts
+                if existing_node == node_name
+            ]
+            if existing_hashes:
+                logger.warning(
+                    "Version conflict: node already materialized with different contract_hash",
+                    extra={
+                        "node_name": node_name,
+                        "existing_hash": existing_hashes[0],
+                        "incoming_hash": canon_hash,
+                    },
+                )
+                return ModelDynamicMaterializationResult(
+                    contract_name=node_name,
+                    contract_hash=canon_hash,
+                    status=EnumMaterializationStatus.REJECTED,
+                    reason=EnumMaterializationRejection.VERSION_CONFLICT,
+                )
+
+            self._materialized_contracts.add(key)
+            return key
+
+    def _release_materialization_key(self, key: tuple[str, str]) -> None:
+        with self._materialization_lock:
+            self._materialized_contracts.discard(key)
+
+    @staticmethod
+    def _build_event_bus_wiring(
+        config: Mapping[str, object],
+    ) -> ModelEventBusWiring | None:
+        from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
+            ModelEventBusWiring,
+        )
+
+        eb_raw = config.get("event_bus")
+        if not isinstance(eb_raw, dict):
+            return None
+
+        sub_raw = eb_raw.get("subscribe_topics")
+        pub_raw = eb_raw.get("publish_topics")
+        cp_raw = eb_raw.get("consumer_purpose")
+        return ModelEventBusWiring(
+            subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
+            publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
+            consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
+            plugin_managed=bool(eb_raw.get("plugin_managed", False)),
+        )
+
+    @staticmethod
+    def _build_handler_routing(
+        config: Mapping[str, object],
+    ) -> ModelHandlerRouting | None:
+        from omnibase_infra.runtime.auto_wiring.models.model_handler_ref import (
+            ModelHandlerRef,
+        )
+        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
+            ModelHandlerRouting,
+        )
+        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry import (
+            ModelHandlerRoutingEntry,
+        )
+
+        hr_raw = config.get("handler_routing")
+        if not isinstance(hr_raw, dict):
+            return None
+
+        entries: list[ModelHandlerRoutingEntry] = []
+        handlers_raw = hr_raw.get("handlers")
+        for handler_item in handlers_raw if isinstance(handlers_raw, list) else []:
+            if not isinstance(handler_item, dict):
+                continue
+            handler_data = handler_item.get("handler") or {}
+            if not isinstance(handler_data, dict):
+                continue
+            event_model_ref = None
+            event_model_data = handler_item.get("event_model")
+            if isinstance(event_model_data, dict):
+                event_model_ref = ModelHandlerRef(
+                    name=event_model_data.get("name", ""),
+                    module=event_model_data.get("module", ""),
+                )
+            entries.append(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name=handler_data.get("name", ""),
+                        module=handler_data.get("module", ""),
+                    ),
+                    event_model=event_model_ref,
+                    operation=handler_item.get("operation"),
+                    event_type=handler_item.get("event_type"),
+                    message_category=handler_item.get("message_category"),
+                )
+            )
+
+        return ModelHandlerRouting(
+            routing_strategy=hr_raw.get("routing_strategy", "payload_type_match"),
+            handlers=tuple(entries),
+        )
+
+    def _build_materialization_contract(
+        self,
+        node_name: str,
+        descriptor: ModelHandlerDescriptor,
+        environment: str | None,
+    ) -> ModelDiscoveredContract:
+        from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
+        from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
+            ModelContractVersion,
+        )
+
+        ver = descriptor.version
+        effective_env = environment or self._environment
+        config = descriptor.contract_config or {}
+        return ModelDiscoveredContract(
+            name=node_name,
+            node_type=descriptor.handler_kind,
+            description=descriptor.description or "",
+            contract_version=ModelContractVersion(
+                major=ver.major,
+                minor=ver.minor,
+                patch=ver.patch,
+            ),
+            node_version=str(descriptor.version),
+            contract_path=Path(f"/kafka/{effective_env}/{node_name}/contract.yaml"),
+            entry_point_name=f"kafka.{node_name}",
+            package_name="dynamic",
+            event_bus=self._build_event_bus_wiring(config),
+            handler_routing=self._build_handler_routing(config),
+        )
+
     async def materialize_cached_contract(
         self,
         node_name: str,
@@ -1059,145 +1221,21 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 reason=EnumMaterializationRejection.PARSE_FAILURE,
             )
 
-        # Compute canonical hash from contract content for idempotency keying.
-        # Hash the contract_config dict (parsed YAML content) so version conflicts
-        # are detected by actual content change, not stable filesystem path.
-        content_repr = json.dumps(
-            descriptor.contract_config or {}, sort_keys=True, default=str
-        )
-        raw_bytes = content_repr.encode("utf-8")
-        canon_hash = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
-
-        # Idempotency + version-conflict gate (thread-safe).
-        # Reserve the key before wiring to prevent concurrent calls from both
-        # passing the gate and wiring twice.  Key is cleared on failure.
-        with self._materialization_lock:
-            key = (node_name, canon_hash)
-            if key in self._materialized_contracts:
-                return ModelDynamicMaterializationResult(
-                    contract_name=node_name,
-                    contract_hash=canon_hash,
-                    status=EnumMaterializationStatus.ALREADY_MATERIALIZED,
-                )
-            existing_hashes = [
-                h for (n, h) in self._materialized_contracts if n == node_name
-            ]
-            if existing_hashes:
-                logger.warning(
-                    "Version conflict: node already materialized with different contract_hash",
-                    extra={
-                        "node_name": node_name,
-                        "existing_hash": existing_hashes[0],
-                        "incoming_hash": canon_hash,
-                    },
-                )
-                return ModelDynamicMaterializationResult(
-                    contract_name=node_name,
-                    contract_hash=canon_hash,
-                    status=EnumMaterializationStatus.REJECTED,
-                    reason=EnumMaterializationRejection.VERSION_CONFLICT,
-                )
-            # Reserve: prevents concurrent calls with same key from both wiring.
-            self._materialized_contracts.add(key)
+        canon_hash = self._canonical_contract_hash(descriptor)
+        reservation = self._reserve_materialization_key(node_name, canon_hash)
+        if isinstance(reservation, ModelDynamicMaterializationResult):
+            return reservation
+        key = reservation
 
         from omnibase_infra.runtime.auto_wiring.handler_wiring import (
             _wire_single_contract,
         )
-        from omnibase_infra.runtime.auto_wiring.models import (
-            ModelDiscoveredContract,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
-            ModelContractVersion,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
-            ModelEventBusWiring,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_ref import (
-            ModelHandlerRef,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
-            ModelHandlerRouting,
-        )
-        from omnibase_infra.runtime.auto_wiring.models.model_handler_routing_entry import (
-            ModelHandlerRoutingEntry,
-        )
         from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 
-        # Build ModelContractVersion from descriptor.version (ModelSemVer).
-        ver = descriptor.version
-        contract_version = ModelContractVersion(
-            major=ver.major,
-            minor=ver.minor,
-            patch=ver.patch,
-        )
-
-        # Build event_bus and handler_routing from contract_config if present.
-        config = descriptor.contract_config or {}
-        event_bus_wiring: ModelEventBusWiring | None = None
-        handler_routing: ModelHandlerRouting | None = None
-
-        eb_raw = config.get("event_bus")
-        if isinstance(eb_raw, dict):
-            sub_raw = eb_raw.get("subscribe_topics")
-            pub_raw = eb_raw.get("publish_topics")
-            cp_raw = eb_raw.get("consumer_purpose")
-            event_bus_wiring = ModelEventBusWiring(
-                subscribe_topics=tuple(sub_raw) if isinstance(sub_raw, list) else (),
-                publish_topics=tuple(pub_raw) if isinstance(pub_raw, list) else (),
-                consumer_purpose=cp_raw if isinstance(cp_raw, str) else None,
-                plugin_managed=bool(eb_raw.get("plugin_managed", False)),
-            )
-
-        hr_raw = config.get("handler_routing")
-        if isinstance(hr_raw, dict):
-            entries: list[ModelHandlerRoutingEntry] = []
-            handlers_raw = hr_raw.get("handlers")
-            for h in handlers_raw if isinstance(handlers_raw, list) else []:
-                if not isinstance(h, dict):
-                    continue
-                handler_data = h.get("handler") or {}
-                if not isinstance(handler_data, dict):
-                    continue
-                handler_ref = ModelHandlerRef(
-                    name=handler_data.get("name", ""),
-                    module=handler_data.get("module", ""),
-                )
-                event_model_data = h.get("event_model")
-                event_model_ref: ModelHandlerRef | None = None
-                if isinstance(event_model_data, dict):
-                    event_model_ref = ModelHandlerRef(
-                        name=event_model_data.get("name", ""),
-                        module=event_model_data.get("module", ""),
-                    )
-                entries.append(
-                    ModelHandlerRoutingEntry(
-                        handler=handler_ref,
-                        event_model=event_model_ref,
-                        operation=h.get("operation"),
-                        event_type=h.get("event_type"),
-                        message_category=h.get("message_category"),
-                    )
-                )
-            handler_routing = ModelHandlerRouting(
-                routing_strategy=hr_raw.get("routing_strategy", "payload_type_match"),
-                handlers=tuple(entries),
-            )
-
-        # Synthetic contract_path for Kafka-sourced contracts (not on filesystem).
-        effective_env = environment or self._environment
-        synthetic_path = Path(f"/kafka/{effective_env}/{node_name}/contract.yaml")
-
-        contract = ModelDiscoveredContract(
-            name=node_name,
-            node_type=descriptor.handler_kind,
-            description=descriptor.description or "",
-            contract_version=contract_version,
-            node_version=str(descriptor.version),
-            contract_path=synthetic_path,
-            entry_point_name=f"kafka.{node_name}",
-            package_name="dynamic",
-            event_bus=event_bus_wiring,
-            handler_routing=handler_routing,
+        contract = self._build_materialization_contract(
+            node_name=node_name,
+            descriptor=descriptor,
+            environment=environment,
         )
 
         try:
@@ -1234,8 +1272,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 )
 
             # Wiring skipped — release the reservation so a future retry can attempt.
-            with self._materialization_lock:
-                self._materialized_contracts.discard(key)
+            self._release_materialization_key(key)
             logger.warning(
                 "Contract materialization skipped",
                 extra={
@@ -1252,8 +1289,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
 
         except Exception as exc:  # noqa: BLE001 — wiring boundary; log and return REJECTED
             # Release the reservation so a future retry can attempt.
-            with self._materialization_lock:
-                self._materialized_contracts.discard(key)
+            self._release_materialization_key(key)
             logger.warning(
                 "Contract materialization failed",
                 extra={

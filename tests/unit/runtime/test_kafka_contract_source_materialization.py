@@ -65,21 +65,51 @@ def _make_wiring_result(
     )
 
 
+def _add_default_descriptor(
+    source: KafkaContractSource,
+    contract_config: dict | None = None,
+) -> ModelHandlerDescriptor:
+    descriptor = _make_descriptor(contract_config=contract_config)
+    source._cache.add("test_dynamic", descriptor)
+    return descriptor
+
+
+def _materialize(
+    source: KafkaContractSource,
+    node_name: str = "test_dynamic",
+    event_bus: object | None = None,
+) -> object:
+    return asyncio.run(
+        source.materialize_cached_contract(
+            node_name=node_name,
+            dispatch_engine=MagicMock(),
+            event_bus=event_bus or AsyncMock(),
+        )
+    )
+
+
+def _capture_wired_contract(source: KafkaContractSource) -> object:
+    captured: list[object] = []
+
+    def _capture_wire(**kwargs: object) -> object:
+        captured.append(kwargs["contract"])
+        return _make_wiring_result()
+
+    with patch(_WIRE_PATCH, side_effect=_capture_wire):
+        _materialize(source)
+
+    assert len(captured) == 1
+    return captured[0]
+
+
 class TestMaterializeCachedContractNotCached:
     """materialize_cached_contract returns REJECTED when node not in cache."""
 
     def test_returns_rejected_for_unknown_node(self) -> None:
         source = KafkaContractSource(environment="dev")
-        dispatch_engine = MagicMock()
-        event_bus = MagicMock()
 
-        result = asyncio.run(
-            source.materialize_cached_contract(
-                node_name="nonexistent.node",
-                dispatch_engine=dispatch_engine,
-                event_bus=event_bus,
-            )
-        )
+        result = _materialize(source, node_name="nonexistent.node")
+
         assert result.status == EnumMaterializationStatus.REJECTED
         assert result.reason == EnumMaterializationRejection.PARSE_FAILURE
         assert result.contract_name == "nonexistent.node"
@@ -90,11 +120,8 @@ class TestMaterializeCachedContractIdempotency:
 
     def test_second_call_returns_already_materialized(self) -> None:
         source = KafkaContractSource(environment="dev")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
-        dispatch_engine = MagicMock()
-        event_bus = AsyncMock()
         wiring_result = _make_wiring_result()
 
         with patch(
@@ -102,23 +129,11 @@ class TestMaterializeCachedContractIdempotency:
             new_callable=AsyncMock,
             return_value=wiring_result,
         ) as mock_wire:
-            result1 = asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=dispatch_engine,
-                    event_bus=event_bus,
-                )
-            )
+            result1 = _materialize(source)
             assert result1.status == EnumMaterializationStatus.MATERIALIZED
             assert mock_wire.call_count == 1
 
-            result2 = asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=dispatch_engine,
-                    event_bus=event_bus,
-                )
-            )
+            result2 = _materialize(source)
             assert result2.status == EnumMaterializationStatus.ALREADY_MATERIALIZED
             assert mock_wire.call_count == 1  # not called again
 
@@ -128,23 +143,15 @@ class TestMaterializeCachedContractVersionConflict:
 
     def test_version_conflict_rejected(self) -> None:
         source = KafkaContractSource(environment="dev")
-
-        descriptor1 = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor1)
+        _add_default_descriptor(source)
 
         # Inject a different hash for the same node name to simulate a
         # version already materialized under a different contract revision.
         fake_hash = "sha256:aabbccddeeff00112233445566778899"
         source._materialized_contracts.add(("test_dynamic", fake_hash))
 
-        # Now try to materialize — the canonical hash won't match fake_hash.
-        result = asyncio.run(
-            source.materialize_cached_contract(
-                node_name="test_dynamic",
-                dispatch_engine=MagicMock(),
-                event_bus=MagicMock(),
-            )
-        )
+        result = _materialize(source)
+
         assert result.status == EnumMaterializationStatus.REJECTED
         assert result.reason == EnumMaterializationRejection.VERSION_CONFLICT
 
@@ -154,8 +161,7 @@ class TestMaterializeCachedContractSuccess:
 
     def test_materialized_result_fields(self) -> None:
         source = KafkaContractSource(environment="dev")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
         dispatchers = ("dispatcher.effect_test",)
         topics = ("onex.evt.test.dynamic.v1",)
@@ -166,13 +172,7 @@ class TestMaterializeCachedContractSuccess:
             new_callable=AsyncMock,
             return_value=wiring_result,
         ):
-            result = asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
+            result = _materialize(source)
 
         assert result.status == EnumMaterializationStatus.MATERIALIZED
         assert result.contract_name == "test_dynamic"
@@ -183,21 +183,14 @@ class TestMaterializeCachedContractSuccess:
 
     def test_materialized_contract_added_to_tracking_set(self) -> None:
         source = KafkaContractSource(environment="dev")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
         with patch(
             _WIRE_PATCH,
             new_callable=AsyncMock,
             return_value=_make_wiring_result(),
         ):
-            asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
+            _materialize(source)
 
         assert len(source._materialized_contracts) == 1
         node_names = {n for (n, _) in source._materialized_contracts}
@@ -209,8 +202,7 @@ class TestMaterializeCachedContractWiringSkipped:
 
     def test_skipped_wiring_returns_rejected(self) -> None:
         source = KafkaContractSource(environment="dev")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
         wiring_result = _make_wiring_result(outcome_value="skipped")
 
@@ -219,13 +211,7 @@ class TestMaterializeCachedContractWiringSkipped:
             new_callable=AsyncMock,
             return_value=wiring_result,
         ):
-            result = asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
+            result = _materialize(source)
 
         assert result.status == EnumMaterializationStatus.REJECTED
         assert result.reason is None
@@ -238,21 +224,14 @@ class TestMaterializeCachedContractWiringException:
 
     def test_exception_returns_rejected(self) -> None:
         source = KafkaContractSource(environment="dev")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
         with patch(
             _WIRE_PATCH,
             new_callable=AsyncMock,
             side_effect=RuntimeError("dispatch engine is frozen"),
         ):
-            result = asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
+            result = _materialize(source)
 
         assert result.status == EnumMaterializationStatus.REJECTED
         assert len(source._materialized_contracts) == 0
@@ -269,29 +248,10 @@ class TestMaterializeCachedContractEventBusConfig:
                 "publish_topics": ["onex.evt.test.bar.v1"],
             }
         }
-        descriptor = _make_descriptor(contract_config=config)
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source, contract_config=config)
 
-        captured: list[object] = []
+        contract = _capture_wired_contract(source)
 
-        async def _capture_wire(**kwargs: object) -> object:
-            captured.append(kwargs["contract"])
-            return _make_wiring_result()
-
-        with patch(
-            _WIRE_PATCH,
-            side_effect=_capture_wire,
-        ):
-            asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
-
-        assert len(captured) == 1
-        contract = captured[0]
         assert hasattr(contract, "event_bus")
         assert contract.event_bus is not None
         assert "onex.evt.test.foo.v1" in contract.event_bus.subscribe_topics
@@ -319,29 +279,10 @@ class TestMaterializeCachedContractHandlerRouting:
                 ],
             }
         }
-        descriptor = _make_descriptor(contract_config=config)
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source, contract_config=config)
 
-        captured: list[object] = []
+        contract = _capture_wired_contract(source)
 
-        async def _capture_wire(**kwargs: object) -> object:
-            captured.append(kwargs["contract"])
-            return _make_wiring_result()
-
-        with patch(
-            _WIRE_PATCH,
-            side_effect=_capture_wire,
-        ):
-            asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
-
-        assert len(captured) == 1
-        contract = captured[0]
         assert contract.handler_routing is not None
         assert contract.handler_routing.routing_strategy == "payload_type_match"
         assert len(contract.handler_routing.handlers) == 1
@@ -353,29 +294,10 @@ class TestMaterializeCachedContractSyntheticPath:
 
     def test_contract_path_is_synthetic(self) -> None:
         source = KafkaContractSource(environment="staging")
-        descriptor = _make_descriptor()
-        source._cache.add("test_dynamic", descriptor)
+        _add_default_descriptor(source)
 
-        captured: list[object] = []
+        contract_path = _capture_wired_contract(source).contract_path
 
-        async def _capture_wire(**kwargs: object) -> object:
-            captured.append(kwargs["contract"])
-            return _make_wiring_result()
-
-        with patch(
-            _WIRE_PATCH,
-            side_effect=_capture_wire,
-        ):
-            asyncio.run(
-                source.materialize_cached_contract(
-                    node_name="test_dynamic",
-                    dispatch_engine=MagicMock(),
-                    event_bus=AsyncMock(),
-                )
-            )
-
-        assert len(captured) == 1
-        contract_path = captured[0].contract_path
         assert isinstance(contract_path, Path)
         assert "kafka" in str(contract_path)
         assert "staging" in str(contract_path)
