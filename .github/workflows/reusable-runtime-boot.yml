@@ -219,6 +219,20 @@ jobs:
           # resolves by container-name DNS.
           uv run python scripts/run-migrations.py
 
+      - name: Pre-warm Redpanda metadata (compose mode)
+        if: inputs.mode == 'compose'
+        run: |
+          set -euo pipefail
+          # Fresh Redpanda brokers need time for their metadata subsystem to
+          # stabilize after initial startup. Without a settling period, the
+          # runtime's topic-creation + immediate subscribe sequence hits
+          # InvalidPartitionsError / UnknownTopicOrPartitionError as Redpanda's
+          # partition metadata cache catches up. 60s covers the observed ~30s
+          # propagation lag with margin.
+          echo "Waiting 60s for Redpanda metadata subsystem to stabilize..."
+          sleep 60
+          echo "Redpanda pre-warm complete"
+
       - name: Stage contracts outside /home (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
