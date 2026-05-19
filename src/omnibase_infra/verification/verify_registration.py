@@ -86,10 +86,10 @@ def _check_registration(
         return ModelContractCheckResult(
             check_type=EnumContractCheckType.REGISTRATION,
             severity=EnumCheckSeverity.REQUIRED,
-            verdict=EnumValidationVerdict.FAIL,
+            verdict=EnumValidationVerdict.QUARANTINE,
             evidence=f"Schema introspection failed: {exc}",
             contract_name=contract_name,
-            message="Registration check failed: could not introspect schema.",
+            message="Registration check quarantined: could not introspect schema.",
         )
 
     actual_columns = {row.get("column_name", "") for row in schema_rows}

@@ -86,8 +86,8 @@ def test_check_registration_queries_by_node_type_not_node_name() -> None:
 
 
 @pytest.mark.unit
-def test_check_registration_schema_introspection_failure_returns_fail() -> None:
-    """If schema introspection itself fails, return FAIL (not crash)."""
+def test_check_registration_schema_introspection_failure_quarantines() -> None:
+    """If schema introspection itself fails, return QUARANTINE (not crash)."""
 
     def db_query_fn(sql: str) -> list[dict[str, str]]:
         if "information_schema" in sql:
@@ -95,5 +95,5 @@ def test_check_registration_schema_introspection_failure_returns_fail() -> None:
         return []
 
     result = _check_registration("node_registration_orchestrator", db_query_fn)
-    assert result.verdict == EnumValidationVerdict.FAIL
+    assert result.verdict == EnumValidationVerdict.QUARANTINE
     assert "schema introspection failed" in result.evidence.lower()

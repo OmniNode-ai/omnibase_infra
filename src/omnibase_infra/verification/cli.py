@@ -22,6 +22,7 @@ import importlib.resources
 import json
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,51 @@ def _find_registration_contracts(contracts_dir: Path) -> list[Path]:
     return contracts
 
 
+RuntimeDbQueryFn = Callable[[str], list[dict[str, str]]]
+
+
+def _make_runtime_db_query_fn() -> RuntimeDbQueryFn | None:
+    """Build a synchronous DB query function from runtime DB configuration.
+
+    The runtime registration projector writes to the database identified by
+    ``OMNIBASE_INFRA_DB_URL``. Returning ``None`` lets callers report an
+    ungrounded probe instead of turning missing DB configuration into empty
+    ``registration_projections`` evidence.
+    """
+    from omnibase_infra.runtime.models.model_postgres_pool_config import (
+        ModelPostgresPoolConfig,
+    )
+
+    try:
+        config = ModelPostgresPoolConfig.from_env("OMNIBASE_INFRA_DB_URL")
+    except ValueError:
+        return None
+
+    def _query(sql: str) -> list[dict[str, str]]:
+        import psycopg2
+
+        with psycopg2.connect(
+            host=config.host,
+            port=config.port,
+            user=config.user,
+            password=config.password,
+            dbname=config.database,
+            connect_timeout=5,
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                column_names = [col[0] for col in cursor.description or ()]
+                return [
+                    {
+                        column: "" if value is None else str(value)
+                        for column, value in zip(column_names, row, strict=False)
+                    }
+                    for row in cursor.fetchall()
+                ]
+
+    return _query
+
+
 def _aggregate_verdict(
     reports: list[ModelContractVerificationReport],
 ) -> EnumValidationVerdict:
@@ -103,11 +149,13 @@ def _run_registration_only(
         logger.error("No registration contracts found in %s", contracts_dir)
         return 1
 
-    # For registration-only, we use placeholder fns that produce QUARANTINE
-    # since the real infra may not be available. The verify_registration_contract
-    # function has its own dependency injection.
-    def _noop_db(sql: str) -> list[dict[str, str]]:
-        return []
+    # Use the same runtime DB that the registration projector writes to. If the
+    # DB target is not configured, fail closed into probe quarantine rather than
+    # fabricating empty registration_projections evidence.
+    db_query_fn = _make_runtime_db_query_fn()
+
+    def _ungrounded_db(sql: str) -> list[dict[str, str]]:
+        raise RuntimeError("OMNIBASE_INFRA_DB_URL is not configured")
 
     def _noop_kafka(_group_id: str) -> set[str]:
         return set()
@@ -118,7 +166,7 @@ def _run_registration_only(
     reports: list[ModelContractVerificationReport] = []
     for contract_path in contracts:
         report = verify_registration_contract(
-            db_query_fn=_noop_db,
+            db_query_fn=db_query_fn or _ungrounded_db,
             kafka_admin_fn=_noop_kafka,
             watermark_fn=_noop_watermark,
             contract_path=contract_path,

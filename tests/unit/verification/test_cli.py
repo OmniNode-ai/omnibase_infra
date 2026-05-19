@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.verification import cli
 from omnibase_infra.verification.cli import build_parser, main
 
 
@@ -158,8 +159,81 @@ class TestCLIMain:
         output = json.loads(captured.out)
         assert isinstance(output, list)
         assert len(output) == 3
-        # All use noop fns so expect FAIL (noop db returns empty rows)
-        assert exit_code == 1
+        # No runtime DB is configured in this unit test, so DB-backed checks
+        # quarantine instead of fabricating empty projection rows.
+        assert exit_code in (1, 2)
+
+    def test_registration_only_uses_runtime_db_for_projection_state(
+        self,
+        tmp_path: Path,
+        capsys: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-9539/9540/9541: configured DB rows drive projection_state PASS."""
+        for node_name, node_type in (
+            ("node_registration_orchestrator", "ORCHESTRATOR_GENERIC"),
+            ("node_registration_reducer", "REDUCER_GENERIC"),
+            ("node_registration_storage_effect", "EFFECT_GENERIC"),
+        ):
+            contract = _make_contract(name=node_name, node_type=node_type)
+            _write_contract(tmp_path, contract, node_name)
+
+        def db_query_fn(sql: str) -> list[dict[str, str]]:
+            if "information_schema.columns" in sql:
+                return [
+                    {"column_name": "entity_id"},
+                    {"column_name": "current_state"},
+                    {"column_name": "node_type"},
+                    {"column_name": "data_provenance"},
+                ]
+            if "WHERE node_type = 'orchestrator'" in sql:
+                return [
+                    {
+                        "entity_id": "orchestrator-1",
+                        "current_state": "active",
+                        "node_type": "orchestrator",
+                    }
+                ]
+            return [
+                {
+                    "entity_id": "orchestrator-1",
+                    "current_state": "active",
+                    "node_type": "orchestrator",
+                },
+                {
+                    "entity_id": "reducer-1",
+                    "current_state": "active",
+                    "node_type": "reducer",
+                },
+                {
+                    "entity_id": "effect-1",
+                    "current_state": "active",
+                    "node_type": "effect",
+                },
+            ]
+
+        monkeypatch.setattr(cli, "_make_runtime_db_query_fn", lambda: db_query_fn)
+
+        exit_code = cli.main(["--registration-only", "--contracts-dir", str(tmp_path)])
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert isinstance(output, list)
+        assert len(output) == 3
+        assert exit_code == 0
+
+        for report in output:
+            projection_check = next(
+                check
+                for check in report["checks"]
+                if check["check_type"] == "projection_state"
+            )
+            assert projection_check["verdict"] == "pass"
+            assert "Found 3/3 rows in terminal states" in projection_check["evidence"]
+            assert (
+                "No rows found in registration_projections"
+                not in projection_check["evidence"]
+            )
 
     def test_registration_only_no_contracts(self, tmp_path: Path) -> None:
         """--registration-only with empty dir -> exit 1."""
