@@ -178,6 +178,10 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelNodeEdge": "Edge definition in runtime node graph (source/target/topic)",
     "ModelRuntimeNodeGraph": "Aggregate runtime node graph model with nodes and edges lists",
     "ModelPatternBBrokerConfig": "Runtime config for Pattern B broker; tested via live integration",
+    # OMN-9266: Aggregate health response models — round-trip covered in
+    # tests/unit/runtime/models/test_model_runtime_aggregate_health.py
+    "ModelEventBusAggregateHealth": "Round-trip covered in test_model_runtime_aggregate_health; extra='allow' complicates generic factory",
+    "ModelRuntimeAggregateHealth": "Round-trip covered in test_model_runtime_aggregate_health; extra='allow' complicates generic factory",
     "ModelDynamicMaterializationResult": "Covered by test_kafka_contract_source_materialization.py",
     "ModelLocalStateStoreEntry": "Internal entry model for ModelLocalStateStore; covered by test_node_invocation_adapter.py",
 }
