@@ -7,8 +7,7 @@ summary: >-
   Adds dynamic contract registration E2E coverage and hardens dynamic materialization so off-allowlist handler paths return a structured HANDLER_ALLOWLIST rejection before runtime auto-wiring attempts imports.
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - "runtime_dynamic_materialization"
+interfaces_touched: []
 evidence_requirements:
   - kind: "tests"
     description: "Dynamic contract registration E2E and Kafka materialization tests pass"
