@@ -102,6 +102,9 @@ from omnibase_infra.runtime.baseline_subscriptions import (
     TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
     TOPIC_SUFFIX_CONTRACT_REGISTERED,
 )
+from omnibase_infra.runtime.constants_security import (
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.enums.enum_materialization_rejection import (
     EnumMaterializationRejection,
 )
@@ -133,6 +136,7 @@ ModelContractDiscoveryResult.model_rebuild()
 
 # Maximum contract size (same as other sources)
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024  # 10MB
+_TEST_HANDLER_NAMESPACE_PREFIXES = ("tests.",)
 
 
 class ContractYamlParser:  # ai-slop-ok: pre-existing
@@ -726,8 +730,9 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         self._cache = KafkaContractCache()
         self._parser = ContractYamlParser(environment=environment)
         # Idempotency set: (node_name, contract_hash) pairs already materialized.
-        # Validation (allowlist, profiles, hash) is performed by
-        # node_contract_registry in omnimarket. Runtime trusts validated events.
+        # Node contract registry owns policy enforcement. Runtime repeats the
+        # handler namespace allowlist check before dynamic imports as defense
+        # in depth.
         self._materialized_contracts: set[tuple[str, str]] = set()
         self._materialization_lock = threading.Lock()
 
@@ -1033,6 +1038,10 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         raw_bytes = content_repr.encode("utf-8")
         return "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
 
+    @staticmethod
+    def _fingerprint_handler_path(handler_path: str) -> str:
+        return "sha256:" + hashlib.sha256(handler_path.encode("utf-8")).hexdigest()
+
     def _reserve_materialization_key(
         self, node_name: str, canon_hash: str
     ) -> ModelDynamicMaterializationResult | tuple[str, str]:
@@ -1072,6 +1081,42 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
     def _release_materialization_key(self, key: tuple[str, str]) -> None:
         with self._materialization_lock:
             self._materialized_contracts.discard(key)
+
+    @staticmethod
+    def _handler_namespace_prefixes(environment: str | None) -> tuple[str, ...]:
+        if environment == "test":
+            return TRUSTED_HANDLER_NAMESPACE_PREFIXES + _TEST_HANDLER_NAMESPACE_PREFIXES
+        return TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+    @classmethod
+    def _is_handler_path_allowed(
+        cls, handler_path: str | None, environment: str | None
+    ) -> bool:
+        if not handler_path:
+            return True
+        return handler_path.startswith(cls._handler_namespace_prefixes(environment))
+
+    @classmethod
+    def _dynamic_materialization_allowlist_rejection(
+        cls,
+        *,
+        descriptor: ModelHandlerDescriptor,
+        contract: ModelDiscoveredContract,
+        environment: str | None,
+    ) -> str | None:
+        handler_class = descriptor.handler_class
+        if not cls._is_handler_path_allowed(handler_class, environment):
+            return handler_class
+
+        if contract.handler_routing is None:
+            return None
+
+        for entry in contract.handler_routing.handlers:
+            module_path = entry.handler.module
+            if not cls._is_handler_path_allowed(module_path, environment):
+                return module_path
+
+        return None
 
     @staticmethod
     def _build_event_bus_wiring(
@@ -1221,6 +1266,37 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 reason=EnumMaterializationRejection.PARSE_FAILURE,
             )
 
+        contract = self._build_materialization_contract(
+            node_name=node_name,
+            descriptor=descriptor,
+            environment=environment,
+        )
+        effective_env = environment or self._environment
+        rejected_handler_path = self._dynamic_materialization_allowlist_rejection(
+            descriptor=descriptor,
+            contract=contract,
+            environment=effective_env,
+        )
+        if rejected_handler_path is not None:
+            allowed_namespaces = self._handler_namespace_prefixes(effective_env)
+            logger.warning(
+                "Rejected dynamic materialization: handler path outside allowed namespaces",
+                extra={
+                    "node_name": node_name,
+                    "handler_path_fingerprint": self._fingerprint_handler_path(
+                        rejected_handler_path
+                    ),
+                    "handler_path_length": len(rejected_handler_path),
+                    "allowed_namespace_count": len(allowed_namespaces),
+                },
+            )
+            return ModelDynamicMaterializationResult(
+                contract_name=node_name,
+                contract_hash=self._canonical_contract_hash(descriptor),
+                status=EnumMaterializationStatus.REJECTED,
+                reason=EnumMaterializationRejection.HANDLER_ALLOWLIST,
+            )
+
         canon_hash = self._canonical_contract_hash(descriptor)
         reservation = self._reserve_materialization_key(node_name, canon_hash)
         if isinstance(reservation, ModelDynamicMaterializationResult):
@@ -1232,12 +1308,6 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         )
         from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 
-        contract = self._build_materialization_contract(
-            node_name=node_name,
-            descriptor=descriptor,
-            environment=environment,
-        )
-
         try:
             from omnibase_infra.protocols.protocol_dispatch_engine import (
                 ProtocolDispatchEngine,
@@ -1247,7 +1317,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 contract=contract,
                 dispatch_engine=cast("ProtocolDispatchEngine", dispatch_engine),
                 event_bus=event_bus,
-                environment=environment or self._environment,
+                environment=effective_env,
                 container=container,
             )
 
