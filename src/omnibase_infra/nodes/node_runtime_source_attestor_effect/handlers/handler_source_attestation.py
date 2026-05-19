@@ -150,9 +150,7 @@ class HandlerSourceAttestation:
             distance = self._compute_distance(runtime_hash, main_head)
 
         runtime_short = runtime_hash[:7]
-        is_exact_match = main_head is not None and (
-            main_head.startswith(runtime_hash) or runtime_hash.startswith(main_head[:7])
-        )
+        is_exact_match = main_head is not None and main_head.startswith(runtime_hash)
 
         if is_exact_match or (distance != -1 and distance <= self._drift_threshold):
             return ModelSourceAttestationResult(
@@ -213,7 +211,7 @@ class HandlerSourceAttestation:
         This is best-effort; the git subprocess may not be present in all
         environments. Callers must handle -1 gracefully.
         """
-        if main_head.startswith(runtime_hash) or runtime_hash.startswith(main_head[:7]):
+        if main_head.startswith(runtime_hash):
             return 0
         try:
             result = subprocess.run(

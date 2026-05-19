@@ -195,6 +195,18 @@ class TestCompliantHash:
         assert result.commit_distance == 3
         assert result.friction_path is None
 
+    def test_shared_short_prefix_is_not_exact_match(self, tmp_path: Path) -> None:
+        handler = _make_handler(tmp_path, drift_threshold=5)
+        runtime_hash = f"{_FAKE_MAIN_HEAD[:7]}999999999999999999999999999999999"
+        event = _make_event(runtime_source_hash=runtime_hash)
+
+        with patch.object(handler, "_resolve_main_head", return_value=_FAKE_MAIN_HEAD):
+            with patch.object(handler, "_compute_distance", return_value=-1):
+                result = handler.attest(event)
+
+        assert result.verdict == "drifted"
+        assert result.friction_path is not None
+
 
 # ---------------------------------------------------------------------------
 # hash is stale → drifted + friction
@@ -296,6 +308,20 @@ class TestResolveMainHead:
             result = handler._resolve_main_head()
 
         assert result is None
+
+
+class TestComputeDistance:
+    def test_shared_short_prefix_is_not_distance_zero(self, tmp_path: Path) -> None:
+        handler = _make_handler(tmp_path)
+        runtime_hash = f"{_FAKE_MAIN_HEAD[:7]}999999999999999999999999999999999"
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = handler._compute_distance(runtime_hash, _FAKE_MAIN_HEAD)
+
+        assert result == -1
 
 
 # ---------------------------------------------------------------------------
