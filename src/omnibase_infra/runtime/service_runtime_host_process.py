@@ -1351,6 +1351,11 @@ class RuntimeHostProcess:
         # Wired when KAFKA_EVENTS mode is active with a KafkaContractSource.
         self._baseline_subscriptions: list[Callable[[], Awaitable[None]]] = []
 
+        # Post-freeze dynamic contract registration listener (OMN-11247)
+        # Unsubscribe callback for the node-registration topic subscription.
+        # None until _start_dynamic_contract_listener() is called during start().
+        self._dynamic_contract_unsubscribe: Callable[[], Awaitable[None]] | None = None
+
         # Contract configuration loaded at startup (OMN-1519)
         # Contains consolidated handler_routing and operation_bindings from all contracts.
         # None until loaded during start() via _load_contract_configs()
@@ -1960,6 +1965,13 @@ class RuntimeHostProcess:
         # contract topics to receive registration/deregistration events.
         await self._wire_baseline_subscriptions()
 
+        # Step 4.35: Start post-freeze dynamic contract registration listener (OMN-11247)
+        # Subscribes to onex.evt.platform.node-registration.v1 AFTER the dispatch
+        # engine is frozen. Routes incoming events to on_contract_registered()
+        # then live materializes the handler into the frozen engine.
+        # No-op when KafkaContractSource is not configured.
+        await self._start_dynamic_contract_listener()
+
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
@@ -2288,6 +2300,18 @@ class RuntimeHostProcess:
                     )
             self._baseline_subscriptions.clear()
             logger.debug("Baseline contract subscriptions cleaned up")
+
+        # Step 2.75: Cleanup dynamic contract registration listener (OMN-11247)
+        if self._dynamic_contract_unsubscribe is not None:
+            try:
+                await self._dynamic_contract_unsubscribe()
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Failed to unsubscribe dynamic contract registration listener",
+                    extra={"error": str(e)},
+                )
+            self._dynamic_contract_unsubscribe = None
+            logger.debug("Dynamic contract registration listener cleaned up")
 
         # Step 2.8: Nullify KafkaContractSource reference for proper cleanup (OMN-1654)
         self._kafka_contract_source = None
@@ -3572,6 +3596,48 @@ class RuntimeHostProcess:
 
         subcontract = ModelEventBusSubcontract.model_validate(event_bus_data)
         if subcontract.subscribe_topics:
+            # Provision new contract's topics before subscribing (OMN-11242).
+            # Best-effort: failure logs a warning but never blocks materialization.
+            _event_bus = getattr(self, "_event_bus", None)
+            _bootstrap = (
+                _event_bus._bootstrap_servers  # type: ignore[union-attr]
+                if isinstance(_event_bus, EventBusKafka)
+                else ""
+            )
+            if _bootstrap:
+                try:
+                    from omnibase_infra.event_bus.service_topic_manager import (
+                        TopicProvisioner,
+                    )
+
+                    _contracts_root = (
+                        self._contract_paths[0] if self._contract_paths else Path()
+                    )
+                    _provisioner = TopicProvisioner(
+                        bootstrap_servers=_bootstrap,
+                        contracts_root=_contracts_root,
+                    )
+                except Exception:  # noqa: BLE001 — boundary: best-effort, never blocks
+                    logger.warning(
+                        "Topic pre-provisioning failed for live contract (non-blocking): "
+                        "node=%s topics=%s",
+                        node_name,
+                        subcontract.subscribe_topics,
+                        exc_info=True,
+                    )
+                else:
+                    for _topic in subcontract.subscribe_topics:
+                        try:
+                            await _provisioner.ensure_topic_exists(topic_name=_topic)
+                        except Exception:  # noqa: BLE001 — boundary: best-effort
+                            logger.warning(
+                                "Topic pre-provisioning failed for live contract "
+                                "(non-blocking): node=%s topic=%s",
+                                node_name,
+                                _topic,
+                                exc_info=True,
+                            )
+
             await self._event_bus_wiring.wire_subscriptions(
                 subcontract=subcontract,
                 node_name=node_name,
@@ -6029,6 +6095,189 @@ class RuntimeHostProcess:
                 extra={
                     "registration_topic": registration_topic,
                     "deregistration_topic": deregistration_topic,
+                },
+            )
+
+    # =========================================================================
+    # Dynamic Contract Registration Listener (OMN-11247)
+    # =========================================================================
+
+    async def _start_dynamic_contract_listener(self) -> None:
+        """Subscribe to node-registration events for post-freeze materialization.
+
+        Called AFTER the dispatch engine is frozen during _start_runtime(). Subscribes
+        to SUFFIX_NODE_REGISTRATION (onex.evt.platform.node-registration.v1) and routes
+        events through on_contract_registered() then live handler materialization.
+
+        No-op when:
+        - _kafka_contract_source is None (not using Kafka discovery)
+        - _event_bus is None
+
+        The runtime trusts events on this topic as pre-validated by omnimarket.
+        No local policy enforcement — only cache + materialize.
+
+        .. versionadded:: 0.9.4
+            Added as part of OMN-11247 post-freeze dynamic contract registration.
+        """
+        if self._kafka_contract_source is None:
+            logger.debug(
+                "Skipping dynamic contract listener: no KafkaContractSource configured"
+            )
+            return
+
+        if self._event_bus is None:
+            logger.debug("Skipping dynamic contract listener: no event bus available")
+            return
+
+        from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
+
+        listener_identity = ModelNodeIdentity(
+            env=self._kafka_contract_source.environment,
+            service=self._node_identity.service,
+            node_name=f"{self._node_identity.node_name}-dynamic-contract-listener",
+            version=self._node_identity.version,
+        )
+
+        self._dynamic_contract_unsubscribe = await self._event_bus.subscribe(
+            topic=SUFFIX_NODE_REGISTRATION,
+            node_identity=listener_identity,
+            on_message=self._on_dynamic_contract_event,
+            purpose=EnumConsumerGroupPurpose.CONSUME,
+        )
+
+        logger.info(
+            "Dynamic contract registration listener started",
+            extra={"topic": SUFFIX_NODE_REGISTRATION},
+        )
+
+    async def _on_dynamic_contract_event(self, msg: ModelEventMessage) -> None:
+        """Process a node-registration event for live handler materialization.
+
+        Parses the event payload, caches the contract via KafkaContractSource,
+        then materializes the handler into the live (frozen) dispatch engine.
+
+        This handler never raises — all exceptions are caught and logged.
+        Structured rejection fields (failure_code, reason, node_name,
+        correlation_id, rejected_at) are included in warning log extras.
+
+        .. versionadded:: 0.9.4
+            Added as part of OMN-11247 post-freeze dynamic contract registration.
+        """
+        import datetime
+
+        correlation_id: UUID = uuid4()
+        node_name: str = ""
+
+        try:
+            if self._kafka_contract_source is None:
+                return
+
+            parsed = _parse_contract_event_payload(msg)
+            if parsed is None:
+                return
+
+            payload, correlation_id = parsed
+            node_name = str(payload.get("node_name", ""))
+            contract_yaml = str(payload.get("contract_yaml", ""))
+            event_type = str(payload.get("event_type", "registered"))
+
+            if not node_name:
+                logger.warning(
+                    "Rejecting malformed node-registration event",
+                    extra={
+                        "failure_code": "MISSING_NODE_NAME",
+                        "reason": "node_name field is missing or empty",
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                        "rejected_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                    },
+                )
+                return
+
+            if event_type in ("deregistered", "expired"):
+                self._kafka_contract_source.on_contract_deregistered(
+                    node_name=node_name,
+                    correlation_id=correlation_id,
+                )
+                return
+
+            if not contract_yaml:
+                logger.warning(
+                    "Rejecting malformed node-registration event",
+                    extra={
+                        "failure_code": "MISSING_CONTRACT_YAML",
+                        "reason": "contract_yaml field is missing or empty",
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                        "rejected_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                    },
+                )
+                return
+
+            cached = self._kafka_contract_source.on_contract_registered(
+                node_name=node_name,
+                contract_yaml=contract_yaml,
+                correlation_id=correlation_id,
+            )
+
+            if not cached:
+                logger.warning(
+                    "Dynamic contract registration caching failed",
+                    extra={
+                        "failure_code": "CACHE_FAILED",
+                        "reason": "on_contract_registered returned False",
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                        "rejected_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                    },
+                )
+                return
+
+            descriptor = self._kafka_contract_source.get_cached_descriptor(node_name)
+            if descriptor is None:
+                logger.warning(
+                    "Dynamic contract cached but descriptor not found",
+                    extra={
+                        "failure_code": "DESCRIPTOR_NOT_FOUND",
+                        "reason": "get_cached_descriptor returned None after caching",
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                        "rejected_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                    },
+                )
+                return
+
+            materialized = await self._materialize_handler_live(
+                node_name=node_name,
+                descriptor=descriptor,
+                correlation_id=correlation_id,
+            )
+
+            if materialized:
+                logger.info(
+                    "Dynamic contract registered and materialized",
+                    extra={
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+            else:
+                logger.warning(
+                    "Dynamic contract cached but materialization returned False",
+                    extra={
+                        "node_name": node_name,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        except Exception as e:  # noqa: BLE001 — boundary: never crash the runtime
+            logger.warning(
+                "Error processing dynamic contract registration event",
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "node_name": node_name,
+                    "correlation_id": str(correlation_id),
                 },
             )
 

@@ -1,0 +1,28 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11244"
+title: "feat(OMN-11244): event-driven contract materialization in KafkaContractSource"
+summary: >
+  Adds materialize_cached_contract() to KafkaContractSource so that a node descriptor already in the in-memory cache can be wired into the live dispatch engine post-startup without a runtime restart. Adds EnumMaterializationStatus, EnumMaterializationRejection, EnumContractSource enums and ModelDynamicMaterializationResult frozen Pydantic model. Idempotency via (node_name, sha256_hash) keyed set. Version conflict guard prevents different-hash re-wiring. Pure library addition — no Kafka subscriptions activated, no DB migration, no runtime service restart required. Part of epic OMN-11241.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "10 unit tests pass covering all materialize_cached_contract status paths."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_kafka_contract_source_materialization.py -v"
+  - id: "dod-deploy"
+    description: >
+      No live deploy required. materialize_cached_contract() is a pure library addition to KafkaContractSource — no Kafka subscriptions activated at import time, no DB migration, no runtime service restart needed. The method only executes when explicitly called by the runtime with a live dispatch_engine reference; this PR does not wire or call it. Deploy assessment: no action needed on 192.168.86.201.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: grep 'materialize_cached_contract' src/omnibase_infra/runtime/kafka_contract_source.py && echo 'No deploy action required — pure library addition, no subscriptions activated'"

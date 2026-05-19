@@ -13,6 +13,8 @@ instead.
 
 from __future__ import annotations
 
+from omnibase_infra.test_utils.fake_postgres_adapter import FakePostgresAdapter
 from omnibase_infra.test_utils.fake_secret_store import FakeSecretStore
+from omnibase_infra.test_utils.fake_valkey_client import FakeValkeyClient
 
-__all__: list[str] = ["FakeSecretStore"]
+__all__: list[str] = ["FakePostgresAdapter", "FakeSecretStore", "FakeValkeyClient"]
