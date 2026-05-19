@@ -3574,9 +3574,10 @@ class RuntimeHostProcess:
         if subcontract.subscribe_topics:
             # Provision new contract's topics before subscribing (OMN-11242).
             # Best-effort: failure logs a warning but never blocks materialization.
+            _event_bus = getattr(self, "_event_bus", None)
             _bootstrap = (
-                self._event_bus._bootstrap_servers  # type: ignore[union-attr]
-                if isinstance(self._event_bus, EventBusKafka)
+                _event_bus._bootstrap_servers  # type: ignore[union-attr]
+                if isinstance(_event_bus, EventBusKafka)
                 else ""
             )
             if _bootstrap:
@@ -3592,8 +3593,6 @@ class RuntimeHostProcess:
                         bootstrap_servers=_bootstrap,
                         contracts_root=_contracts_root,
                     )
-                    for _topic in subcontract.subscribe_topics:
-                        await _provisioner.ensure_topic_exists(topic_name=_topic)
                 except Exception:  # noqa: BLE001 — boundary: best-effort, never blocks
                     logger.warning(
                         "Topic pre-provisioning failed for live contract (non-blocking): "
@@ -3602,6 +3601,18 @@ class RuntimeHostProcess:
                         subcontract.subscribe_topics,
                         exc_info=True,
                     )
+                else:
+                    for _topic in subcontract.subscribe_topics:
+                        try:
+                            await _provisioner.ensure_topic_exists(topic_name=_topic)
+                        except Exception:  # noqa: BLE001 — boundary: best-effort
+                            logger.warning(
+                                "Topic pre-provisioning failed for live contract "
+                                "(non-blocking): node=%s topic=%s",
+                                node_name,
+                                _topic,
+                                exc_info=True,
+                            )
 
             await self._event_bus_wiring.wire_subscriptions(
                 subcontract=subcontract,

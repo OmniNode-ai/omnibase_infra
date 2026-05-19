@@ -90,9 +90,6 @@ class TestKernelBootTopicProvisioning:
         kernel_logger.addHandler(log_handler)
 
         try:
-            # Simulate the section-3.5 guard pattern directly
-            import logging as _logging
-
             from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 
             use_kafka = True
@@ -104,9 +101,9 @@ class TestKernelBootTopicProvisioning:
                     correlation_id=correlation_id,
                 )
                 log_level = (
-                    _logging.WARNING
+                    logging.WARNING
                     if provisioning_result["status"] != "success"
-                    else _logging.INFO
+                    else logging.INFO
                 )
                 kernel_logger.log(
                     log_level,
@@ -239,6 +236,55 @@ class TestDynamicMaterializationTopicProvisioning:
         assert wire_called, (
             "wire_subscriptions must be called even when provisioning fails"
         )
+
+    @pytest.mark.asyncio
+    async def test_provision_failure_continues_to_later_topics(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A failing topic does not prevent later topics from being provisioned."""
+        contracts_dir = tmp_path / "contracts"
+        contracts_dir.mkdir()
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            RuntimeHostProcess,
+        )
+
+        process = RuntimeHostProcess.__new__(RuntimeHostProcess)
+        process._contract_paths = [contracts_dir]
+        process._event_bus = _make_kafka_bus_mock()
+        process._event_bus_wiring = MagicMock()
+        process._event_bus_wiring.wire_subscriptions = AsyncMock()
+
+        attempted_topics: list[str] = []
+
+        async def _mock_ensure_topic_exists(topic_name: str, **kwargs: object) -> bool:
+            attempted_topics.append(topic_name)
+            if topic_name == "onex.evt.test.topic-a.v1":
+                raise RuntimeError("broker rejected topic-a")
+            return True
+
+        mock_provisioner_instance = AsyncMock()
+        mock_provisioner_instance.ensure_topic_exists = AsyncMock(
+            side_effect=_mock_ensure_topic_exists
+        )
+        mock_provisioner_cls = MagicMock(return_value=mock_provisioner_instance)
+
+        descriptor = _make_descriptor_mock(
+            ["onex.evt.test.topic-a.v1", "onex.evt.test.topic-b.v1"]
+        )
+
+        with patch(_PATCH_TARGET, mock_provisioner_cls):
+            await process._wire_live_handler_subscriptions(
+                node_name="test-handler",
+                descriptor=descriptor,
+            )
+
+        assert attempted_topics == [
+            "onex.evt.test.topic-a.v1",
+            "onex.evt.test.topic-b.v1",
+        ]
+        process._event_bus_wiring.wire_subscriptions.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_provision_skipped_without_kafka_bus(
