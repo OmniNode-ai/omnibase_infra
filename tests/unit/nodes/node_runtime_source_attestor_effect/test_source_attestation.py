@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.model_runtime_booted_event import (
     ModelRuntimeBootedEvent,
 )
@@ -72,14 +73,16 @@ class TestModelRuntimeBootedEvent:
         with pytest.raises(Exception):
             event.container_ref = "new-name"  # type: ignore[misc]
 
-    def test_extra_fields_forbidden(self) -> None:
-        with pytest.raises(Exception):
-            ModelRuntimeBootedEvent(
-                container_ref="c",
-                runtime_source_hash="abc1234",
-                booted_at=datetime.now(UTC),
-                unexpected_field="boom",  # type: ignore[call-arg]
-            )
+    def test_extra_fields_ignored_for_forward_compatibility(self) -> None:
+        event = ModelRuntimeBootedEvent(
+            container_ref="c",
+            runtime_source_hash="abc1234",
+            booted_at=datetime.now(UTC),
+            unexpected_field="boom",  # type: ignore[call-arg]
+        )
+
+        assert event.container_ref == "c"
+        assert not hasattr(event, "unexpected_field")
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +109,14 @@ class TestModelSourceAttestationResult:
         )
         with pytest.raises(Exception):
             result.verdict = "drifted"  # type: ignore[misc]
+
+
+class TestHandlerMetadata:
+    def test_handler_classification_properties(self, tmp_path: Path) -> None:
+        handler = _make_handler(tmp_path)
+
+        assert handler.handler_type is EnumHandlerType.NODE_HANDLER
+        assert handler.handler_category is EnumHandlerTypeCategory.EFFECT
 
 
 # ---------------------------------------------------------------------------

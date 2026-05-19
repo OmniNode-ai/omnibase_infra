@@ -35,6 +35,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.model_runtime_booted_event import (
     ModelRuntimeBootedEvent,
 )
@@ -98,6 +99,16 @@ class HandlerSourceAttestation:
         self._repo_url = repo_url
         self._drift_threshold = drift_threshold
         self._friction_dir = friction_dir
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this node-bound effect handler."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification for source attestation I/O."""
+        return EnumHandlerTypeCategory.EFFECT
 
     # ------------------------------------------------------------------
     # Public API

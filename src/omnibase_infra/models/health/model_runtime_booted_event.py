@@ -25,7 +25,7 @@ class ModelRuntimeBootedEvent(BaseModel):
     deployment defect, not a graceful-degradation case.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="ignore", from_attributes=True)
 
     container_ref: str = Field(
         ...,
