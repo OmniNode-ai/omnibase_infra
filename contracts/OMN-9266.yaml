@@ -20,7 +20,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run pytest tests/unit/models/test_model_serialization_roundtrip.py tests/unit/runtime/models/test_model_runtime_aggregate_health.py -q"
+        check_value: "uv run pytest tests/unit/models/test_model_serialization_roundtrip.py tests/unit/runtime/models/test_model_runtime_aggregate_health.py tests/integration/runtime/test_runtime_aggregate_health_contract.py -q"
   - id: "dod-deploy"
     description: "Deploy validation plan for runtime health response shape model; no live runtime restart was performed in this PR."
     source: "manual"
