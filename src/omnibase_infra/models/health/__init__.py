@@ -38,6 +38,9 @@ from omnibase_infra.models.health.model_llm_endpoint_status import (
 from omnibase_infra.models.health.model_row_count_probe_result import (
     ModelRowCountProbeResult,
 )
+from omnibase_infra.models.health.model_runtime_booted_event import (
+    ModelRuntimeBootedEvent,
+)
 from omnibase_infra.models.health.model_runtime_error_event import (
     ModelRuntimeErrorEvent,
 )
@@ -58,6 +61,7 @@ __all__ = [
     "ModelLlmEndpointHealthEvent",
     "ModelLlmEndpointStatus",
     "ModelRowCountProbeResult",
+    "ModelRuntimeBootedEvent",
     "ModelRuntimeErrorEvent",
     "ModelTableRowCount",
 ]

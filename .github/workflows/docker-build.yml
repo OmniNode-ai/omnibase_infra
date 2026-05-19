@@ -176,6 +176,8 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             VCS_REF=${{ github.sha }}
+            # OMN-9139: stamp full commit SHA so containers carry provenance
+            RUNTIME_SOURCE_HASH=${{ github.sha }}
             UV_VERSION=${{ env.UV_VERSION }}
 
       # Validate built image with quick import test
@@ -415,6 +417,16 @@ jobs:
           fi
           echo "- Target: <8GB uncompressed after further layer optimization" >> $GITHUB_STEP_SUMMARY
 
+  # OMN-9139: Verify RUNTIME_SOURCE_HASH is valid and matches HEAD.
+  # This is a REQUIRED status check — no bypass, no skip tokens.
+  attest-source-hash:
+    name: Attest Source Hash (OMN-9139)
+    needs: docker-build
+    uses: ./.github/workflows/attest-source-hash.yml
+    with:
+      runtime_source_hash: ${{ github.sha }}
+      expected_commit_sha: ${{ github.sha }}
+
   # Build summary
   build-summary:
     name: Build Summary
@@ -425,7 +437,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [docker-build, docker-integration-tests]
+    needs: [docker-build, docker-integration-tests, attest-source-hash]
     if: always()
 
     steps:
