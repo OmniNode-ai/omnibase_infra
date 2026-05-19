@@ -1038,6 +1038,10 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         raw_bytes = content_repr.encode("utf-8")
         return "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
 
+    @staticmethod
+    def _fingerprint_handler_path(handler_path: str) -> str:
+        return "sha256:" + hashlib.sha256(handler_path.encode("utf-8")).hexdigest()
+
     def _reserve_materialization_key(
         self, node_name: str, canon_hash: str
     ) -> ModelDynamicMaterializationResult | tuple[str, str]:
@@ -1274,14 +1278,16 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             environment=effective_env,
         )
         if rejected_handler_path is not None:
+            allowed_namespaces = self._handler_namespace_prefixes(effective_env)
             logger.warning(
                 "Rejected dynamic materialization: handler path outside allowed namespaces",
                 extra={
                     "node_name": node_name,
-                    "handler_path": rejected_handler_path,
-                    "allowed_namespaces": list(
-                        self._handler_namespace_prefixes(effective_env)
+                    "handler_path_fingerprint": self._fingerprint_handler_path(
+                        rejected_handler_path
                     ),
+                    "handler_path_length": len(rejected_handler_path),
+                    "allowed_namespace_count": len(allowed_namespaces),
                 },
             )
             return ModelDynamicMaterializationResult(

@@ -15,6 +15,7 @@ to avoid network dependencies.
 
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 import pytest
@@ -326,7 +327,9 @@ async def test_malformed_yaml_does_not_crash() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_outside_allowed_namespace_wiring_fails_gracefully() -> None:
+async def test_handler_outside_allowed_namespace_wiring_fails_gracefully(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Contract with handler module outside any allowed namespace returns REJECTED.
 
     The handler_class points to os.system — this will either fail to import
@@ -335,6 +338,10 @@ async def test_handler_outside_allowed_namespace_wiring_fails_gracefully() -> No
     source = _make_source()
     engine = _make_engine()
     bus = _make_bus()
+    caplog.set_level(
+        logging.WARNING,
+        logger="omnibase_infra.runtime.kafka_contract_source",
+    )
 
     source.on_contract_registered(
         node_name="node_evil",
@@ -350,3 +357,16 @@ async def test_handler_outside_allowed_namespace_wiring_fails_gracefully() -> No
     )
     assert result.status == EnumMaterializationStatus.REJECTED
     assert result.reason == EnumMaterializationRejection.HANDLER_ALLOWLIST
+    assert "os.system" not in caplog.text
+
+    rejection_records = [
+        record
+        for record in caplog.records
+        if record.getMessage()
+        == "Rejected dynamic materialization: handler path outside allowed namespaces"
+    ]
+    assert rejection_records
+    for record in rejection_records:
+        assert "handler_path" not in record.__dict__
+        assert record.__dict__["handler_path_fingerprint"].startswith("sha256:")
+        assert record.__dict__["handler_path_length"] == len("os.system")
