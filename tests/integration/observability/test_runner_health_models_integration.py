@@ -32,6 +32,7 @@ def test_enum_runner_health_state_has_required_members() -> None:
         "HEALTHY",
         "GITHUB_OFFLINE",
         "DOCKER_UNHEALTHY",
+        "OOM_KILLED",
         "CRASH_LOOPING",
         "STALE_REGISTRATION",
         "MISSING",
