@@ -7,7 +7,7 @@ Subscribed by ``node_runtime_source_attestor_effect`` which compares
 ``runtime_source_hash`` against the current ``main`` HEAD for each repo
 and emits friction events when drift exceeds the configured threshold.
 
-Topic: ``onex.evt.runtime.booted.v1``
+Topic: ``onex.evt.omnibase-infra.runtime-booted.v1``
 """
 
 from __future__ import annotations

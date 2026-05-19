@@ -518,6 +518,7 @@ node_runner_health_snapshot_effect = "omnibase_infra.nodes.node_runner_health_sn
 node_runner_usage_effect = "omnibase_infra.nodes.node_runner_usage_effect"
 node_runtime_error_triage_effect = "omnibase_infra.nodes.node_runtime_error_triage_effect"
 node_runtime_orchestrator = "omnibase_infra.nodes.node_runtime_orchestrator"
+node_runtime_source_attestor_effect = "omnibase_infra.nodes.node_runtime_source_attestor_effect"
 node_savings_estimation_compute = "omnibase_infra.nodes.node_savings_estimation_compute"
 node_scope_extract_compute = "omnibase_infra.nodes.node_scope_extract_compute"
 node_scope_file_read_effect = "omnibase_infra.nodes.node_scope_file_read_effect"
