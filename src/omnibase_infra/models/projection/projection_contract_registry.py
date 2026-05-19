@@ -6,17 +6,18 @@ Declares ModelProjectionContract instances for every materialized projection
 maintained by omnibase_infra, providing the runtime with freshness SLAs,
 cursor mechanisms, and degraded-behaviour semantics.
 
-ModelProjectionContract is defined in omnibase_core PR #1100 (OMN-11192).
+ModelProjectionContract is local until the published omnibase_core package
+contains the projection contract modules.
 """
 
 from __future__ import annotations
 
-from omnibase_core.enums.enum_degraded_behavior import EnumDegradedBehavior
-from omnibase_core.models.projection.model_cursor_contract import ModelCursorContract
-from omnibase_core.models.projection.model_projection_contract import (
+from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
+from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
+from omnibase_infra.models.projection.model_cursor_contract import ModelCursorContract
+from omnibase_infra.models.projection.model_projection_contract import (
     ModelProjectionContract,
 )
-from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 
 _KAFKA_OFFSET_CURSOR = ModelCursorContract(
     cursor_type="kafka_offset",
@@ -24,7 +25,7 @@ _KAFKA_OFFSET_CURSOR = ModelCursorContract(
 )
 
 CONTRACT_REGISTRY_PROJECTION = ModelProjectionContract(
-    projection_name="contract_registry",
+    projection_key="contract_registry",
     source_topics=(
         EnumPlatformTopic.EVT_CONTRACT_REGISTERED_V1.value,
         EnumPlatformTopic.EVT_CONTRACT_DEREGISTERED_V1.value,
@@ -42,7 +43,7 @@ CONTRACT_REGISTRY_PROJECTION = ModelProjectionContract(
 )
 
 TOPIC_REGISTRY_PROJECTION = ModelProjectionContract(
-    projection_name="topic_registry",
+    projection_key="topic_registry",
     source_topics=(
         EnumPlatformTopic.EVT_CONTRACT_REGISTERED_V1.value,
         EnumPlatformTopic.EVT_CONTRACT_DEREGISTERED_V1.value,
@@ -59,7 +60,7 @@ TOPIC_REGISTRY_PROJECTION = ModelProjectionContract(
 )
 
 REGISTRATION_PROJECTION = ModelProjectionContract(
-    projection_name="registration",
+    projection_key="registration",
     source_topics=(
         EnumPlatformTopic.EVT_NODE_REGISTRATION_V1.value,
         EnumPlatformTopic.EVT_NODE_HEARTBEAT_V1.value,
