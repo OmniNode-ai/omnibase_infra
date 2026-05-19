@@ -61,11 +61,11 @@ adjacency:
     reverse_deps: [adapters, cli, event_bus, handlers, mixins, models, observability, runtime, services, tui, validation]
   # --- high-impact non-shared modules ---
   services:
-    reverse_deps: [adapters, dlq, handlers, protocols, runtime]
+    reverse_deps: [adapters, dlq, handlers, runtime]
   protocols:
     reverse_deps: [adapters, models, observability, plugins, runtime, services]
   event_bus:
-    reverse_deps: [adapters, backends, cli, observability, protocols, runtime, services]
+    reverse_deps: [adapters, backends, cli, observability, runtime, services]
   mixins:
     reverse_deps: [adapters, dlq, event_bus, handlers, observability, plugins, projectors, runtime, services, utils]
   utils:
@@ -79,7 +79,7 @@ adjacency:
   types:
     reverse_deps: [errors, event_bus, mixins, models, runtime, utils, validation]
   projectors:
-    reverse_deps: [cli, protocols, runtime, services]
+    reverse_deps: [cli, runtime, services]
   validation:
     reverse_deps: [cli, runtime]
   idempotency:
@@ -99,7 +99,7 @@ adjacency:
   onboarding:
     reverse_deps: []
   plugins:
-    reverse_deps: [protocols]
+    reverse_deps: []
   probes:
     reverse_deps: []
   registry:
