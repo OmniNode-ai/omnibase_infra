@@ -107,19 +107,19 @@ class TestHandlerRunnerHealthCollector:
 
         with (
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_github_runners",
                 new_callable=AsyncMock,
                 return_value=(github_data, None),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_docker_status",
                 new_callable=AsyncMock,
                 return_value=(docker_data, None),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_host_disk",
                 new_callable=AsyncMock,
                 return_value=42.0,
@@ -140,19 +140,19 @@ class TestHandlerRunnerHealthCollector:
     ) -> None:
         with (
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_github_runners",
                 new_callable=AsyncMock,
                 return_value=([], "GitHub API exit code 1: Not Found"),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_docker_status",
                 new_callable=AsyncMock,
                 return_value=({}, None),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_host_disk",
                 new_callable=AsyncMock,
                 return_value=25.0,
@@ -175,19 +175,19 @@ class TestHandlerRunnerHealthCollector:
         ]
         with (
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_github_runners",
                 new_callable=AsyncMock,
                 return_value=(github_data, None),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_docker_status",
                 new_callable=AsyncMock,
                 return_value=({}, "SSH/Docker exit code 255: Connection refused"),
             ),
             patch.object(
-                handler,
+                handler._collector,
                 "_fetch_host_disk",
                 new_callable=AsyncMock,
                 return_value=0.0,
@@ -203,14 +203,14 @@ class TestHandlerRunnerHealthCollector:
     def test_collect_uses_asyncio_subprocess(
         self, handler: HandlerRunnerHealthCollector
     ) -> None:
-        """Verify GitHub and Docker fetch methods use asyncio.create_subprocess_exec."""
+        """Verify underlying collector uses asyncio.create_subprocess_exec (non-blocking)."""
         import inspect
 
         assert "create_subprocess_exec" in inspect.getsource(
-            handler._fetch_github_runners
+            handler._collector._fetch_github_runners
         )
         assert "create_subprocess_exec" in inspect.getsource(
-            handler._fetch_docker_status
+            handler._collector._fetch_docker_status
         )
 
 
