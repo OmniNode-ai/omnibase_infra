@@ -12,7 +12,7 @@ internal state, isolating the methods under test from full runtime setup.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
