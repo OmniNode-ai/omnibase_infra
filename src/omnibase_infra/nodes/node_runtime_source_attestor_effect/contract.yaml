@@ -98,11 +98,11 @@ io_operations:
 # Dependencies
 dependencies:
   - name: "drift_threshold"
-    type: "config"
+    type: "environment"
     description: "Maximum allowed commits between runtime_source_hash and main HEAD (default 5)"
     required: false
   - name: "repo_url"
-    type: "config"
+    type: "environment"
     description: "GitHub repo URL for git ls-remote HEAD resolution"
     required: false
 # Feature flags
