@@ -201,7 +201,11 @@ from uuid import UUID, uuid4
 import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
-from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
+from aiokafka.errors import (
+    InvalidPartitionsError,
+    KafkaError,
+    UnknownTopicOrPartitionError,
+)
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -1699,19 +1703,22 @@ class EventBusKafka(
             **self._build_auth_kwargs(),
         )
 
-        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError during
-        # consumer.start() when partition metadata has not yet propagated to the
-        # broker the client is connected to, even if the topic was just created
-        # successfully by another client. This is not a permanent error — it
-        # resolves once metadata propagates (typically within a few seconds).
+        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError or
+        # InvalidPartitionsError during consumer.start() when partition metadata
+        # has not yet propagated after topic creation. Both errors are transient
+        # in Redpanda --smp 1 --mode dev-container: UnknownTopicOrPartitionError
+        # appears when metadata hasn't propagated yet; InvalidPartitionsError
+        # (Kafka error 37) appears when the broker acknowledges the topic exists
+        # but hasn't finalized partition metadata. Neither error is permanent —
+        # both resolve once Redpanda stabilizes the topic state.
         #
-        # aiokafka raises UnknownTopicOrPartitionError from _wait_topics(), which
-        # is called inside consumer.start(). This propagates out of asyncio.wait_for
-        # before the timeout fires, so KAFKA_TIMEOUT_SECONDS does not help.
+        # aiokafka raises these from _wait_topics() inside consumer.start(). They
+        # propagate out of asyncio.wait_for before the timeout fires, so
+        # KAFKA_TIMEOUT_SECONDS alone does not help.
         #
-        # Fix: retry UnknownTopicOrPartitionError with exponential backoff within
-        # the timeout budget. Each failed attempt stops and discards the consumer;
-        # a fresh AIOKafkaConsumer is created for each retry to avoid stale state.
+        # Fix: retry both errors with exponential backoff within the timeout
+        # budget. Each failed attempt stops and discards the consumer; a fresh
+        # AIOKafkaConsumer is created for each retry to avoid stale state.
         metadata_retry_deadline = (
             asyncio.get_event_loop().time() + self._timeout_seconds
         )
@@ -1738,14 +1745,16 @@ class EventBusKafka(
                     )
                 raise
 
-            except UnknownTopicOrPartitionError as e:
+            except (UnknownTopicOrPartitionError, InvalidPartitionsError) as e:
                 # Transient metadata propagation lag — stop the failed consumer,
                 # wait briefly, and retry if still within the timeout budget.
+                error_type = type(e).__name__
                 try:
                     await consumer.stop()
                 except Exception as cleanup_err:  # noqa: BLE001
                     logger.debug(
-                        "Cleanup after UnknownTopicOrPartitionError (topic=%s): %s",
+                        "Cleanup after %s (topic=%s): %s",
+                        error_type,
                         topic,
                         cleanup_err,
                     )
@@ -1763,14 +1772,14 @@ class EventBusKafka(
                     )
                     logger.exception(
                         f"Timeout waiting for topic metadata for {topic} after {self._timeout_seconds}s "
-                        f"(UnknownTopicOrPartitionError on all retries)",
+                        f"({error_type} on all retries)",
                         extra={
                             "topic": topic,
                             "group_id": group_id,
                             "correlation_id": str(correlation_id),
                             "timeout_seconds": self._timeout_seconds,
                             "servers": sanitized_servers,
-                            "error_type": "UnknownTopicOrPartitionError",
+                            "error_type": error_type,
                         },
                     )
                     raise InfraTimeoutError(
@@ -1782,9 +1791,10 @@ class EventBusKafka(
                     ) from e
 
                 logger.warning(
-                    "Topic metadata not yet available for %s (UnknownTopicOrPartitionError); "
+                    "Topic metadata not yet available for %s (%s); "
                     "retrying in %.1fs (%.0fs remaining in budget)",
                     topic,
+                    error_type,
                     metadata_retry_backoff,
                     remaining,
                     extra={

@@ -256,6 +256,10 @@ jobs:
           # the consumer start timeout from the default 30s to 120s so the
           # runtime does not crash while Redpanda catches up.
           KAFKA_TIMEOUT_SECONDS: "120"
+          # Redpanda --smp 1 --mode dev-container returns InvalidPartitionsError
+          # (error 37) for topics created with > 1 partition. Cap auto-created
+          # topics at 1 partition so CI Redpanda can serve valid partition metadata.
+          ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
         run: |
           set -euo pipefail
           # Background the runtime so subsequent health-wait steps can probe it.
@@ -269,6 +273,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           KAFKA_TIMEOUT_SECONDS: "120"
+          ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
         run: |
           set -euo pipefail
           # runtime-effects listens on :8086 and consumes under a distinct
