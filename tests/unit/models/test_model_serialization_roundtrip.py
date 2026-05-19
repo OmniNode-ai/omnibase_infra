@@ -179,6 +179,7 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelRuntimeNodeGraph": "Aggregate runtime node graph model with nodes and edges lists",
     "ModelPatternBBrokerConfig": "Runtime config for Pattern B broker; tested via live integration",
     "ModelDynamicMaterializationResult": "Covered by test_kafka_contract_source_materialization.py",
+    "ModelLocalStateStoreEntry": "Internal entry model for ModelLocalStateStore; covered by test_node_invocation_adapter.py",
 }
 
 
