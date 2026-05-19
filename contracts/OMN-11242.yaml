@@ -8,7 +8,7 @@ is_seam_ticket: false
 interface_change: true
 interfaces_touched:
   - topics
-  - runtime
+  - protocols
 emergency_bypass:
   enabled: false
   justification: ""
