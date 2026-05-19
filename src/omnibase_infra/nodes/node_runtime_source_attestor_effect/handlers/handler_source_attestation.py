@@ -220,7 +220,7 @@ class HandlerSourceAttestation:
             if result.returncode == 0 and result.stdout.strip().isdigit():
                 return int(result.stdout.strip())
         except (OSError, subprocess.TimeoutExpired, ValueError):
-            pass
+            logger.debug("git rev-list distance calculation failed", exc_info=True)
         return -1
 
     def _emit_friction(

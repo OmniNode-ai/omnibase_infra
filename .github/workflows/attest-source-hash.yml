@@ -77,8 +77,10 @@ jobs:
 
       - name: Resolve expected commit SHA
         id: resolve
+        env:
+          INPUT_EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
         run: |
-          EXPECTED="${{ inputs.expected_commit_sha }}"
+          EXPECTED="${INPUT_EXPECTED_COMMIT_SHA}"
           if [ -z "$EXPECTED" ]; then
             EXPECTED="${GITHUB_SHA}"
           fi
@@ -86,8 +88,10 @@ jobs:
           echo "Expected SHA: ${EXPECTED}"
 
       - name: Assert hash is not unknown/empty
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
         run: |
-          HASH="${{ inputs.runtime_source_hash }}"
+          HASH="${INPUT_RUNTIME_SOURCE_HASH}"
           if [ -z "$HASH" ] || [ "$HASH" = "unknown" ] || [ "$HASH" = "dev" ]; then
             echo "::error::RUNTIME_SOURCE_HASH='${HASH}' is invalid (empty/unknown/dev)."
             echo "::error::Pass --build-arg RUNTIME_SOURCE_HASH=\$(git rev-parse HEAD) at build time."
@@ -96,9 +100,12 @@ jobs:
           echo "Hash is non-empty and not a sentinel value: '${HASH}'"
 
       - name: Assert hash matches HEAD commit
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
+          EXPECTED_COMMIT_SHA: ${{ steps.resolve.outputs.expected_sha }}
         run: |
-          HASH="${{ inputs.runtime_source_hash }}"
-          EXPECTED="${{ steps.resolve.outputs.expected_sha }}"
+          HASH="${INPUT_RUNTIME_SOURCE_HASH}"
+          EXPECTED="${EXPECTED_COMMIT_SHA}"
 
           # Accept either a short (7+ chars) or full SHA match
           HASH_LEN=${#HASH}
@@ -109,7 +116,7 @@ jobs:
 
           # Check if EXPECTED starts with HASH (short-hash prefix match)
           # or HASH starts with EXPECTED (full-hash prefix match)
-          if echo "$EXPECTED" | grep -q "^${HASH}" || echo "$HASH" | grep -q "^${EXPECTED}"; then
+          if [[ "$EXPECTED" == "$HASH"* ]] || [[ "$HASH" == "$EXPECTED"* ]]; then
             echo "Hash matches HEAD commit. RUNTIME_SOURCE_HASH='${HASH}' EXPECTED='${EXPECTED}'"
           else
             echo "::error::RUNTIME_SOURCE_HASH='${HASH}' does NOT match HEAD commit '${EXPECTED}'."
@@ -119,13 +126,16 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
+          EXPECTED_COMMIT_SHA: ${{ steps.resolve.outputs.expected_sha }}
         run: |
           echo "# Source Hash Attestation" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| RUNTIME_SOURCE_HASH | \`${{ inputs.runtime_source_hash }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Expected commit SHA | \`${{ steps.resolve.outputs.expected_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| RUNTIME_SOURCE_HASH | \`${INPUT_RUNTIME_SOURCE_HASH}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Expected commit SHA | \`${EXPECTED_COMMIT_SHA}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Commit | \`${GITHUB_SHA}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Branch | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Ticket | OMN-9139 |" >> "$GITHUB_STEP_SUMMARY"
