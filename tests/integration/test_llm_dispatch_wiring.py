@@ -52,7 +52,6 @@ _REGISTRY = ServiceTopicRegistry.from_defaults()
 _TOPIC_INFERENCE_CMD = _REGISTRY.resolve(topic_keys.LLM_INFERENCE_REQUEST)
 _TOPIC_LLM_COMPLETED = _REGISTRY.resolve(topic_keys.LLM_CALL_COMPLETED)
 _TOPIC_LLM_COMPLETED_INFRA = _REGISTRY.resolve(topic_keys.LLM_CALL_COMPLETED_INFRA)
-_TOPIC_EMBEDDING_CMD = _REGISTRY.resolve(topic_keys.LLM_EMBEDDING_REQUEST)
 
 
 def _make_inference_response(
@@ -150,28 +149,29 @@ async def test_inference_request_emits_llm_call_completed_event() -> None:
         topic_registry=_REGISTRY,
     )
 
-    request = _make_chat_request()
-    await service.handle(request)
+    try:
+        request = _make_chat_request()
+        await service.handle(request)
 
-    # ServiceLlmMetricsPublisher schedules emit as a background task — drain it.
-    await asyncio.sleep(0)
+        # ServiceLlmMetricsPublisher schedules emit as a background task — drain it.
+        await asyncio.sleep(0)
 
-    assert len(captured) >= 1, (
-        f"Expected at least one event on {_TOPIC_LLM_COMPLETED!r} but got {len(captured)}. "
-        "ServiceLlmMetricsPublisher may not be publishing to the event bus."
-    )
+        assert len(captured) >= 1, (
+            f"Expected at least one event on {_TOPIC_LLM_COMPLETED!r} but got {len(captured)}. "
+            "ServiceLlmMetricsPublisher may not be publishing to the event bus."
+        )
 
-    event_payload = json.loads(captured[0].value.decode())
-    assert "model_id" in event_payload, (
-        "Published llm-call-completed payload missing 'model_id' field. "
-        f"Payload keys: {list(event_payload.keys())}"
-    )
-    assert event_payload["prompt_tokens"] == 10
-    assert event_payload["completion_tokens"] == 5
-    assert event_payload["total_tokens"] == 15
-
-    await unsubscribe()
-    await bus.close()
+        event_payload = json.loads(captured[0].value.decode())
+        assert "model_id" in event_payload, (
+            "Published llm-call-completed payload missing 'model_id' field. "
+            f"Payload keys: {list(event_payload.keys())}"
+        )
+        assert event_payload["prompt_tokens"] == 10
+        assert event_payload["completion_tokens"] == 5
+        assert event_payload["total_tokens"] == 15
+    finally:
+        await unsubscribe()
+        await bus.close()
 
 
 def test_inference_subscribe_topic_matches_contract() -> None:
