@@ -730,30 +730,11 @@ class MessageDispatchEngine:
         .. versionchanged:: 0.5.0
             Added ``node_kind`` parameter for time injection context support.
         """
-        # Validate inputs before acquiring lock
-        if not dispatcher_id or not dispatcher_id.strip():
-            raise ModelOnexError(
-                message="Dispatcher ID cannot be empty or whitespace.",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-
-        if dispatcher is None or not callable(dispatcher):
-            raise ModelOnexError(
-                message=f"Dispatcher for '{dispatcher_id}' must be callable. "
-                f"Got {type(dispatcher).__name__}.",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-
-        # Normalize category to canonical EnumMessageCategory at the boundary.
-        # Accepts: canonical instance (pass-through), valid string, foreign enum with matching .value.
-        # Raises ValueError (not ModelOnexError) listing valid values for invalid input.
-        try:
-            category = coerce_message_category(category)
-        except ValueError as exc:
-            raise ModelOnexError(
-                message=str(exc),
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            ) from exc
+        category = self._validate_dispatcher_registration(
+            dispatcher_id,
+            dispatcher,
+            category,
+        )
 
         # Runtime validation for node_kind to catch dynamic dispatch issues
         # where type checkers can't help (e.g., dynamically constructed arguments)
@@ -780,52 +761,84 @@ class MessageDispatchEngine:
                     error_code=EnumCoreErrorCode.INVALID_STATE,
                 )
 
-            if dispatcher_id in self._dispatchers:
-                raise ModelOnexError(
-                    message=f"Dispatcher with ID '{dispatcher_id}' is already registered. "
-                    "Cannot register duplicate dispatcher ID.",
-                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
-                )
-
-            # Compute accepts_context once at registration time (cached)
-            # This avoids expensive inspect.signature() calls on every dispatch
-            accepts_context = self._dispatcher_accepts_context(dispatcher)
-
-            # Store dispatcher entry
-            entry = DispatchEntryInternal(
+            self._register_dispatcher_unlocked(
                 dispatcher_id=dispatcher_id,
                 dispatcher=dispatcher,
                 category=category,
                 message_types=message_types,
                 node_kind=node_kind,
-                accepts_context=accepts_context,
                 operation_bindings=operation_bindings,
             )
-            self._dispatchers[dispatcher_id] = entry
 
-            # Log requirement for operation_bindings users
-            # NOTE: When operation_bindings is provided, envelopes dispatched to this
-            # handler MUST have an 'operation' attribute/key. The operation field is
-            # extracted at dispatch time via _extract_operation() and used to select
-            # the appropriate binding configuration. Missing operation fields will
-            # result in binding resolution failures at dispatch time.
-            if operation_bindings is not None:
-                self._logger.debug(
-                    "Dispatcher '%s' registered with operation_bindings. "
-                    "Envelopes MUST have an 'operation' attribute/key for binding resolution.",
-                    dispatcher_id,
-                )
-
-            # Update category index
-            self._dispatchers_by_category[category].append(dispatcher_id)
-
-            self._logger.debug(
-                "Registered dispatcher '%s' for category %s (message_types=%s, node_kind=%s)",
-                dispatcher_id,
-                category,
-                message_types if message_types else "all",
-                node_kind.value if node_kind else "none",
+    def _validate_dispatcher_registration(
+        self,
+        dispatcher_id: str,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+    ) -> EnumMessageCategory:
+        if not dispatcher_id or not dispatcher_id.strip():
+            raise ModelOnexError(
+                message="Dispatcher ID cannot be empty or whitespace.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
+        if dispatcher is None or not callable(dispatcher):
+            raise ModelOnexError(
+                message=f"Dispatcher for '{dispatcher_id}' must be callable. "
+                f"Got {type(dispatcher).__name__}.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+        try:
+            return coerce_message_category(category)
+        except ValueError as exc:
+            raise ModelOnexError(
+                message=str(exc),
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            ) from exc
+
+    def _register_dispatcher_unlocked(
+        self,
+        *,
+        dispatcher_id: str,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None,
+        node_kind: EnumNodeKind | None,
+        operation_bindings: ModelOperationBindingsSubcontract | None,
+    ) -> None:
+        if dispatcher_id in self._dispatchers:
+            raise ModelOnexError(
+                message=f"Dispatcher with ID '{dispatcher_id}' is already registered. "
+                "Cannot register duplicate dispatcher ID.",
+                error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
+            )
+
+        accepts_context = self._dispatcher_accepts_context(dispatcher)
+        entry = DispatchEntryInternal(
+            dispatcher_id=dispatcher_id,
+            dispatcher=dispatcher,
+            category=category,
+            message_types=message_types,
+            node_kind=node_kind,
+            accepts_context=accepts_context,
+            operation_bindings=operation_bindings,
+        )
+        self._dispatchers[dispatcher_id] = entry
+
+        if operation_bindings is not None:
+            self._logger.debug(
+                "Dispatcher '%s' registered with operation_bindings. "
+                "Envelopes MUST have an 'operation' attribute/key for binding resolution.",
+                dispatcher_id,
+            )
+
+        self._dispatchers_by_category[category].append(dispatcher_id)
+        self._logger.debug(
+            "Registered dispatcher '%s' for category %s (message_types=%s, node_kind=%s)",
+            dispatcher_id,
+            category,
+            message_types if message_types else "all",
+            node_kind.value if node_kind else "none",
+        )
 
     def freeze(self) -> None:
         """
@@ -910,47 +923,21 @@ class MessageDispatchEngine:
 
         Thread-safe: acquires _registration_lock. Duplicate IDs still rejected.
         """
-        if not dispatcher_id or not dispatcher_id.strip():
-            raise ModelOnexError(
-                message="Dispatcher ID cannot be empty or whitespace.",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-
-        if dispatcher is None or not callable(dispatcher):
-            raise ModelOnexError(
-                message=f"Dispatcher for '{dispatcher_id}' must be callable. "
-                f"Got {type(dispatcher).__name__}.",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-
-        try:
-            category = coerce_message_category(category)
-        except ValueError as exc:
-            raise ModelOnexError(
-                message=str(exc),
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            ) from exc
+        category = self._validate_dispatcher_registration(
+            dispatcher_id,
+            dispatcher,
+            category,
+        )
 
         with self._registration_lock:
-            if dispatcher_id in self._dispatchers:
-                raise ModelOnexError(
-                    message=f"Dispatcher with ID '{dispatcher_id}' is already registered. "
-                    "Cannot register duplicate dispatcher ID.",
-                    error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
-                )
-
-            accepts_context = self._dispatcher_accepts_context(dispatcher)
-            entry = DispatchEntryInternal(
+            self._register_dispatcher_unlocked(
                 dispatcher_id=dispatcher_id,
                 dispatcher=dispatcher,
                 category=category,
                 message_types=message_types,
                 node_kind=None,
-                accepts_context=accepts_context,
                 operation_bindings=None,
             )
-            self._dispatchers[dispatcher_id] = entry
-            self._dispatchers_by_category[category].append(dispatcher_id)
 
             self._logger.info(
                 "Dynamically registered dispatcher '%s' (category=%s, types=%s)",
