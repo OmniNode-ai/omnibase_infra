@@ -1,0 +1,31 @@
+# OMN-9139 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical OCC evidence lives in onex_change_control; this repo-local
+# contract carries the runtime deploy proof required by deploy-gate.
+schema_version: "1.0.0"
+ticket_id: "OMN-9139"
+title: "Deployed artifact source hash attestation"
+summary: >
+  Adds build-time and boot-time runtime source hash attestation so deployed containers can prove which commit produced the running artifact.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+  - "protocols"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-unit-integration-tests"
+    description: "Source hash attestation unit and integration coverage passes."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_runtime_source_attestor_effect/test_source_attestation.py tests/integration/nodes/test_node_runtime_source_attestor_effect_integration.py -q"
+  - id: "dod-deploy"
+    description: "Post-merge deploy proof verifies the runtime container carries a non-unknown RUNTIME_SOURCE_HASH."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: after merge and authorized runtime rollout, run docker exec omnibase-runtime printenv RUNTIME_SOURCE_HASH | grep -qv '^unknown$'"
