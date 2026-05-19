@@ -36,7 +36,6 @@ KAFKA_BOOTSTRAP = os.environ.get(
     "KAFKA_BOOTSTRAP_SERVERS",
     "192.168.86.201:19092",  # kafka-fallback-ok
 )
-_RUNTIME_HOST = KAFKA_BOOTSTRAP.split(":")[0]
 REGISTRATION_TOPIC = "onex.cmd.platform.node-registration-requested.v1"
 TOPOLOGY_DELTA_TOPIC = "onex.evt.platform.topology-manifest-delta.v1"
 
@@ -102,6 +101,11 @@ def _load_golden_chain(name: str) -> list[dict]:
     return json.loads((FIXTURES_DIR / f"{name}.json").read_text())
 
 
+def _load_kafka_clients() -> tuple[type, type]:
+    kafka_module = pytest.importorskip("kafka")
+    return kafka_module.KafkaProducer, kafka_module.KafkaConsumer
+
+
 class TestGoldenChainLiveRuntime:
     """Replay the golden event path against the live .201 runtime."""
 
@@ -115,10 +119,7 @@ class TestGoldenChainLiveRuntime:
             5. Topology manifest delta emitted (consumed from Kafka topic)
             6. Dispatch routable (proven by registered_handlers in delta payload)
         """
-        try:
-            from kafka import KafkaConsumer, KafkaProducer
-        except ImportError:
-            pytest.skip("kafka-python not installed")
+        KafkaProducer, KafkaConsumer = _load_kafka_clients()
 
         golden = _load_golden_chain("dynamic_registration_success")
         correlation_id = uuid4()
@@ -263,10 +264,7 @@ class TestGoldenChainLiveRuntime:
         Verification is event-driven: consume topology-manifest-delta events and
         confirm at most one materialization event per (node_name, hash).
         """
-        try:
-            from kafka import KafkaConsumer, KafkaProducer
-        except ImportError:
-            pytest.skip("kafka-python not installed")
+        KafkaProducer, KafkaConsumer = _load_kafka_clients()
 
         correlation_id = uuid4()
         contract_hash = (
