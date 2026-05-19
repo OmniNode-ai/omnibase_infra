@@ -1,0 +1,49 @@
+# OMN-11248 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11248"
+title: "feat(OMN-11248): integration test - dynamic contract registration E2E"
+summary: >-
+  Adds dynamic contract registration E2E coverage and hardens dynamic materialization so off-allowlist handler paths return a structured HANDLER_ALLOWLIST rejection before runtime auto-wiring attempts imports.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - "runtime_dynamic_materialization"
+evidence_requirements:
+  - kind: "tests"
+    description: "Dynamic contract registration E2E and Kafka materialization tests pass"
+    command: >-
+      uv run pytest tests/integration/runtime/test_dynamic_contract_registration_e2e.py tests/unit/runtime/test_kafka_contract_source_materialization.py -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #1656"
+    command: "gh pr checks 1656 --repo OmniNode-ai/omnibase_infra"
+  - kind: "manual"
+    description: "Post-merge deploy validation exercises dynamic allowlist rejection"
+    command: >-
+      deploy omninode-runtime on the stability runtime after merge and verify a dynamic contract with handler module outside TRUSTED_HANDLER_NAMESPACE_PREFIXES is rejected with HANDLER_ALLOWLIST before import.
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-11248"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-11248.yaml"
+  - id: "dod-tests"
+    description: "Dynamic registration E2E and materialization tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/integration/runtime/test_dynamic_contract_registration_e2e.py tests/unit/runtime/test_kafka_contract_source_materialization.py -q
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation required after merge: install the merged runtime on the stability runtime and verify dynamic handler allowlist rejection is surfaced as HANDLER_ALLOWLIST before import.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy omninode-runtime on the stability runtime after merge and run a dynamic materialization smoke that rejects an off-allowlist handler with HANDLER_ALLOWLIST
