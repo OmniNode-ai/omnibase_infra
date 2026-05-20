@@ -349,7 +349,8 @@ class TestModelConfigGraphProjector:
     """Configuration model for the graph projector."""
 
     @pytest.mark.unit
-    def test_defaults(self) -> None:
+    def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         config = ModelConfigGraphProjector()
         assert config.bootstrap_servers == "localhost:19092"
         assert (

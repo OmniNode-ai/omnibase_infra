@@ -309,6 +309,46 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         )
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_wire_from_manifest_threads_materialized_deps_to_resolver(
+        self,
+    ) -> None:
+        """wire_from_manifest exposes materialized deps for runtime-owned pools."""
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        contract = _make_contract(handler_name="HandlerWithExplicitDep")
+        manifest = _make_manifest(contract)
+        engine = MessageDispatchEngine()
+
+        class HandlerWithExplicitDep:
+            def __init__(self, pool: object) -> None:
+                self.pool = pool
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        fake_pool = MagicMock()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithExplicitDep,
+        ):
+            report = await wire_from_manifest(
+                manifest,
+                engine,
+                materialized_explicit_dependencies={
+                    "HandlerWithExplicitDep": {"pool": fake_pool}
+                },
+            )
+
+        assert report.total_failed == 0
+        assert (
+            report.results[0].wirings[0].resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
+        )
+
+    @pytest.mark.unit
     def test_delegation_dispatch_port_materialized_from_event_bus(self) -> None:
         """Runtime materializes HandlerDelegateSkill's annotated dispatch port."""
         contract = _make_contract(handler_name="HandlerWithDispatchPort")

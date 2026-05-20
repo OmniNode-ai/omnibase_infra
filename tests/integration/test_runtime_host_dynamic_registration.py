@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+import omnibase_infra.runtime.service_runtime_host_process as runtime_host_module
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
@@ -118,9 +119,17 @@ class _CachingContractSource:
         return self.cached.get(node_name)
 
 
+class _RuntimeCreatedContractSource(_CachingContractSource):
+    def __init__(self, *, environment: str, graceful_mode: bool) -> None:
+        super().__init__()
+        self.environment = environment
+        self.graceful_mode = graceful_mode
+        self.correlation_id = uuid4()
+
+
 def _make_process(
     event_bus: _InMemoryEventBus,
-    contract_source: _CachingContractSource,
+    contract_source: _CachingContractSource | None,
 ) -> RuntimeHostProcess:
     process = RuntimeHostProcess.__new__(RuntimeHostProcess)
     process._event_bus = event_bus
@@ -131,6 +140,7 @@ def _make_process(
     process._node_identity.version = "v1"
     process._dynamic_contract_unsubscribe = None
     process.materialized: list[tuple[str, object, UUID]] = []
+    process._get_environment_from_config = MagicMock(return_value="test")
 
     async def materialize_handler_live(
         *,
@@ -172,6 +182,29 @@ async def test_dynamic_registration_event_crosses_bus_to_materialize_handler() -
     ]
     descriptor = contract_source.get_cached_descriptor("node_dynamic_test")
     assert process.materialized == [("node_dynamic_test", descriptor, correlation_id)]
+
+
+@pytest.mark.asyncio
+async def test_dynamic_listener_initializes_contract_source_in_hybrid_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hybrid runtime startup still wires the post-freeze dynamic listener."""
+    event_bus = _InMemoryEventBus()
+    process = _make_process(event_bus, None)
+
+    monkeypatch.setattr(
+        runtime_host_module,
+        "KafkaContractSource",
+        _RuntimeCreatedContractSource,
+    )
+
+    await process._start_dynamic_contract_listener()
+
+    assert isinstance(process._kafka_contract_source, _RuntimeCreatedContractSource)
+    assert process._kafka_contract_source.environment == "test"
+    assert [subscription.topic for subscription in event_bus.subscriptions] == [
+        SUFFIX_NODE_REGISTRATION
+    ]
 
 
 @pytest.mark.asyncio

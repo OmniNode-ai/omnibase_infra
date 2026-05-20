@@ -712,16 +712,20 @@ class TestPolicyRegistryPerformanceRegression:
         indexed_time = time.perf_counter() - indexed_start
 
         # Simulate unindexed lookup (O(n) scan)
-        # This simulates what performance would be without the secondary index
+        # This simulates the old no-index path: scan all registrations, select
+        # candidates, then perform the same latest-version resolution as get().
         unindexed_start = time.perf_counter()
         for _ in range(1000):
-            # Simulate O(n) scan by iterating through all registry keys
             with registry._lock:
+                matches = []
                 for key in registry._registry:
                     if key.policy_id == "policy_50":
-                        # Found - in real unindexed implementation we'd still
-                        # need to filter by type/version
-                        pass
+                        matches.append(key)
+                latest_key = max(
+                    matches,
+                    key=lambda k: registry._parse_semver(k.version),
+                )
+                _ = registry._registry[latest_key]
         unindexed_time = time.perf_counter() - unindexed_start
 
         speedup = unindexed_time / indexed_time

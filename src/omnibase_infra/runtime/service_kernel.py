@@ -60,7 +60,7 @@ import re
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
@@ -966,7 +966,7 @@ async def bootstrap() -> int:
             )
 
         event_bus_start_time = time.time()
-        event_bus: EventBusInmemory | EventBusKafka
+        event_bus: object
         event_bus_type: str
 
         # OMN-7076: Use registry auto-configuration for bus selection.
@@ -1590,7 +1590,7 @@ async def bootstrap() -> int:
                     "component": "container_wiring",
                 },
             )
-            wire_summary: dict[str, list[str] | str] = {
+            wire_summary: Mapping[str, object] = {
                 "services": [],
                 "status": "degraded",
             }  # Empty summary for degraded mode
@@ -2378,6 +2378,12 @@ async def bootstrap() -> int:
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
 
+                runtime_manifest_dependencies: dict[str, dict[str, object]] = {}
+                if registration_service.postgres_pool is not None:
+                    runtime_manifest_dependencies[
+                        "HandlerPostgresRuntimeManifestInsert"
+                    ] = {"pool": registration_service.postgres_pool}
+
                 # 5. Wire handlers into dispatch engine
                 auto_wiring_report = await wire_from_manifest(
                     manifest=filtered_manifest,
@@ -2387,6 +2393,9 @@ async def bootstrap() -> int:
                     container=container,
                     subscribe_immediately=False,
                     result_appliers_by_contract=auto_wiring_result_appliers,
+                    materialized_explicit_dependencies=(
+                        runtime_manifest_dependencies or None
+                    ),
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start

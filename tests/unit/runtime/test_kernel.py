@@ -531,6 +531,7 @@ class TestBootstrap:
         """
         monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
@@ -1324,6 +1325,14 @@ class TestIntegration:
         """
         monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+        from tests.unit.runtime.conftest import _default_node_graph_config
+
+        config = _default_node_graph_config().model_copy(update={"scan_deny_paths": ()})
+        monkeypatch.setattr(
+            "omnibase_infra.runtime.service_kernel._load_node_graph_config",
+            lambda: config,
+        )
 
     async def test_full_bootstrap_with_real_event_bus(
         self,
@@ -1462,6 +1471,7 @@ class TestHttpPortValidation:
         """
         monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:

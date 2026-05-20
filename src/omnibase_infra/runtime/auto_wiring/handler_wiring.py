@@ -1327,6 +1327,7 @@ async def wire_from_manifest(
     subscribe_immediately: bool = True,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    materialized_explicit_dependencies: dict[str, dict[str, object]] | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -1360,6 +1361,8 @@ async def wire_from_manifest(
         result_appliers_by_contract: Optional per-contract dispatch result
             appliers. Only contracts present in this mapping apply dispatcher
             outputs from auto-wired callbacks.
+        materialized_explicit_dependencies: Optional pre-built constructor
+            dependencies keyed by handler name for resolver Step 2.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -1435,6 +1438,7 @@ async def wire_from_manifest(
                 if container is not None
                 else None,
                 result_appliers_by_contract=result_appliers_by_contract,
+                materialized_explicit_dependencies=materialized_explicit_dependencies,
             )
             prepared_contracts.append(prepared)
         except TypeError:
