@@ -108,6 +108,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: market.skill-proof,workflow.orchestration,runtime.main
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       KAFKA_INSTANCE_ID: stability-test-main
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
     ports: !override
@@ -139,6 +140,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: effects.consumer,market.skill-proof,runtime.effects
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
       KAFKA_INSTANCE_ID: stability-test-effects
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
     ports: !override
@@ -170,6 +172,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: workflow.dispatch,contract.update,runtime.worker
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
       KAFKA_INSTANCE_ID: stability-test-worker
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: "0"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
     volumes: !override

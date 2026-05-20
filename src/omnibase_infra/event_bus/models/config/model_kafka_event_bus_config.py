@@ -323,7 +323,7 @@ class ModelKafkaEventBusConfig(BaseModel):
     max_poll_interval_ms: int = Field(
         default=300000,
         ge=10000,
-        le=600000,
+        le=3600000,
         description=(
             "Maximum time in ms between poll() calls before the consumer is "
             "considered failed. Default 300s (5 min). Set high enough to "

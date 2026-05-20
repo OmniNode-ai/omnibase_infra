@@ -65,6 +65,15 @@ class TestSessionTimeoutCustomValues:
         )
         assert config.max_poll_interval_ms == 600000
 
+    @pytest.mark.unit
+    def test_slow_runtime_max_poll_interval_ms(self) -> None:
+        config = ModelKafkaEventBusConfig(
+            session_timeout_ms=45000,
+            heartbeat_interval_ms=15000,
+            max_poll_interval_ms=1800000,
+        )
+        assert config.max_poll_interval_ms == 1800000
+
 
 class TestSessionTimeoutValidator:
     """Test the validate_session_timeout_ratio cross-field validator."""

@@ -239,6 +239,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
+        assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
         assert "image" not in services[service_name]
         assert services[service_name]["restart"] == "unless-stopped"
         assert environment["ONEX_RUNTIME_ADDRESS"].startswith(
