@@ -132,6 +132,7 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
+        assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
 
         group_id = environment["ONEX_GROUP_ID"]
         assert group_id.startswith("onex-stability-test-")
