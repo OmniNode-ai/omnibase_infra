@@ -1104,7 +1104,6 @@ jobs:
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose
-    secrets: inherit
 
   ci-summary:
     name: CI Summary
