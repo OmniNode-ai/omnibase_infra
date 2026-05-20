@@ -6110,7 +6110,6 @@ class RuntimeHostProcess:
         events through on_contract_registered() then live handler materialization.
 
         No-op when:
-        - _kafka_contract_source is None (not using Kafka discovery)
         - _event_bus is None
 
         The runtime trusts events on this topic as pre-validated by omnimarket.
@@ -6119,15 +6118,25 @@ class RuntimeHostProcess:
         .. versionadded:: 0.9.4
             Added as part of OMN-11247 post-freeze dynamic contract registration.
         """
-        if self._kafka_contract_source is None:
-            logger.debug(
-                "Skipping dynamic contract listener: no KafkaContractSource configured"
-            )
-            return
-
         if self._event_bus is None:
             logger.debug("Skipping dynamic contract listener: no event bus available")
             return
+
+        if self._kafka_contract_source is None:
+            environment = self._get_environment_from_config()
+            self._kafka_contract_source = KafkaContractSource(
+                environment=environment,
+                graceful_mode=True,
+            )
+
+            logger.info(
+                "Initialized KafkaContractSource for dynamic contract listener",
+                extra={
+                    "environment": environment,
+                    "mode": "dynamic_listener",
+                    "correlation_id": str(self._kafka_contract_source.correlation_id),
+                },
+            )
 
         from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
