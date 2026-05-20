@@ -1,0 +1,20 @@
+# OMN-10814 contract file for omnibase_infra deploy-gate.
+# This repo-local contract carries deploy-gate evidence only.
+schema_version: "1.0.0"
+ticket_id: "OMN-10814"
+title: "Add config injection path for LINEAR_API_KEY in node_merge_gate_effect"
+summary: "HandlerUpsertMergeGate now consumes Linear credentials from typed constructor injection backed by node_merge_gate_effect/contract.yaml config declarations, instead of reading LINEAR_API_KEY or LINEAR_TEAM_ID directly from os.environ. The change is runtime library behavior only; no live deploy or restart is performed pre-merge."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-deploy"
+    description: "Deploy validation plan for the merge-gate Linear config injection path. No runtime deploy, restart, or .201 mutation was performed pre-merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime after merge during the normal rollout, then verify the deployed image imports HandlerUpsertMergeGate and that node_merge_gate_effect/contract.yaml declares linear_api_key and linear_team_id config entries; pre-merge proof is local unit and integration coverage only."

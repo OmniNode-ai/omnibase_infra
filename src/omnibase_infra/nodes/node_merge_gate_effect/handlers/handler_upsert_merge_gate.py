@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -137,14 +136,25 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
         True
     """
 
-    def __init__(self, pool: asyncpg.Pool | None = None) -> None:
-        """Initialise handler with asyncpg connection pool.
+    def __init__(
+        self,
+        pool: asyncpg.Pool | None = None,
+        linear_api_key: str | None = None,
+        linear_team_id: str | None = None,
+    ) -> None:
+        """Initialise handler with asyncpg connection pool and optional Linear config.
 
         Args:
             pool: asyncpg connection pool. Should be pre-configured and ready.
                 When None (auto-wired path), handle() returns a failure result.
+            linear_api_key: Linear API key for quarantine ticket creation.
+                When None, quarantine tickets are skipped with a warning.
+            linear_team_id: Linear team ID for quarantine ticket creation.
+                When None, quarantine tickets are skipped with a warning.
         """
         self._pool = pool
+        self._linear_api_key = linear_api_key
+        self._linear_team_id = linear_team_id
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -266,12 +276,8 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             payload: Merge gate decision payload.
             correlation_id: Correlation ID for tracing.
         """
-        api_key = os.environ.get(
-            "LINEAR_API_KEY"
-        )  # ONEX_EXCLUDE: Linear API key has no config injection path
-        team_id = os.environ.get(
-            "LINEAR_TEAM_ID"
-        )  # ONEX_EXCLUDE: Linear team ID has no config injection path
+        api_key = self._linear_api_key
+        team_id = self._linear_team_id
 
         if not api_key or not team_id:
             logger.warning(

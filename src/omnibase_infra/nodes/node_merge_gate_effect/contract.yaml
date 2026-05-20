@@ -179,6 +179,16 @@ io_operations:
       - duration_ms
       - correlation_id
       - backend_id
+# =============================================================================
+# CONFIG (injectable via DI / secret resolver)
+# =============================================================================
+config:
+  linear_api_key:
+    default: null
+    description: "Linear API key for quarantine ticket creation (optional; when null, QUARANTINE tickets are skipped)"
+  linear_team_id:
+    default: null
+    description: "Linear team ID for quarantine ticket creation (optional; when null, QUARANTINE tickets are skipped)"
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_postgres_adapter"
