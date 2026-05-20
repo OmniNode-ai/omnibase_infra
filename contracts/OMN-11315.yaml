@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11315
+title: "Extend stability runtime Kafka poll interval"
+summary: "Allow and configure a longer Kafka max poll interval for the stability-test runtime lane so long delegate-skill LLM handlers keep consumer membership until terminal events are emitted."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Kafka timeout config and stability lane regression tests pass"
+    command: "uv run pytest tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q"
+  - kind: "ci"
+    description: "Touched runtime config and stability lane files pass ruff checks"
+    command: "uv run ruff format --check src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py && uv run ruff check src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py"
+  - kind: "manual"
+    description: "Post-merge stability runtime rebuild/restart and delegate-skill smoke proof"
+    command: "deploy .201 stability runtime from the merged image, then verify the delegate-skill smoke terminal event and zero command-topic lag"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-targeted-tests"
+    description: "Kafka timeout config and stability lane regression tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q"
+  - id: "dod-ruff-check"
+    description: "Touched runtime config and stability lane files pass ruff checks"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run ruff format --check src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py && uv run ruff check src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py tests/unit/event_bus/test_kafka_config_session_timeout.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py"
+  - id: "dod-stability-deploy-proof"
+    description: "Post-merge stability runtime rebuild/restart and delegate-skill smoke proof"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy .201 stability runtime from the merged image, then run rpk group describe for the delegate-skill consumer group and verify terminal completion"
