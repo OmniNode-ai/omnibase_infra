@@ -15,6 +15,9 @@ import logging
 import os
 from pathlib import Path
 
+from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+    ContractConfigExtractor,
+)
 from omnibase_infra.runtime.overlay.errors import OverlayNotFoundError
 from omnibase_infra.runtime.overlay.model_overlay_resolution_result import (
     ModelOverlayResolutionResult,
@@ -71,4 +74,5 @@ def load_overlay_config(
             "Run onboarding to configure the runtime: `onex onboard`"
         )
 
-    return OverlayConfigResolver().resolve(overlay, contracts_dir)
+    requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
+    return OverlayConfigResolver().resolve(overlay, requirements)
