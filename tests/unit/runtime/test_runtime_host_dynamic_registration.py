@@ -88,6 +88,7 @@ def _make_process(
     process._node_identity.node_name = "test-node"
     process._node_identity.version = "v1"
     process._dynamic_contract_unsubscribe = None
+    process._config = {"event_bus": {"environment": "dev"}}
     return process
 
 
@@ -124,15 +125,15 @@ class TestStartDynamicContractListener:
         assert process._dynamic_contract_unsubscribe is unsubscribe_fn
 
     @pytest.mark.asyncio
-    async def test_noop_when_no_kafka_source(self) -> None:
-        """Listener is a no-op when KafkaContractSource is not configured."""
+    async def test_initializes_kafka_source_when_missing(self) -> None:
+        """Listener initializes a KafkaContractSource in normal hybrid mode."""
         process = _make_process(kafka_source=None)
 
         await process._start_dynamic_contract_listener()
 
-        # subscribe should not have been called
-        assert process._dynamic_contract_unsubscribe is None
-        process._event_bus.subscribe.assert_not_called()
+        assert process._kafka_contract_source is not None
+        assert process._kafka_contract_source.environment == "dev"
+        process._event_bus.subscribe.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_noop_when_no_event_bus(self) -> None:

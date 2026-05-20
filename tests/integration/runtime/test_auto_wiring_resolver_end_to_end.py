@@ -679,7 +679,8 @@ def _make_wrapped_prepare(
     )
 
     def _wrapped(**kwargs: object) -> object:
-        kwargs.setdefault("materialized_explicit_dependencies", materialized)
+        if kwargs.get("materialized_explicit_dependencies") is None:
+            kwargs["materialized_explicit_dependencies"] = materialized
         return _real_prepare(**kwargs)  # type: ignore[arg-type]
 
     return _wrapped

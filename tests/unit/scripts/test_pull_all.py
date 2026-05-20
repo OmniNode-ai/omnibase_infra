@@ -113,6 +113,9 @@ def _run_pull_all(
         **os.environ,
         "OMNI_HOME": str(omni_home),
         "HOME": str(fake_home),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "LC_CTYPE": "C",
     }
     # Drop CLAUDE_PLUGIN_ROOT so the auto-detection path is exercised.
     env.pop("CLAUDE_PLUGIN_ROOT", None)

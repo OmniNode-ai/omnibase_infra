@@ -308,6 +308,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
         )
 
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_wire_from_manifest_threads_materialized_deps_to_resolver(
         self,
