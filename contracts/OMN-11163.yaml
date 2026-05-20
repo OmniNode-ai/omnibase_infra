@@ -1,0 +1,22 @@
+# OMN-11163 contract file for omnibase_infra deploy-gate.
+# Canonical ticket evidence lives in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11163"
+title: "Flip omnibase_infra cross-repo migration conflict gate to blocking"
+summary: >
+  Removes warn-only handling from the cross-repo migration conflict workflow so boundary validation failures block the PR instead of being reported as advisory startup failures.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-deploy"
+    description: "CI-only migration boundary gate hardening; no live deploy, restart, broker topic, container image, or runtime mutation is required."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-11163 is CI-only migration conflict gate hardening; no docker exec, rpk topic produce, live deploy, restart, or runtime mutation required before merge'"

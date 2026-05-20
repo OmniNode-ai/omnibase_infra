@@ -655,10 +655,7 @@ jobs:
                   CHECKED=$((CHECKED + 1))
                   MOD_PATH=$(echo "$mod" | tr '.' '/')
                   if [ ! -f "src/${MOD_PATH}.py" ] && [ ! -f "src/${MOD_PATH}/__init__.py" ]; then
-                    # Warn-only for now: many contracts reference protocols and
-                    # decommissioned handlers that no longer exist as files.
-                    # Promoting to hard-fail requires a contract cleanup pass first.
-                    echo "::warning file=${contract}::Contract references module '${mod}' but neither src/${MOD_PATH}.py nor src/${MOD_PATH}/__init__.py exists"
+                    echo "::error file=${contract}::Contract references module '${mod}' but neither src/${MOD_PATH}.py nor src/${MOD_PATH}/__init__.py exists"
                     WARNINGS=$((WARNINGS + 1))
                   fi
                   ;;
@@ -668,7 +665,11 @@ jobs:
               esac
             done
           done
-          echo "Contract path pre-flight: ${CHECKED} local modules checked, ${WARNINGS} warnings, ${SKIPPED} cross-repo references skipped"
+          echo "Contract path pre-flight: ${CHECKED} local modules checked, ${WARNINGS} dead references, ${SKIPPED} cross-repo references skipped"
+          if [ "$WARNINGS" -gt "0" ]; then
+            echo "Contract path pre-flight FAILED: ${WARNINGS} dead module reference(s)"
+            exit 1
+          fi
 
   contract-sync-gate:
     name: Contract Sync Gate (Wave C) [OMN-8915]
@@ -1029,7 +1030,6 @@ jobs:
   # ============================================================================
   # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
   # Validates migration schema conflicts against onex_change_control.
-  # warn-only until all violations fixed (see OMN-5775).
   # ============================================================================
 
   migration-conflict-check:
@@ -1041,19 +1041,14 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    continue-on-error: true
     steps:
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
-        continue-on-error: true
+        env:
+          OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         with:
           checks: "migration-conflicts"
-          warn-only: "true"
-
-      - name: Report non-blocking boundary validator startup failure
-        if: steps.migration_conflicts.outcome == 'failure'
-        run: |
-          echo "::warning::Cross-repo migration conflict validation could not complete. This job is warn-only; see the validate-boundaries action logs for the upstream packaging/setup failure."
+          warn-only: "false"
 
 
   contract-compliance:
