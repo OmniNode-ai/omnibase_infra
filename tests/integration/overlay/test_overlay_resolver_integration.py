@@ -19,6 +19,9 @@ class TestOverlayConfigResolverIntegration:
         contracts_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -28,7 +31,8 @@ class TestOverlayConfigResolverIntegration:
         monkeypatch.delenv("POSTGRES_HOST", raising=False)
 
         overlay = OverlayFileLoader().load(sample_overlay_yaml)
-        result = OverlayConfigResolver().resolve(overlay, contracts_dir)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
+        result = OverlayConfigResolver().resolve(overlay, requirements)
 
         assert result.resolved["KAFKA_BOOTSTRAP_SERVERS"] == "localhost:9092"
         assert result.resolved["POSTGRES_HOST"] == "localhost"
@@ -41,6 +45,9 @@ class TestOverlayConfigResolverIntegration:
         contracts_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -48,7 +55,8 @@ class TestOverlayConfigResolverIntegration:
 
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "already-set:9092")
         overlay = OverlayFileLoader().load(sample_overlay_yaml)
-        result = OverlayConfigResolver().resolve(overlay, contracts_dir)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
+        result = OverlayConfigResolver().resolve(overlay, requirements)
         injection = result.apply_to_environment()
 
         assert "KAFKA_BOOTSTRAP_SERVERS" in injection.skipped_existing_keys
@@ -58,6 +66,9 @@ class TestOverlayConfigResolverIntegration:
     def test_resolve_incomplete_overlay_returns_available_pairs(
         self, overlay_dir: Path, contracts_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -82,9 +93,10 @@ class TestOverlayConfigResolverIntegration:
         incomplete.chmod(0o600)
 
         overlay = OverlayFileLoader().load(incomplete)
-        result = OverlayConfigResolver().resolve(overlay, contracts_dir)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
+        result = OverlayConfigResolver().resolve(overlay, requirements)
         assert result.resolved == {"KAFKA_BOOTSTRAP_SERVERS": "host:9092"}
-        assert result.missing == ()
+        assert result.missing == ("POSTGRES_HOST", "POSTGRES_PASSWORD", "POSTGRES_PORT")
 
     def test_resolve_includes_all_overlay_keys(
         self,
@@ -92,6 +104,9 @@ class TestOverlayConfigResolverIntegration:
         contracts_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -101,7 +116,8 @@ class TestOverlayConfigResolverIntegration:
         monkeypatch.delenv("POSTGRES_HOST", raising=False)
 
         overlay = OverlayFileLoader().load(sample_overlay_yaml)
-        result = OverlayConfigResolver().resolve(overlay, contracts_dir)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
+        result = OverlayConfigResolver().resolve(overlay, requirements)
 
         assert "POSTGRES_PORT" in result.resolved
         assert "POSTGRES_PASSWORD" in result.resolved
@@ -113,6 +129,9 @@ class TestOverlayConfigResolverIntegration:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Replay determinism: same inputs -> same resolved values and hash."""
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -122,10 +141,11 @@ class TestOverlayConfigResolverIntegration:
         monkeypatch.delenv("POSTGRES_HOST", raising=False)
 
         overlay = OverlayFileLoader().load(sample_overlay_yaml)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
         resolver = OverlayConfigResolver()
 
-        result1 = resolver.resolve(overlay, contracts_dir)
-        result2 = resolver.resolve(overlay, contracts_dir)
+        result1 = resolver.resolve(overlay, requirements)
+        result2 = resolver.resolve(overlay, requirements)
         assert result1.resolved == result2.resolved
         assert (
             result1.manifest.resolved_config_hash

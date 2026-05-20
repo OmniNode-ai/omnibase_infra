@@ -116,6 +116,9 @@ class TestOverlayEndToEnd:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Replay proof: same overlay + same contracts -> same resolution hash."""
+        from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+            ContractConfigExtractor,
+        )
         from omnibase_infra.runtime.overlay.overlay_config_resolver import (
             OverlayConfigResolver,
         )
@@ -125,10 +128,11 @@ class TestOverlayEndToEnd:
         monkeypatch.delenv("POSTGRES_HOST", raising=False)
 
         overlay = OverlayFileLoader().load(sample_overlay_yaml)
+        requirements = ContractConfigExtractor().extract_from_paths([contracts_dir])
         resolver = OverlayConfigResolver()
 
-        result1 = resolver.resolve(overlay, contracts_dir)
-        result2 = resolver.resolve(overlay, contracts_dir)
+        result1 = resolver.resolve(overlay, requirements)
+        result2 = resolver.resolve(overlay, requirements)
 
         assert result1.resolved == result2.resolved
         assert (

@@ -46,10 +46,15 @@ def contracts_dir(tmp_path: Path) -> Path:
     contract = {
         "name": "test-node",
         "node_type": "EFFECT_GENERIC",
-        "metadata": {"transport_type": "kafka"},
         "dependencies": [
-            {"type": "environment", "key": "POSTGRES_HOST"},
-            {"type": "environment", "key": "KAFKA_BOOTSTRAP_SERVERS"},
+            {
+                "type": "environment",
+                "env_var": "KAFKA_BOOTSTRAP_SERVERS",
+                "required": False,
+            },
+            {"type": "environment", "env_var": "POSTGRES_HOST", "required": False},
+            {"type": "environment", "env_var": "POSTGRES_PORT", "required": False},
+            {"type": "environment", "env_var": "POSTGRES_PASSWORD", "required": False},
         ],
     }
     (cdir / "contract.yaml").write_text(yaml.safe_dump(contract))
