@@ -1,0 +1,28 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11299"
+title: "Support composite projection upsert keys in sync DB adapter"
+summary: >
+  Allow the sync projection DB adapter to accept comma-separated composite conflict keys (e.g. "session_id,event_timestamp,model_local,model_cloud_baseline") for savings_estimates-style projection tables. No schema change, no new topics, no migrations — purely a logic fix to the SQL generation path in handler_wiring.py.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-tests
+    description: "Unit and integration tests pass for composite and single conflict key paths."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py tests/integration/test_sync_db_adapter_composite_conflict_key.py -v"
+  - id: dod-deploy
+    description: >
+      Pure logic fix to SQL generation — no new tables, topics, migrations, or Dockerfile changes. Rolling restart on .201 after merge is sufficient.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.auto_wiring.handler_wiring import _build_sync_db_adapter; print(\"composite key adapter loaded\")'"
