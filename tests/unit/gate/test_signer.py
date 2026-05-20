@@ -139,7 +139,7 @@ class TestOmniGateSigner:
     ) -> None:
         calls: dict[str, object] = {}
 
-        class VerificationMaterials:
+        class Bundle:
             @staticmethod
             def from_json(value: str) -> object:
                 calls["bundle_json"] = value
@@ -166,13 +166,15 @@ class TestOmniGateSigner:
                 calls["identity"] = identity
                 calls["issuer"] = issuer
 
+        models_module = types.ModuleType("sigstore.models")
+        models_module.Bundle = Bundle
         verify_module = types.ModuleType("sigstore.verify")
         verify_module.Verifier = Verifier
-        verify_module.VerificationMaterials = VerificationMaterials
         policy_module = types.ModuleType("sigstore.verify.policy")
         policy_module.Identity = Identity
         sigstore_module = types.ModuleType("sigstore")
         monkeypatch.setitem(sys.modules, "sigstore", sigstore_module)
+        monkeypatch.setitem(sys.modules, "sigstore.models", models_module)
         monkeypatch.setitem(sys.modules, "sigstore.verify", verify_module)
         monkeypatch.setitem(sys.modules, "sigstore.verify.policy", policy_module)
 
@@ -195,7 +197,7 @@ class TestOmniGateSigner:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        class VerificationMaterials:
+        class Bundle:
             @staticmethod
             def from_json(value: str) -> object:
                 return {"bundle": value}
@@ -220,13 +222,15 @@ class TestOmniGateSigner:
                 self.identity = identity
                 self.issuer = issuer
 
+        models_module = types.ModuleType("sigstore.models")
+        models_module.Bundle = Bundle
         verify_module = types.ModuleType("sigstore.verify")
         verify_module.Verifier = Verifier
-        verify_module.VerificationMaterials = VerificationMaterials
         policy_module = types.ModuleType("sigstore.verify.policy")
         policy_module.Identity = Identity
         sigstore_module = types.ModuleType("sigstore")
         monkeypatch.setitem(sys.modules, "sigstore", sigstore_module)
+        monkeypatch.setitem(sys.modules, "sigstore.models", models_module)
         monkeypatch.setitem(sys.modules, "sigstore.verify", verify_module)
         monkeypatch.setitem(sys.modules, "sigstore.verify.policy", policy_module)
 

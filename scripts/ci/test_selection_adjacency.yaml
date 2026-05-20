@@ -84,6 +84,8 @@ adjacency:
     reverse_deps: [cli, runtime]
   idempotency:
     reverse_deps: [runtime]
+  gate:
+    reverse_deps: [gateway, gateways, runtime]
   gateway:
     reverse_deps: [gateways, runtime]
   diagnostics:

@@ -59,7 +59,7 @@ class OmniGateSigner:
         payload = self.serialize_for_signing(receipt)
         try:
             bundle = _method_with_string(
-                _load_module_attr("sigstore.verify", "VerificationMaterials"),
+                _load_module_attr("sigstore.models", "Bundle"),
                 "from_json",
             )(receipt.sigstore_bundle_json)
             policy = _identity_factory()(
