@@ -254,28 +254,30 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.category is EnumMessageCategory.COMMAND
 
     @pytest.mark.unit
-    def test_registration_contract_skips_generic_direct_handler_dispatcher(
+    def test_registration_contract_registers_generic_direct_handler_dispatcher(
         self,
     ) -> None:
-        """Registration auto-wiring owns subscriptions, not generic dispatchers."""
+        """Registration auto-wiring owns dispatcher registration and subscriptions."""
         from omnibase_core.enums.enum_handler_resolution_outcome import (
             EnumHandlerResolutionOutcome,
         )
         from omnibase_infra.enums import EnumMessageCategory
 
         contract = _make_contract_with_event_type_alias(
-            event_model_name="ModelTopicCatalogRequest",
-            event_type_alias="platform.request-introspection",
-            message_category="COMMAND",
+            event_model_name="ModelNodeHeartbeatEvent",
+            event_type_alias="platform.node-heartbeat",
+            message_category="EVENT",
             node_name="node_registration_orchestrator",
         )
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        handler_cls = _make_zero_arg_handler_cls()
         ownership = ServiceLocalHandlerOwnershipQuery(
             local_node_names=frozenset({contract.name})
         )
         resolver = ServiceHandlerResolver()
         with patch(
-            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
         ) as import_handler:
             prepared = _prepare_handler_wiring(
                 contract=contract,
@@ -287,18 +289,18 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 container=None,
             )
 
-        import_handler.assert_not_called()
-        assert prepared.is_skip is True
-        assert prepared.category is EnumMessageCategory.COMMAND
+        import_handler.assert_called_once()
+        assert prepared.is_skip is False
+        assert prepared.category is EnumMessageCategory.EVENT
         assert prepared.message_types == {
-            "ModelTopicCatalogRequest",
-            "platform.request-introspection",
+            "ModelNodeHeartbeatEvent",
+            "platform.node-heartbeat",
         }
         assert (
             prepared.resolution_outcome
-            is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_ZERO_ARG
         )
-        assert "auto-wiring" in prepared.skip_reason
+        assert prepared.dispatcher_id
 
     @pytest.mark.unit
     def test_message_types_includes_topic_derived_alias_when_no_explicit_alias(
