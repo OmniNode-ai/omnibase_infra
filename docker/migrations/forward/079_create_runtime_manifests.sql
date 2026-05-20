@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 -- SPDX-License-Identifier: MIT
 --
--- Migration 078: create runtime_manifests append-only projection table (OMN-11197).
+-- Migration 079: create runtime_manifests append-only projection table (OMN-11197).
 --
 -- Append-only: handler INSERTS only, never UPDATEs.
 -- The unique index on (runtime_profile, topology_hash, started_at) deduplicates

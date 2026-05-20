@@ -43,7 +43,7 @@ _MIGRATION_PATH = (
     / "docker"
     / "migrations"
     / "forward"
-    / "078_create_runtime_manifests.sql"
+    / "079_create_runtime_manifests.sql"
 )
 
 

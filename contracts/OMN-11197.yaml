@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-11197
 title: "Add runtime_manifests projection table and handler"
-summary: "Adds the runtime_manifests projection table via migration 078 and a postgres INSERT handler that consumes runtime-manifest-published events and persists one row per startup (append-only, ON CONFLICT DO NOTHING dedup)."
+summary: "Adds the runtime_manifests projection table via migration 079 and a postgres INSERT handler that consumes runtime-manifest-published events and persists one row per startup (append-only, ON CONFLICT DO NOTHING dedup)."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,8 +11,8 @@ evidence_requirements:
     description: "Unit tests cover successful INSERT, ON CONFLICT DO NOTHING dedup, SQL parameter ordering, and pool error path."
     command: "uv run pytest tests/unit/nodes/node_runtime_manifest_reducer -v"
   - kind: manual
-    description: "Deploy-gate proof: forward migration 078 + new reducer node. Runtime image rebuild required post-merge; migration applied on startup."
-    command: "deploy-gate: runtime image rebuild required post-merge; migration 078_create_runtime_manifests.sql applied via runtime startup migration runner"
+    description: "Deploy-gate proof: forward migration 079 + new reducer node. Runtime image rebuild required post-merge; migration applied on startup."
+    command: "deploy-gate: runtime image rebuild required post-merge; migration 079_create_runtime_manifests.sql applied via runtime startup migration runner"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -29,4 +29,4 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "deploy: next omninode-runtime image build carries node_runtime_manifest_reducer and migration 078_create_runtime_manifests.sql; rolling restart on .201 activates the projection table"
+        check_value: "deploy: next omninode-runtime image build carries node_runtime_manifest_reducer and migration 079_create_runtime_manifests.sql; rolling restart on .201 activates the projection table"
