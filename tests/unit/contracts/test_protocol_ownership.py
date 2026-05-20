@@ -159,6 +159,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # entry-point-registered validator function shape so the registry can inject and
     # unit-test validators without binding to a concrete implementation.
     "OmniGateValidatorCallable": "gate/validator_registry.py",
+    # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
+    "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

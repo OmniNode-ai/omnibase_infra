@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Prometheus alerting rules for ONEX runtime crash-loop detection (OMN-9121).
+#
+# Metric source: cAdvisor (container_restarts_total)
+# cAdvisor exposes Docker container restart counts scraped from the Docker daemon.
+# Add cAdvisor to the compose stack (see observability/prometheus/prometheus.yml)
+# to enable these alerts.
+#
+# Containers targeted: any container whose name matches "omninode-*" — covers
+# omninode-runtime, omninode-runtime-effects, omninode-skill-lifecycle-consumer,
+# omninode-agent-actions-consumer, omninode-context-audit-consumer, etc.
+#
+# The 490-restart incident (OMN-9121): runtime crash-looped for 72h with zero
+# alerting. These rules close that structural gap.
+groups:
+  - name: runtime-health
+    rules:
+      # ---------------------------------------------------------------------------
+      # Critical: crash-loop storm — ≥4 restarts in 5 minutes
+      # ---------------------------------------------------------------------------
+      # Fires when a container is actively crash-looping. The 2m `for` clause
+      # absorbs one-off blips (e.g. a single OOM during a deploy) while catching
+      # sustained crash loops within 7 minutes of onset.
+      - alert: OmninodeRuntimeRestartStorm
+        expr: increase(container_restarts_total{name=~"omninode-.*"}[5m]) >= 4
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "{{ $labels.name }} crash-looping ({{ $value | humanize }} restarts in 5m)"
+          description: "Container {{ $labels.name }} has restarted {{ $value | humanize }} times in the last 5 minutes and has been in this state for at least 2 minutes. Investigate immediately — this matches the 490-restart incident pattern."
+          runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/runtime-crash-loop.md"
+      # ---------------------------------------------------------------------------
+      # Warning: accumulated restart count — >10 lifetime restarts
+      # ---------------------------------------------------------------------------
+      # Fires when a container has accumulated more than 10 total restarts since
+      # the Docker daemon last started. A high accumulated count indicates repeated
+      # instability even if the current burst rate is low.
+      - alert: OmninodeRuntimeHighRestartCount
+        expr: container_restarts_total{name=~"omninode-.*"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $labels.name }} accumulated {{ $value | humanize }} restarts"
+          description: "Container {{ $labels.name }} has accumulated {{ $value | humanize }} total restarts since the Docker daemon started. This may indicate persistent instability. Review logs and autoheal events."
+          runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/runtime-crash-loop.md"
+      # ---------------------------------------------------------------------------
+      # Warning: runtime health endpoint absent — container running but /health dead
+      # ---------------------------------------------------------------------------
+      # Fires when the Prometheus scrape target for a runtime container drops.
+      # Complements restart-count alerting: a container can be "running" per Docker
+      # while its health endpoint is unreachable (wiring failure, port conflict, etc.).
+      - alert: OmninodeRuntimeHealthEndpointDown
+        expr: up{job=~"omninode-runtime.*"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }} health endpoint unreachable for 3m"
+          description: "Prometheus cannot scrape {{ $labels.job }} at {{ $labels.instance }}. The container may be running but its /metrics or /health endpoint is not responding. Check container logs and port bindings."
