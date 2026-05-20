@@ -105,6 +105,9 @@ def test_migration_conflict_action_is_blocking() -> None:
     )
     assert "continue-on-error" not in validate_step
     assert validate_step["with"]["warn-only"] == "false"
+    assert (
+        validate_step["env"]["OMNI_REPO_CLONE_TOKEN"] == "${{ secrets.CROSS_REPO_PAT }}"
+    )
 
     report_steps = [
         step

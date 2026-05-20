@@ -140,6 +140,7 @@ jobs:
         run: |
           FAILED=false
           for check in \
+            "type-safety=${{ needs.type-safety.result }}" \
             "type-union-check=${{ needs.type-union-check.result }}" \
             "handler-contract-compliance=${{ needs.handler-contract-compliance.result }}"; do
             NAME="${check%%=*}"
@@ -151,7 +152,6 @@ jobs:
               echo "$NAME: $RESULT"
             fi
           done
-          echo "type-safety: ${{ needs.type-safety.result }}"
           if [ "$FAILED" = "true" ]; then
             echo "Omni Standards Gate FAILED"
             exit 1

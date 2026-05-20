@@ -1,0 +1,22 @@
+# OMN-11161 contract file for omnibase_infra deploy-gate.
+# Canonical ticket evidence lives in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11161"
+title: "Flip omnibase_infra type-safety gate to blocking"
+summary: >
+  Removes the advisory continue-on-error behavior from the omnibase_infra type-safety workflow and ensures the standards summary evaluates type-safety as a blocking dependency.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-deploy"
+    description: "CI-only hardening; no live deploy, restart, broker topic, container image, or runtime mutation is required."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-11161 is CI-only type-safety gate hardening; no docker exec, rpk topic produce, live deploy, restart, or runtime mutation required before merge'"

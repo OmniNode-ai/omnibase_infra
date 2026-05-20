@@ -1,0 +1,23 @@
+# OMN-10972 contract file for omnibase_infra deploy-gate.
+# Canonical ticket evidence lives in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-10972"
+title: "Gate hardening epic for advisory CI gates"
+summary: >
+  Repo-local deploy-gate evidence for omnibase_infra PR #1648, which hardens advisory CI gates and updates contract dependency metadata. No live deploy, restart, broker topic, container image, or runtime mutation is required before merge.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "ci"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-deploy"
+    description: "No runtime deploy or restart is required for CI gate hardening and contract metadata cleanup."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-10972 PR #1648 changes CI/workflow enforcement and contract dependency metadata only; no docker exec, rpk topic produce, live deploy, restart, or runtime mutation required before merge'"
