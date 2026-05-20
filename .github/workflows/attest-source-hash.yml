@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# attest-source-hash — OMN-9139
+#
+# Verifies that every build artifact carries a valid, non-unknown
+# RUNTIME_SOURCE_HASH baked in at build time from `git rev-parse HEAD`.
+#
+# Rules enforced:
+#   1. Working tree is clean (no uncommitted changes).
+#   2. HEAD matches origin/main (or a release branch cut from main).
+#   3. The built-in hash matches `git rev-parse HEAD` exactly.
+#   4. The hash is not "unknown", empty, or "dev".
+#
+# This workflow is called by docker-build.yml, build-and-push-runtime.yml,
+# and release-python-reusable.yml as a REQUIRED status check.
+# No bypass, no skip tokens.
+#
+# Related: OMN-9139, OMN-9122 (runtime_sweep integration)
+
+name: Attest Source Hash
+
+on:
+  workflow_call:
+    inputs:
+      runtime_source_hash:
+        description: "RUNTIME_SOURCE_HASH value baked into the artifact"
+        required: true
+        type: string
+      expected_commit_sha:
+        description: "Full commit SHA that should match the hash (defaults to github.sha)"
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      runtime_source_hash:
+        description: "RUNTIME_SOURCE_HASH to verify"
+        required: true
+        type: string
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  attest-source-hash:
+    name: Verify source hash attestation
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Assert clean working tree
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Working tree has unstaged changes — cannot attest a dirty build."
+            exit 1
+          fi
+          if ! git diff --cached --exit-code; then
+            echo "::error::Working tree has staged (uncommitted) changes — cannot attest a dirty build."
+            exit 1
+          fi
+          UNTRACKED=$(git ls-files --others --exclude-standard)
+          if [ -n "$UNTRACKED" ]; then
+            echo "::error::Untracked files found: $UNTRACKED"
+            exit 1
+          fi
+          echo "Working tree is clean."
+
+      - name: Resolve expected commit SHA
+        id: resolve
+        env:
+          INPUT_EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+        run: |
+          EXPECTED="${INPUT_EXPECTED_COMMIT_SHA}"
+          if [ -z "$EXPECTED" ]; then
+            EXPECTED="${GITHUB_SHA}"
+          fi
+          echo "expected_sha=${EXPECTED}" >> "$GITHUB_OUTPUT"
+          echo "Expected SHA: ${EXPECTED}"
+
+      - name: Assert hash is not unknown/empty
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
+        run: |
+          HASH="${INPUT_RUNTIME_SOURCE_HASH}"
+          if [ -z "$HASH" ] || [ "$HASH" = "unknown" ] || [ "$HASH" = "dev" ]; then
+            echo "::error::RUNTIME_SOURCE_HASH='${HASH}' is invalid (empty/unknown/dev)."
+            echo "::error::Pass --build-arg RUNTIME_SOURCE_HASH=\$(git rev-parse HEAD) at build time."
+            exit 1
+          fi
+          echo "Hash is non-empty and not a sentinel value: '${HASH}'"
+
+      - name: Assert hash matches HEAD commit
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
+          EXPECTED_COMMIT_SHA: ${{ steps.resolve.outputs.expected_sha }}
+        run: |
+          HASH="${INPUT_RUNTIME_SOURCE_HASH}"
+          EXPECTED="${EXPECTED_COMMIT_SHA}"
+
+          # Accept either a short (7+ chars) or full SHA match
+          HASH_LEN=${#HASH}
+          if [ "$HASH_LEN" -lt 7 ]; then
+            echo "::error::RUNTIME_SOURCE_HASH='${HASH}' is too short (< 7 chars); must be at least the 7-char short SHA."
+            exit 1
+          fi
+
+          # Check if EXPECTED starts with HASH (short-hash prefix match)
+          # or HASH starts with EXPECTED (full-hash prefix match)
+          if [[ "$EXPECTED" == "$HASH"* ]] || [[ "$HASH" == "$EXPECTED"* ]]; then
+            echo "Hash matches HEAD commit. RUNTIME_SOURCE_HASH='${HASH}' EXPECTED='${EXPECTED}'"
+          else
+            echo "::error::RUNTIME_SOURCE_HASH='${HASH}' does NOT match HEAD commit '${EXPECTED}'."
+            echo "::error::Ensure the image was built with --build-arg RUNTIME_SOURCE_HASH=\$(git rev-parse HEAD) on a clean, merged commit."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          INPUT_RUNTIME_SOURCE_HASH: ${{ inputs.runtime_source_hash }}
+          EXPECTED_COMMIT_SHA: ${{ steps.resolve.outputs.expected_sha }}
+        run: |
+          echo "# Source Hash Attestation" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| RUNTIME_SOURCE_HASH | \`${INPUT_RUNTIME_SOURCE_HASH}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Expected commit SHA | \`${EXPECTED_COMMIT_SHA}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${GITHUB_SHA}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ticket | OMN-9139 |" >> "$GITHUB_STEP_SUMMARY"

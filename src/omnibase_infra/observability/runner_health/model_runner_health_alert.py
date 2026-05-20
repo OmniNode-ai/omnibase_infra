@@ -48,6 +48,7 @@ class ModelRunnerHealthAlert(BaseModel):
                 EnumRunnerHealthState.GITHUB_OFFLINE: ":red_circle:",
                 EnumRunnerHealthState.CRASH_LOOPING: ":rotating_light:",
                 EnumRunnerHealthState.DOCKER_UNHEALTHY: ":warning:",
+                EnumRunnerHealthState.OOM_KILLED: ":skull:",
                 EnumRunnerHealthState.STALE_REGISTRATION: ":ghost:",
                 EnumRunnerHealthState.MISSING: ":question:",
             }.get(r.state, ":x:")
@@ -57,3 +58,6 @@ class ModelRunnerHealthAlert(BaseModel):
                 f"(GitHub: {r.github_status}, Docker: {r.docker_status}){detail}"
             )
         return "\n".join(lines)
+
+
+__all__ = ["ModelRunnerHealthAlert"]

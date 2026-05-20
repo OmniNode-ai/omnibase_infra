@@ -41,6 +41,8 @@ Exports:
     ModelHealthCheckResponse: HTTP response model for health check endpoints
     ModelComponentHealth: Per-component health status for detailed diagnostics (OMN-519)
     ModelDetailedHealthResponse: Extended response for /health/detailed endpoint (OMN-519)
+    ModelEventBusAggregateHealth: Typed model for the event_bus sub-dict in :8085/health response (OMN-9266)
+    ModelRuntimeAggregateHealth: Canonical typed model for :8085/health aggregate response shape (OMN-9266)
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
     ModelSecretSourceSpec: Source specification for a single secret
     SecretSourceType: Type alias for secret source types (env, vault, file)
@@ -110,6 +112,9 @@ from omnibase_infra.runtime.models.model_duplicate_response import (
 )
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
+)
+from omnibase_infra.runtime.models.model_event_bus_aggregate_health import (
+    ModelEventBusAggregateHealth,
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
@@ -195,6 +200,9 @@ from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
+from omnibase_infra.runtime.models.model_runtime_aggregate_health import (
+    ModelRuntimeAggregateHealth,
+)
 from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
 from omnibase_infra.runtime.models.model_runtime_contract_config import (
     ModelRuntimeContractConfig,
@@ -316,4 +324,7 @@ __all__: list[str] = [
     "ModelPluginDiscoveryEntry",
     "ModelPluginDiscoveryReport",
     "PluginDiscoveryStatus",
+    # Aggregate health response model (OMN-9266)
+    "ModelEventBusAggregateHealth",
+    "ModelRuntimeAggregateHealth",
 ]

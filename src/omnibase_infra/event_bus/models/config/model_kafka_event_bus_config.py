@@ -614,6 +614,40 @@ class ModelKafkaEventBusConfig(BaseModel):
             )
         return v
 
+    # Static group membership override (OMN-7601).
+    # When None (default), EventBusKafka auto-derives from effective_group_id + hostname.
+    group_instance_id: str | None = Field(
+        default=None,
+        description=(
+            "Explicit static group membership ID override. When set, passed directly "
+            "to AIOKafkaConsumer as group_instance_id. When None (default), "
+            "EventBusKafka auto-derives the value from the effective consumer group "
+            "ID and socket.gethostname(), producing a stable per-consumer-per-host "
+            "identity. Never populate this from os.environ — use contract config or "
+            "leave None to use auto-derivation."
+        ),
+    )
+
+    @field_validator("group_instance_id", mode="before")
+    @classmethod
+    def validate_group_instance_id(cls, v: object) -> str | None:
+        """Validate group_instance_id contains only Kafka-safe characters."""
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError(
+                f"group_instance_id must be a string, got {type(v).__name__}"
+            )
+        if not v.strip():
+            return None
+        if not re.match(r"^[a-zA-Z0-9._-]+$", v):
+            raise ValueError(
+                f"group_instance_id {v!r} contains invalid characters. "
+                "Only alphanumeric characters, periods (.), underscores (_), "
+                "and hyphens (-) are allowed."
+            )
+        return v
+
     # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
     # Pydantic's @computed_field transforms the @property into a computed field.
     # This is a known mypy/Pydantic v2 interaction - the code works correctly at runtime.

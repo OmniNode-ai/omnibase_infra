@@ -51,3 +51,6 @@ class ModelRunnerHealthSnapshot(BaseModel):
     host_disk_percent: float = Field(
         default=0.0, description="Host disk usage percentage"
     )
+
+
+__all__ = ["ModelRunnerHealthSnapshot"]

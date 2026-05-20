@@ -74,6 +74,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # Pattern B dispatch commands enter through local runtime transport / skill clients;
     # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
     "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnibase-infra.runtime-manifest-published.v1": "Published by runtime startup self-report, not a contract-declared node | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
