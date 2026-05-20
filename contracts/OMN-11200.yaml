@@ -1,0 +1,28 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-11200"
+title: "Projection freshness SLA monitor"
+summary: >
+  Add ServiceFreshnessMonitor that periodically checks each declared ModelProjectionContract against MAX(freshness_field) FROM freshness_source_table and emits ModelProjectionDegradedEvent / ModelProjectionRecoveredEvent as freshness state transitions occur. Includes projection contract registry for contract_registry, topic_registry, and registration projections.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "All 15 unit tests pass covering detection, degradation, recovery, dedup, skip, and lifecycle."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_freshness_monitor.py -v"
+  - id: "dod-deploy"
+    description: >
+      Runtime deploy: after merging, rebuild omninode-runtime image on 192.168.86.201. ServiceFreshnessMonitor imports cleanly and freshness topics resolve.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.freshness_monitor import ServiceFreshnessMonitor; print(\"freshness monitor available\")'"

@@ -754,6 +754,33 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1135
+  - file_pattern: 'freshness_monitor\.py'
+    class_pattern: "Class name 'ServiceFreshnessMonitor'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-11200
+  - file_pattern: 'model_projection_degraded_event\.py'
+    field_pattern: "Field 'projection_name'"
+    violation_pattern: "might reference an entity"
+    reason: >
+      projection_name is the canonical name of a projection contract (e.g. "contract_registry"), not an entity reference. It identifies the projection by name, not by a database entity ID.
+
+    documentation:
+      - OMN-11199 (projection contract registry)
+    ticket: OMN-11200
+  - file_pattern: 'model_projection_recovered_event\.py'
+    field_pattern: "Field 'projection_name'"
+    violation_pattern: "might reference an entity"
+    reason: >
+      projection_name is the canonical name of a projection contract (e.g. "contract_registry"), not an entity reference. It identifies the projection by name, not by a database entity ID.
+
+    documentation:
+      - OMN-11199 (projection contract registry)
+    ticket: OMN-11200
   - file_pattern: 'service_snapshot\.py'
     class_pattern: "Class name 'ServiceSnapshot'"
     violation_pattern: "contains anti-pattern 'Service'"
