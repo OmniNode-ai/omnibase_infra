@@ -149,6 +149,40 @@ def test_projection_callback_maps_introspection_event_type() -> None:
 
 
 @pytest.mark.unit
+def test_projection_callback_awaits_async_handle() -> None:
+    """Async projection handlers are awaited after DB and event-type injection."""
+    received: list[dict] = []
+
+    class FakeHandler:
+        async def handle(self, input_data: dict) -> dict:
+            await asyncio.sleep(0)
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "node_service_registry", "database": "omnidash_analytics"}]
+    handler = FakeHandler()
+    callback = _make_projection_dispatch_callback(
+        handler, db_tables, ("onex.evt.platform.node-heartbeat.v1",)
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope.payload = {"service_name": "svc-a"}
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert len(received) == 1
+    assert received[0]["_event_type"] == "heartbeat"
+    assert received[0]["_db"] is fake_adapter
+
+
+@pytest.mark.unit
 def test_projection_callback_skips_when_db_url_missing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

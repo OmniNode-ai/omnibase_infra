@@ -739,6 +739,8 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
+            if asyncio.iscoroutine(result):
+                result = await cast("Awaitable[object]", result)
             projected = True
             logger.debug(
                 "Projection handler completed: topic=%s event_type=%s result=%s",
