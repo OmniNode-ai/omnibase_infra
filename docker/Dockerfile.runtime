@@ -396,9 +396,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get clean
 
 # Security: upgrade setuptools in the runtime base image to clear CVE-2025-47273.
-# The builder venv already has the patched version, but the python:3.12-slim base
-# image's system Python retains the vulnerable version. Trivy scans both stages.
-RUN pip install --no-cache-dir "setuptools>=78.1.1"
+# The builder venv already has the patched wheel. Copy it into system
+# site-packages instead of fetching again from the runtime stage, which keeps
+# runtime builds independent from a second package-index lookup.
+RUN python -c "import pathlib, shutil, site; target = pathlib.Path(site.getsitepackages()[0]); [shutil.rmtree(path, ignore_errors=True) for pattern in ('setuptools', 'setuptools-*.dist-info') for path in target.glob(pattern)]"
+COPY --from=builder /app/.venv/lib/python3.12/site-packages/setuptools /usr/local/lib/python3.12/site-packages/setuptools
+COPY --from=builder /app/.venv/lib/python3.12/site-packages/setuptools-*.dist-info /usr/local/lib/python3.12/site-packages/
 
 # Create non-root user for security
 # UID 1000 is typically the first non-system user, good for volume permissions
