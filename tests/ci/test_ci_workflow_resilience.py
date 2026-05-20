@@ -85,9 +85,17 @@ def test_migration_integration_resolves_reachable_postgres_host() -> None:
     assert "psql" not in assert_step["run"]
 
 
-def test_migration_conflict_action_startup_failure_is_warn_only() -> None:
+def test_migration_conflict_action_is_blocking() -> None:
+    """OMN-11163 graduated migration-conflict-check from advisory to blocking.
+
+    The validate-boundaries step must run with warn-only disabled and without
+    continue-on-error at either the job or step level, so an upstream conflict
+    fails the gate instead of merely emitting a warning.
+    """
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-conflict-check"]
+
+    assert "continue-on-error" not in job
 
     validate_step = next(
         step
@@ -95,15 +103,15 @@ def test_migration_conflict_action_startup_failure_is_warn_only() -> None:
         if step.get("uses")
         == "OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main"
     )
-    assert validate_step["continue-on-error"] is True
-    assert validate_step["with"]["warn-only"] == "true"
+    assert "continue-on-error" not in validate_step
+    assert validate_step["with"]["warn-only"] == "false"
 
-    report_step = next(
+    report_steps = [
         step
         for step in job["steps"]
         if step.get("name") == "Report non-blocking boundary validator startup failure"
-    )
-    assert report_step["if"] == "steps.migration_conflicts.outcome == 'failure'"
+    ]
+    assert report_steps == []
 
 
 def test_docker_integration_build_timeout_matches_workflow_budget() -> None:
