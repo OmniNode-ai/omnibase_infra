@@ -454,7 +454,11 @@ class TestHandlerUpsertMergeGateInjectedConfig:
                 "data": {
                     "issueCreate": {
                         "success": True,
-                        "issue": {"id": "i1", "identifier": "OMN-1", "url": "http://x"},
+                        "issue": {
+                            "id": "i1",
+                            "identifier": "OMN-1",
+                            "url": "https://linear.app/omninode/issue/OMN-1",
+                        },
                     }
                 }
             }
