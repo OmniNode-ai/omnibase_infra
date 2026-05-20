@@ -2054,6 +2054,16 @@ pattern_exemptions:
       - docs/patterns/reducer_pattern.md
     ticket: OMN-1653
   - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_contract_registered'
+    violation_pattern: 'has 7 parameters'
+    reason: >
+      Extended reducer handler signature adding data_provenance (OMN-11201). The 7 parameters are: self, state (immutable input), event (typed domain event), Kafka position (topic/partition/offset) for idempotency, and data_provenance for projection tracking. This remains the canonical ONEX reducer handler pattern.
+
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+      - docs/patterns/reducer_pattern.md
+    ticket: OMN-11201
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_contract_deregistered'
     violation_pattern: 'has 6 parameters'
     reason: Same as _on_contract_registered - standard reducer handler signature.
@@ -3344,6 +3354,32 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/onboarding/model_interactive_policy.py
     ticket: OMN-10782
+  # ==========================================================================
+  # Dynamic Materialization Result Exemptions (OMN-11244)
+  # ==========================================================================
+  - file_pattern: 'model_dynamic_materialization\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is the cache key (node identifier string, e.g. "claude_hook_effect") used to look up the descriptor in KafkaContractCache.get(). It is NOT a reference to a Contract entity — it is a status field on a value-object result model echoing back which key was materialized. No UUID + display_name decomposition applies to a cache-key echo field.
+
+    documentation:
+      - OMN-11244 (event-driven contract materialization)
+    ticket: OMN-11244
+  # ==========================================================================
+  # HandlerRunnerHealthCollector Naming Exemption (OMN-11273)
+  # ==========================================================================
+  # HandlerRunnerHealthCollector is an observability collector that follows
+  # CLAUDE.md Handler<Name> naming convention and exposes handler_id,
+  # handler_type, and handler_category consistent with the ONEX handler system.
+  - file_pattern: 'handler_runner_health_collector\.py'
+    class_pattern: "Class name 'HandlerRunnerHealthCollector'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerRunnerHealthCollector is a standalone observability collector that follows the CLAUDE.md Handler<Name> naming convention. Ticket OMN-11273 explicitly specifies this class name as the required implementation target.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-11273
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

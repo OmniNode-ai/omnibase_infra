@@ -65,12 +65,13 @@ logger = logging.getLogger(__name__)
 SQL_UPSERT_CONTRACT = """
 INSERT INTO contracts (
     contract_id, node_name, version_major, version_minor, version_patch,
-    contract_hash, contract_yaml, is_active, registered_at, last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    contract_hash, contract_yaml, is_active, data_provenance, registered_at, last_seen_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (contract_id) DO UPDATE SET
     contract_hash = EXCLUDED.contract_hash,
     contract_yaml = EXCLUDED.contract_yaml,
     is_active = EXCLUDED.is_active,
+    data_provenance = EXCLUDED.data_provenance,
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = NOW()
 RETURNING contract_id, (xmax = 0) AS was_insert;
@@ -201,6 +202,7 @@ class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
                 payload.contract_hash,
                 contract_yaml_str,
                 payload.is_active,
+                payload.data_provenance,
                 payload.registered_at,
                 payload.last_seen_at,
             )

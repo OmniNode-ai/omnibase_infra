@@ -1,0 +1,16 @@
+[
+  {
+    "sequence": 0,
+    "event_type": "contract_registration_requested",
+    "topic": "onex.cmd.platform.node-registration-requested.v1",
+    "source_node": "contract_deployer"
+  },
+  {
+    "sequence": 1,
+    "event_type": "contract_registration_rejected",
+    "topic": "onex.evt.platform.node-registration-rejected.v1",
+    "source_node": "node_contract_registry",
+    "status": "rejected",
+    "reason": "parse_failure"
+  }
+]

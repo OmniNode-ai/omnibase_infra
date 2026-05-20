@@ -680,11 +680,17 @@ def _make_projection_dispatch_callback(
     handler_instance: object,
     db_tables: list[dict[str, str]],
     subscribe_topics: tuple[str, ...],
+    event_bus: object | None = None,
+    terminal_event: str | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
     input_data alongside _event_type derived from the topic name.
+
+    When event_bus and terminal_event are provided, emits a terminal event
+    envelope to terminal_event after each successful projection so downstream
+    Pattern-B consumers and golden-chain tests can observe completion.
     """
     database = (
         db_tables[0].get("database", "omnidash_analytics")
@@ -715,6 +721,7 @@ def _make_projection_dispatch_callback(
                 database,
             )
             return None
+        projected = False
         try:
             adapter = _build_sync_db_adapter(db_url)
             topic = _extract_projection_topic(envelope)
@@ -732,6 +739,7 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
+            projected = True
             logger.debug(
                 "Projection handler completed: topic=%s event_type=%s result=%s",
                 topic,
@@ -754,9 +762,54 @@ def _make_projection_dispatch_callback(
                 type(exc).__name__,
                 exc,
             )
+
+        if projected and event_bus is not None and terminal_event is not None:
+            await _emit_projection_terminal_event(event_bus, terminal_event, envelope)
+
         return None
 
     return _callback
+
+
+async def _emit_projection_terminal_event(
+    event_bus: object,
+    terminal_event: str,
+    source_envelope: ModelEventEnvelope[object],
+) -> None:
+    """Publish a terminal event after a successful DB projection.
+
+    Propagates the source envelope's correlation_id so Pattern-B consumers
+    and golden-chain tests can correlate the terminal event to the command.
+    Best-effort: publish failures are logged but never propagate.
+    """
+    from datetime import UTC, datetime
+
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    try:
+        terminal_envelope = ModelEventEnvelope[object](
+            payload={"projected": True},
+            correlation_id=source_envelope.correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=terminal_event,
+            source_tool="projection-reducer",
+        )
+        raw = terminal_envelope.model_dump_json().encode("utf-8")
+        if hasattr(event_bus, "publish"):
+            await event_bus.publish(terminal_event, None, raw)  # type: ignore[union-attr]
+        else:
+            logger.warning(
+                "Projection terminal event not emitted: event_bus has no publish method "
+                "(topic=%s)",
+                terminal_event,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Failed to emit projection terminal event: topic=%s error_type=%s error=%s",
+            terminal_event,
+            type(exc).__name__,
+            _sanitize_exc(exc),
+        )
 
 
 def _make_event_bus_callback(
@@ -2179,15 +2232,25 @@ def _prepare_handler_wiring(
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
         )
+        projection_terminal_event = (
+            contract.terminal_event
+            if contract.terminal_event
+            and contract.event_bus is not None
+            and contract.terminal_event in contract.event_bus.publish_topics
+            else None
+        )
         callback = _make_projection_dispatch_callback(
             handler_instance,
             db_tables,
             subscribe_topics,
+            event_bus=event_bus,
+            terminal_event=projection_terminal_event,
         )
         logger.info(
-            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s",
+            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s terminal_event=%s",
             handler_ref.name,
             [t.get("name") for t in db_tables],
+            projection_terminal_event,
         )
     else:
         callback = _make_dispatch_callback(handler_instance, entry.event_model)
@@ -2226,6 +2289,7 @@ def _prepare_handler_wiring(
 def _commit_handler_wiring(
     prepared: PreparedWiring,
     dispatch_engine: object,
+    dynamic_materialization_authorized: bool = False,
 ) -> tuple[str, list[str]]:
     """Register a prepared handler wiring with the dispatch engine (side effects only).
 
@@ -2240,6 +2304,11 @@ def _commit_handler_wiring(
     keeps async-incompatible handlers off the dispatch engine so they
     cannot poison runtime-effects boot.
 
+    When ``dynamic_materialization_authorized=True`` and the engine is frozen,
+    the private dynamic registration methods are used instead of the standard
+    ones. This flag MUST only be set by ``materialize_cached_contract()`` after
+    full contract validation — never by general application code (OMN-11246).
+
     Returns:
         Tuple of (dispatcher_id, list of route_ids registered). Returns
         ``("", [])`` for skip / quarantined entries.
@@ -2247,20 +2316,38 @@ def _commit_handler_wiring(
     if prepared.is_skip or prepared.is_quarantined:
         return "", []
 
+    from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+    from omnibase_core.models.errors import ModelOnexError
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
     engine = dispatch_engine
     if isinstance(engine, MessageDispatchEngine):
-        engine.register_dispatcher(
-            dispatcher_id=prepared.dispatcher_id,
-            dispatcher=prepared.dispatcher,
-            category=prepared.category,
-            message_types=prepared.message_types,
-        )
-        for route in prepared.routes:
-            engine.register_route(route)
+        if engine.is_frozen:
+            if not dynamic_materialization_authorized:
+                raise ModelOnexError(
+                    message="Post-freeze registration requires explicit dynamic "
+                    "materialization authorization.",
+                    error_code=EnumCoreErrorCode.INVALID_STATE,
+                )
+            engine._register_dispatcher_dynamic(
+                dispatcher_id=prepared.dispatcher_id,
+                dispatcher=prepared.dispatcher,
+                category=prepared.category,
+                message_types=prepared.message_types,
+            )
+            for route in prepared.routes:
+                engine._register_route_dynamic(route)
+        else:
+            engine.register_dispatcher(
+                dispatcher_id=prepared.dispatcher_id,
+                dispatcher=prepared.dispatcher,
+                category=prepared.category,
+                message_types=prepared.message_types,
+            )
+            for route in prepared.routes:
+                engine.register_route(route)
 
     return prepared.dispatcher_id, prepared.route_ids
 

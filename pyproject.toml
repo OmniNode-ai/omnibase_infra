@@ -86,12 +86,12 @@ dependencies = [
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
-    "opentelemetry-instrumentation>=0.48b0,<0.62", # Base instrumentation
-    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.62", # FastAPI tracing
-    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.62", # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.62", # AIOHTTP tracing
-    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.62", # Kafka tracing
-    "opentelemetry-instrumentation-redis>=0.48b0,<0.62", # Redis tracing
+    "opentelemetry-instrumentation>=0.48b0,<0.64", # Base instrumentation
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.64", # FastAPI tracing
+    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.64", # AsyncPG tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.64", # AIOHTTP tracing
+    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.64", # Kafka tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.64", # Redis tracing
     # MCP (Model Context Protocol) integration
     "mcp>=1.25.0,<2.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
@@ -166,10 +166,6 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-11210: pin to omnibase_core main HEAD until EnumDataProvenance (added in
-# e2668b21, PR #1097) lands in a tagged release. The proof-of-life test
-# imports omnibase_core.enums.enum_data_provenance.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "04a2342cb9be689be6675166672facdb4406900b" }
 # v0.36.0: spi v0.21.0 tag does not exist yet (release in flight); pin to the
 # release branch and swap to `tag = "v0.21.0"` in a follow-up once tagged.
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
@@ -521,7 +517,9 @@ node_rsd_state_reducer = "omnibase_infra.nodes.node_rsd_state_reducer"
 node_runner_health_snapshot_effect = "omnibase_infra.nodes.node_runner_health_snapshot_effect"
 node_runner_usage_effect = "omnibase_infra.nodes.node_runner_usage_effect"
 node_runtime_error_triage_effect = "omnibase_infra.nodes.node_runtime_error_triage_effect"
+node_runtime_manifest_reducer = "omnibase_infra.nodes.node_runtime_manifest_reducer"
 node_runtime_orchestrator = "omnibase_infra.nodes.node_runtime_orchestrator"
+node_runtime_source_attestor_effect = "omnibase_infra.nodes.node_runtime_source_attestor_effect"
 node_savings_estimation_compute = "omnibase_infra.nodes.node_savings_estimation_compute"
 node_scope_extract_compute = "omnibase_infra.nodes.node_scope_extract_compute"
 node_scope_file_read_effect = "omnibase_infra.nodes.node_scope_file_read_effect"

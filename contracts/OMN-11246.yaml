@@ -1,0 +1,34 @@
+# OMN-11246 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-11246
+title: "Dynamic topic subscription after dispatch engine freeze"
+summary: "Allow explicitly authorized handler materialization to register dispatchers and routes after the dispatch engine has frozen."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+  - events
+evidence_requirements:
+  - kind: tests
+    description: "Unit and integration tests prove authorized post-freeze dynamic registration while preserving normal freeze protection."
+    command: "uv run pytest tests/unit/runtime/test_dispatch_engine_post_freeze.py tests/integration/runtime/test_dispatch_engine_post_freeze_dynamic_registration.py -q"
+  - kind: manual
+    description: "Runtime deploy validation for post-freeze handler materialization."
+    command: "deploy: after authorized runtime rollout, materialize a contract after dispatch engine freeze and confirm dispatch reaches the dynamically registered handler."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-dynamic-registration-tests
+    description: "Post-freeze dispatcher and route registration is only allowed through explicit dynamic materialization authorization."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_dispatch_engine_post_freeze.py tests/integration/runtime/test_dispatch_engine_post_freeze_dynamic_registration.py -q"
+  - id: dod-deploy-dynamic-registration
+    description: "Deployment validation must prove authorized dynamic materialization reaches a dynamically registered handler after freeze."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: after authorized runtime rollout, materialize a contract after dispatch engine freeze and confirm dispatch reaches the dynamically registered handler."

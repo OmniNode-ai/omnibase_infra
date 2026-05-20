@@ -9,6 +9,8 @@ by orchestrators to query current entity state.
 Exports:
     ModelCapabilityFields: Container for capability fields in projection persistence
     ModelContractProjection: Contract projection for Registry API queries
+    ModelCursorContract: Cursor mechanism contract for projection replay
+    ModelProjectionContract: Freshness and degraded-semantics contract for projections
     ModelProjectionIntent: Intent emitted by reducer to trigger synchronous projection (omnibase_core.models.projectors)
     ModelRegistrationProjection: Registration projection for orchestrator state queries
     ModelRegistrationSnapshot: Compacted snapshot for read optimization
@@ -38,8 +40,12 @@ from omnibase_infra.models.projection.model_capability_fields import (
 from omnibase_infra.models.projection.model_contract_projection import (
     ModelContractProjection,
 )
+from omnibase_infra.models.projection.model_cursor_contract import ModelCursorContract
 from omnibase_infra.models.projection.model_projected_flag_meta import (
     ModelProjectedFlagMeta,
+)
+from omnibase_infra.models.projection.model_projection_contract import (
+    ModelProjectionContract,
 )
 from omnibase_infra.models.projection.model_projection_ordering_contract import (
     DISPATCH_EVAL_RESULTS_ORDERING_CONTRACT,
@@ -64,9 +70,11 @@ from omnibase_infra.models.projection.model_topic_projection import (
 __all__ = [
     "ModelCapabilityFields",
     "ModelContractProjection",
+    "ModelCursorContract",
     "DISPATCH_EVAL_RESULTS_ORDERING_CONTRACT",
     "EnumProjectionOrderingDirection",
     "ModelProjectedFlagMeta",
+    "ModelProjectionContract",
     "ModelProjectionIntent",
     "ModelProjectionOrderingContract",
     "PROJECTION_ORDERING_CONTRACTS",

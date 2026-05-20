@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Minimal Prometheus configuration for ONEX runtime crash-loop alerting (OMN-9121).
+#
+# Integration path:
+#   Add the observability profile services to docker-compose.infra.yml and start with:
+#     docker compose -f docker/docker-compose.infra.yml --profile observability up -d
+#
+# Metric sources:
+#   - cAdvisor (cadvisor:8080): Docker container metrics including container_restarts_total
+#   - ONEX runtime apps (:9090/metrics): App-level metrics via HandlerMetricsPrometheus
+#
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+rule_files:
+  - "rules/runtime-health.yml"
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            # Alertmanager runs at :9093 when deployed; leave empty for rules-only mode.
+            - "alertmanager:9093"
+scrape_configs:
+  # ---------------------------------------------------------------------------
+  # cAdvisor — Docker container metrics (RestartCount, CPU, memory, etc.)
+  # ---------------------------------------------------------------------------
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+  # ---------------------------------------------------------------------------
+  # ONEX runtime services — app-level Prometheus metrics (:9090/metrics)
+  # ---------------------------------------------------------------------------
+  # HandlerMetricsPrometheus binds to localhost:9090 by default (secure default).
+  # In Docker, set METRICS_HOST=0.0.0.0 and expose port 9090 per service to enable.
+  - job_name: "omninode-runtime-main"
+    static_configs:
+      - targets: ["omninode-runtime:9090"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+  - job_name: "omninode-runtime-effects"
+    static_configs:
+      - targets: ["omninode-runtime-effects:9090"]
+    metrics_path: /metrics
+    scrape_interval: 30s

@@ -106,6 +106,15 @@ class ModelTopicProjection(BaseModel):
         description="Whether topic is currently referenced by any active contract",
     )
 
+    # Data provenance (OMN-11201)
+    data_provenance: str = Field(
+        default="unknown",
+        description=(
+            "Origin of projected data. Valid values: "
+            "demo_seeded, demo_projected_shortcut, measured, estimated, unknown."
+        ),
+    )
+
     # Audit timestamps
     created_at: datetime | None = Field(
         default=None,

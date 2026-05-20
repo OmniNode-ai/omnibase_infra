@@ -363,6 +363,7 @@ io_operations:
       - contract_yaml
       - source_node_id
       - is_active
+      - data_provenance
       - registered_at
       - last_seen_at
     output_fields:
@@ -480,7 +481,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-02-02"
-  updated: "2025-02-02"
+  updated: "2026-05-18"
   tags:
     - effect
     - contract-registry
@@ -491,3 +492,4 @@ metadata:
     - "OMN-1845"
     - "OMN-1653"
     - "OMN-9151"
+    - "OMN-11201"
