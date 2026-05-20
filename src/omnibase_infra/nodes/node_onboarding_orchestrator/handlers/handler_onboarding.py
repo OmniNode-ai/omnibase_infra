@@ -47,6 +47,8 @@ from omnibase_infra.onboarding.renderers.renderer_markdown import (
 )
 from omnibase_infra.probes.model_verification_spec import ModelVerificationSpec
 from omnibase_infra.probes.verification_executor import execute_verification
+from omnibase_infra.runtime.overlay.overlay_from_env import overlay_from_env_dict
+from omnibase_infra.runtime.overlay.overlay_writer import OverlayWriter
 
 
 class OnboardingHandlerError(ValueError):
@@ -109,16 +111,32 @@ async def _handle_interactive(
         for sr in result.step_results
     ]
 
-    # Optionally write env config
+    # Optionally write overlay and env config
     env_output_path_written: str | None = None
+    overlay_output_path_written: str | None = None
     if not input_model.dry_run:
         if input_model.env_output_path is None:
             msg = "env_output_path is required when dry_run=False"
             raise OnboardingHandlerError(msg)
         target_path = Path(input_model.env_output_path)
-        writer = ConfigWriter()
-        writer.write(result.env_dict, target_path)
-        env_output_path_written = str(target_path)
+
+        # Generate and write overlay YAML as primary output
+        overlay = overlay_from_env_dict(
+            result.env_dict, environment="dev", return_warnings=False
+        )
+        overlay_path = (
+            Path(input_model.overlay_output_path)
+            if input_model.overlay_output_path is not None
+            else target_path.parent / "overlay.yaml"
+        )
+        OverlayWriter().write(overlay, overlay_path)
+        overlay_output_path_written = str(overlay_path)
+
+        # Legacy .env output behind flag
+        if input_model.legacy_env_output:
+            writer = ConfigWriter()
+            writer.write(result.env_dict, target_path)
+            env_output_path_written = str(target_path)
 
     # Render env output as markdown for display
     env_lines = [f"  {k}={v}" for k, v in sorted(result.env_dict.items())]
@@ -131,7 +149,10 @@ async def _handle_interactive(
     if input_model.dry_run:
         rendered += "\n*Dry run — no files written.*\n"
     else:
-        rendered += f"\n*Written to: {env_output_path_written}*\n"
+        if overlay_output_path_written:
+            rendered += f"\n*Overlay written to: {overlay_output_path_written}*\n"
+        if env_output_path_written:
+            rendered += f"\n*Env written to: {env_output_path_written}*\n"
 
     visited_steps = [sr.step_key for sr in result.step_results]
 
@@ -148,6 +169,7 @@ async def _handle_interactive(
         terminal_step=result.terminal_step,
         dry_run=input_model.dry_run,
         env_output_path_written=env_output_path_written,
+        overlay_output_path_written=overlay_output_path_written,
     )
 
 
