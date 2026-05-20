@@ -39,7 +39,8 @@ def _runtime_version() -> str:
 
 def _contract_requirements_hash(requirements: ModelConfigRequirements) -> str:
     sorted_reqs = sorted(
-        {"key": r.key, "required": r.required} for r in requirements.requirements
+        ({"key": r.key, "required": r.required} for r in requirements.requirements),
+        key=lambda d: (d["key"], d["required"]),
     )
     sorted_transports = sorted(t.value for t in requirements.transport_types)
     sorted_paths = sorted(str(p) for p in requirements.contract_paths)
