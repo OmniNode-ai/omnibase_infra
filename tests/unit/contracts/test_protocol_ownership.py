@@ -155,6 +155,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
+    # [DI] OMN-11142 callable surface for OmniGate validator adapters — narrows the
+    # entry-point-registered validator function shape so the registry can inject and
+    # unit-test validators without binding to a concrete implementation.
+    "OmniGateValidatorCallable": "gate/validator_registry.py",
     # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
 }

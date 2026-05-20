@@ -76,6 +76,7 @@ dependencies = [
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
     "cryptography>=46.0.3,<49.0.0",
+    "sigstore>=4.0.0,<5.0.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
     "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
@@ -166,6 +167,10 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+# OMN-11142: pin to omnibase_core main HEAD for the omnibase_core.gate module
+# (receipt_canonical, OmniGate config) used by the OmniGate signer/executor.
+# Also carries EnumDataProvenance (OMN-11210). Swap to a tagged release once cut.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "7631ef3321e1a6561f4b2c70019ee57d24160620" }
 # v0.36.0: spi v0.21.0 tag does not exist yet (release in flight); pin to the
 # release branch and swap to `tag = "v0.21.0"` in a follow-up once tagged.
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
