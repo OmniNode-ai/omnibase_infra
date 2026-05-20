@@ -9,7 +9,7 @@ summary: >
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "ci"
+  - "public_api"
 emergency_bypass:
   enabled: false
   justification: ""
