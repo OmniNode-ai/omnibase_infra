@@ -225,3 +225,5 @@ src/omnibase_infra/nodes/node_waste_detection_compute/handlers/__init__.py  # OM
 src/omnibase_infra/nodes/node_waste_detection_compute/handlers/handler_waste_detection.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/__init__.py  # OMN-9139: infra-owned attestation node — verifies RUNTIME_SOURCE_HASH provenance, not a business-domain node.
 src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/handler_source_attestation.py  # OMN-9139: infra-owned attestation node — verifies RUNTIME_SOURCE_HASH provenance, not a business-domain node.
+src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/__init__.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
+src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/handler_postgres_runtime_manifest_insert.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
