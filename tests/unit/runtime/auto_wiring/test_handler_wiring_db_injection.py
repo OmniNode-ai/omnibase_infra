@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _build_sync_db_adapter,
     _make_dispatch_callback,
     _make_projection_dispatch_callback,
     _read_db_io_tables,
@@ -213,6 +214,39 @@ def test_projection_callback_logs_type_error_not_raises(
 
     assert result is None
     assert any("TypeError" in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_sync_db_adapter_accepts_multi_column_conflict_key() -> None:
+    """Projection DB adapter preserves protocol support for composite UPSERT keys."""
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "savings_estimates",
+            "session_id,event_timestamp,model_local,model_cloud_baseline",
+            {
+                "session_id": "sess-1",
+                "event_timestamp": "2026-05-20T20:00:00+00:00",
+                "model_local": "local-model",
+                "model_cloud_baseline": "cloud-model",
+                "savings_usd": "0.001",
+            },
+        )
+
+    assert result is True
+    sql = cursor.execute.call_args.args[0]
+    assert (
+        'ON CONFLICT ("session_id", "event_timestamp", '
+        '"model_local", "model_cloud_baseline") DO UPDATE SET'
+    ) in sql
+    assert '"savings_usd" = EXCLUDED."savings_usd"' in sql
 
 
 # ---------------------------------------------------------------------------

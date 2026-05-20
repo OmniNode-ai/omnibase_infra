@@ -624,18 +624,33 @@ def _build_sync_db_adapter(db_url: str) -> object:
         def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
             if not _TABLE_NAME_RE.match(table):
                 raise ValueError(f"Invalid table name: {table!r}")
-            if not _TABLE_NAME_RE.match(conflict_key):
+            conflict_keys = [
+                key.strip() for key in conflict_key.split(",") if key.strip()
+            ]
+            if not conflict_keys:
+                raise ValueError("conflict_key must contain at least one column")
+            bad_conflict_keys = [
+                key for key in conflict_keys if not _TABLE_NAME_RE.match(key)
+            ]
+            if bad_conflict_keys:
                 raise ValueError(f"Invalid conflict key: {conflict_key!r}")
             conn = self._get_conn()
             cols = list(row.keys())
             bad_cols = [c for c in cols if not _TABLE_NAME_RE.match(str(c))]
             if bad_cols:
                 raise ValueError(f"Invalid column names: {bad_cols!r}")
+            missing_conflict_keys = [key for key in conflict_keys if key not in row]
+            if missing_conflict_keys:
+                raise KeyError(
+                    f"row missing conflict key(s): {missing_conflict_keys!r}"
+                )
             quoted_cols = ", ".join(f'"{c}"' for c in cols)
             placeholders = ", ".join(f"%({c})s" for c in cols)
+            conflict_key_set = set(conflict_keys)
             updates = ", ".join(
-                f'"{c}" = EXCLUDED."{c}"' for c in cols if c != conflict_key
+                f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
             )
+            conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             adapted_row = {
                 key: psycopg2.extras.Json(value)
                 if isinstance(value, (dict, list))
@@ -646,7 +661,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
             parts = [
                 f'INSERT INTO "{table}" ({quoted_cols})',
                 f"VALUES ({placeholders})",
-                f'ON CONFLICT ("{conflict_key}") DO UPDATE SET {updates}',
+                f"ON CONFLICT ({conflict_columns}) DO UPDATE SET {updates}",
             ]
             insert_sql = " ".join(parts)
             with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
