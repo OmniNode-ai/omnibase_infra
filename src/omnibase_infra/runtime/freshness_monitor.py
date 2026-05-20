@@ -27,14 +27,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_core.models.projection.model_projection_contract import (
-    ModelProjectionContract,
-)
 from omnibase_infra.models.health.model_projection_degraded_event import (
     ModelProjectionDegradedEvent,
 )
 from omnibase_infra.models.health.model_projection_recovered_event import (
     ModelProjectionRecoveredEvent,
+)
+from omnibase_infra.models.projection.model_projection_contract import (
+    ModelProjectionContract,
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils.correlation import generate_correlation_id
@@ -200,7 +200,7 @@ class ServiceFreshnessMonitor:
                     projection_name=contract.projection_name,
                     sla_seconds=contract.freshness_sla_seconds,
                     actual_staleness_seconds=staleness,
-                    degraded_behavior=str(contract.degraded_semantics),
+                    degraded_behavior=contract.degraded_semantics.value,
                     observed_at=now,
                     source_contract_hash=contract_hash,
                 )

@@ -20,16 +20,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_core.enums.enum_degraded_behavior import EnumDegradedBehavior
-from omnibase_core.models.projection.model_cursor_contract import ModelCursorContract
-from omnibase_core.models.projection.model_projection_contract import (
-    ModelProjectionContract,
-)
+from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
 from omnibase_infra.models.health.model_projection_degraded_event import (
     ModelProjectionDegradedEvent,
 )
 from omnibase_infra.models.health.model_projection_recovered_event import (
     ModelProjectionRecoveredEvent,
+)
+from omnibase_infra.models.projection.model_cursor_contract import ModelCursorContract
+from omnibase_infra.models.projection.model_projection_contract import (
+    ModelProjectionContract,
 )
 from omnibase_infra.runtime.freshness_monitor import ServiceFreshnessMonitor
 
