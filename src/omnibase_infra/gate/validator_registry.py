@@ -68,16 +68,15 @@ def execute_validator(
 ) -> ModelOmniGateCheckResult:
     """Execute one declared validator and fail closed when it is unavailable."""
     start = time.monotonic()
-    validator = resolve_validator(validator_ref.id)
-    if validator is None:
-        return _validator_result(
-            validator_ref.id,
-            EnumReceiptStatus.FAIL,
-            int((time.monotonic() - start) * 1000),
-            f"Unknown OmniGate validator id: {validator_ref.id}",
-        )
-
     try:
+        validator = resolve_validator(validator_ref.id)
+        if validator is None:
+            return _validator_result(
+                validator_ref.id,
+                EnumReceiptStatus.FAIL,
+                int((time.monotonic() - start) * 1000),
+                f"Unknown OmniGate validator id: {validator_ref.id}",
+            )
         raw_result = _invoke_validator(
             validator,
             repo_path,
@@ -116,7 +115,16 @@ def _normalize_validator_result(
     duration_ms: int,
 ) -> ModelOmniGateCheckResult:
     if isinstance(raw_result, ModelOmniGateCheckResult):
-        return raw_result
+        from omnibase_infra.gate.executor import redact_if_secret_bearing
+
+        redacted = (
+            redact_if_secret_bearing(raw_result.stdout_preview)
+            if raw_result.stdout_preview
+            else None
+        )
+        return raw_result.model_copy(
+            update={"stdout_preview": redacted[:4096] if redacted else None}
+        )
     if isinstance(raw_result, bool):
         return _validator_result(
             validator_id,

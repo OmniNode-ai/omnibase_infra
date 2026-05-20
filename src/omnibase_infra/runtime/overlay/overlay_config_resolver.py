@@ -7,12 +7,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from omnibase_core.models.overlay.model_overlay_file import ModelOverlayFile
 from omnibase_core.models.overlay.model_overlay_resolution_manifest import (
     ModelOverlayResolutionManifest,
 )
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.runtime.config_discovery.models.model_config_requirements import (
     ModelConfigRequirements,
 )
@@ -36,12 +38,14 @@ def _runtime_version() -> str:
 
 
 def _contract_requirements_hash(requirements: ModelConfigRequirements) -> str:
-    sorted_keys = sorted(r.key for r in requirements.requirements)
+    sorted_reqs = sorted(
+        {"key": r.key, "required": r.required} for r in requirements.requirements
+    )
     sorted_transports = sorted(t.value for t in requirements.transport_types)
     sorted_paths = sorted(str(p) for p in requirements.contract_paths)
     payload = json.dumps(
         {
-            "keys": sorted_keys,
+            "requirements": sorted_reqs,
             "transports": sorted_transports,
             "contract_paths": sorted_paths,
         },
@@ -85,8 +89,13 @@ class OverlayConfigResolver:
                 missing_optional.append(req.key)
 
         if missing_required:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="resolve_overlay_config",
+            )
             raise RequiredConfigMissingError(
-                f"Required config keys missing from overlay: {sorted(missing_required)}"
+                f"Required config keys missing from overlay: {sorted(missing_required)}",
+                context=context,
             )
 
         manifest = ModelOverlayResolutionManifest(

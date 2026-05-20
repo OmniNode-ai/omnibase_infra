@@ -6,11 +6,16 @@ from __future__ import annotations
 
 import logging
 import os
+from types import MappingProxyType
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.models.overlay.model_overlay_resolution_manifest import (
     ModelOverlayResolutionManifest,
+)
+from omnibase_infra.runtime.overlay.model_frozen_str_mapping_validator import (
+    ModelFrozenStrMappingValidator,
 )
 from omnibase_infra.runtime.overlay.model_overlay_env_injection_result import (
     ModelOverlayEnvInjectionResult,
@@ -24,8 +29,8 @@ class ModelOverlayResolutionResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    resolved: dict[str, str] = Field(
-        ..., description="Keys resolved from the overlay file."
+    resolved: Annotated[MappingProxyType[str, str], ModelFrozenStrMappingValidator] = (
+        Field(..., description="Keys resolved from the overlay file.")
     )
     missing: tuple[str, ...] = Field(
         ..., description="Optional keys that had no value in the overlay."

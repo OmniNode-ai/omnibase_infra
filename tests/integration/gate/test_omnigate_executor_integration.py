@@ -52,6 +52,8 @@ def _config(
 @pytest.fixture(autouse=True)
 def _clear_validators() -> None:
     clear_builtin_validators()
+    yield
+    clear_builtin_validators()
 
 
 def test_real_bash_pipefail_invocation_passes(tmp_path: Path) -> None:
