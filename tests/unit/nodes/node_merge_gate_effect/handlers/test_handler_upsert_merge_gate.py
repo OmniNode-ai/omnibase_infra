@@ -465,7 +465,11 @@ class TestHandlerUpsertMergeGateInjectedConfig:
         )
 
         with (
-            patch.dict("os.environ", {}, clear=False),
+            patch.dict(
+                "os.environ",
+                {"LINEAR_API_KEY": "env-key", "LINEAR_TEAM_ID": "env-team"},
+                clear=False,
+            ),
             patch(
                 "omnibase_infra.nodes.node_merge_gate_effect.handlers."
                 "handler_upsert_merge_gate.httpx.AsyncClient"
@@ -488,6 +492,7 @@ class TestHandlerUpsertMergeGateInjectedConfig:
         mock_client.post.assert_called_once()
         post_kwargs = mock_client.post.call_args[1]
         assert post_kwargs["headers"]["Authorization"] == "injected-key"
+        assert post_kwargs["json"]["variables"]["teamId"] == "injected-team"
 
     @pytest.mark.asyncio
     async def test_no_injected_config_skips_linear_ticket(self) -> None:
@@ -498,10 +503,17 @@ class TestHandlerUpsertMergeGateInjectedConfig:
 
         payload = make_gate_payload(decision="QUARANTINE")
 
-        with patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
-        ) as mock_client_cls:
+        with (
+            patch.dict(
+                "os.environ",
+                {"LINEAR_API_KEY": "env-key", "LINEAR_TEAM_ID": "env-team"},
+                clear=False,
+            ),
+            patch(
+                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+                "handler_upsert_merge_gate.httpx.AsyncClient"
+            ) as mock_client_cls,
+        ):
             handler = HandlerUpsertMergeGate(pool)
             result = await handler.handle(payload, uuid4())
 

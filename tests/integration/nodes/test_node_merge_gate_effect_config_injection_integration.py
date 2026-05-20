@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_merge_gate_effect.models.model_merge_gate_result 
 pytestmark = [pytest.mark.integration]
 
 CONTRACT = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).parents[3]
     / "src"
     / "omnibase_infra"
     / "nodes"
