@@ -119,6 +119,8 @@ class TestLoadOperationBindingsHappyPath:
         assert "test.operation" in result.bindings
         assert len(result.bindings["test.operation"]) == 1
 
+    @pytest.mark.unit
+    @pytest.mark.unit
     def test_load_packaged_ledger_projection_contract(self) -> None:
         """Packaged ledger projection contract uses valid binding expressions."""
         contract_path = (
