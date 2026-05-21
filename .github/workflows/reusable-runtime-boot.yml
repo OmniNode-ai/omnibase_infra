@@ -25,7 +25,8 @@
 #       - `RuntimeHostError` / `ServiceResolutionError` raised at boot
 #       - `load_runtime_config` fatal errors (service_kernel.py config gate)
 #   * registration_projections row count > 0 (active + fresh heartbeat)
-#   * rpk group list contains `onex-runtime` with >= 1 member
+#   * /health reports runtime + runtime-effects Kafka consumers and rpk group
+#     list contains stable deterministic runtime consumer groups
 #
 # Warn-only observations (never fail the job):
 #   * subscriber_count < 300 (empirical .201 threshold; see
@@ -476,33 +477,62 @@ jobs:
             exit 1
           fi
 
-      - name: Assert onex-runtime consumer group has members
+      - name: Assert runtime consumer groups are active
         id: rpk_groups
         run: |
           set -euo pipefail
-          if [[ "${{ inputs.mode }}" == "compose" ]]; then
-            raw=$(docker exec omnibase-infra-redpanda rpk group list)
-          else
-            user="${{ inputs.real_ssh_user }}"
-            if [[ -z "$user" ]]; then
-              user="$(whoami)"
+
+          runtime_consumer_count=$(jq -r '.details.event_bus.consumer_count // 0' health_initial.json)
+          effects_consumer_count=$(jq -r '.details.event_bus.consumer_count // 0' effects_health_initial.json)
+          if [[ "${runtime_consumer_count}" -lt 1 ]]; then
+            echo "::error::runtime /health reports 0 Kafka consumers"
+            jq -c '{status, details: {event_bus: .details.event_bus}}' health_initial.json || true
+            exit 1
+          fi
+          if [[ "${effects_consumer_count}" -lt 1 ]]; then
+            echo "::error::runtime-effects /health reports 0 Kafka consumers"
+            jq -c '{status, details: {event_bus: .details.event_bus}}' effects_health_initial.json || true
+            exit 1
+          fi
+
+          for attempt in $(seq 1 10); do
+            if [[ "${{ inputs.mode }}" == "compose" ]]; then
+              raw=$(docker exec omnibase-infra-redpanda rpk group list)
+            else
+              user="${{ inputs.real_ssh_user }}"
+              if [[ -z "$user" ]]; then
+                user="$(whoami)"
+              fi
+              raw=$(ssh -o StrictHostKeyChecking=no "${user}@${RUNTIME_HOST}" "docker exec omnibase-infra-redpanda rpk group list")
             fi
-            raw=$(ssh -o StrictHostKeyChecking=no "${user}@${RUNTIME_HOST}" "docker exec omnibase-infra-redpanda rpk group list")
+            echo "$raw" > rpk_groups.txt
+
+            runtime_group_count=$(awk 'NR > 1 && $2 ~ /^local\.omnibase_infra\./ {count++} END {print count + 0}' rpk_groups.txt)
+            effects_group_count=$(awk 'NR > 1 && $2 ~ /^local\.runtime_config\./ {count++} END {print count + 0}' rpk_groups.txt)
+            unstable_groups=$(awk 'NR > 1 && $2 ~ /^local\.(omnibase_infra|runtime_config)\./ && $3 != "Stable" {print}' rpk_groups.txt)
+            if [[ "${runtime_group_count}" -gt 0 && "${effects_group_count}" -gt 0 && -z "${unstable_groups}" ]]; then
+              echo "runtime consumer groups active: runtime=${runtime_group_count} effects=${effects_group_count}"
+              exit 0
+            fi
+            echo "waiting for runtime consumer groups: attempt=${attempt} runtime=${runtime_group_count} effects=${effects_group_count}"
+            if [[ -n "${unstable_groups}" ]]; then
+              echo "unstable runtime groups:"
+              echo "${unstable_groups}"
+            fi
+            sleep 2
+          done
+
+          echo "::error::runtime consumer groups did not stabilize"
+          runtime_group_count=$(awk 'NR > 1 && $2 ~ /^local\.omnibase_infra\./ {count++} END {print count + 0}' rpk_groups.txt)
+          effects_group_count=$(awk 'NR > 1 && $2 ~ /^local\.runtime_config\./ {count++} END {print count + 0}' rpk_groups.txt)
+          echo "runtime_group_count=${runtime_group_count} effects_group_count=${effects_group_count}"
+          unstable_groups=$(awk 'NR > 1 && $2 ~ /^local\.(omnibase_infra|runtime_config)\./ && $3 != "Stable" {print}' rpk_groups.txt)
+          if [[ -n "${unstable_groups}" ]]; then
+            echo "unstable runtime groups:"
+            echo "${unstable_groups}"
           fi
-          echo "$raw" > rpk_groups.txt
-          if ! grep -qE '(^|[[:space:]])onex-runtime([[:space:]]|$)' rpk_groups.txt; then
-            echo "::error::rpk group list missing onex-runtime group"
-            cat rpk_groups.txt
-            exit 1
-          fi
-          # Assert the group has at least one member — presence alone is not enough.
-          member_count=$(echo "$raw" | awk '/onex-runtime/{print $NF}' | grep -E '^[0-9]+$' | head -1 || echo "0")
-          if [[ -z "$member_count" ]] || [[ "$member_count" -lt 1 ]]; then
-            echo "::error::onex-runtime consumer group has 0 members (got '${member_count}')"
-            cat rpk_groups.txt
-            exit 1
-          fi
-          echo "onex-runtime group member_count=${member_count}"
+          cat rpk_groups.txt
+          exit 1
 
       - name: Emit smoke-result.json artifact
         if: always()
