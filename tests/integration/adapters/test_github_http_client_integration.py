@@ -321,6 +321,23 @@ class TestGitHubHttpClientIntegration:
             name = c.fetch_failing_job_name("OmniNode-ai/omnimarket", 42)
         assert name == "Lint"
 
+    def test_fetch_failing_run_id_extracts_run_from_job_url(
+        self, fake_server: str
+    ) -> None:
+        c = GitHubHttpClient(token="fake-token")
+        with (
+            patch(
+                "omnibase_infra.adapters.github.adapter_github_client._GITHUB_GRAPHQL",
+                f"{fake_server}/graphql",
+            ),
+            patch(
+                "omnibase_infra.adapters.github.adapter_github_client._GITHUB_REST",
+                fake_server,
+            ),
+        ):
+            run_id = c.fetch_failing_run_id("OmniNode-ai/omnimarket", 42)
+        assert run_id == "88888"
+
     def test_missing_token_raises(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             import os

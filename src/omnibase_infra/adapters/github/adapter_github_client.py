@@ -193,29 +193,37 @@ query($owner: String!, $name: String!, $after: String) {
     ) -> list[dict[str, object]]:
         """Fetch CI check conclusions for a PR via REST API."""
         results: list[dict[str, object]] = []
-        detail = self.fetch_pr_detail(repo, pr_number, "headRefOid")
-        if detail:
-            head_oid = detail.get("headRefOid", "")
-            if head_oid:
-                data = self._rest_get(
-                    f"/repos/{repo}/commits/{head_oid}/check-runs", timeout=15
-                )
-                if isinstance(data, dict):
-                    check_runs = data.get("check_runs") or []
-                    if isinstance(check_runs, list):
-                        for run in check_runs:
-                            if not isinstance(run, dict):
-                                continue
-                            conclusion = str(run.get("conclusion") or "").upper()
-                            results.append(
-                                {
-                                    "name": str(run.get("name") or ""),
-                                    "conclusion": conclusion,
-                                    "status": str(run.get("status") or ""),
-                                    "isRequired": True,
-                                }
-                            )
+        for run in self._fetch_pr_check_runs(repo, pr_number):
+            conclusion = str(run.get("conclusion") or "").upper()
+            results.append(
+                {
+                    "name": str(run.get("name") or ""),
+                    "conclusion": conclusion,
+                    "status": str(run.get("status") or ""),
+                    "isRequired": True,
+                }
+            )
         return results
+
+    def _fetch_pr_check_runs(
+        self, repo: str, pr_number: int
+    ) -> list[dict[str, object]]:
+        """Fetch raw check-run dictionaries for the PR head commit."""
+        detail = self.fetch_pr_detail(repo, pr_number, "headRefOid")
+        if not detail:
+            return []
+        head_oid = detail.get("headRefOid", "")
+        if not head_oid:
+            return []
+        data = self._rest_get(
+            f"/repos/{repo}/commits/{head_oid}/check-runs", timeout=15
+        )
+        if not isinstance(data, dict):
+            return []
+        check_runs = data.get("check_runs") or []
+        if not isinstance(check_runs, list):
+            return []
+        return [run for run in check_runs if isinstance(run, dict)]
 
     def fetch_pr_detail(
         self, repo: str, pr_number: int, fields: str = "id,headRefName"
@@ -273,38 +281,13 @@ query($owner: String!, $name: String!, $number: Int!) {
 
     def fetch_failing_run_id(self, repo: str, pr_number: int) -> str | None:
         """Find the most recent failing GitHub Actions run ID for a PR."""
-        checks = self._fetch_pr_checks_rest(repo, pr_number)
-        for ctx in checks:
-            if ctx.get("conclusion") == "FAILURE":
-                detail = self.fetch_pr_detail(repo, pr_number, "headRefOid")
-                if detail:
-                    head_oid = detail.get("headRefOid", "")
-                    if head_oid:
-                        data = self._rest_get(
-                            f"/repos/{repo}/commits/{head_oid}/check-runs"
-                        )
-                        if isinstance(data, dict):
-                            check_runs = data.get("check_runs") or []
-                            if isinstance(check_runs, list):
-                                for run in check_runs:
-                                    if not isinstance(run, dict):
-                                        continue
-                                    if (
-                                        str(run.get("conclusion") or "").upper()
-                                        == "FAILURE"
-                                    ):
-                                        url = str(
-                                            run.get("details_url")
-                                            or run.get("html_url")
-                                            or ""
-                                        )
-                                        run_id = (
-                                            url.rstrip("/").split("/")[-1]
-                                            if url
-                                            else None
-                                        )
-                                        if run_id:
-                                            return run_id
+        for run in self._fetch_pr_check_runs(repo, pr_number):
+            if str(run.get("conclusion") or "").upper() != "FAILURE":
+                continue
+            for key in ("details_url", "html_url"):
+                run_id = _github_actions_run_id_from_url(str(run.get(key) or ""))
+                if run_id:
+                    return run_id
         return None
 
     def fetch_failing_job_name(self, repo: str, pr_number: int) -> str | None:
@@ -433,6 +416,15 @@ def _split_repo(repo: str) -> tuple[str, str]:
     if len(parts) != 2:
         raise ValueError(f"Invalid repo format: {repo!r} — expected 'org/name'")
     return parts[0], parts[1]
+
+
+def _github_actions_run_id_from_url(url: str) -> str | None:
+    """Extract the Actions run id from a GitHub run or job URL."""
+    parts = [part for part in url.rstrip("/").split("/") if part]
+    for index, part in enumerate(parts):
+        if part == "runs" and index + 1 < len(parts):
+            return parts[index + 1]
+    return None
 
 
 __all__: list[str] = ["GitHubHttpClient"]

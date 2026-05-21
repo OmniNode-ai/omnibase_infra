@@ -448,6 +448,23 @@ class TestProtocolExtraction:
         assert result is not None
         assert "SomeService" not in result.protocols
 
+    def test_skips_protocol_dependency_without_string_name(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Protocol dependencies without valid names should not leak mock values."""
+        dep = MagicMock()
+        dep.name = MagicMock()
+        dep.is_protocol = MagicMock(return_value=True)
+
+        minimal_effect_contract.dependencies = [dep]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert result.protocols == []
+
 
 # =============================================================================
 # TestIntentTypeExtraction - Intent type extraction
@@ -1026,6 +1043,23 @@ class TestEdgeCases:
                 "valid" in result.capability_tags
                 or "also_valid" in result.capability_tags
             )
+
+    def test_non_string_protocol_interfaces_filtered_out(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Malformed protocol interface entries should not enter sorted output."""
+        minimal_effect_contract.protocol_interfaces = [
+            "ProtocolA",
+            MagicMock(),
+            None,
+        ]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert result.protocols == ["ProtocolA"]
 
     def test_special_characters_in_tags(
         self,
