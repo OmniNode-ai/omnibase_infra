@@ -97,9 +97,11 @@ class _FakeAIOKafkaConsumer:
     created: ClassVar[list[_FakeAIOKafkaConsumer]] = []
     stop_error: ClassVar[Exception | None] = None
 
-    def __init__(self, *topics: object, **_kwargs: object) -> None:
+    def __init__(self, *topics: object, **kwargs: object) -> None:
         self.topics = topics
+        self.kwargs = kwargs
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+        self.assigned_partitions: set[object] = set()
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -109,8 +111,14 @@ class _FakeAIOKafkaConsumer:
         await asyncio.sleep(0)
         self.started = True
 
-    def assignment(self) -> set[str]:
-        return {"partition-0"} if self.started else set()
+    def partitions_for_topic(self, topic: str) -> set[int]:
+        return {0} if self.started and topic else set()
+
+    def assign(self, partitions: set[object]) -> None:
+        self.assigned_partitions = partitions
+
+    def assignment(self) -> set[object]:
+        return self.assigned_partitions
 
     async def seek_to_end(self, *_assignment: object) -> None:
         await asyncio.sleep(0)
@@ -360,6 +368,8 @@ async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
     assert resolved_route == route
     assert result.status == "completed"
     assert result.payload == {"status": "complete", "dispatch_count": 5}
+    assert created_consumers[0].kwargs["group_id"] is None
+    assert created_consumers[0].assigned_partitions
     assert created_consumers[0].stopped is True
 
 
@@ -394,7 +404,12 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
     resolved_route, result = await broker.dispatch_request(command)
 
     assert resolved_route == route
-    assert created_consumers[0].topics[:2] == route.terminal_events
+    assert created_consumers[0].topics == ()
+    assert created_consumers[0].kwargs["group_id"] is None
+    assert {
+        getattr(partition, "topic", "")
+        for partition in created_consumers[0].assigned_partitions
+    } == set(route.terminal_events)
     assert result.status == "failed"
     assert result.error_message == "routing contract missing"
     assert created_consumers[0].stopped is True

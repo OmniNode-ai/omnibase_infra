@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import cast
 from uuid import UUID
 
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
@@ -248,9 +248,8 @@ class RuntimePatternBBroker:
         kafka_event_bus = self._kafka_event_bus()
         config = getattr(kafka_event_bus, "config", SimpleNamespace())
         consumer = AIOKafkaConsumer(
-            *terminal_topics,
             bootstrap_servers=self._kafka_bootstrap_servers(),
-            group_id=_terminal_group_id(command.correlation_id),
+            group_id=None,
             auto_offset_reset="latest",
             enable_auto_commit=False,
             session_timeout_ms=getattr(config, "session_timeout_ms", 45000),
@@ -264,7 +263,11 @@ class RuntimePatternBBroker:
             await asyncio.wait_for(
                 consumer.start(), timeout=min(30, command.timeout_seconds)
             )
-            await self._wait_for_kafka_assignment(consumer, command.timeout_seconds)
+            await self._assign_terminal_topic_partitions(
+                consumer,
+                terminal_topics,
+                command.timeout_seconds,
+            )
             await consumer.seek_to_end(*consumer.assignment())
             await self._publish_worker_command(command, route)
 
@@ -296,13 +299,23 @@ class RuntimePatternBBroker:
                     sanitize_error_message(exc),
                 )
 
-    async def _wait_for_kafka_assignment(
+    async def _assign_terminal_topic_partitions(
         self,
         consumer: AIOKafkaConsumer,
+        topics: tuple[str, ...],
         timeout_seconds: int,
     ) -> None:
         deadline = asyncio.get_running_loop().time() + min(30, timeout_seconds)
-        while not consumer.assignment():
+        while True:
+            partitions: set[TopicPartition] = set()
+            for topic in topics:
+                topic_partitions = consumer.partitions_for_topic(topic) or set()
+                partitions.update(
+                    TopicPartition(topic, partition) for partition in topic_partitions
+                )
+            if partitions:
+                consumer.assign(partitions)
+                return
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError
             await asyncio.sleep(0.05)
