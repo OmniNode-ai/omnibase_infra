@@ -97,12 +97,15 @@ class _FakeAIOKafkaConsumer:
     created: ClassVar[list[_FakeAIOKafkaConsumer]] = []
     stop_error: ClassVar[Exception | None] = None
     topic_partitions_by_topic: ClassVar[dict[str, set[int]] | None] = None
+    require_metadata_refresh: ClassVar[bool] = False
 
     def __init__(self, *topics: object, **kwargs: object) -> None:
         self.topics = topics
         self.kwargs = kwargs
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
         self.assigned_partitions: set[object] = set()
+        self.metadata_refreshed = False
+        self.topics_calls = 0
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -112,8 +115,18 @@ class _FakeAIOKafkaConsumer:
         await asyncio.sleep(0)
         self.started = True
 
+    async def topics(self) -> set[str]:
+        await asyncio.sleep(0)
+        self.topics_calls += 1
+        self.metadata_refreshed = True
+        if type(self).topic_partitions_by_topic is not None:
+            return set(type(self).topic_partitions_by_topic)
+        return {"onex.evt.omnimarket.session-orchestrator-completed.v1"}
+
     def partitions_for_topic(self, topic: str) -> set[int]:
         if not self.started or not topic:
+            return set()
+        if type(self).require_metadata_refresh and not self.metadata_refreshed:
             return set()
         if type(self).topic_partitions_by_topic is not None:
             return set(type(self).topic_partitions_by_topic.get(topic, set()))
@@ -147,6 +160,7 @@ def _install_fake_aiokafka_consumer(
     _FakeAIOKafkaConsumer.created = []
     _FakeAIOKafkaConsumer.stop_error = stop_error
     _FakeAIOKafkaConsumer.topic_partitions_by_topic = None
+    _FakeAIOKafkaConsumer.require_metadata_refresh = False
     monkeypatch.setattr(
         "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
         _FakeAIOKafkaConsumer,
@@ -377,6 +391,35 @@ async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
     assert created_consumers[0].kwargs["group_id"] is None
     assert created_consumers[0].assigned_partitions
     assert created_consumers[0].stopped is True
+
+
+@pytest.mark.asyncio
+async def test_service_pattern_b_broker_kafka_waiter_refreshes_topic_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route()
+    created_consumers = _install_fake_aiokafka_consumer(monkeypatch)
+    _FakeAIOKafkaConsumer.require_metadata_refresh = True
+
+    broker = RuntimePatternBBroker(
+        _FakeKafkaTransport(route, created_consumers, assert_seeked=True),
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
+
+    resolved_route, result = await broker.dispatch_request(command)
+
+    assert resolved_route == route
+    assert result.status == "completed"
+    assert created_consumers[0].topics_calls >= 1
+    assert created_consumers[0].assigned_partitions
 
 
 @pytest.mark.asyncio

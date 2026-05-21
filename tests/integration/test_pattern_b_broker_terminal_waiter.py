@@ -42,6 +42,7 @@ class _TerminalConsumer:
         self.kwargs = kwargs
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
         self.assigned_partitions: set[object] = set()
+        self.topics_calls = 0
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -52,6 +53,12 @@ class _TerminalConsumer:
 
     def partitions_for_topic(self, topic: str) -> set[int]:
         return {0, 1} if self.started and topic else set()
+
+    async def topics(self) -> set[str]:
+        self.topics_calls += 1
+        return {
+            "onex.evt.omnimarket.delegate-skill-completed.v1",
+        }
 
     def assign(self, partitions: set[object]) -> None:
         self.assigned_partitions = partitions
@@ -141,4 +148,5 @@ async def test_pattern_b_terminal_waiter_uses_ungrouped_assigned_consumer(
     assert resolved_route == route
     assert result.status == "completed"
     assert result.payload == {"status": "completed", "response": "stability-smoke-ok"}
+    assert _TerminalConsumer.created[0].topics_calls >= 1
     assert _TerminalConsumer.created[0].stopped is True
