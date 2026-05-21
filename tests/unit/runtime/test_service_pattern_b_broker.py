@@ -102,10 +102,12 @@ class _FakeAIOKafkaConsumer:
     def __init__(self, *topics: object, **kwargs: object) -> None:
         self.topics = topics
         self.kwargs = kwargs
+        self._client = _FakeAIOKafkaClient(self)
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
         self.assigned_partitions: set[object] = set()
         self.metadata_refreshed = False
         self.topics_calls = 0
+        self.set_topics_calls: list[tuple[str, ...]] = []
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -127,6 +129,11 @@ class _FakeAIOKafkaConsumer:
         if not self.started or not topic:
             return set()
         if type(self).require_metadata_refresh and not self.metadata_refreshed:
+            return set()
+        if (
+            type(self).require_metadata_refresh
+            and topic not in self._client.tracked_topics
+        ):
             return set()
         if type(self).topic_partitions_by_topic is not None:
             return set(type(self).topic_partitions_by_topic.get(topic, set()))
@@ -150,6 +157,19 @@ class _FakeAIOKafkaConsumer:
         if type(self).stop_error is not None:
             raise type(self).stop_error
         self.stopped = True
+
+
+class _FakeAIOKafkaClient:
+    def __init__(self, consumer: _FakeAIOKafkaConsumer) -> None:
+        self._consumer = consumer
+        self.tracked_topics: set[str] = set()
+
+    async def set_topics(self, topics: list[str]) -> bool:
+        await asyncio.sleep(0)
+        self.tracked_topics = set(topics)
+        self._consumer.set_topics_calls.append(tuple(topics))
+        self._consumer.metadata_refreshed = True
+        return True
 
 
 def _install_fake_aiokafka_consumer(
@@ -418,7 +438,7 @@ async def test_service_pattern_b_broker_kafka_waiter_refreshes_topic_metadata(
 
     assert resolved_route == route
     assert result.status == "completed"
-    assert created_consumers[0].topics_calls >= 1
+    assert created_consumers[0].set_topics_calls
     assert created_consumers[0].assigned_partitions
 
 

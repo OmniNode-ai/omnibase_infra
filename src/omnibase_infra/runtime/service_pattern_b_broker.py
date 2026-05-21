@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -308,9 +309,7 @@ class RuntimePatternBBroker:
         deadline = asyncio.get_running_loop().time() + min(30, timeout_seconds)
         expected_topics = set(topics)
         while True:
-            topics_method = getattr(type(consumer), "topics", None)
-            if callable(topics_method):
-                await topics_method(consumer)
+            await self._refresh_terminal_topic_metadata(consumer, topics)
             partitions: set[TopicPartition] = set()
             ready_topics: set[str] = set()
             for topic in topics:
@@ -326,6 +325,31 @@ class RuntimePatternBBroker:
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError
             await asyncio.sleep(0.05)
+
+    async def _refresh_terminal_topic_metadata(
+        self,
+        consumer: AIOKafkaConsumer,
+        topics: tuple[str, ...],
+    ) -> None:
+        client = getattr(consumer, "_client", None)
+        set_topics = getattr(client, "set_topics", None)
+        if callable(set_topics):
+            result = set_topics(list(topics))
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        add_topic = getattr(client, "add_topic", None)
+        if callable(add_topic):
+            for topic in topics:
+                result = add_topic(topic)
+                if inspect.isawaitable(result):
+                    await result
+            return
+
+        topics_method = getattr(type(consumer), "topics", None)
+        if callable(topics_method):
+            await topics_method(consumer)
 
     def _supports_direct_kafka_terminal_consumer(self) -> bool:
         return (
