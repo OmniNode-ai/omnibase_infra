@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-11350
 title: "Fix stability runtime startup errors"
-summary: "Preserve typed envelopes for envelope-style auto-wired handlers, make projection terminal event emission tolerate materialized dispatch dicts, and repair the ledger projection handler binding expression rejected during stability runtime startup."
+summary: "Preserve typed envelopes for envelope-style auto-wired handlers, make projection terminal event emission tolerate materialized dispatch dicts, repair the ledger projection handler binding expression rejected during stability runtime startup, and suppress false-positive missing handler_routing startup errors for contracts that do not declare that optional subcontract."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -16,6 +16,9 @@ evidence_requirements:
   - kind: tests
     description: "Operation-bindings loader parses the packaged ledger projection handler contract without the invalid bare ${payload} expression."
     command: "uv run pytest tests/unit/runtime/contract_loaders/test_operation_bindings_loader.py -q"
+  - kind: tests
+    description: "Runtime contract startup loading skips optional missing handler_routing sections without emitting MISSING_HANDLER_ROUTING errors while preserving strict direct loader behavior."
+    command: "uv run pytest tests/unit/runtime/test_runtime_contract_config_loader.py tests/unit/runtime/contract_loaders/test_handler_routing_loader.py::TestLoadHandlerRoutingSubcontractErrors::test_missing_handler_routing_section_raises_error tests/integration/runtime/test_kernel_auto_wiring.py::test_auto_wiring_skips_contract_without_handler_routing tests/integration/test_runtime_contract_config_startup_noise.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -39,3 +42,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "uv run pytest tests/unit/runtime/contract_loaders/test_operation_bindings_loader.py -q"
+  - id: dod-missing-handler-routing-startup-noise
+    description: "Runtime contract startup loading no longer logs missing handler_routing as an error for contracts that omit the optional section."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_runtime_contract_config_loader.py tests/unit/runtime/contract_loaders/test_handler_routing_loader.py::TestLoadHandlerRoutingSubcontractErrors::test_missing_handler_routing_section_raises_error tests/integration/runtime/test_kernel_auto_wiring.py::test_auto_wiring_skips_contract_without_handler_routing tests/integration/test_runtime_contract_config_startup_noise.py -q"
