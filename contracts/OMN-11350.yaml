@@ -21,7 +21,7 @@ evidence_requirements:
     command: "uv run pytest tests/unit/runtime/test_runtime_contract_config_loader.py tests/unit/runtime/contract_loaders/test_handler_routing_loader.py::TestLoadHandlerRoutingSubcontractErrors::test_missing_handler_routing_section_raises_error tests/integration/runtime/test_kernel_auto_wiring.py::test_auto_wiring_skips_contract_without_handler_routing tests/integration/test_runtime_contract_config_startup_noise.py -q"
   - kind: tests
     description: "Topic startup validation suppresses per-topic MISSING_TOPIC logs during the runtime pre-auto-create validation pass, then revalidates after auto-create while preserving direct validator logging semantics."
-    command: "uv run pytest tests/unit/event_bus/test_topic_startup_validator.py tests/unit/runtime/test_topic_provisioner_integration.py tests/integration/test_runtime_crash_loop_fix.py -q"
+    command: "uv run pytest tests/unit/event_bus/test_topic_startup_validator.py tests/unit/runtime/test_topic_provisioner_integration.py tests/integration/test_runtime_crash_loop_fix.py tests/integration/test_topic_startup_noise.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -56,4 +56,4 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/event_bus/test_topic_startup_validator.py tests/unit/runtime/test_topic_provisioner_integration.py tests/integration/test_runtime_crash_loop_fix.py -q"
+        check_value: "uv run pytest tests/unit/event_bus/test_topic_startup_validator.py tests/unit/runtime/test_topic_provisioner_integration.py tests/integration/test_runtime_crash_loop_fix.py tests/integration/test_topic_startup_noise.py -q"
