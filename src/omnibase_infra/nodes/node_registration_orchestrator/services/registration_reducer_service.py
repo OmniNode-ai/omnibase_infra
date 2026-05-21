@@ -250,6 +250,7 @@ class RegistrationReducerService:
                 "last_applied_event_id": registration_attempt_id,
                 "registered_at": now,
                 "updated_at": now,
+                "last_heartbeat_at": now,
                 "correlation_id": correlation_id,
             },
         )

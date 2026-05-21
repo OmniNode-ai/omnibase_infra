@@ -53,12 +53,13 @@ def test_leaf_module_change_expands_to_its_reverse_deps() -> None:
 
 
 def test_services_module_expands_to_reverse_deps() -> None:
-    # services is imported by adapters, dlq, handlers, protocols, runtime
+    # services is imported by adapters, dlq, handlers, runtime
+    # (protocols removed: tests/unit/protocols/ does not exist)
     changed_files = ["src/omnibase_infra/services/foo.py"]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
     expected = sorted(
         f"tests/unit/{m}/"
-        for m in ("services", "adapters", "dlq", "handlers", "protocols", "runtime")
+        for m in ("services", "adapters", "dlq", "handlers", "runtime")
     )
     assert paths == expected
 

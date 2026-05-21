@@ -101,6 +101,22 @@ jobs:
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
             effective="${{ inputs.compose_pg_port }}"
+            # Compose mode: self-hosted CI runners run inside Docker containers
+            # that share the Docker daemon with the compose stack via socket
+            # mount (/var/run/docker.sock). Port bindings (localhost:5433,
+            # localhost:19092) are on the HOST machine, not reachable from the
+            # runner container.
+            #
+            # Instead we connect the runner container directly to the compose
+            # network (omnibase-infra-network) and reach services by their
+            # container names on their INTERNAL ports.
+            #
+            # Kafka: redpanda internal listener is at redpanda:9092.
+            echo "KAFKA_BOOTSTRAP_SERVERS=redpanda:9092" >> "$GITHUB_ENV"
+            # Allow the redpanda internal hostname so the allowlist guard passes.
+            echo "KAFKA_BROKER_ALLOWLIST=redpanda:" >> "$GITHUB_ENV"
+            # DB URL via compose container name + internal postgres port.
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra" >> "$GITHUB_ENV"
           else
             effective="${{ inputs.pg_port }}"
           fi
@@ -118,12 +134,31 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Install CLI dependencies (jq, curl, postgres-client)
+      - name: Install CLI dependencies (jq, curl)
         if: inputs.mode == 'compose'
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends jq curl postgresql-client
+          # Self-hosted runners (omnibase-ci) already have jq and curl; skip
+          # apt-get (sudo unavailable on container runners).  psql is invoked
+          # via `docker exec` against omnibase-infra-postgres so no host psql
+          # is needed.
+          missing=()
+          command -v jq   >/dev/null 2>&1 || missing+=(jq)
+          command -v curl >/dev/null 2>&1 || missing+=(curl)
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends "${missing[@]}"
+            elif [[ "$(id -u)" -eq 0 ]]; then
+              apt-get update
+              apt-get install -y --no-install-recommends "${missing[@]}"
+            else
+              echo "::error::jq/curl missing and cannot install: no sudo and not running as root"
+              exit 1
+            fi
+          else
+            echo "jq and curl already available — skipping apt install"
+          fi
           # rpk is executed via `docker exec` against the compose-managed
           # omnibase-infra-redpanda container, so a host-level rpk install is
           # unnecessary in compose mode.
@@ -135,19 +170,96 @@ jobs:
           set -euo pipefail
           POSTGRES_PORT="${{ inputs.compose_pg_port }}" \
             docker compose -f docker/docker-compose.e2e.yml up -d postgres redpanda
-          # Wait for redpanda admin API + postgres to become responsive.
-          for i in $(seq 1 60); do
-            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1 \
-               && docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
+
+          # Self-hosted CI runners run inside Docker containers that share the
+          # host Docker daemon via /var/run/docker.sock. Port bindings on the
+          # host (localhost:5433, localhost:19092) are NOT reachable from the
+          # runner container. Connect the runner to the compose network so the
+          # runtime can reach services by container name on internal ports.
+          RUNNER_ID=$(cat /proc/self/cgroup 2>/dev/null \
+            | grep -oP '(?<=docker/)([0-9a-f]{64})' | head -1 || true)
+          if [[ -z "$RUNNER_ID" ]]; then
+            RUNNER_ID=$(hostname)
+          fi
+          echo "Runner container ID/name: ${RUNNER_ID}"
+          docker network connect omnibase-infra-network "${RUNNER_ID}" 2>/dev/null \
+            || echo "network connect skipped (may already be connected or not in Docker)"
+
+          # Wait for both compose services to be healthy via docker exec.
+          # No localhost TCP check needed — we reach them by container name.
+          for i in $(seq 1 90); do
+            pg_ok=false
+            kafka_ok=false
+            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
+              pg_ok=true
+            fi
+            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1; then
+              kafka_ok=true
+            fi
+            if $pg_ok && $kafka_ok; then
               echo "compose infra healthy after ${i}s"
               break
             fi
+            echo "waiting... pg=${pg_ok} kafka=${kafka_ok} (${i}s)"
             sleep 1
           done
+          if ! $pg_ok || ! $kafka_ok; then
+            echo "::error::compose services not healthy after 90s — pg=${pg_ok} kafka=${kafka_ok}"
+            exit 1
+          fi
+
+      - name: Run database migrations (compose mode)
+        if: inputs.mode == 'compose'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # OMNIBASE_INFRA_DB_URL was set in the resolve_pg step to:
+          #   postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra
+          # The runner is now on omnibase-infra-network so omnibase-infra-postgres
+          # resolves by container-name DNS.
+          uv run python scripts/run-migrations.py
+
+      - name: Pre-warm Redpanda metadata (compose mode)
+        if: inputs.mode == 'compose'
+        run: |
+          set -euo pipefail
+          # Fresh Redpanda brokers need time for their metadata subsystem to
+          # stabilize after initial startup. Without a settling period, the
+          # runtime's topic-creation + immediate subscribe sequence hits
+          # InvalidPartitionsError / UnknownTopicOrPartitionError as Redpanda's
+          # partition metadata cache catches up. 60s covers the observed ~30s
+          # propagation lag with margin.
+          echo "Waiting 60s for Redpanda metadata subsystem to stabilize..."
+          sleep 60
+          echo "Redpanda pre-warm complete"
+
+      - name: Stage contracts outside /home (compose mode)
+        if: inputs.mode == 'compose'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # contract_loader_effect.yaml deny_patterns include "/home", which
+          # blocks the default contracts/ path when the runner CWD is under
+          # /home/runner/... (GitHub-hosted and self-hosted CI). Copy the
+          # contracts tree to /tmp so path.resolve() lands outside the deny list.
+          rm -rf /tmp/onex-contracts
+          cp -r "${{ github.workspace }}/contracts" /tmp/onex-contracts
+          echo "ONEX_CONTRACTS_DIR=/tmp/onex-contracts" >> "$GITHUB_ENV"
 
       - name: Launch runtime (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
+        env:
+          # Fresh Redpanda brokers exhibit metadata propagation lag — topics are
+          # created successfully but aiokafka's _wait_on_metadata retries for
+          # several seconds before partition metadata becomes available. Extend
+          # the consumer start timeout from the default 30s to 120s so the
+          # runtime does not crash while Redpanda catches up.
+          KAFKA_TIMEOUT_SECONDS: "120"
+          # Redpanda --smp 1 --mode dev-container returns InvalidPartitionsError
+          # (error 37) for topics created with > 1 partition. Cap auto-created
+          # topics at 1 partition so CI Redpanda can serve valid partition metadata.
+          ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
         run: |
           set -euo pipefail
           # Background the runtime so subsequent health-wait steps can probe it.
@@ -159,6 +271,9 @@ jobs:
       - name: Launch runtime-effects (compose mode)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
+        env:
+          KAFKA_TIMEOUT_SECONDS: "120"
+          ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
         run: |
           set -euo pipefail
           # runtime-effects listens on :8086 and consumes under a distinct
@@ -339,16 +454,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
-            export PGPASSWORD="test-password"
+            # Use docker exec so no host psql is required (container runners
+            # may not have psql and may not have sudo to install it).
+            count=$(docker exec -e PGPASSWORD=test-password omnibase-infra-postgres \
+              psql -h localhost -p 5432 -U postgres -d "${POSTGRES_DATABASE}" \
+              -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'" \
+              | tr -d '[:space:]')
           else
             if [[ -z "${REAL_PG_PASSWORD:-}" ]]; then
               echo "::error::Missing secret: RUNTIME_PG_PASSWORD (required in real mode)"
               exit 1
             fi
             export PGPASSWORD="${REAL_PG_PASSWORD}"
+            count=$(psql -h "${RUNTIME_HOST}" -p "${PG_PORT}" -U postgres -d "${POSTGRES_DATABASE}" \
+              -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'")
           fi
-          count=$(psql -h "${RUNTIME_HOST}" -p "${PG_PORT}" -U postgres -d "${POSTGRES_DATABASE}" \
-            -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'")
           echo "active_fresh_registrations=${count}"
           echo "active_fresh_registrations=${count}" >> "$GITHUB_OUTPUT"
           if [[ "${count}" -le 0 ]]; then

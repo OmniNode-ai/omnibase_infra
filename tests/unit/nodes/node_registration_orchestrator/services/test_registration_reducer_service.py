@@ -385,6 +385,24 @@ class TestDecideIntrospectionEventFields:
         expected_deadline = TEST_NOW + timedelta(seconds=120)
         assert data["liveness_deadline"] == expected_deadline
 
+    def test_initial_registration_sets_last_heartbeat_at(self) -> None:
+        """Verify last_heartbeat_at is set in the initial UPSERT data (CI liveness check)."""
+        service = RegistrationReducerService()
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        payload = decision.intents[0].payload
+        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
+        data = payload.record.data
+        assert "last_heartbeat_at" in data
+        assert data["last_heartbeat_at"] == TEST_NOW
+
 
 # ---------------------------------------------------------------------------
 # decide_ack tests

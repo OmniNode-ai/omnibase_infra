@@ -754,6 +754,8 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
+            if asyncio.iscoroutine(result):
+                result = await cast("Awaitable[object]", result)
             projected = True
             logger.debug(
                 "Projection handler completed: topic=%s event_type=%s result=%s",
@@ -2103,23 +2105,6 @@ def _prepare_handler_wiring(
         }
         if topic_aliases:
             message_types = (message_types or set()).union(topic_aliases)
-
-    if contract.name == "node_registration_orchestrator":
-        return PreparedWiring(
-            dispatcher_id="",
-            dispatcher=_skip_dispatcher,
-            category=_early_category,
-            message_types=message_types,
-            handler_name=handler_ref.name,
-            handler_module=handler_ref.module,
-            resolution_outcome=(
-                EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
-            ),
-            skip_reason=(
-                "registration direct-handler dispatcher creation is skipped; "
-                "generic contract auto-wiring owns registration event-bus wiring"
-            ),
-        )
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 

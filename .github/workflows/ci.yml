@@ -1090,6 +1090,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # ============================================================================
+  # Runtime Boot Smoke Test (OMN-9120)
+  # Calls the reusable reusable-runtime-boot.yml workflow in compose mode.
+  # Runs after the full test suite passes so a boot regression doesn't compete
+  # with flaky unit tests for signal. Self-hosted runners have Docker available;
+  # public-fork runs fall back to ubuntu-latest which also has Docker.
+  # ============================================================================
+  runtime-boot-smoke:
+    name: Runtime Boot Smoke (compose)
+    needs: [tests-gate]
+    if: needs.tests-gate.result == 'success'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: compose
+
   ci-summary:
     name: CI Summary
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1100,6 +1115,11 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
+    # OMN-9120: runtime-boot-smoke runs as an advisory check during the compose-mode
+    # boot stabilization period. It is intentionally NOT in `needs` so a smoke-test
+    # failure does not block CI Summary. A follow-up ticket promotes it to a hard
+    # gate once compose-mode boot is consistently green on main. See CLAUDE.md
+    # "Strict-mode invariants land AFTER all downstream consumers are compliant".
     needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
@@ -1156,6 +1176,7 @@ jobs:
             echo "Writer-Migration Coupling Check: Passed"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
+            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
             exit 0
           else
             echo "Checks failed"
@@ -1175,6 +1196,7 @@ jobs:
             echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
+            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
             exit 1
           fi
 
