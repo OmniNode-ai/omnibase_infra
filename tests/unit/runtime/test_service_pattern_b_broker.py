@@ -96,10 +96,13 @@ async def _collect_terminal_result(
 class _FakeAIOKafkaConsumer:
     created: ClassVar[list[_FakeAIOKafkaConsumer]] = []
     stop_error: ClassVar[Exception | None] = None
+    topic_partitions_by_topic: ClassVar[dict[str, set[int]] | None] = None
 
-    def __init__(self, *topics: object, **_kwargs: object) -> None:
+    def __init__(self, *topics: object, **kwargs: object) -> None:
         self.topics = topics
+        self.kwargs = kwargs
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+        self.assigned_partitions: set[object] = set()
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -109,8 +112,18 @@ class _FakeAIOKafkaConsumer:
         await asyncio.sleep(0)
         self.started = True
 
-    def assignment(self) -> set[str]:
-        return {"partition-0"} if self.started else set()
+    def partitions_for_topic(self, topic: str) -> set[int]:
+        if not self.started or not topic:
+            return set()
+        if type(self).topic_partitions_by_topic is not None:
+            return set(type(self).topic_partitions_by_topic.get(topic, set()))
+        return {0}
+
+    def assign(self, partitions: set[object]) -> None:
+        self.assigned_partitions = partitions
+
+    def assignment(self) -> set[object]:
+        return self.assigned_partitions
 
     async def seek_to_end(self, *_assignment: object) -> None:
         await asyncio.sleep(0)
@@ -133,6 +146,7 @@ def _install_fake_aiokafka_consumer(
 ) -> list[_FakeAIOKafkaConsumer]:
     _FakeAIOKafkaConsumer.created = []
     _FakeAIOKafkaConsumer.stop_error = stop_error
+    _FakeAIOKafkaConsumer.topic_partitions_by_topic = None
     monkeypatch.setattr(
         "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
         _FakeAIOKafkaConsumer,
@@ -147,7 +161,7 @@ class _FakeKafkaTransport:
         max_poll_interval_ms=300000,
         reconnect_backoff_ms=2000,
     )
-    _bootstrap_servers = "redpanda:9092"
+    _bootstrap_servers = "pattern-b-test-broker"
 
     def __init__(
         self,
@@ -360,6 +374,8 @@ async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
     assert resolved_route == route
     assert result.status == "completed"
     assert result.payload == {"status": "complete", "dispatch_count": 5}
+    assert created_consumers[0].kwargs["group_id"] is None
+    assert created_consumers[0].assigned_partitions
     assert created_consumers[0].stopped is True
 
 
@@ -394,10 +410,43 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
     resolved_route, result = await broker.dispatch_request(command)
 
     assert resolved_route == route
-    assert created_consumers[0].topics[:2] == route.terminal_events
+    assert created_consumers[0].topics == ()
+    assert created_consumers[0].kwargs["group_id"] is None
+    assert {
+        getattr(partition, "topic", "")
+        for partition in created_consumers[0].assigned_partitions
+    } == set(route.terminal_events)
     assert result.status == "failed"
     assert result.error_message == "routing contract missing"
     assert created_consumers[0].stopped is True
+
+
+@pytest.mark.asyncio
+async def test_service_pattern_b_broker_kafka_waiter_requires_all_terminal_topics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route_with_failure_terminal()
+    _install_fake_aiokafka_consumer(monkeypatch)
+    _FakeAIOKafkaConsumer.topic_partitions_by_topic = {
+        route.terminal_events[0]: {0},
+        route.terminal_events[1]: set(),
+    }
+    consumer = _FakeAIOKafkaConsumer()
+    await consumer.start()
+    broker = RuntimePatternBBroker(
+        _FakeKafkaTransport(route, [consumer]),
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+
+    with pytest.raises(TimeoutError):
+        await broker._assign_terminal_topic_partitions(
+            consumer,
+            route.terminal_events,
+            timeout_seconds=0,
+        )
+
+    assert consumer.assigned_partitions == set()
 
 
 @pytest.mark.asyncio
