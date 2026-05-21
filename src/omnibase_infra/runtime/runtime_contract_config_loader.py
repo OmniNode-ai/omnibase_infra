@@ -73,6 +73,26 @@ logger = logging.getLogger(__name__)
 CONTRACT_YAML_FILENAME: str = "contract.yaml"
 
 
+def _contract_declares_subcontract(contract_path: Path, section_name: str) -> bool:
+    """Return whether a contract explicitly declares an optional subcontract.
+
+    Startup loading treats missing optional subcontracts as valid, but the
+    section-specific loaders remain strict for direct use. If this lightweight
+    probe cannot parse the file, return True so the strict loader preserves the
+    existing error path.
+    """
+    try:
+        with contract_path.open("r", encoding="utf-8") as f:
+            contract = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return True
+
+    if not isinstance(contract, dict):
+        return True
+
+    return section_name in contract
+
+
 class RuntimeContractConfigLoader:
     """Unified loader for runtime contract configuration.
 
@@ -364,40 +384,46 @@ class RuntimeContractConfigLoader:
         operation_bindings: ModelOperationBindingsSubcontract | None = None
         errors: list[str] = []
 
-        # Try to load handler_routing
-        try:
-            handler_routing = load_handler_routing_subcontract(contract_path)
-            logger.debug(
-                "Loaded handler_routing from %s: %d handlers",
-                contract_path,
-                len(handler_routing.handlers),
-            )
-        except ProtocolConfigurationError as e:
-            # Check if this is "missing section" which is OK
-            if (
-                "MISSING_HANDLER_ROUTING" in str(e)
-                or "handler_routing" in str(e).lower()
-            ):
+        # Try to load handler_routing when the optional section is present.
+        if _contract_declares_subcontract(contract_path, "handler_routing"):
+            try:
+                handler_routing = load_handler_routing_subcontract(contract_path)
                 logger.debug(
-                    "No handler_routing section in %s (this is OK)",
+                    "Loaded handler_routing from %s: %d handlers",
                     contract_path,
+                    len(handler_routing.handlers),
                 )
-            else:
-                error_msg = f"handler_routing load failed: {e}"
+            except ProtocolConfigurationError as e:
+                # Check if this is "missing section" which is OK
+                if (
+                    "MISSING_HANDLER_ROUTING" in str(e)
+                    or "handler_routing" in str(e).lower()
+                ):
+                    logger.debug(
+                        "No handler_routing section in %s (this is OK)",
+                        contract_path,
+                    )
+                else:
+                    error_msg = f"handler_routing load failed: {e}"
+                    logger.warning(
+                        "Failed to load handler_routing from %s: %s",
+                        contract_path,
+                        e,
+                    )
+                    errors.append(error_msg)
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+                error_msg = f"handler_routing load failed: {type(e).__name__}: {e}"
                 logger.warning(
-                    "Failed to load handler_routing from %s: %s",
+                    "Unexpected error loading handler_routing from %s: %s",
                     contract_path,
                     e,
                 )
                 errors.append(error_msg)
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            error_msg = f"handler_routing load failed: {type(e).__name__}: {e}"
-            logger.warning(
-                "Unexpected error loading handler_routing from %s: %s",
+        else:
+            logger.debug(
+                "No handler_routing section in %s (this is OK)",
                 contract_path,
-                e,
             )
-            errors.append(error_msg)
 
         # Try to load operation_bindings
         try:

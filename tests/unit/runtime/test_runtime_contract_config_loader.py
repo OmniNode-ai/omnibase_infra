@@ -393,6 +393,27 @@ class TestLoadHandlerRouting:
         result = config.contract_results[0]
         assert result.handler_routing is None
 
+    def test_contract_without_handler_routing_does_not_log_error(
+        self,
+        loader: RuntimeContractConfigLoader,
+        contract_without_sections: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Optional missing handler_routing should not emit startup error noise."""
+        import logging
+
+        search_path = contract_without_sections.parent.parent
+
+        with caplog.at_level(logging.ERROR):
+            config = loader.load_all_contracts(search_paths=[search_path])
+
+        assert config.total_contracts_loaded == 1
+        assert not any(
+            "MISSING_HANDLER_ROUTING" in record.message
+            or "Missing 'handler_routing' section" in record.message
+            for record in caplog.records
+        )
+
     def test_handler_routing_with_multiple_handlers(
         self,
         loader: RuntimeContractConfigLoader,
