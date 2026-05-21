@@ -150,8 +150,22 @@ jobs:
         run: |
           git checkout -b "${{ steps.vars.outputs.branch }}"
 
-          # Upgrade the package in the lockfile
-          uv lock --upgrade-package "${{ inputs.package }}"
+          # Upgrade the lockfile to the released version. Passing the explicit
+          # package spec prevents uv from selecting a different latest version.
+          # PyPI's simple index can lag just after publish, so refresh and retry.
+          SPEC="${{ steps.vars.outputs.pkg_hyphen }}==${{ steps.vars.outputs.version }}"
+          for attempt in $(seq 1 12); do
+            if uv lock \
+              --refresh-package "${{ steps.vars.outputs.pkg_hyphen }}" \
+              --upgrade-package "$SPEC"; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "ERROR: failed to resolve $SPEC after $attempt attempts"
+              exit 1
+            fi
+            sleep 10
+          done
 
           # Check if anything changed
           if git diff --quiet uv.lock; then
@@ -168,24 +182,9 @@ jobs:
           BUMP_PACKAGE: ${{ inputs.package }}
         run: |
           PKG_HYPHEN="${BUMP_PACKAGE//_/-}"
-          export PKG_HYPHEN
-
-          RESOLVED=$(python3 - <<'PYEOF'
-          import re, sys, os
-          pkg = os.environ["PKG_HYPHEN"]
-          content = open("uv.lock").read()
-          m = re.search(
-              r'name\s*=\s*"' + re.escape(pkg) + r'".*?version\s*=\s*"([^"]+)"',
-              content, re.DOTALL
-          )
-          if m:
-              print(m.group(1))
-          else:
-              sys.exit(1)
-          PYEOF
-          )
-          echo "Resolved version for ${PKG_HYPHEN}: ${RESOLVED}"
-          export RESOLVED
+          RESOLVED="${{ steps.vars.outputs.version }}"
+          export PKG_HYPHEN RESOLVED
+          echo "Pinned version for ${PKG_HYPHEN}: ${RESOLVED}"
 
           python3 - <<'PYEOF'
           import re, os

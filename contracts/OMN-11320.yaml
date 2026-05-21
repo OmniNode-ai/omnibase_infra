@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-11320
+title: "Fix dependency cascade release-version pinning"
+summary: "Pin downstream dependency-cascade PRs to the released package version and refresh package metadata with retries so immediate post-release PRs do not select invalid or stale versions."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "manual"
+    description: "Dependency cascade workflow uses the explicit release version and refreshes package metadata before resolving"
+    command: "python3 - <<'PY'\nfrom pathlib import Path\ntext = Path('.github/workflows/dependency-cascade.yml').read_text()\nfor snippet in ('--refresh-package \"${{ steps.vars.outputs.pkg_hyphen }}\"', '--upgrade-package \"$SPEC\"', 'RESOLVED=\"${{ steps.vars.outputs.version }}\"'):\n    assert snippet in text\nPY"
+  - kind: "ci"
+    description: "Workflow patch has no whitespace errors"
+    command: "git diff --check"
+  - kind: "manual"
+    description: "Existing downstream cascade branches resolve omnibase-infra 0.36.0 with locked installs"
+    command: "uv sync --locked in omnimemory and omniclaude cascade worktrees"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-workflow-snippets"
+    description: "Dependency cascade workflow uses explicit version pin, refresh, and retry"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python3 - <<'PY'\nfrom pathlib import Path\ntext = Path('.github/workflows/dependency-cascade.yml').read_text()\nfor snippet in ('--refresh-package \"${{ steps.vars.outputs.pkg_hyphen }}\"', '--upgrade-package \"$SPEC\"', 'RESOLVED=\"${{ steps.vars.outputs.version }}\"'):\n    assert snippet in text\nPY"
+  - id: "dod-diff-check"
+    description: "Workflow patch has no whitespace errors"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "git diff --check"
+  - id: "dod-downstream-locks"
+    description: "Existing downstream cascade branches resolve omnibase-infra 0.36.0 with locked installs"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv sync --locked in omnimemory and omniclaude cascade worktrees"
