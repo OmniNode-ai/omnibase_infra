@@ -7,11 +7,11 @@ interface_change: false
 interfaces_touched: []
 evidence_requirements:
   - kind: "tests"
-    description: "Pattern B broker regression tests pass"
-    command: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q"
+    description: "Pattern B broker unit and integration regression tests pass"
+    command: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py -q"
   - kind: "ci"
     description: "Touched Pattern B broker files pass ruff checks"
-    command: "uv run ruff format --check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py && uv run ruff check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py"
+    command: "uv run ruff format --check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py && uv run ruff check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py"
   - kind: "manual"
     description: "Post-merge stability runtime rebuild/restart and delegate-skill /skill smoke proof"
     command: "deploy .201 stability runtime from the merged image, then verify /skill returns after delegate-skill terminal event and command-topic lag remains zero"
@@ -21,17 +21,17 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-targeted-tests"
-    description: "Pattern B broker regression tests pass"
+    description: "Pattern B broker unit and integration regression tests pass"
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q"
+        check_value: "uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py -q"
   - id: "dod-ruff-check"
     description: "Touched Pattern B broker files pass ruff checks"
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run ruff format --check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py && uv run ruff check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py"
+        check_value: "uv run ruff format --check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py && uv run ruff check src/omnibase_infra/runtime/service_pattern_b_broker.py tests/unit/runtime/test_service_pattern_b_broker.py tests/integration/test_pattern_b_broker_terminal_waiter.py"
   - id: "dod-stability-deploy-proof"
     description: "Post-merge stability runtime rebuild/restart and delegate-skill /skill smoke proof"
     source: "manual"
