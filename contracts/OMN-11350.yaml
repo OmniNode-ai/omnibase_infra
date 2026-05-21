@@ -1,0 +1,32 @@
+# OMN-11350 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-11350
+title: "Fix stability runtime auto-wiring errors"
+summary: "Preserve typed envelopes for envelope-style auto-wired handlers and make projection terminal event emission tolerate materialized dispatch dicts."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused unit and integration tests cover typed payload handlers, typed envelope handlers, materialized dispatch dicts, and heartbeat dispatcher compatibility."
+    command: "uv run pytest tests/integration/test_auto_wiring_typed_envelope_runtime.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py tests/unit/runtime/auto_wiring/test_wiring_subscribe.py tests/unit/registration/dispatchers/test_dispatcher_node_heartbeat.py -q"
+  - kind: manual
+    description: "Deploy proof: .201 stability runtime rebuilt and restarted from PR source, then health and log scans verified the previous auto-wiring failures are gone."
+    command: "deploy: rebuild omninode-runtime and runtime-effects on .201; verify /health on 18085 and 18086 plus log scan for prior HandlerNodeHeartbeat and projection terminal AttributeError signatures"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-focused-auto-wiring-tests
+    description: "Focused unit and integration tests for the auto-wiring regression pass."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/integration/test_auto_wiring_typed_envelope_runtime.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py tests/unit/runtime/auto_wiring/test_wiring_subscribe.py tests/unit/registration/dispatchers/test_dispatcher_node_heartbeat.py -q"
+  - id: dod-deploy-stability-runtime
+    description: "Deploy scope: runtime path change was rebuilt and validated on the .201 stability runtime."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: .201 stability runtime rebuilt from PR source; omninode-runtime and runtime-effects healthy; prior HandlerNodeHeartbeat payload AttributeError, projection terminal correlation_id AttributeError, and Dispatch completed with errors signatures absent in steady-state log scan"

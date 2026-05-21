@@ -34,7 +34,14 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, get_args, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Protocol,
+    cast,
+    get_args,
+    get_origin,
+    runtime_checkable,
+)
 
 from pydantic import BaseModel
 
@@ -328,7 +335,9 @@ def _make_dispatch_callback(
     """Create a dispatch callback wrapping a handler instance.
 
     Legacy handlers receive the materialized dispatch envelope. Contract-typed
-    handlers receive a validated payload model and may be sync or async.
+    handlers receive a validated payload model and may be sync or async. Handlers
+    that declare an envelope-shaped signature keep receiving a typed envelope
+    even when their contract declares ``event_model``.
     """
 
     async def _callback(
@@ -354,6 +363,20 @@ def _make_dispatch_callback(
             if isinstance(payload, model_cls)
             else model_cls.model_validate(payload)
         )
+        if _handler_accepts_event_envelope(handle_method):
+            handler_envelope = _materialize_typed_event_envelope(
+                envelope,
+                typed_payload,
+                event_model.name,
+            )
+            typed_handle = cast("Callable[[object], object]", handle_method)
+            envelope_result: object = typed_handle(handler_envelope)
+            if asyncio.iscoroutine(envelope_result):
+                envelope_result = await cast("Awaitable[object]", envelope_result)
+            return _normalize_handler_result(
+                envelope_result, envelope, event_model.name
+            )
+
         typed_handle = cast("Callable[[object], object]", handle_method)
         typed_result: object = typed_handle(typed_payload)
         if asyncio.iscoroutine(typed_result):
@@ -372,6 +395,131 @@ def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
             "does not expose model_validate"
         )
     return cast("type[BaseModel]", model_cls)
+
+
+def _handler_accepts_event_envelope(handle_method: object) -> bool:
+    """Return true when a handler's first parameter is envelope-shaped."""
+    try:
+        signature = inspect.signature(cast("Callable[..., object]", handle_method))
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in signature.parameters.values():
+        if parameter.name == "self":
+            continue
+        if parameter.kind not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            continue
+        if parameter.name == "envelope":
+            return True
+        return _annotation_mentions_event_envelope(parameter.annotation)
+    return False
+
+
+def _annotation_mentions_event_envelope(annotation: object) -> bool:
+    if annotation is inspect.Signature.empty:
+        return False
+    if isinstance(annotation, str):
+        return "ModelEventEnvelope" in annotation
+    if getattr(annotation, "__name__", "") == "ModelEventEnvelope":
+        return True
+    origin = get_origin(annotation)
+    if getattr(origin, "__name__", "") == "ModelEventEnvelope":
+        return True
+    return any(_annotation_mentions_event_envelope(arg) for arg in get_args(annotation))
+
+
+def _coerce_uuid_or_none(value: object) -> object | None:
+    from uuid import UUID
+
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_datetime_or_none(value: object) -> object | None:
+    from datetime import UTC, datetime
+
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    if isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return None
+
+
+def _extract_dispatch_envelope_timestamp(envelope: object) -> object | None:
+    if isinstance(envelope, Mapping):
+        candidate = envelope.get("envelope_timestamp")
+        if candidate is not None:
+            return candidate
+        candidate = envelope.get("timestamp")
+        if candidate is not None:
+            return candidate
+        debug_trace = envelope.get("__debug_trace")
+        if isinstance(debug_trace, Mapping):
+            return debug_trace.get("envelope_timestamp") or debug_trace.get("timestamp")
+    return getattr(envelope, "envelope_timestamp", None)
+
+
+def _extract_dispatch_event_type(envelope: object) -> object | None:
+    if isinstance(envelope, Mapping):
+        candidate = envelope.get("event_type")
+        if candidate is not None:
+            return candidate
+        debug_trace = envelope.get("__debug_trace")
+        if isinstance(debug_trace, Mapping):
+            return debug_trace.get("event_type")
+    return getattr(envelope, "event_type", None)
+
+
+def _materialize_typed_event_envelope(
+    envelope: object,
+    typed_payload: BaseModel,
+    fallback_event_type: str,
+) -> ModelEventEnvelope[object]:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    if isinstance(envelope, ModelEventEnvelope):
+        updates: dict[str, object] = {"payload": typed_payload}
+        if envelope.event_type is None:
+            updates["event_type"] = fallback_event_type
+        if envelope.payload_type is None:
+            updates["payload_type"] = type(typed_payload).__name__
+        return envelope.model_copy(update=updates)
+
+    correlation_id = _coerce_uuid_or_none(
+        _extract_dispatch_correlation_id(envelope, typed_payload)
+    )
+    envelope_timestamp = _coerce_datetime_or_none(
+        _extract_dispatch_envelope_timestamp(envelope)
+    )
+    event_type = _extract_dispatch_event_type(envelope)
+
+    return ModelEventEnvelope[object](
+        payload=typed_payload,
+        correlation_id=correlation_id if correlation_id is not None else uuid4(),
+        envelope_timestamp=(
+            envelope_timestamp if envelope_timestamp is not None else datetime.now(UTC)
+        ),
+        event_type=str(event_type or fallback_event_type),
+        payload_type=type(typed_payload).__name__,
+        source_tool="auto-wiring",
+    )
 
 
 def _extract_dispatch_payload(envelope: object) -> object:
@@ -791,7 +939,7 @@ def _make_projection_dispatch_callback(
 async def _emit_projection_terminal_event(
     event_bus: object,
     terminal_event: str,
-    source_envelope: ModelEventEnvelope[object],
+    source_envelope: object,
 ) -> None:
     """Publish a terminal event after a successful DB projection.
 
@@ -804,9 +952,13 @@ async def _emit_projection_terminal_event(
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
     try:
+        source_payload = _extract_dispatch_payload(source_envelope)
+        correlation_id = _coerce_uuid_or_none(
+            _extract_dispatch_correlation_id(source_envelope, source_payload)
+        )
         terminal_envelope = ModelEventEnvelope[object](
             payload={"projected": True},
-            correlation_id=source_envelope.correlation_id,
+            correlation_id=correlation_id,
             envelope_timestamp=datetime.now(UTC),
             event_type=terminal_event,
             source_tool="projection-reducer",
