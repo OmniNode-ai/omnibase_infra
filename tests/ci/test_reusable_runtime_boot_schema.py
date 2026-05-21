@@ -20,9 +20,9 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
   60s hold with both PIDs alive + both health checks (compose) / flapping
   tolerance (real), startup log gating for duplicate dispatcher /
   auto-wiring / service-resolution failures (OMN-9458), psql
-  registration_projections liveness query, rpk group list check, and
-  smoke-result.json artifact upload guarded against missing intermediate
-  files.
+  registration_projections liveness query, deterministic runtime consumer-group
+  liveness check, and smoke-result.json artifact upload guarded against missing
+  intermediate files.
 """
 
 from __future__ import annotations
@@ -330,6 +330,11 @@ def test_boot_has_rpk_group_list_step(workflow: Workflow) -> None:
     steps = _boot_steps(workflow)
     matched = [s for s in steps if "rpk group list" in _step_text(s)]
     assert matched, "rpk group list check missing"
+    step_texts = "\n".join(_step_text(s) for s in matched)
+    assert "consumer_count" in step_texts
+    assert "local\\.omnibase_infra" in step_texts
+    assert "local\\.runtime_config" in step_texts
+    assert "onex-runtime" not in step_texts
 
 
 def test_boot_uploads_smoke_result_artifact(workflow: Workflow) -> None:
