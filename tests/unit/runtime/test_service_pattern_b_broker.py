@@ -164,8 +164,7 @@ class _FakeAIOKafkaClient:
         self._consumer = consumer
         self.tracked_topics: set[str] = set()
 
-    async def set_topics(self, topics: list[str]) -> bool:
-        await asyncio.sleep(0)
+    def set_topics(self, topics: list[str]) -> bool:
         self.tracked_topics = set(topics)
         self._consumer.set_topics_calls.append(tuple(topics))
         self._consumer.metadata_refreshed = True

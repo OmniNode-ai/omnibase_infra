@@ -85,7 +85,7 @@ class _TerminalConsumerClient:
         self._consumer = consumer
         self.tracked_topics: set[str] = set()
 
-    async def set_topics(self, topics: list[str]) -> bool:
+    def set_topics(self, topics: list[str]) -> bool:
         self.tracked_topics = set(topics)
         self._consumer.set_topics_calls.append(tuple(topics))
         return True

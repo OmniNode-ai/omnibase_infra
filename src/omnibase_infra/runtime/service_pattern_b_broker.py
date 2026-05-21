@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -334,17 +333,13 @@ class RuntimePatternBBroker:
         client = getattr(consumer, "_client", None)
         set_topics = getattr(client, "set_topics", None)
         if callable(set_topics):
-            result = set_topics(list(topics))
-            if inspect.isawaitable(result):
-                await result
+            set_topics(list(topics))
             return
 
         add_topic = getattr(client, "add_topic", None)
         if callable(add_topic):
             for topic in topics:
-                result = add_topic(topic)
-                if inspect.isawaitable(result):
-                    await result
+                add_topic(topic)
             return
 
         topics_method = getattr(type(consumer), "topics", None)
