@@ -76,7 +76,7 @@ class _KafkaLikeTransport:
         max_poll_interval_ms=1800000,
         reconnect_backoff_ms=2000,
     )
-    _bootstrap_servers = "redpanda:9092"
+    _bootstrap_servers = "pattern-b-test-broker"
 
     def __init__(self, route: RuntimeLocalIngressRoute) -> None:
         self._route = route

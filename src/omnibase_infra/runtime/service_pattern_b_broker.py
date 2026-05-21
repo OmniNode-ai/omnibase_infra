@@ -306,14 +306,18 @@ class RuntimePatternBBroker:
         timeout_seconds: int,
     ) -> None:
         deadline = asyncio.get_running_loop().time() + min(30, timeout_seconds)
+        expected_topics = set(topics)
         while True:
             partitions: set[TopicPartition] = set()
+            ready_topics: set[str] = set()
             for topic in topics:
                 topic_partitions = consumer.partitions_for_topic(topic) or set()
+                if topic_partitions:
+                    ready_topics.add(topic)
                 partitions.update(
                     TopicPartition(topic, partition) for partition in topic_partitions
                 )
-            if partitions:
+            if ready_topics == expected_topics:
                 consumer.assign(partitions)
                 return
             if asyncio.get_running_loop().time() >= deadline:
