@@ -339,6 +339,56 @@ def test_projection_callback_emits_terminal_event_on_success() -> None:
 
 
 @pytest.mark.unit
+def test_projection_callback_emits_terminal_event_from_materialized_dict() -> None:
+    """Terminal event correlation is extracted from materialized dispatch dicts."""
+    import json
+    import uuid
+
+    published: list[tuple] = []
+    test_correlation_id = uuid.uuid4()
+
+    class FakeHandler:
+        def handle(self, input_data: dict) -> dict:
+            return {"rows_upserted": 1}
+
+    class FakeEventBus:
+        async def publish(self, topic: str, key: object, value: bytes) -> None:
+            published.append((topic, key, value))
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
+    callback = _make_projection_dispatch_callback(
+        FakeHandler(),
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        event_bus=FakeEventBus(),
+        terminal_event=terminal_topic,
+    )
+    envelope = {
+        "payload": {"task_type": "code-review"},
+        "__debug_trace": {
+            "topic": "onex.evt.omniclaude.task-delegated.v1",
+            "correlation_id": str(test_correlation_id),
+        },
+    }
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))  # type: ignore[arg-type]
+
+    assert len(published) == 1
+    topic_published, _, raw_bytes = published[0]
+    assert topic_published == terminal_topic
+    parsed = json.loads(raw_bytes.decode("utf-8"))
+    assert parsed["event_type"] == terminal_topic
+    assert parsed["correlation_id"] == str(test_correlation_id)
+
+
+@pytest.mark.unit
 def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> None:
     """When handler raises, no terminal event is emitted."""
     published: list[tuple] = []

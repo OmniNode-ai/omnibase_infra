@@ -272,6 +272,57 @@ class TestMakeDispatchCallback:
         assert isinstance(result.output_events[0], FakeTypedOutput)
         assert result.output_events[0].result == "handled:market"
 
+    @pytest.mark.asyncio
+    async def test_callback_preserves_envelope_for_typed_envelope_handler(
+        self,
+    ) -> None:
+        received: list[ModelEventEnvelope[FakeTypedPayload]] = []
+
+        class Handler:
+            async def handle(
+                self,
+                envelope: ModelEventEnvelope[FakeTypedPayload],
+            ) -> FakeTypedOutput:
+                received.append(envelope)
+                return FakeTypedOutput(
+                    correlation_id=envelope.payload.correlation_id,
+                    result=f"handled:{envelope.payload.value}",
+                )
+
+        correlation_id = UUID("22222222-2222-4222-8222-222222222222")
+        callback = _make_dispatch_callback(
+            Handler(),
+            ModelHandlerRef(
+                name="FakeTypedPayload",
+                module=__name__,
+            ),
+        )
+
+        result = await callback(
+            {
+                "payload": {
+                    "correlation_id": str(correlation_id),
+                    "value": "registration",
+                },
+                "__debug_trace": {
+                    "topic": "onex.evt.platform.node-heartbeat.v1",
+                    "event_type": "platform.node-heartbeat",
+                    "correlation_id": str(correlation_id),
+                },
+            }
+        )
+
+        assert len(received) == 1
+        assert isinstance(received[0], ModelEventEnvelope)
+        assert isinstance(received[0].payload, FakeTypedPayload)
+        assert received[0].correlation_id == correlation_id
+        assert received[0].event_type == "platform.node-heartbeat"
+        assert result is not None
+        assert result.correlation_id == correlation_id
+        assert len(result.output_events) == 1
+        assert isinstance(result.output_events[0], FakeTypedOutput)
+        assert result.output_events[0].result == "handled:registration"
+
 
 class TestTerminalEventResultApplier:
     @pytest.mark.asyncio
