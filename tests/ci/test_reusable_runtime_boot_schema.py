@@ -141,6 +141,29 @@ def test_compose_pg_port_input_defaults_5433(workflow: Workflow) -> None:
     assert inputs["compose_pg_port"].get("default") == "5433"
 
 
+def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None:
+    """Compose DNS names are valid only after the runner joins the compose network."""
+    steps = _boot_steps(workflow)
+    resolve_steps = [
+        s for s in steps if "resolve mode-specific postgres port" in _step_text(s)
+    ]
+    assert resolve_steps, "resolve-pg step missing"
+    resolve_text = "\n".join(_step_text(s) for s in resolve_steps)
+    assert "redpanda:9092" not in resolve_text
+    assert "omnibase-infra-postgres" not in resolve_text
+
+    compose_steps = [s for s in steps if "bring up compose stack" in _step_text(s)]
+    assert compose_steps, "compose bring-up step missing"
+    compose_text = "\n".join(_step_text(s) for s in compose_steps)
+    assert "docker network connect omnibase-infra-network" in compose_text
+    assert "runner_on_compose_network=true" in compose_text
+    assert "runner appears containerized but could not join" in compose_text
+    assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
+    assert "kafka_bootstrap_servers=localhost:19092" in compose_text
+    assert "omnibase-infra-postgres:5432" in compose_text
+    assert "localhost:${{ inputs.compose_pg_port }}" in compose_text
+
+
 def test_real_ssh_user_input_has_empty_default(workflow: Workflow) -> None:
     """SSH user must be parameterized, not hardcoded to `jonah`."""
     inputs = _inputs(workflow)

@@ -101,22 +101,6 @@ jobs:
           set -euo pipefail
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
             effective="${{ inputs.compose_pg_port }}"
-            # Compose mode: self-hosted CI runners run inside Docker containers
-            # that share the Docker daemon with the compose stack via socket
-            # mount (/var/run/docker.sock). Port bindings (localhost:5433,
-            # localhost:19092) are on the HOST machine, not reachable from the
-            # runner container.
-            #
-            # Instead we connect the runner container directly to the compose
-            # network (omnibase-infra-network) and reach services by their
-            # container names on their INTERNAL ports.
-            #
-            # Kafka: redpanda internal listener is at redpanda:9092.
-            echo "KAFKA_BOOTSTRAP_SERVERS=redpanda:9092" >> "$GITHUB_ENV"
-            # Allow the redpanda internal hostname so the allowlist guard passes.
-            echo "KAFKA_BROKER_ALLOWLIST=redpanda:" >> "$GITHUB_ENV"
-            # DB URL via compose container name + internal postgres port.
-            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra" >> "$GITHUB_ENV"
           else
             effective="${{ inputs.pg_port }}"
           fi
@@ -176,14 +160,43 @@ jobs:
           # host (localhost:5433, localhost:19092) are NOT reachable from the
           # runner container. Connect the runner to the compose network so the
           # runtime can reach services by container name on internal ports.
-          RUNNER_ID=$(cat /proc/self/cgroup 2>/dev/null \
-            | grep -oP '(?<=docker/)([0-9a-f]{64})' | head -1 || true)
-          if [[ -z "$RUNNER_ID" ]]; then
-            RUNNER_ID=$(hostname)
+          runner_container_id=""
+          mapfile -t runner_candidates < <(
+            {
+              grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
+              hostname
+            } | awk 'NF && !seen[$0]++'
+          )
+          for candidate in "${runner_candidates[@]}"; do
+            if docker inspect --type container "$candidate" >/dev/null 2>&1; then
+              runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
+              break
+            fi
+          done
+
+          runner_on_compose_network=false
+          if [[ -n "$runner_container_id" ]]; then
+            echo "Runner container ID: ${runner_container_id}"
+            docker network connect omnibase-infra-network "${runner_container_id}" 2>/dev/null || true
+            if docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "$runner_container_id" \
+              | grep -q '"omnibase-infra-network"'; then
+              runner_on_compose_network=true
+            fi
           fi
-          echo "Runner container ID/name: ${RUNNER_ID}"
-          docker network connect omnibase-infra-network "${RUNNER_ID}" 2>/dev/null \
-            || echo "network connect skipped (may already be connected or not in Docker)"
+
+          if [[ -f /.dockerenv ]]; then
+            if [[ "${runner_on_compose_network}" != "true" ]]; then
+              echo "::error::runner appears containerized but could not join omnibase-infra-network"
+              exit 1
+            fi
+            echo "KAFKA_BOOTSTRAP_SERVERS=redpanda:9092" >> "$GITHUB_ENV"
+            echo "KAFKA_BROKER_ALLOWLIST=redpanda:" >> "$GITHUB_ENV"
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@omnibase-infra-postgres:5432/omnibase_infra" >> "$GITHUB_ENV"
+          else
+            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:19092" >> "$GITHUB_ENV"
+            echo "KAFKA_BROKER_ALLOWLIST=localhost:" >> "$GITHUB_ENV"
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@localhost:${{ inputs.compose_pg_port }}/omnibase_infra" >> "$GITHUB_ENV"
+          fi
 
           # Wait for both compose services to be healthy via docker exec.
           # No localhost TCP check needed — we reach them by container name.
