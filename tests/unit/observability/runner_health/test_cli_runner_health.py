@@ -131,6 +131,76 @@ async def test_cli_alert_all_healthy(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_cli_emit_skips_when_no_bootstrap(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--emit skips gracefully when KAFKA_BOOTSTRAP_SERVERS is not set."""
+    config_path = tmp_path / "runner_fleet.yaml"
+    _write_runner_fleet_config(config_path)
+    monkeypatch.setenv("RUNNER_FLEET_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    mock_snapshot = _make_snapshot()
+    with patch(
+        "omnibase_infra.observability.runner_health.cli_runner_health.CollectorRunnerHealth"
+    ) as mock_cls:
+        mock_cls.return_value.collect = AsyncMock(return_value=mock_snapshot)
+        result = await main(["--host", "192.168.86.201", "--emit"])
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "KAFKA_BOOTSTRAP_SERVERS not set" in captured.out
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_emit_publishes_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--emit calls _emit_to_kafka with the collected snapshot."""
+    config_path = tmp_path / "runner_fleet.yaml"
+    _write_runner_fleet_config(config_path)
+    monkeypatch.setenv("RUNNER_FLEET_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    mock_snapshot = _make_snapshot()
+
+    with (
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.CollectorRunnerHealth"
+        ) as mock_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health._emit_to_kafka",
+            new=AsyncMock(),
+        ) as mock_emit,
+    ):
+        mock_cls.return_value.collect = AsyncMock(return_value=mock_snapshot)
+        result = await main(["--host", "192.168.86.201", "--emit"])
+
+    assert result == 0
+    mock_emit.assert_awaited_once_with(mock_snapshot)
+
+
+@pytest.mark.unit
+def test_runner_health_topic_in_all_omnibase_infra_specs() -> None:
+    """SUFFIX_RUNNER_HEALTH_SNAPSHOT is registered in ALL_OMNIBASE_INFRA_TOPIC_SPECS with retention config."""
+    from omnibase_infra.topics.platform_topic_suffixes import (
+        ALL_OMNIBASE_INFRA_TOPIC_SPECS,
+        SUFFIX_RUNNER_HEALTH_SNAPSHOT,
+    )
+
+    suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
+    assert SUFFIX_RUNNER_HEALTH_SNAPSHOT in suffixes
+    matched = next(
+        spec
+        for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS
+        if spec.suffix == SUFFIX_RUNNER_HEALTH_SNAPSHOT
+    )
+    assert matched.partitions == 1
+    assert matched.kafka_config is not None
+    assert matched.kafka_config.get("retention.ms") == "604800000"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_cli_uses_configured_runner_count(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

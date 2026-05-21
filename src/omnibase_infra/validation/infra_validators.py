@@ -486,7 +486,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 150 (2026-05-09): interactive onboarding models — ModelTransition alias + ModelTransitionBranch JsonType (OMN-10771)
 #                     + StepResponse type alias in transition_reducer (OMN-10780)
 # - 152 (2026-05-10): interactive executor + result models (OMN-10782)
-INFRA_MAX_UNIONS = 152
+# - 154 (2026-05-21): projection freshness SLA monitor (OMN-11200)
+INFRA_MAX_UNIONS = 154
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
