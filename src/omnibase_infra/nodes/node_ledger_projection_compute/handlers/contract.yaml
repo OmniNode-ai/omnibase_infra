@@ -40,7 +40,7 @@ operation_bindings:
   bindings:
     "ledger.project":
       - parameter_name: "message"
-        expression: "${payload}"
+        expression: "${envelope.payload}"
         required: true
 metadata:
   description: "Ledger projection handler that transforms ModelEventMessage to ModelIntent with ModelPayloadLedgerAppend for audit ledger persistence"

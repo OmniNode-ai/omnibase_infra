@@ -119,6 +119,26 @@ class TestLoadOperationBindingsHappyPath:
         assert "test.operation" in result.bindings
         assert len(result.bindings["test.operation"]) == 1
 
+    @pytest.mark.unit
+    @pytest.mark.unit
+    def test_load_packaged_ledger_projection_contract(self) -> None:
+        """Packaged ledger projection contract uses valid binding expressions."""
+        contract_path = (
+            Path("src/omnibase_infra/nodes/node_ledger_projection_compute")
+            / "handlers/contract.yaml"
+        )
+
+        result = load_operation_bindings_subcontract(
+            contract_path,
+            io_operations=["ledger.project"],
+        )
+
+        binding = result.bindings["ledger.project"][0]
+        assert binding.parameter_name == "message"
+        assert binding.source == "envelope"
+        assert binding.path_segments == ("payload",)
+        assert binding.original_expression == "${envelope.payload}"
+
     def test_load_with_global_bindings(self, tmp_path: Path) -> None:
         """Contract with global_bindings loads correctly."""
         contract = {
