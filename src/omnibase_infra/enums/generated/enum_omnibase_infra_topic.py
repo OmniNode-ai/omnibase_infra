@@ -19,6 +19,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_BASELINE_COMPARISON_REQUEST_V1 = "onex.cmd.omnibase-infra.baseline-comparison-request.v1"  # onex.cmd.omnibase-infra.baseline-comparison-request.v1
+    CMD_BASELINES_BATCH_COMPUTE_V1 = "onex.cmd.omnibase-infra.baselines-batch-compute.v1"  # onex.cmd.omnibase-infra.baselines-batch-compute.v1
     CMD_BUILD_LOOP_APPEND_V1 = "onex.cmd.omnibase-infra.build-loop-append.v1"  # onex.cmd.omnibase-infra.build-loop-append.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
