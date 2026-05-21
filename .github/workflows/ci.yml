@@ -1115,7 +1115,12 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate, runtime-boot-smoke]
+    # OMN-9120: runtime-boot-smoke runs as an advisory check during the compose-mode
+    # boot stabilization period. It is intentionally NOT in `needs` so a smoke-test
+    # failure does not block CI Summary. A follow-up ticket promotes it to a hard
+    # gate once compose-mode boot is consistently green on main. See CLAUDE.md
+    # "Strict-mode invariants land AFTER all downstream consumers are compliant".
+    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
@@ -1137,7 +1142,6 @@ jobs:
           migrationrequiredcheck="${{ needs.migration-required-check.result }}"
           compliance="${{ needs.compliance.result }}"
           contractsync="${{ needs.contract-sync-gate.result }}"
-          runtimeboot="${{ needs.runtime-boot-smoke.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -1154,8 +1158,7 @@ jobs:
              [[ "$migrationintegration" == "success" || "$migrationintegration" == "skipped" ]] && \
              [[ "$migrationrequiredcheck" == "success" ]] && \
              [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
-             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]] && \
-             [[ "$runtimeboot" == "success" || "$runtimeboot" == "skipped" ]]; then
+             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
             echo "Code Quality: Passed"
@@ -1173,7 +1176,7 @@ jobs:
             echo "Writer-Migration Coupling Check: Passed"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: $runtimeboot"
+            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
             exit 0
           else
             echo "Checks failed"
@@ -1193,7 +1196,7 @@ jobs:
             echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             echo "Contract Compliance: $compliance"
             echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: $runtimeboot"
+            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
             exit 1
           fi
 

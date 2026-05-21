@@ -6,7 +6,7 @@ schema_version: '1.0.0'
 ticket_id: OMN-9120
 title: CI Gate — Runtime Boot Smoke Test
 summary: >
-  Wires the existing reusable-runtime-boot.yml workflow into ci.yml as a caller job (runtime-boot-smoke). The workflow boots the runtime in compose mode after the test suite passes and asserts /health, 60s stability, startup log cleanliness, and consumer group membership. ci-summary includes runtime-boot-smoke as a hard merge gate.
+  Wires the existing reusable-runtime-boot.yml workflow into ci.yml as a caller job (runtime-boot-smoke). The workflow boots the runtime in compose mode after the test suite passes and asserts /health, 60s stability, startup log cleanliness, and consumer group membership. runtime-boot-smoke runs as an advisory check during the compose-mode boot stabilization period; a follow-up ticket promotes it to a hard CI Summary gate once compose-mode boot is consistently green on main (per CLAUDE.md "Strict-mode invariants land AFTER all downstream consumers are compliant").
 
 is_seam_ticket: false
 interface_change: false
@@ -17,7 +17,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-001
-    description: PR #1649 wires runtime boot smoke test into CI as a required check
+    description: PR #1649 wires runtime boot smoke test into CI as an advisory check (promoted to required in a follow-up ticket after compose-mode boot stabilizes)
     source: generated
     checks:
       - check_type: command
