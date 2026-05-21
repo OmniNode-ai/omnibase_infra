@@ -891,11 +891,14 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
-    # Runner health snapshot events (1 partition — low-throughput, OMN-6082)
+    # Runner health snapshot events (1 partition — low-throughput, OMN-11276)
     ModelTopicSpec(
         suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
         partitions=1,
-        kafka_config={},
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
     ),
     # Row count diagnostic events (1 partition — low-throughput, OMN-5653)
     ModelTopicSpec(
