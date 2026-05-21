@@ -40,9 +40,11 @@ class _TerminalConsumer:
     def __init__(self, *topics: object, **kwargs: object) -> None:
         self.topics = topics
         self.kwargs = kwargs
+        self._client = _TerminalConsumerClient(self)
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
         self.assigned_partitions: set[object] = set()
         self.topics_calls = 0
+        self.set_topics_calls: list[tuple[str, ...]] = []
         self.seeked_to_end = False
         self.started = False
         self.stopped = False
@@ -52,7 +54,9 @@ class _TerminalConsumer:
         self.started = True
 
     def partitions_for_topic(self, topic: str) -> set[int]:
-        return {0, 1} if self.started and topic else set()
+        if not self.started or topic not in self._client.tracked_topics:
+            return set()
+        return {0, 1}
 
     async def topics(self) -> set[str]:
         self.topics_calls += 1
@@ -74,6 +78,17 @@ class _TerminalConsumer:
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+class _TerminalConsumerClient:
+    def __init__(self, consumer: _TerminalConsumer) -> None:
+        self._consumer = consumer
+        self.tracked_topics: set[str] = set()
+
+    def set_topics(self, topics: list[str]) -> bool:
+        self.tracked_topics = set(topics)
+        self._consumer.set_topics_calls.append(tuple(topics))
+        return True
 
 
 class _KafkaLikeTransport:
@@ -148,5 +163,7 @@ async def test_pattern_b_terminal_waiter_uses_ungrouped_assigned_consumer(
     assert resolved_route == route
     assert result.status == "completed"
     assert result.payload == {"status": "completed", "response": "stability-smoke-ok"}
-    assert _TerminalConsumer.created[0].topics_calls >= 1
+    assert _TerminalConsumer.created[0].set_topics_calls == [
+        ("onex.evt.omnimarket.delegate-skill-completed.v1",)
+    ]
     assert _TerminalConsumer.created[0].stopped is True
