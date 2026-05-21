@@ -1147,8 +1147,12 @@ async def bootstrap() -> int:
                 validator = TopicStartupValidator(
                     bootstrap_servers=kafka_bootstrap_servers,
                 )
+                strict_topic_validation = (
+                    os.environ.get("STARTUP_VALIDATION_STRICT") == "1"
+                )
                 validation_result = await validator.validate(
                     correlation_id=correlation_id,
+                    log_missing=False,
                 )
                 if not validation_result.is_valid:
                     # OMN-7810: Auto-create missing topics before failing strict
@@ -1178,6 +1182,16 @@ async def bootstrap() -> int:
                                 _auto_result["created"],
                                 correlation_id,
                             )
+                        validation_result = await validator.validate(
+                            correlation_id=correlation_id,
+                            log_missing=strict_topic_validation,
+                        )
+                        if validation_result.status == "success":
+                            logger.info(
+                                "Topic validation recovered after auto-create "
+                                "(correlation_id=%s)",
+                                correlation_id,
+                            )
                     except Exception:  # noqa: BLE001
                         logger.warning(
                             "Auto-create missing topics failed (best-effort) "
@@ -1186,16 +1200,17 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-                    if os.environ.get("STARTUP_VALIDATION_STRICT") == "1":
+                    if strict_topic_validation:
                         raise RuntimeError(
                             f"Missing topics: {validation_result.missing_topics}"
                         )
-                    logger.warning(
-                        "Topic validation: %d missing (non-blocking) "
-                        "(correlation_id=%s)",
-                        len(validation_result.missing_topics),
-                        correlation_id,
-                    )
+                    if not validation_result.is_valid:
+                        logger.warning(
+                            "Topic validation: %d missing (non-blocking) "
+                            "(correlation_id=%s)",
+                            len(validation_result.missing_topics),
+                            correlation_id,
+                        )
             except RuntimeError:
                 raise
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades

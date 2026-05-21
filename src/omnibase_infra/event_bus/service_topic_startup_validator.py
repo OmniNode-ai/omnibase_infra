@@ -74,6 +74,8 @@ class TopicStartupValidator:
     async def validate(
         self,
         correlation_id: UUID | None = None,
+        *,
+        log_missing: bool = True,
     ) -> ModelTopicValidationResult:
         """Validate that all required platform topics exist on the broker.
 
@@ -82,6 +84,10 @@ class TopicStartupValidator:
 
         Args:
             correlation_id: Optional correlation ID for tracing.
+            log_missing: Emit per-topic ``MISSING_TOPIC`` error logs when topics
+                are absent. Runtime startup uses ``False`` before its
+                best-effort auto-create pass so recoverable first-boot gaps do
+                not look like hard failures.
 
         Returns:
             ``ModelTopicValidationResult`` with validation outcome.
@@ -141,12 +147,13 @@ class TopicStartupValidator:
         missing = tuple(t for t in required if t not in broker_topics)
 
         if missing:
-            for topic in missing:
-                logger.error(
-                    "MISSING_TOPIC: Required topic '%s' not in broker",
-                    topic,
-                    extra={"correlation_id": str(correlation_id)},
-                )
+            if log_missing:
+                for topic in missing:
+                    logger.error(
+                        "MISSING_TOPIC: Required topic '%s' not in broker",
+                        topic,
+                        extra={"correlation_id": str(correlation_id)},
+                    )
             return ModelTopicValidationResult(
                 required_topics=required,
                 present_topics=present,
