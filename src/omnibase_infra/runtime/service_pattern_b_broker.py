@@ -308,6 +308,9 @@ class RuntimePatternBBroker:
         deadline = asyncio.get_running_loop().time() + min(30, timeout_seconds)
         expected_topics = set(topics)
         while True:
+            topics_method = getattr(type(consumer), "topics", None)
+            if callable(topics_method):
+                await topics_method(consumer)
             partitions: set[TopicPartition] = set()
             ready_topics: set[str] = set()
             for topic in topics:
