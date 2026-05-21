@@ -16,12 +16,14 @@ Ticket: OMN-3496
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -45,7 +47,7 @@ _spec.loader.exec_module(_cli)  # type: ignore[union-attr]
 def _run_main(argv: list[str], env: dict[str, str] | None = None) -> int:
     """Run main() with the given argv, optionally overriding environment.
 
-    Mocks _run_orchestrator to skip actual Docker / Infisical calls.
+    Mocks _publish_setup_command to skip Kafka I/O.
 
     Returns:
         Exit code returned by main().
@@ -61,13 +63,13 @@ def _run_main(argv: list[str], env: dict[str, str] | None = None) -> int:
                 saved_env[key] = os.environ.get(key)
                 os.environ[key] = value
 
-        # Patch _run_orchestrator to always return True without doing I/O.
-        async def _fake_orchestrator(
+        # Patch _publish_setup_command to always return a correlation ID.
+        async def _fake_publish(
             topology: Any, compose_file_path: str, dry_run: bool
-        ) -> bool:
-            return True
+        ) -> str:
+            return "11111111-1111-4111-8111-111111111111"
 
-        with patch.object(_cli, "_run_orchestrator", side_effect=_fake_orchestrator):
+        with patch.object(_cli, "_publish_setup_command", side_effect=_fake_publish):
             return _cli.main()
 
     finally:
@@ -258,3 +260,73 @@ class TestOnexSetupCLI:
         exit_code = _run_main(["--topology-file", str(topo_path), "--no-interactive"])
 
         assert exit_code == 0
+
+    def test_build_setup_command_uses_typed_payload(self) -> None:
+        """The bus payload must be the setup orchestrator input model."""
+        from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_input import (
+            ModelSetupOrchestratorInput,
+        )
+
+        topology = _cli._topology_for_preset("minimal")
+
+        command = _cli._build_setup_command(
+            topology=topology,
+            compose_file_path="docker/docker-compose.infra.yml",
+            dry_run=False,
+        )
+
+        assert isinstance(command, ModelSetupOrchestratorInput)
+        assert command.compose_file_path == "docker/docker-compose.infra.yml"
+        assert command.dry_run is False
+
+    def test_publish_setup_command_sends_typed_envelope(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kafka publish path sends a typed envelope to the setup command topic."""
+        published: list[dict[str, object]] = []
+
+        async def mock_send(
+            topic: str,
+            value: bytes,
+            key: bytes | None = None,
+        ) -> None:
+            published.append(
+                {
+                    "topic": topic,
+                    "payload": json.loads(value),
+                    "key": key.decode("utf-8") if key else None,
+                }
+            )
+
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer.send_and_wait = AsyncMock(side_effect=mock_send)
+
+        topology = _cli._topology_for_preset("minimal")
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+
+        with patch("aiokafka.AIOKafkaProducer", return_value=mock_producer):
+            correlation_id = asyncio.run(
+                _cli._publish_setup_command(
+                    topology=topology,
+                    compose_file_path="docker/docker-compose.infra.yml",
+                    dry_run=False,
+                )
+            )
+
+        assert len(published) == 1
+        assert published[0]["topic"] == _cli.SETUP_ORCHESTRATION_TOPIC
+        envelope = published[0]["payload"]
+        assert envelope["event_type"] == _cli.SETUP_ORCHESTRATION_TOPIC
+        assert envelope["payload_type"] == "ModelSetupOrchestratorInput"
+        assert envelope["correlation_id"] == str(correlation_id)
+        assert published[0]["key"] == str(correlation_id)
+        assert envelope["payload"]["compose_file_path"] == (
+            "docker/docker-compose.infra.yml"
+        )
+
+    def test_script_has_no_direct_handler_imports(self) -> None:
+        """Regression coverage for OMN-11176 bus_bypass_import cleanup."""
+        source = _CLI_PATH.read_text()
+        assert ".handlers" not in source
