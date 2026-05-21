@@ -50,6 +50,17 @@ class TestKernelBootTopicProvisioning:
         assert "TopicProvisioner" in source
         assert "ensure_provisioned_topics_exist" in source
 
+    def test_validation_suppresses_pre_auto_create_missing_topic_logs(self) -> None:
+        """Kernel suppresses per-topic MISSING_TOPIC logs before auto-create retry."""
+        import inspect
+
+        from omnibase_infra.runtime import service_kernel
+
+        source = inspect.getsource(service_kernel)
+        assert "log_missing=False" in source
+        assert "strict_topic_validation" in source
+        assert "Topic validation recovered after auto-create" in source
+
     def test_provisioner_import_path_is_correct(self) -> None:
         """TopicProvisioner can be imported from the path used by service_kernel.py."""
         from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner

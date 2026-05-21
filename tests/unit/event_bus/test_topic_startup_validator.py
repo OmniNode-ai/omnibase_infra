@@ -142,6 +142,34 @@ async def test_topics_missing(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_topics_missing_can_suppress_per_topic_error_logs(
+    validator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Topics missing + log_missing=False -> degraded result without MISSING_TOPIC logs."""
+    broker_topics = {SAMPLE_SUFFIXES[0]: MagicMock()}
+    mock_admin = _make_mock_admin(broker_topics=broker_topics)
+
+    with (
+        patch(
+            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
+            SAMPLE_SUFFIXES,
+        ),
+        _patch_aiokafka_import(mock_admin),
+        caplog.at_level(logging.ERROR),
+    ):
+        result = await validator.validate(correlation_id=uuid4(), log_missing=False)
+
+    assert result.is_valid is False
+    assert result.status == "degraded"
+    assert len(result.missing_topics) == 2
+
+    error_messages = [r.message for r in caplog.records if r.levelno >= logging.ERROR]
+    assert not any("MISSING_TOPIC" in msg for msg in error_messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_strict_mode_raises(
     validator,
 ) -> None:
