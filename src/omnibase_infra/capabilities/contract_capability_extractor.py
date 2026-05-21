@@ -158,34 +158,8 @@ class ContractCapabilityExtractor:
         """Extract protocol names from dependencies and interfaces."""
         protocols: list[str] = []
 
-        # From protocol_interfaces field
-        if hasattr(contract, "protocol_interfaces"):
-            protocol_interfaces = contract.protocol_interfaces
-            if protocol_interfaces:
-                for proto in protocol_interfaces:
-                    if proto is not None:  # Skip None values
-                        protocols.append(proto)
-
-        # From dependencies where type is protocol
-        if hasattr(contract, "dependencies"):
-            dependencies = contract.dependencies
-            if dependencies:
-                for dep in dependencies:
-                    # Check if it's a protocol dependency using is_protocol() method
-                    if hasattr(dep, "is_protocol") and dep.is_protocol():
-                        if hasattr(dep, "name") and dep.name:
-                            protocols.append(dep.name)
-                    # Fallback: check dependency_type directly
-                    elif hasattr(dep, "dependency_type"):
-                        dep_type = dep.dependency_type
-                        type_str = (
-                            dep_type.value
-                            if hasattr(dep_type, "value")
-                            else str(dep_type)
-                        )
-                        if type_str.upper() == "PROTOCOL":
-                            if hasattr(dep, "name") and dep.name:
-                                protocols.append(dep.name)
+        protocols.extend(_extract_protocol_interfaces(contract))
+        protocols.extend(_extract_dependency_protocols(contract))
 
         return protocols
 
@@ -222,3 +196,58 @@ class ContractCapabilityExtractor:
                         tags.append(tag)
 
         return tags
+
+
+def _extract_protocol_interfaces(contract: ModelContractBase) -> list[str]:
+    """Extract protocol names from the protocol_interfaces field."""
+    if not hasattr(contract, "protocol_interfaces"):
+        return []
+    protocol_interfaces = contract.protocol_interfaces
+    if not protocol_interfaces:
+        return []
+    return [proto for proto in protocol_interfaces if isinstance(proto, str)]
+
+
+def _extract_dependency_protocols(contract: ModelContractBase) -> list[str]:
+    """Extract protocol dependency names from contract dependencies."""
+    if not hasattr(contract, "dependencies"):
+        return []
+    dependencies = contract.dependencies
+    if not dependencies:
+        return []
+    protocols: list[str] = []
+    for dep in dependencies:
+        protocol_name = _dependency_protocol_name(dep)
+        if protocol_name:
+            protocols.append(protocol_name)
+    return protocols
+
+
+def _dependency_protocol_name(dependency: object) -> str | None:
+    """Return a dependency name only when the dependency represents a protocol."""
+    if _dependency_uses_protocol_marker(dependency):
+        return _dependency_name(dependency)
+    if _dependency_type_is_protocol(dependency):
+        return _dependency_name(dependency)
+    return None
+
+
+def _dependency_uses_protocol_marker(dependency: object) -> bool:
+    """Return True when dependency.is_protocol() marks a protocol dependency."""
+    marker = getattr(dependency, "is_protocol", None)
+    return bool(marker()) if callable(marker) else False
+
+
+def _dependency_type_is_protocol(dependency: object) -> bool:
+    """Return True when dependency_type is PROTOCOL."""
+    if not hasattr(dependency, "dependency_type"):
+        return False
+    dep_type = dependency.dependency_type
+    type_str = dep_type.value if hasattr(dep_type, "value") else str(dep_type)
+    return type_str.upper() == "PROTOCOL"
+
+
+def _dependency_name(dependency: object) -> str | None:
+    """Return a non-empty dependency name."""
+    name = getattr(dependency, "name", None)
+    return name if isinstance(name, str) and name else None
