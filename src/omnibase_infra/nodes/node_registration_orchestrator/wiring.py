@@ -1152,39 +1152,6 @@ async def get_handler_node_heartbeat_from_container(
         return None
 
 
-async def get_handler_topic_catalog_query_from_container(
-    container: ModelONEXContainer,
-    correlation_id: UUID | None = None,
-) -> HandlerTopicCatalogQuery | None:
-    """Get HandlerTopicCatalogQuery from container.
-
-    Returns None if the handler was not registered (e.g., no catalog service
-    registered — neither HandlerTopicCatalogPostgres nor ServiceTopicCatalog available).
-
-    Args:
-        container: ONEX container with registered services.
-        correlation_id: Optional correlation ID for error tracking.
-
-    Returns:
-        HandlerTopicCatalogQuery instance or None if not registered.
-    """
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerTopicCatalogQuery,
-    )
-
-    _validate_service_registry(container, "resolve HandlerTopicCatalogQuery")
-    try:
-        return cast(
-            "HandlerTopicCatalogQuery",
-            await container.service_registry.resolve_service(HandlerTopicCatalogQuery),
-        )
-    except Exception:  # noqa: BLE001 — boundary: returns degraded response
-        logger.debug(
-            "HandlerTopicCatalogQuery not registered (no catalog service available)"
-        )
-        return None
-
-
 __all__: list[str] = [
     # Route ID constants
     "ROUTE_ID_NODE_HEARTBEAT",
@@ -1203,5 +1170,4 @@ __all__: list[str] = [
     "get_handler_node_heartbeat_from_container",
     "get_handler_runtime_tick_from_container",
     "get_handler_node_registration_acked_from_container",
-    "get_handler_topic_catalog_query_from_container",
 ]
