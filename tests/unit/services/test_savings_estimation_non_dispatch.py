@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -16,19 +17,24 @@ from omnibase_infra.services.observability.savings_estimation.consumer import (
 )
 
 
+def _kafka_bootstrap_servers() -> str:
+    return os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+
+
 def _service() -> ServiceSavingsEstimator:
     return ServiceSavingsEstimator(
         ConfigSavingsEstimation(
-            kafka_bootstrap_servers="localhost:19092",
+            kafka_bootstrap_servers=_kafka_bootstrap_servers(),
             grace_window_seconds=1.0,
             session_timeout_seconds=3600.0,
-            max_sessions=10,
-            finalized_session_cache_size=10,
+            max_sessions=100,
+            finalized_session_cache_size=1000,
             schema_version="1.0",
         )
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_non_dispatch_projection_fields_are_populated() -> None:
     service = _service()
