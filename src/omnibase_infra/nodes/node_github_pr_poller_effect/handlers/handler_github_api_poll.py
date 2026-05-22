@@ -48,6 +48,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast
+from uuid import UUID
 
 import yaml
 
@@ -81,11 +82,23 @@ class ProtocolGitHubTriageClient(Protocol):
 
     def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
         """Fetch open PR payloads with triage fields."""
-        ...
 
 
 # Triage state type alias (matches TriageState in omnibase_core PR model)
 TriageState = str
+
+
+def _coerce_correlation_id(value: object) -> UUID | None:
+    """Coerce an incoming correlation_id of unknown type into a UUID."""
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
+
 
 _BLOCKING_LABELS = frozenset({"blocked", "do-not-merge", "wip"})
 _CONFIG_KEYS = frozenset(
@@ -284,6 +297,9 @@ class HandlerGitHubApiPoll:
             non-fatal errors.
         """
         config = self._resolve_config(input_data)
+        incoming_correlation_id = _coerce_correlation_id(
+            getattr(input_data, "correlation_id", None)
+        )
 
         errors: list[str] = []
         pending_events: list[JsonType] = []
@@ -309,6 +325,7 @@ class HandlerGitHubApiPoll:
             )
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             error_ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=incoming_correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="init_github_client",
                 target_name="github_http_client",
@@ -338,6 +355,7 @@ class HandlerGitHubApiPoll:
                     client=client,
                     repo=repo,
                     stale_hours=config.stale_threshold_hours,
+                    correlation_id=incoming_correlation_id,
                 )
                 self._last_polled[repo] = datetime.now(tz=UTC)
                 repos_polled.append(repo)
@@ -346,6 +364,7 @@ class HandlerGitHubApiPoll:
                 pending_events.extend(pr_events)
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 error_ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=incoming_correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="poll_repo",
                     target_name=repo,
@@ -385,6 +404,7 @@ class HandlerGitHubApiPoll:
         client: ProtocolGitHubTriageClient,
         repo: str,
         stale_hours: int,
+        correlation_id: UUID | None = None,
     ) -> tuple[list[JsonType], int, list[str]]:
         """Poll all open PRs for a single repository with pagination.
 
@@ -415,6 +435,7 @@ class HandlerGitHubApiPoll:
                 pr_events.append(event_payload)
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 error_ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="process_pr",
                     target_name=f"{repo}#{pr_number}",

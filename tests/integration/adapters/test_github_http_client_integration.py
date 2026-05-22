@@ -20,6 +20,8 @@ import pytest
 
 from omnibase_infra.adapters.github.adapter_github_client import GitHubHttpClient
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Fake GitHub server
 # ---------------------------------------------------------------------------

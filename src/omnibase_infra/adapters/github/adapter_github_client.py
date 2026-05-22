@@ -362,7 +362,6 @@ class GitHubPullTriageApi(ABC):
     @abstractmethod
     def _rest_get(self, path: str, *, timeout: float | None = None) -> object | None:
         """Return a parsed REST GET response."""
-        ...
 
     def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
         """Fetch open PR REST payloads augmented for deterministic triage."""
