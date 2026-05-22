@@ -85,6 +85,7 @@ async def _table_exists(db_conn: object, table_name: str) -> bool:
     avoid any possibility of SQL injection from contract-sourced table names.
     Checks the current connection's database only.
     """
+    # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
     row = await db_conn.fetchval(  # type: ignore[attr-defined]
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = $1",
         table_name,

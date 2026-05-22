@@ -92,6 +92,7 @@ def _parse_circuit_state(
     """
     raw = str(cb_state.get("state", default))
     if raw in _VALID_CIRCUIT_STATES:
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return raw  # type: ignore[return-value]
     return default
 

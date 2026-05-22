@@ -243,6 +243,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         if bootstrap_servers:
             self._bootstrap_servers = bootstrap_servers
         elif hasattr(event_bus, "_bootstrap_servers"):
+            # Why: Control flow narrows this union at runtime before the attribute access.
             self._bootstrap_servers = event_bus._bootstrap_servers  # type: ignore[union-attr]
         else:
             import os

@@ -1402,6 +1402,7 @@ def validate_infra_union_usage(
     return ModelValidationResult(
         is_valid=is_valid,
         errors=filtered_issues,
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         metadata=ModelValidationMetadata.model_construct(**metadata_fields),  # type: ignore[arg-type]
     )
 

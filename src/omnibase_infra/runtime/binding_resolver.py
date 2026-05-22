@@ -459,6 +459,7 @@ class BindingExpressionParser:
                 )
 
         # Type narrowing: source is guaranteed to be one of the valid values
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return source, path_segments  # type: ignore[return-value]
 
 
@@ -822,6 +823,7 @@ class OperationBindingResolver:
             )
             return None
 
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return current  # type: ignore[return-value]
 
 

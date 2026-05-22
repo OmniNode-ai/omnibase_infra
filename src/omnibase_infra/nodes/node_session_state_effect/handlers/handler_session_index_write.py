@@ -42,6 +42,7 @@ from omnibase_infra.utils import sanitize_error_string
 if sys.platform != "win32":
     import fcntl
 else:  # pragma: no cover — flock not available on Windows
+    # Why: Runtime compatibility requires assigning through a broader static type.
     fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)

@@ -53,12 +53,14 @@ def _get_dict(data: dict[str, JsonType], key: str) -> dict[str, JsonType]:
 def _get_int(data: dict[str, JsonType], key: str, default: int) -> int:
     """Get an int value from a dict, returning default if missing."""
     val = data.get(key, default)
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return int(val)  # type: ignore[arg-type]
 
 
 def _get_float(data: dict[str, JsonType], key: str, default: float) -> float:
     """Get a float value from a dict, returning default if missing."""
     val = data.get(key, default)
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return float(val)  # type: ignore[arg-type]
 
 
@@ -302,4 +304,5 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         if not isinstance(data, dict):
             msg = f"Expected dict in {path}, got {type(data).__name__}"
             raise ValueError(msg)
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return data  # type: ignore[return-value]

@@ -781,6 +781,7 @@ async def wire_registration_handlers(
                 },
             )
             await container.service_registry.register_instance(
+                # Why: Registry stores protocol contracts, not instantiable concrete implementations.
                 interface=ProtocolNodeHeartbeat,  # type: ignore[type-abstract]
                 instance=handler_heartbeat,
                 scope=EnumInjectionScope.GLOBAL,

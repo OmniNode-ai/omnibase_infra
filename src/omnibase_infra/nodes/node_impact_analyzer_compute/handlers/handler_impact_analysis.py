@@ -237,6 +237,7 @@ def _level_to_policy(level: int) -> Literal["none", "warn", "require", "strict"]
     """Convert a numeric policy level back to the policy string."""
     for policy, lvl in MERGE_POLICY_ORDER.items():
         if lvl == level:
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return policy  # type: ignore[return-value]
     return "none"
 

@@ -97,6 +97,7 @@ class HandlerPRWebhookIngestion:
             "contract_changed",
             "schema_changed",
             "manual_plan_request",
+            # Why: Runtime compatibility requires assigning through a broader static type.
         ] = raw_trigger_type  # type: ignore[assignment]
 
         trigger = ModelUpdateTrigger(

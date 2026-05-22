@@ -777,6 +777,7 @@ class ServiceRegistration:
                 )
 
                 await config.container.service_registry.register_instance(
+                    # Why: Registry stores protocol contracts, not instantiable concrete implementations.
                     interface=ProtocolRegistrationPersistence,  # type: ignore[type-abstract]  # Protocol used as DI key
                     instance=handler,
                     scope=EnumInjectionScope.GLOBAL,
@@ -1137,6 +1138,7 @@ class ServiceRegistration:
             # Generic contract auto-wiring owns subscriptions; this publisher-only path
             # uses config.event_bus for publish_envelope.
             result_applier = DispatchResultApplier(
+                # Why: Runtime wiring validates and narrows this payload shape before use.
                 event_bus=config.event_bus,  # type: ignore[arg-type]
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,

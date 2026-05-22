@@ -55,6 +55,7 @@ def _int(value: object) -> int:
         return value
     if isinstance(value, str | bytes | bytearray):
         return int(value)
+    # Why: Input coercion accepts runtime values outside the static overload set.
     return int(value)  # type: ignore[call-overload]
 
 

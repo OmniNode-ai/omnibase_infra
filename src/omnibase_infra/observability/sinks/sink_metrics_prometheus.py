@@ -68,8 +68,11 @@ try:
 except ImportError as e:
     _PROMETHEUS_IMPORT_ERROR = str(e)
     # Provide stubs for type checking when prometheus_client is not installed
+    # Why: Runtime compatibility requires assigning through a broader static type.
     Counter = None  # type: ignore[assignment, misc]
+    # Why: Runtime compatibility requires assigning through a broader static type.
     Gauge = None  # type: ignore[assignment, misc]
+    # Why: Runtime compatibility requires assigning through a broader static type.
     Histogram = None  # type: ignore[assignment, misc]
 
 if TYPE_CHECKING:

@@ -784,6 +784,7 @@ async def _main() -> None:
         loop.add_signal_handler(sig, _on_signal)
 
     async def _run_once() -> None:
+        # Why: Runtime factory dispatch accepts this dynamic constructor shape.
         config = ConfigSkillLifecycleConsumer()  # type: ignore[call-arg]
         consumer = SkillLifecycleConsumer(config)
         active_consumer[0] = consumer

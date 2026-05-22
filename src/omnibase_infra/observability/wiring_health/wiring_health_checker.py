@@ -246,16 +246,19 @@ class WiringHealthChecker:
             for topic_health in metrics.topics:
                 labels = {"topic": topic_health.topic}
 
+                # Why: Control flow narrows this union at runtime before the attribute access.
                 self._prometheus_sink.set_gauge(  # type: ignore[union-attr]
                     "wiring_health_emit_total",
                     labels,
                     float(topic_health.emit_count),
                 )
+                # Why: Control flow narrows this union at runtime before the attribute access.
                 self._prometheus_sink.set_gauge(  # type: ignore[union-attr]
                     "wiring_health_consume_total",
                     labels,
                     float(topic_health.consume_count),
                 )
+                # Why: Control flow narrows this union at runtime before the attribute access.
                 self._prometheus_sink.set_gauge(  # type: ignore[union-attr]
                     "wiring_health_mismatch_ratio",
                     labels,
@@ -263,11 +266,13 @@ class WiringHealthChecker:
                 )
 
             # Aggregate metrics
+            # Why: Control flow narrows this union at runtime before the attribute access.
             self._prometheus_sink.set_gauge(  # type: ignore[union-attr]
                 "wiring_health_overall_healthy",
                 {},
                 1.0 if metrics.overall_healthy else 0.0,
             )
+            # Why: Control flow narrows this union at runtime before the attribute access.
             self._prometheus_sink.set_gauge(  # type: ignore[union-attr]
                 "wiring_health_unhealthy_count",
                 {},

@@ -24,6 +24,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
     from aiokafka import AIOKafkaConsumer  # type: ignore[import-untyped]
 
 from omnibase_infra.services.session_registry.enum_node_label import (
@@ -100,6 +101,7 @@ def build_graph_mutations(
         List of ModelGraphMutation instances. Empty if event has no task_id.
     """
     # Navigate into payload if this is an envelope
+    # Why: Runtime compatibility requires assigning through a broader static type.
     payload: dict[str, object] = event.get("payload", event)  # type: ignore[assignment]
 
     task_id = payload.get("task_id")
@@ -245,7 +247,10 @@ class SessionGraphProjector:
 
     async def start(self) -> None:
         """Connect to Kafka and Memgraph."""
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
         import mgclient  # type: ignore[import-untyped]
+
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
         from aiokafka import AIOKafkaConsumer  # type: ignore[import-untyped]
 
         self._mgclient = mgclient.connect(
@@ -289,6 +294,7 @@ class SessionGraphProjector:
         mgconn = self._mgclient
         if mgconn is not None:
             try:
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 mgconn.close()  # type: ignore[attr-defined]
             except Exception:  # noqa: BLE001 -- boundary
                 logger.warning("Error closing Memgraph connection", exc_info=True)
@@ -340,6 +346,7 @@ class SessionGraphProjector:
             logger.error("Memgraph connection not available")
             return
 
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         cursor = mgconn.cursor()  # type: ignore[attr-defined]
         for mutation in mutations:
             try:
@@ -350,6 +357,7 @@ class SessionGraphProjector:
                     extra={"cypher": mutation.cypher, "params": mutation.params},
                 )
         try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             mgconn.commit()  # type: ignore[attr-defined]
         except Exception:
             logger.exception("Failed to commit Memgraph transaction")

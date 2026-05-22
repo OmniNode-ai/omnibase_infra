@@ -104,6 +104,7 @@ class ConsumerHealthProjectionConsumer:
         self._config = config
         self._consumer: AIOKafkaConsumer | None = None
         self._writer: WriterConsumerHealthPostgres | None = None
+        # Why: Runtime handler payloads are heterogeneous JSON-like mappings by contract.
         self._pool: asyncpg.Pool | None = None  # type: ignore[type-arg]
         self._health_app: web.Application | None = None
         self._health_runner: web.AppRunner | None = None
@@ -231,6 +232,7 @@ class ConsumerHealthProjectionConsumer:
             try:
                 timeout_s = max(0.1, batch_deadline - time.monotonic())
                 result = await asyncio.wait_for(
+                    # Why: Control flow narrows this union at runtime before the attribute access.
                     self._consumer.getmany(  # type: ignore[union-attr]
                         timeout_ms=int(timeout_s * 1000),
                         max_records=self._config.batch_size,
@@ -330,6 +332,7 @@ async def _main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
     )
+    # Why: Runtime factory dispatch accepts this dynamic constructor shape.
     config = ConfigConsumerHealthProjection()  # type: ignore[call-arg]
     consumer = ConsumerHealthProjectionConsumer(config)
     await consumer.start()

@@ -164,6 +164,7 @@ class ModelDispatchOutputs(BaseModel):
 
     # NOTE: Intentionally overrides BaseModel.__iter__ which iterates over field names.
     # For ModelDispatchOutputs, iteration semantics are over topic strings instead.
+    # Why: Runtime protocol compatibility keeps this narrower implementation signature.
     def __iter__(self) -> Iterator[str]:  # type: ignore[override]  # NOTE: intentional semantic override
         """Iterate over output topics.
 

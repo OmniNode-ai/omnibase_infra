@@ -611,6 +611,7 @@ def _normalize_handler_result(
         completed_at=datetime.now(UTC),
         output_count=len(output_events) + len(output_intents),
         output_events=output_events,
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         output_intents=output_intents,  # type: ignore[arg-type]
         correlation_id=correlation_id,
     )
@@ -731,6 +732,7 @@ def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
     non-projection wiring path.
     """
     try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
         import yaml  # type: ignore[import-untyped]
 
         with open(contract_path) as f:
@@ -752,7 +754,10 @@ def _build_sync_db_adapter(db_url: str) -> object:
 
     Separated from _make_projection_dispatch_callback to allow test patching.
     """
+    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
     import psycopg2  # type: ignore[import-untyped]
+
+    # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
     import psycopg2.extras  # type: ignore[import-untyped]
 
     class SyncPsycopg2Adapter:
@@ -812,6 +817,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 f"ON CONFLICT ({conflict_columns}) DO UPDATE SET {updates}",
             ]
             insert_sql = " ".join(parts)
+            # Why: Control flow narrows this union at runtime before the attribute access.
             with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
                 cur.execute(insert_sql, adapted_row)
             return True
@@ -832,6 +838,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 clauses = [f'"{k}" = %s' for k in filters]
                 select_sql += " WHERE " + " AND ".join(clauses)
                 params = list(filters.values())
+            # Why: Control flow narrows this union at runtime before the attribute access.
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
                 cur.execute(select_sql, params or None)
                 return [dict(r) for r in cur.fetchall()]
@@ -898,9 +905,11 @@ def _make_projection_dispatch_callback(
                 dict(payload) if isinstance(payload, dict) else {}
             )
             if hasattr(payload, "model_dump"):
+                # Why: Control flow narrows this union at runtime before the attribute access.
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
+            # Why: Control flow narrows this union at runtime before the attribute access.
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
@@ -965,6 +974,7 @@ async def _emit_projection_terminal_event(
         )
         raw = terminal_envelope.model_dump_json().encode("utf-8")
         if hasattr(event_bus, "publish"):
+            # Why: Control flow narrows this union at runtime before the attribute access.
             await event_bus.publish(terminal_event, None, raw)  # type: ignore[union-attr]
         else:
             logger.warning(
@@ -1965,8 +1975,10 @@ async def _commit_contract_wiring(
     LOCAL_OWNERSHIP_SKIP entries land in ``skipped_handlers`` (OMN-9201).
     """
     if pcw.skip_result is not None:
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return pcw.skip_result  # type: ignore[return-value]
 
+    # Why: Runtime compatibility requires assigning through a broader static type.
     contract: ModelDiscoveredContract = pcw.contract  # type: ignore[assignment]
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
@@ -2117,12 +2129,14 @@ async def _subscribe_contract_topics(
                 )
             callback = _make_raw_event_projection_callback(
                 topic,
+                # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 effective_result_applier,
             )
         else:
             callback = _make_event_bus_callback(
                 topic,
+                # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 result_applier=effective_result_applier,
             )
