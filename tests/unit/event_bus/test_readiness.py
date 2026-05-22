@@ -155,7 +155,7 @@ class TestKafkaReadinessTracking:
 
         # Mock internal methods to avoid actual Kafka connection
         bus._started = True
-        bus._start_consumer_for_topic = AsyncMock()  # type: ignore[method-assign]
+        bus._start_consumer_for_topic_unlocked = AsyncMock()  # type: ignore[method-assign]
         bus._validate_topic_name = MagicMock()  # type: ignore[method-assign]
 
         identity = make_test_node_identity()
