@@ -6,7 +6,7 @@
 """Interactive CLI for bootstrapping the OmniNode platform infrastructure.
 
 Prompts for preset/custom selection, writes ~/.omnibase/topology.yaml, and
-invokes NodeSetupOrchestrator, printing events as they flow.
+publishes a typed setup orchestration command to the ONEX event bus.
 
 Invariants:
     I7 — resolve_compose_file() lives only here. Handlers receive an
@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
-from uuid import uuid4
+from typing import Final
+from uuid import UUID, uuid4
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -40,25 +42,10 @@ CLOUD_COMING_SOON = (
     "but cloud provisioning is not yet implemented (coming soon).\n"
 )
 
-# Human-readable messages for each event type emitted by the orchestrator.
-_EVENT_MESSAGES: dict[str, str] = {
-    "setup.preflight.started": "Running preflight checks...",
-    "setup.preflight.completed": "All checks passed",
-    "setup.preflight.failed": "Preflight checks failed",
-    "setup.provision.started": "Starting Docker services...",
-    "setup.provision.completed": "Docker services started",
-    "setup.provision.failed": "Docker provisioning failed",
-    "setup.infisical.started": "Bootstrapping Infisical...",
-    "setup.infisical.completed": "Infisical ready",
-    "setup.infisical.skipped": "Infisical skipped (not in topology)",
-    "setup.infisical.failed": "Infisical bootstrap failed",
-    "setup.validate.started": "Validating provisioned services...",
-    "setup.validate.completed": "All services healthy",
-    "setup.validate.failed": "Service validation failed",
-    "setup.completed": "Platform ready \u2713",
-    "setup.cloud.unavailable": "Cloud provisioning not available",
-    "setup.aborted": "Setup aborted",
-}
+SETUP_ORCHESTRATION_TOPIC: Final[str] = (
+    "onex.cmd.omnibase-infra.setup-orchestration-start.v1"
+)
+"""Command topic consumed by the setup orchestration runtime."""
 
 
 # ---------------------------------------------------------------------------
@@ -171,110 +158,94 @@ def _print_topology_summary(topology: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Event printing
+# Typed bus command publishing
 # ---------------------------------------------------------------------------
 
 
-def _print_event(event_type: str, payload: dict[str, object]) -> None:
-    """Print a single setup event in the canonical CLI format.
-
-    Format: ``[event_type]   message``
-    """
-    message = _EVENT_MESSAGES.get(event_type, "")
-    if payload and event_type == "setup.cloud.unavailable":
-        gated = payload.get("gated_services", [])
-        message = f"Cloud provisioning not available: {', '.join(str(s) for s in gated)} (stored for future use)"
-    elif payload and event_type == "setup.preflight.completed":
-        # Optionally show check count if available in payload
-        pass
-    print(f"[{event_type}]  {message}")
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator invocation (dry-run aware)
-# ---------------------------------------------------------------------------
-
-
-async def _run_orchestrator(
+def _build_setup_command(
     topology: object,
     compose_file_path: str,
     dry_run: bool,
-) -> bool:
-    """Invoke HandlerSetupOrchestrator and print events as they flow.
-
-    In dry-run mode, all steps are skipped and a ``setup.completed`` event
-    is synthesised to indicate success.
-
-    Args:
-        topology: Validated ModelDeploymentTopology.
-        compose_file_path: Resolved path to docker-compose.infra.yml.
-        dry_run: If True, skip all real provisioning.
-
-    Returns:
-        True on success (``setup.completed`` received), False otherwise.
-    """
-    from omnibase_core.enums.enum_deployment_mode import EnumDeploymentMode
+    correlation_id: UUID | None = None,
+) -> object:
+    """Build the typed setup orchestrator command payload."""
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
+    )
+    from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_input import (
+        ModelSetupOrchestratorInput,
     )
 
     assert isinstance(topology, ModelDeploymentTopology)
 
-    if dry_run:
-        print("\n[dry-run] Skipping provisioning — topology summary only.")
-        _print_event("setup.completed", {})
-        return True
-
-    # Check for cloud-only gate before invoking the orchestrator.
-    cloud_services = [
-        name
-        for name, svc in topology.services.items()
-        if svc.mode == EnumDeploymentMode.CLOUD
-    ]
-    if cloud_services:
-        _print_event("setup.cloud.unavailable", {"gated_services": cloud_services})
-        return False
-
-    # Import effect node implementations lazily to avoid import-time side-effects.
-    # Build a minimal stub container (no services required for CLI invocation).
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.nodes.node_setup_infisical_effect.handlers import (
-        HandlerInfisicalFullSetup,
-    )
-    from omnibase_infra.nodes.node_setup_local_provision_effect.handlers import (
-        HandlerLocalProvision,
-    )
-    from omnibase_infra.nodes.node_setup_orchestrator.handlers import (
-        HandlerSetupOrchestrator,
-    )
-    from omnibase_infra.nodes.node_setup_preflight_effect.handlers import (
-        HandlerPreflightCheck,
-    )
-    from omnibase_infra.nodes.node_setup_validate_effect.handlers import (
-        HandlerServiceValidate,
+    return ModelSetupOrchestratorInput(
+        topology=topology,
+        correlation_id=correlation_id or uuid4(),
+        compose_file_path=compose_file_path,
+        dry_run=dry_run,
     )
 
-    container = ModelONEXContainer()
 
-    handler = HandlerSetupOrchestrator(
-        container=container,
-        preflight=HandlerPreflightCheck(container=container),
-        provision=HandlerLocalProvision(container=container),
-        infisical=HandlerInfisicalFullSetup(container=container),
-        validate=HandlerServiceValidate(container=container),
+def _build_command_envelope_json(command: object) -> str:
+    """Serialize the setup command as a typed ONEX event envelope."""
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_input import (
+        ModelSetupOrchestratorInput,
     )
-    await handler.initialize({})
 
-    corr_id = uuid4()
-    result = await handler.handle(topology, corr_id, compose_file_path)
+    assert isinstance(command, ModelSetupOrchestratorInput)
+    envelope: ModelEventEnvelope[ModelSetupOrchestratorInput] = ModelEventEnvelope[
+        ModelSetupOrchestratorInput
+    ](
+        payload=command,
+        correlation_id=command.correlation_id,
+        source_tool="onex-setup",
+        target_tool="node_setup_orchestrator",
+        event_type=SETUP_ORCHESTRATION_TOPIC,
+        payload_type=type(command).__name__,
+    )
+    return envelope.model_dump_json()
 
-    success = False
-    for event in result.result.events:
-        _print_event(event.event_type, dict(event.payload))
-        if event.event_type == "setup.completed":
-            success = True
 
-    return success
+async def _publish_setup_command(
+    topology: object,
+    compose_file_path: str,
+    dry_run: bool,
+) -> UUID:
+    """Publish the setup orchestration command to Kafka.
+
+    Returns:
+        Correlation ID of the published setup command.
+    """
+    from aiokafka import AIOKafkaProducer
+
+    from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_input import (
+        ModelSetupOrchestratorInput,
+    )
+
+    bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    if not bootstrap_servers:
+        raise RuntimeError(
+            "KAFKA_BOOTSTRAP_SERVERS is not set. "
+            "Set it to the Redpanda/Kafka bootstrap address before running setup."
+        )
+
+    command = _build_setup_command(topology, compose_file_path, dry_run)
+    assert isinstance(command, ModelSetupOrchestratorInput)
+    payload = _build_command_envelope_json(command).encode("utf-8")
+
+    producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all")
+    await producer.start()
+    try:
+        await producer.send_and_wait(
+            SETUP_ORCHESTRATION_TOPIC,
+            payload,
+            key=str(command.correlation_id).encode("utf-8"),
+        )
+    finally:
+        await producer.stop()
+
+    return command.correlation_id
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +411,7 @@ def main() -> int:
             return 1
 
     # ------------------------------------------------------------------
-    # Step 5: Invoke orchestrator and print events
+    # Step 5: Publish setup command
     # ------------------------------------------------------------------
     print("\n--- Setup ---")
     try:
@@ -453,11 +424,24 @@ def main() -> int:
             return 1
 
     try:
-        success = asyncio.run(
-            _run_orchestrator(
+        if args.dry_run:
+            command = _build_setup_command(
                 topology=topology,
                 compose_file_path=compose_file,
-                dry_run=args.dry_run,
+                dry_run=True,
+            )
+            print("\n[dry-run] Setup command payload:")
+            print(
+                json.dumps(json.loads(_build_command_envelope_json(command)), indent=2)
+            )
+            print("[dry-run] Skipping Kafka publish.")
+            return 0
+
+        correlation_id = asyncio.run(
+            _publish_setup_command(
+                topology=topology,
+                compose_file_path=compose_file,
+                dry_run=False,
             )
         )
     except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
@@ -467,7 +451,9 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Step 6: Exit code
     # ------------------------------------------------------------------
-    return 0 if success else 1
+    print(f"Published setup command to {SETUP_ORCHESTRATION_TOPIC}")
+    print(f"Correlation ID: {correlation_id}")
+    return 0
 
 
 if __name__ == "__main__":
