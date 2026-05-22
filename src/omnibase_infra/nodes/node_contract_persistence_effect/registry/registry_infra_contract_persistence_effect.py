@@ -29,9 +29,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.models.runtime.model_resolved_dependencies import (
-        ModelResolvedDependencies,
-    )
     from omnibase_infra.nodes.node_contract_persistence_effect.node import (
         NodeContractPersistenceEffect,
     )
@@ -66,24 +63,14 @@ class RegistryInfraContractPersistenceEffect:
     """
 
     @staticmethod
-    def create(
-        container: ModelONEXContainer,
-        dependencies: ModelResolvedDependencies | None = None,
-    ) -> NodeContractPersistenceEffect:
-        """Create a NodeContractPersistenceEffect instance with resolved dependencies.
-
-        Factory method that creates a fully configured NodeContractPersistenceEffect
-        using the provided ONEX container for dependency injection.
+    def create(container: ModelONEXContainer) -> NodeContractPersistenceEffect:
+        """Create a NodeContractPersistenceEffect instance.
 
         Args:
             container: ONEX dependency injection container. Must have the
                 following protocols registered:
                 - ProtocolPostgresAdapter: PostgreSQL database operations
                 - ProtocolCircuitBreakerAware: Backend circuit breaker protection
-            dependencies: Optional pre-resolved protocol dependencies from
-                ContractDependencyResolver. If provided, the node uses these
-                instead of resolving from container. Part of OMN-1732 runtime
-                dependency injection.
 
         Returns:
             Configured NodeContractPersistenceEffect instance ready for operation.
@@ -91,26 +78,13 @@ class RegistryInfraContractPersistenceEffect:
         Raises:
             OnexError: If required protocols are not registered in container.
 
-        Example:
-            >>> container = ModelONEXContainer()
-            >>> container.register(ProtocolPostgresAdapter, postgres_adapter)
-            >>> effect = RegistryInfraContractPersistenceEffect.create(container)
-            >>>
-            >>> # With pre-resolved dependencies (OMN-1732)
-            >>> resolved = resolver.resolve(contract)
-            >>> effect = RegistryInfraContractPersistenceEffect.create(
-            ...     container, dependencies=resolved
-            ... )
-
         .. versionadded:: 0.5.0
-        .. versionchanged:: 0.6.0
-            Added optional ``dependencies`` parameter for constructor injection (OMN-1732).
         """
         from omnibase_infra.nodes.node_contract_persistence_effect.node import (
             NodeContractPersistenceEffect,
         )
 
-        return NodeContractPersistenceEffect(container, dependencies=dependencies)
+        return NodeContractPersistenceEffect(container)
 
     @staticmethod
     def get_required_protocols() -> list[str]:

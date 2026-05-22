@@ -25,9 +25,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.models.runtime.model_resolved_dependencies import (
-        ModelResolvedDependencies,
-    )
     from omnibase_infra.nodes.node_decision_store_effect.node import (
         NodeDecisionStoreEffect,
     )
@@ -52,19 +49,14 @@ class RegistryInfraDecisionStoreEffect:
     """
 
     @staticmethod
-    def create(
-        container: ModelONEXContainer,
-        dependencies: ModelResolvedDependencies | None = None,
-    ) -> NodeDecisionStoreEffect:
-        """Create a NodeDecisionStoreEffect instance with resolved dependencies.
+    def create(container: ModelONEXContainer) -> NodeDecisionStoreEffect:
+        """Create a NodeDecisionStoreEffect instance.
 
         Args:
             container: ONEX dependency injection container. Must have the
                 following protocols registered:
                 - ProtocolPostgresAdapter: PostgreSQL database operations
                 - ProtocolCircuitBreakerAware: Backend circuit breaker protection
-            dependencies: Optional pre-resolved protocol dependencies from
-                ContractDependencyResolver. Part of OMN-1732 runtime DI.
 
         Returns:
             Configured NodeDecisionStoreEffect instance ready for operation.
@@ -78,7 +70,7 @@ class RegistryInfraDecisionStoreEffect:
             NodeDecisionStoreEffect,
         )
 
-        return NodeDecisionStoreEffect(container, dependencies=dependencies)
+        return NodeDecisionStoreEffect(container)
 
     @staticmethod
     def get_required_protocols() -> list[str]:
