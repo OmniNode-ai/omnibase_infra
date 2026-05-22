@@ -26,7 +26,6 @@ from omnibase_infra.runtime.models.model_runtime_process_policy import (
 _DEFAULT_CONTRACT = (
     _REPO_ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
 )
-_DEFAULT_ENV_FILE = _REPO_ROOT / "docker" / "runtime-policy.env"
 
 _PROFILE_ENV_PREFIX: dict[RuntimeProfileName, str] = {
     "dev": "DEV",
