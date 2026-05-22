@@ -509,8 +509,6 @@ class TestKafkaEventBusSubscribe:
         self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Concurrent subscribe() calls for distinct keys start one consumer each."""
-        import asyncio
-
         started: list[tuple[str, str]] = []
 
         async def fake_start(topic: str, group_id: str) -> None:
@@ -544,8 +542,6 @@ class TestKafkaEventBusSubscribe:
         self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Concurrent subscribe() calls for the same (topic, group) start exactly one consumer."""
-        import asyncio
-
         start_count = 0
 
         async def fake_start(topic: str, group_id: str) -> None:
