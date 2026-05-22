@@ -15,12 +15,18 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.nodes.node_github_pr_poller_effect.handlers.handler_github_api_poll import (
+    HandlerGitHubApiPoll,
     compute_triage_state,
 )
+from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
+    ModelGitHubPollerConfig,
+)
+from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
 
 def _pr(
@@ -251,3 +257,27 @@ class TestTriageStatePrecedenceOrder:
             "needs_review",
         }
         assert states == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_handler_runtime_tick_uses_contract_config_without_polling() -> None:
+    """Runtime tick inputs resolve to the handler's configured poller settings."""
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    tick = ModelRuntimeTick(
+        now=now,
+        tick_id=uuid4(),
+        sequence_number=1,
+        scheduled_at=now,
+        correlation_id=uuid4(),
+        scheduler_id="test-scheduler",
+        tick_interval_ms=1000,
+    )
+    handler = HandlerGitHubApiPoll(config=ModelGitHubPollerConfig(repos=[]))
+
+    result = await handler.handle(tick)
+
+    assert result.repos_polled == []
+    assert result.prs_polled == 0
+    assert result.pending_events == []
+    assert result.errors == []

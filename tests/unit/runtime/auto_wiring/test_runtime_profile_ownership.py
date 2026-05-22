@@ -114,3 +114,34 @@ terminal_event: onex.evt.omnimarket.build-loop-orchestrator-completed.v1
         manifest.contracts[0].terminal_event
         == "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
     )
+
+
+def test_github_pr_poller_is_owned_by_effects_runtime_profile() -> None:
+    contract_path = (
+        Path(__file__).resolve().parents[4]
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_github_pr_poller_effect"
+        / "contract.yaml"
+    )
+
+    manifest = discover_contracts_from_paths([contract_path])
+
+    assert manifest.total_errors == 0
+    contract = manifest.contracts[0]
+    assert contract.name == "node_github_pr_poller_effect"
+    assert contract.runtime_profiles == ("effects",)
+    assert contract.event_bus is not None
+    assert contract.event_bus.subscribe_topics == (
+        "onex.intent.platform.runtime-tick.v1",
+    )
+
+    effects_result = filter_manifest_for_runtime_profile(manifest, "effects")
+    main_result = filter_manifest_for_runtime_profile(manifest, "main")
+
+    assert [item.name for item in effects_result.manifest.contracts] == [
+        "node_github_pr_poller_effect"
+    ]
+    assert main_result.manifest.contracts == ()
+    assert main_result.skipped_contracts == ("node_github_pr_poller_effect",)
