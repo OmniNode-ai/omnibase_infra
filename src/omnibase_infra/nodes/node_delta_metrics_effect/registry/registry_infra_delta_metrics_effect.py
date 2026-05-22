@@ -21,9 +21,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.models.runtime.model_resolved_dependencies import (
-        ModelResolvedDependencies,
-    )
     from omnibase_infra.nodes.node_delta_metrics_effect.node import (
         NodeDeltaMetricsEffect,
     )
@@ -39,16 +36,11 @@ class RegistryInfraDeltaMetricsEffect:
     """
 
     @staticmethod
-    def create(
-        container: ModelONEXContainer,
-        dependencies: ModelResolvedDependencies | None = None,
-    ) -> NodeDeltaMetricsEffect:
-        """Create a NodeDeltaMetricsEffect instance with resolved dependencies.
+    def create(container: ModelONEXContainer) -> NodeDeltaMetricsEffect:
+        """Create a NodeDeltaMetricsEffect instance.
 
         Args:
             container: ONEX dependency injection container.
-            dependencies: Optional pre-resolved protocol dependencies from
-                ContractDependencyResolver. Part of OMN-1732 runtime DI.
 
         Returns:
             Configured NodeDeltaMetricsEffect instance ready for operation.
@@ -59,7 +51,7 @@ class RegistryInfraDeltaMetricsEffect:
             NodeDeltaMetricsEffect,
         )
 
-        return NodeDeltaMetricsEffect(container, dependencies=dependencies)
+        return NodeDeltaMetricsEffect(container)
 
     @staticmethod
     def get_required_protocols() -> list[str]:
