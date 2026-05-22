@@ -167,6 +167,19 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.runtime.address=runtime://omninode-pc/prod/effects"
       - "com.omninode.runtime.id=prod-effects"
+  projection-api:
+    container_name: omnimarket-prod-projection-api
+    restart: unless-stopped
+    environment:
+      ONEX_ENVIRONMENT: prod
+      KAFKA_ENVIRONMENT: prod
+      OTEL_SERVICE_NAME: omnimarket-prod-projection-api
+    ports: !override
+      - "${PROD_PROJECTION_API_PORT:-23002}:3002"
+    labels:
+      - "com.omninode.lane=prod"
+      - "com.omninode.service=projection-api"
+      - "com.omninode.layer=runtime"
   runtime-worker:
     container_name: omninode-prod-runtime-worker
     restart: unless-stopped

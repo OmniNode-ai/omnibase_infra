@@ -1,0 +1,46 @@
+name: projection-api
+description: OmniMarket projection API server for reducer-owned projection snapshots (OMN-11542)
+image: omnibase-infra-runtime:latest
+layer: runtime
+container_name: omnimarket-projection-api
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OTEL_SERVICE_NAME: omnimarket-projection-api
+  RUNTIME_PROFILE: projection-api
+operational_defaults: {}
+ports:
+  external: 3002
+  internal: 3002
+healthcheck:
+  test:
+    - curl
+    - -sf
+    - http://localhost:3002/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 5
+  start_period_s: 60
+volumes: []
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: "0.5"
+  memory: 256M
+  cpus_reservation: "0.1"
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  - omnimarket-projection-api
+labels:
+  com.omninode.service: projection-api
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: "true"
