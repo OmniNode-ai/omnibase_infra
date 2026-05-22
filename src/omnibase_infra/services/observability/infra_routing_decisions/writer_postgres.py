@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: migration 080_create_infra_routing_decisions already in this PR
 """PostgreSQL writer for infra routing decisions (OMN-8692).
 
 Persists routing-decided events to infra_routing_decisions table.
@@ -137,7 +138,7 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
             if val is None:
                 return default
             try:
-                return int(val)
+                return int(str(val))
             except (TypeError, ValueError):
                 return default
 
@@ -145,7 +146,7 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
             if val is None:
                 return None
             try:
-                return float(val)
+                return float(str(val))
             except (TypeError, ValueError):
                 return None
 
