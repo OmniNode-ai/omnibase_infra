@@ -10,6 +10,8 @@ by checking the registration_projections table for rows in terminal states.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
@@ -25,7 +27,7 @@ TERMINAL_STATES: frozenset[str] = frozenset({"active", "ack_received"})
 
 def check_projection_state(
     contract_name: str,
-    db_rows: list[dict[str, object]],
+    db_rows: Sequence[Mapping[str, object]],
 ) -> ModelContractCheckResult:
     """Check registration projection state for evidence of completed FSM cycles.
 
