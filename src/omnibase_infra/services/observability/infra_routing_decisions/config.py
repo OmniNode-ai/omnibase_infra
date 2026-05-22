@@ -12,8 +12,20 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_TOPIC_ROUTING_DECIDED: str = "onex.evt.omnibase-infra.routing-decided.v1"
-_TOPIC_DLQ: str = "onex.evt.omnibase-infra.routing-decided-dlq.v1"
+from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+
+def _default_routing_decided_topic() -> str:
+    return ServiceTopicRegistry.from_defaults().resolve(topic_keys.ROUTING_DECIDED)
+
+
+def _default_dlq_topic() -> str:
+    topic = get_dlq_topic_for_original(_default_routing_decided_topic())
+    if topic is None:
+        raise ValueError("No DLQ topic could be resolved for routing decisions")
+    return topic
 
 
 class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
@@ -40,7 +52,7 @@ class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
         description="Consumer group ID for offset tracking",
     )
     topics: list[str] = Field(
-        default_factory=lambda: [_TOPIC_ROUTING_DECIDED],
+        default_factory=lambda: [_default_routing_decided_topic()],
         description="Kafka topics to consume",
     )
     auto_offset_reset: str = Field(
@@ -109,7 +121,7 @@ class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
         description="Successful requests required to close circuit from half-open state",
     )
     dlq_topic: str = Field(
-        default=_TOPIC_DLQ,
+        default_factory=_default_dlq_topic,
         description="Dead letter topic for permanently failed messages.",
     )
     dlq_enabled: bool = Field(
