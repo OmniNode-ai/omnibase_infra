@@ -574,6 +574,7 @@ class TestDockerRuntime:
         self,
         docker_available: bool,
         built_test_image: str,
+        project_root: Path,
         available_port: int,
     ) -> None:
         """Verify container handles SIGTERM gracefully.
@@ -596,6 +597,8 @@ class TestDockerRuntime:
                     "-d",
                     "--name",
                     container_name,
+                    "--env-file",
+                    str(project_root / "docker" / "runtime-policy.env"),
                     "-p",
                     f"{available_port}:8085",
                     "-e",
@@ -1111,6 +1114,8 @@ class TestDockerComposeProfiles:
             [
                 "docker",
                 "compose",
+                "--env-file",
+                str(project_root / "docker" / "runtime-policy.env"),
                 "-f",
                 str(compose_file_path),
                 "config",
