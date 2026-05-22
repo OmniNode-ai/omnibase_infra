@@ -15,10 +15,11 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.types import JsonType
 
 
 class ModelProjectionRecord(BaseModel):
@@ -69,10 +70,7 @@ class ModelProjectionRecord(BaseModel):
             "in schema_registration_projection.sql."
         ),
     )
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for dynamic projection columns
-    # that vary by projector schema. Cannot use a typed model because columns differ
-    # per projector (e.g., ack_deadline, capabilities, node_version).
-    data: dict[str, Any] = Field(
+    data: dict[str, JsonType] = Field(
         default_factory=dict,
         description=(
             "Dynamic projection columns that vary by projector schema. "

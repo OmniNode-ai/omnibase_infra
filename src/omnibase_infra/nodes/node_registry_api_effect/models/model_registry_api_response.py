@@ -9,10 +9,11 @@ Ticket: OMN-1441
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+from omnibase_core.types import JsonType
 
 
 class ModelRegistryApiResponse(BaseModel):
@@ -38,8 +39,7 @@ class ModelRegistryApiResponse(BaseModel):
     success: bool = Field(
         description="Whether the operation completed without fatal errors."
     )
-    # ONEX_EXCLUDE: any_type - response data is a generic JSON envelope; values are operation-specific
-    data: dict[str, Any] = Field(
+    data: dict[str, JsonType] = Field(
         default_factory=dict, description="Operation-specific payload."
     )
     warnings: list[str] = Field(

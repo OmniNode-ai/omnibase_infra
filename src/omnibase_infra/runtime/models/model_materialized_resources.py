@@ -10,8 +10,6 @@ Part of OMN-1976: Contract dependency materialization.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -41,15 +39,12 @@ class ModelMaterializedResources(BaseModel):
         arbitrary_types_allowed=True,
     )
 
-    # ONEX_EXCLUDE: any_type - dict holds heterogeneous resource instances
-    # (asyncpg.Pool, AIOKafkaProducer, httpx.AsyncClient). Type varies by resource.
-    resources: dict[str, Any] = Field(
+    resources: dict[str, object] = Field(
         default_factory=dict,
         description="Map of dependency names to materialized resource instances",
     )
 
-    # ONEX_EXCLUDE: any_type - returns heterogeneous resource instance
-    def get(self, name: str) -> Any:
+    def get(self, name: str) -> object:
         """Get a materialized resource by dependency name.
 
         Args:
@@ -68,8 +63,7 @@ class ModelMaterializedResources(BaseModel):
             )
         return self.resources[name]
 
-    # ONEX_EXCLUDE: any_type - returns heterogeneous resource instance or default
-    def get_optional(self, name: str, default: Any = None) -> Any:
+    def get_optional(self, name: str, default: object | None = None) -> object | None:
         """Get a resource by name, returning default if not found."""
         return self.resources.get(name, default)
 

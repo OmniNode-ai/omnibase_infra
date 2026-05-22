@@ -10,8 +10,6 @@ Part of OMN-1732: Runtime dependency injection for zero-code nodes.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -44,16 +42,12 @@ class ModelResolvedDependencies(BaseModel):
         arbitrary_types_allowed=True,  # Required for protocol instances
     )
 
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for heterogeneous protocol instances
-    # resolved from container.service_registry. Type varies by protocol (ProtocolPostgresAdapter,
-    # ProtocolCircuitBreakerAware, etc.). Cannot use Union as protocols are open-ended.
-    protocols: dict[str, Any] = Field(
+    protocols: dict[str, object] = Field(
         default_factory=dict,
         description="Map of protocol class names to resolved instances",
     )
 
-    # ONEX_EXCLUDE: any_type - returns heterogeneous protocol instance from protocols dict
-    def get(self, protocol_name: str) -> Any:
+    def get(self, protocol_name: str) -> object:
         """Get a resolved protocol by name.
 
         Args:
@@ -75,8 +69,9 @@ class ModelResolvedDependencies(BaseModel):
             )
         return self.protocols[protocol_name]
 
-    # ONEX_EXCLUDE: any_type - returns heterogeneous protocol instance, default can be any type
-    def get_optional(self, protocol_name: str, default: Any = None) -> Any:
+    def get_optional(
+        self, protocol_name: str, default: object | None = None
+    ) -> object | None:
         """Get a resolved protocol by name, returning default if not found.
 
         Args:
