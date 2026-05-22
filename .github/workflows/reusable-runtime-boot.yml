@@ -185,6 +185,30 @@ jobs:
             fi
           fi
 
+          # Wait for both compose services to be healthy via docker exec.
+          # Use docker exec for readiness before selecting the runtime
+          # endpoint surface exposed to the runner.
+          for i in $(seq 1 90); do
+            pg_ok=false
+            kafka_ok=false
+            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
+              pg_ok=true
+            fi
+            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1; then
+              kafka_ok=true
+            fi
+            if $pg_ok && $kafka_ok; then
+              echo "compose infra healthy after ${i}s"
+              break
+            fi
+            echo "waiting... pg=${pg_ok} kafka=${kafka_ok} (${i}s)"
+            sleep 1
+          done
+          if ! $pg_ok || ! $kafka_ok; then
+            echo "::error::compose services not healthy after 90s — pg=${pg_ok} kafka=${kafka_ok}"
+            exit 1
+          fi
+
           can_connect() {
             python - "$1" "$2" <<'PY'
           import socket
@@ -215,32 +239,8 @@ jobs:
               echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@localhost:${{ inputs.compose_pg_port }}/omnibase_infra"
             } >> "$GITHUB_ENV"
           else
-            echo "::error::compose services are healthy in Docker but unreachable from the runner by Docker DNS or localhost published ports"
+            echo "::error::compose services are healthy but unreachable from the runner by Docker DNS or localhost published ports"
             echo "runner_container_id=${runner_container_id:-<none>} runner_on_compose_network=${runner_on_compose_network}"
-            exit 1
-          fi
-
-          # Wait for both compose services to be healthy via docker exec.
-          # Use docker exec for readiness so the runtime endpoint choice above
-          # remains independent from container health checks.
-          for i in $(seq 1 90); do
-            pg_ok=false
-            kafka_ok=false
-            if docker exec omnibase-infra-postgres pg_isready -U postgres >/dev/null 2>&1; then
-              pg_ok=true
-            fi
-            if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1; then
-              kafka_ok=true
-            fi
-            if $pg_ok && $kafka_ok; then
-              echo "compose infra healthy after ${i}s"
-              break
-            fi
-            echo "waiting... pg=${pg_ok} kafka=${kafka_ok} (${i}s)"
-            sleep 1
-          done
-          if ! $pg_ok || ! $kafka_ok; then
-            echo "::error::compose services not healthy after 90s — pg=${pg_ok} kafka=${kafka_ok}"
             exit 1
           fi
 
