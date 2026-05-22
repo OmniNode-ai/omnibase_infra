@@ -10,8 +10,6 @@ by checking the registration_projections table for rows in terminal states.
 
 from __future__ import annotations
 
-from typing import Any
-
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
@@ -25,10 +23,9 @@ from omnibase_infra.verification.models.model_contract_check_result import (
 TERMINAL_STATES: frozenset[str] = frozenset({"active", "ack_received"})
 
 
-# ONEX_EXCLUDE: any_type - DB rows are untyped dicts from SQL queries
 def check_projection_state(
     contract_name: str,
-    db_rows: list[dict[str, Any]],
+    db_rows: list[dict[str, object]],
 ) -> ModelContractCheckResult:
     """Check registration projection state for evidence of completed FSM cycles.
 

@@ -108,6 +108,8 @@ class DependencyMaterializer:
         self._lock = asyncio.Lock()
 
         # Resource cache: type -> resource instance (deduplication)
+        # Why: resources are runtime handles from different libraries
+        # (asyncpg.Pool, AIOKafkaProducer, httpx.AsyncClient) keyed by contract type.
         # ONEX_EXCLUDE: any_type - heterogeneous resource instances
         self._resource_by_type: dict[str, Any] = {}
 
@@ -153,6 +155,8 @@ class DependencyMaterializer:
             extra={"dependency_count": len(infra_deps)},
         )
 
+        # Why: each dependency name points to the runtime handle created for its
+        # resource type; concrete types vary by provider.
         # ONEX_EXCLUDE: any_type - heterogeneous resource instances
         resources: dict[str, Any] = {}
 
@@ -341,6 +345,8 @@ class DependencyMaterializer:
 
         return deps
 
+    # Why: factory dispatch returns one of several provider-specific runtime
+    # handles selected by contract resource type.
     # ONEX_EXCLUDE: any_type - returns heterogeneous resource instance
     async def _create_resource(self, resource_type: str, correlation_id: UUID) -> Any:
         """Create a resource using the appropriate provider.
@@ -400,6 +406,8 @@ class DependencyMaterializer:
             context=context,
         )
 
+    # Why: raw contract YAML is heterogeneous until the dependency materializer
+    # validates and extracts dependency declarations.
     # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
     def _load_contract_yaml(self, path: Path, correlation_id: UUID) -> dict[str, Any]:
         """Load and parse a contract YAML file.
