@@ -136,7 +136,7 @@ class HandlerFoo:
     assert validate_file(f) == []
 
 
-def test_non_handler_class_not_flagged(tmp_path: Path) -> None:
+def test_gate_is_class_name_agnostic(tmp_path: Path) -> None:
     f = _write(
         tmp_path,
         "service_foo.py",
@@ -148,14 +148,13 @@ class ServiceFoo:
         pass
 """,
     )
-    # ServiceFoo.handle() is not a handler class restriction in this gate
-    # The gate checks ANY class with handle/__init__ — verify it still flags
+    # Gate checks ANY class with handle/__init__, regardless of class name.
     findings = validate_file(f)
     assert len(findings) == 1  # gate is class-name-agnostic
 
 
 def test_main_returns_zero_on_clean_dir(tmp_path: Path) -> None:
-    f = _write(
+    _write(
         tmp_path,
         "handler_clean.py",
         """
