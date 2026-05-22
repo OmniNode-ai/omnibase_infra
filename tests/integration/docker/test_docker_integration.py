@@ -1107,6 +1107,19 @@ class TestDockerComposeProfiles:
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
                 "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
+                # OMN-11673: runtime policy contract vars are required by
+                # compose even when docker/runtime-policy.env is also loaded.
+                "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
+                "BIFROST_VERIFY_ENDPOINTS": "1",
+                "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+                "DEV_RUNTIME_EFFECTS_PORT": "8086",
+                "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
+                "DEV_RUNTIME_MAIN_PORT": "8085",
+                "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+                "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+                "OMNIMEMORY_ENABLED": "false",
+                "OMNIMEMORY_MEMGRAPH_PORT": "7687",
+                "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
             }
         )
 
