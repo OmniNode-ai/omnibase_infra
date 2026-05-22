@@ -24,9 +24,10 @@ Evaluation order (first match wins):
 
 Non-blocking Design
 -------------------
-The handler uses ``httpx.AsyncClient`` with a configurable timeout.
-GitHub API errors are logged and surfaced in ``ModelGitHubPollerResult.errors``
-rather than raising — the poller must not block the runtime tick loop.
+The handler uses the canonical ``GitHubHttpClient`` adapter with a configurable
+timeout. GitHub API errors are logged and surfaced in
+``ModelGitHubPollerResult.errors`` rather than raising — the poller must not
+block the runtime tick loop.
 
 Handler Purity
 --------------
@@ -41,13 +42,14 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-
-import httpx
+from typing import Protocol, cast
 
 from omnibase_core.types import JsonType
+from omnibase_infra.adapters.github.adapter_github_client import GitHubHttpClient
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -69,6 +71,15 @@ logger = logging.getLogger(__name__)
 
 # GitHub API base URL — injectable for testing
 GITHUB_API_BASE = "https://api.github.com"
+
+
+class ProtocolGitHubTriageClient(Protocol):
+    """Subset of GitHubHttpClient used by the PR poller."""
+
+    def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
+        """Fetch open PR payloads with triage fields."""
+        ...
+
 
 # Triage state type alias (matches TriageState in omnibase_core PR model)
 TriageState = str
@@ -216,9 +227,15 @@ class HandlerGitHubApiPoll:
         api_base: str = GITHUB_API_BASE,
         http_timeout: float = 15.0,
         publish_topic: str | None = None,
+        github_token: str | None = None,
+        github_client_factory: Callable[
+            ..., ProtocolGitHubTriageClient
+        ] = GitHubHttpClient,
     ) -> None:
         self._api_base = api_base
         self._http_timeout = http_timeout
+        self._github_token = github_token
+        self._github_client_factory = github_client_factory
         # Topic from contract.yaml; falls back to class default
         self._publish_topic = publish_topic or self._DEFAULT_PUBLISH_TOPIC
         # Per-repo throttle tracker — maps repo identifier to last poll time
@@ -241,14 +258,6 @@ class HandlerGitHubApiPoll:
             ``ModelGitHubPollerResult`` with counts, pending events, and any
             non-fatal errors.
         """
-        token = os.environ.get(config.github_token_env_var, "")
-        headers: dict[str, str] = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
         errors: list[str] = []
         pending_events: list[JsonType] = []
         repos_polled: list[str] = []
@@ -256,38 +265,70 @@ class HandlerGitHubApiPoll:
         now = datetime.now(tz=UTC)
         interval = timedelta(seconds=max(0, config.poll_interval_seconds))
 
-        async with httpx.AsyncClient(
-            headers=headers, timeout=self._http_timeout
-        ) as client:
-            for repo in config.repos:
-                # Throttle: skip if interval has not elapsed
-                last = self._last_polled.get(repo)
-                if last is not None and (now - last) < interval:
-                    continue
+        if not config.repos:
+            return ModelGitHubPollerResult(
+                events_published=0,
+                repos_polled=repos_polled,
+                prs_polled=prs_polled,
+                errors=errors,
+                pending_events=pending_events,
+            )
 
-                try:
-                    pr_events, repo_prs, repo_errors = await self._poll_repo(
-                        client=client,
-                        repo=repo,
-                        stale_hours=config.stale_threshold_hours,
-                    )
-                    self._last_polled[repo] = datetime.now(tz=UTC)
-                    repos_polled.append(repo)
-                    prs_polled += repo_prs
-                    errors.extend(repo_errors)
-                    pending_events.extend(pr_events)
-                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
-                    error_ctx = ModelInfraErrorContext.with_correlation(
-                        transport_type=EnumInfraTransportType.RUNTIME,
-                        operation="poll_repo",
-                        target_name=repo,
-                    )
-                    sanitized = sanitize_error_string(
-                        f"Error polling repo {repo}: {type(exc).__name__} "
-                        f"[correlation_id={error_ctx.correlation_id}]"
-                    )
-                    logger.warning("%s", sanitized)
-                    errors.append(sanitized)
+        try:
+            client = self._github_client_factory(
+                token=self._github_token,
+                rest_base=self._api_base,
+                timeout=self._http_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
+            error_ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="init_github_client",
+                target_name="github_http_client",
+            )
+            sanitized = sanitize_error_string(
+                f"Error initializing GitHub client: {type(exc).__name__} "
+                f"[correlation_id={error_ctx.correlation_id}]"
+            )
+            logger.warning("%s", sanitized)
+            errors.append(sanitized)
+            return ModelGitHubPollerResult(
+                events_published=0,
+                repos_polled=repos_polled,
+                prs_polled=prs_polled,
+                errors=errors,
+                pending_events=pending_events,
+            )
+
+        for repo in config.repos:
+            # Throttle: skip if interval has not elapsed
+            last = self._last_polled.get(repo)
+            if last is not None and (now - last) < interval:
+                continue
+
+            try:
+                pr_events, repo_prs, repo_errors = await self._poll_repo(
+                    client=client,
+                    repo=repo,
+                    stale_hours=config.stale_threshold_hours,
+                )
+                self._last_polled[repo] = datetime.now(tz=UTC)
+                repos_polled.append(repo)
+                prs_polled += repo_prs
+                errors.extend(repo_errors)
+                pending_events.extend(pr_events)
+            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
+                error_ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="poll_repo",
+                    target_name=repo,
+                )
+                sanitized = sanitize_error_string(
+                    f"Error polling repo {repo}: {type(exc).__name__} "
+                    f"[correlation_id={error_ctx.correlation_id}]"
+                )
+                logger.warning("%s", sanitized)
+                errors.append(sanitized)
 
         return ModelGitHubPollerResult(
             events_published=0,  # Runtime publishes from pending_events
@@ -299,7 +340,7 @@ class HandlerGitHubApiPoll:
 
     async def _poll_repo(
         self,
-        client: httpx.AsyncClient,
+        client: ProtocolGitHubTriageClient,
         repo: str,
         stale_hours: int,
     ) -> tuple[list[JsonType], int, list[str]]:
@@ -310,41 +351,16 @@ class HandlerGitHubApiPoll:
         """
         errors: list[str] = []
         pr_events: list[JsonType] = []
-        prs_url = f"{self._api_base}/repos/{repo}/pulls"
-        per_page = 100
-
-        # Paginate: accumulate all open PRs
-        all_prs: list[dict[str, JsonType]] = []
-        page = 1
-        while True:
-            response = await client.get(
-                prs_url,
-                params={"state": "open", "per_page": per_page, "page": page},
-            )
-            response.raise_for_status()
-            batch: list[dict[str, JsonType]] = response.json()
-            all_prs.extend(batch)
-            if len(batch) < per_page:
-                break
-            page += 1
+        all_prs = await asyncio.to_thread(client.fetch_open_prs_for_triage, repo)
 
         for pr in all_prs:
             pr_number = pr["number"]
             if not isinstance(pr_number, int):
                 continue
             try:
-                # Augment with combined status and review states
-                head = pr.get("head", {})
-                sha = str(head.get("sha", "")) if isinstance(head, dict) else ""
-                pr["combined_status"] = await self._get_combined_status(
-                    client, repo, sha
+                triage = compute_triage_state(
+                    cast("dict[str, JsonType]", pr), stale_hours
                 )
-                review_states_raw = await self._get_review_states(
-                    client, repo, pr_number
-                )
-                pr["review_states"] = list(review_states_raw)
-
-                triage = compute_triage_state(pr, stale_hours)
                 # Topic declared in contract.yaml event_bus.publish_topics
                 event_payload: JsonType = {
                     "event_type": self._publish_topic,
@@ -369,47 +385,3 @@ class HandlerGitHubApiPoll:
                 errors.append(sanitized)
 
         return pr_events, len(all_prs), errors
-
-    async def _get_combined_status(
-        self, client: httpx.AsyncClient, repo: str, sha: str
-    ) -> str:
-        """Fetch combined commit status for a given SHA.
-
-        Returns: "success" | "failure" | "pending"
-        """
-        try:
-            url = f"{self._api_base}/repos/{repo}/commits/{sha}/status"
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data: dict[str, JsonType] = resp.json()
-            return str(data.get("state", "pending"))
-        except Exception:  # noqa: BLE001 — boundary: returns degraded response
-            return "pending"
-
-    async def _get_review_states(
-        self, client: httpx.AsyncClient, repo: str, pr_number: int
-    ) -> list[str]:
-        """Fetch review states for a PR.
-
-        Returns list of review state strings (e.g. ["APPROVED", "CHANGES_REQUESTED"]).
-        """
-        try:
-            url = f"{self._api_base}/repos/{repo}/pulls/{pr_number}/reviews"
-            resp = await client.get(url)
-            resp.raise_for_status()
-            reviews: list[dict[str, JsonType]] = resp.json()
-            # Deduplicate by user — last review per user wins
-            latest: dict[str, str] = {}
-            for review in reviews:
-                user_data = review.get("user", {})
-                user = (
-                    str(user_data.get("login", "unknown"))
-                    if isinstance(user_data, dict)
-                    else "unknown"
-                )
-                state = str(review.get("state", ""))
-                if state in {"APPROVED", "CHANGES_REQUESTED"}:
-                    latest[user] = state
-            return list(latest.values())
-        except Exception:  # noqa: BLE001 — boundary: returns degraded response
-            return []

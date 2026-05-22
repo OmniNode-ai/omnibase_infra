@@ -109,10 +109,10 @@ config:
   stale_threshold_hours: 48
   github_token_env_var: "GITHUB_TOKEN"
 dependencies:
-  - name: "httpx"
-    type: "library"
-    library: "httpx"
-    description: "Async HTTP client for GitHub API requests"
+  - name: "github_http_client"
+    type: "service"
+    description: "Canonical GitHubHttpClient adapter for GitHub API requests"
+    required: true
   - name: "github_token"
     type: "environment"
     env_var: "GITHUB_TOKEN"
