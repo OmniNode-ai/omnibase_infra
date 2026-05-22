@@ -687,6 +687,13 @@ class ServiceSavingsEstimator:
             if buf.treatment_group:
                 result["treatment_group"] = buf.treatment_group
 
+            # Always populate cost/model fields required by the savings_estimates
+            # projection handler. For dispatch sessions, use measured costs from the
+            # dispatch eval. For pure injection/LLM sessions, derive from actual_cost_usd
+            # and estimated savings so the projection handler never silently drops events.
+            estimated_total_savings = float(
+                result.get("estimated_total_savings_usd", 0.0)
+            )
             if buf.dispatch_evals:
                 first_dispatch = buf.dispatch_evals[0]
                 result["task_id"] = first_dispatch.task_id
@@ -701,11 +708,20 @@ class ServiceSavingsEstimator:
                 result["model_cloud_baseline"] = counterfactual
                 result["local_cost_usd"] = first_dispatch.dollars_cost
                 result["cloud_cost_usd"] = round(
-                    first_dispatch.dollars_cost
-                    + float(result.get("estimated_total_savings_usd", 0.0)),
+                    first_dispatch.dollars_cost + estimated_total_savings,
                     10,
                 )
-                result["savings_usd"] = result["estimated_total_savings_usd"]
+                result["savings_usd"] = estimated_total_savings
+            else:
+                # Pure injection/LLM session: derive costs from actual_cost_usd.
+                actual_cost = float(result.get("actual_cost_usd", 0.0))
+                result["model_local"] = actual_model_id
+                result["model_cloud_baseline"] = counterfactual
+                result["local_cost_usd"] = actual_cost
+                result["cloud_cost_usd"] = round(
+                    actual_cost + estimated_total_savings, 10
+                )
+                result["savings_usd"] = estimated_total_savings
             return result
         except Exception:
             logger.exception(
