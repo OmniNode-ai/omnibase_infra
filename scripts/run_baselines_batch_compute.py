@@ -35,11 +35,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
+from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
 import yaml  # ONEX_EXCLUDE: manual_yaml - reads node contract for command topic
@@ -126,7 +122,7 @@ def _load_command_model_class() -> type[Any]:
         raise RuntimeError(message)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(cast("ModuleType", module))
+    spec.loader.exec_module(module)
     return cast("type[Any]", module.ModelBaselinesBatchComputeCommand)
 
 
