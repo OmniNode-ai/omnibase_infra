@@ -6,9 +6,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from omnibase_infra.validators.handler_any_signature import main
 
 
+@pytest.mark.integration
 def test_handler_any_signature_gate_runs_against_fixture_tree(tmp_path: Path) -> None:
     handler = tmp_path / "handler_fixture.py"
     handler.write_text(

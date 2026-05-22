@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from omnibase_infra.validators.handler_any_signature import main, validate_file
 
 
@@ -85,6 +83,26 @@ class HandlerFoo:
     findings = validate_file(f)
     assert len(findings) == 1
     assert "client" in findings[0].detail
+
+
+def test_flags_vararg_and_kwarg_any_annotations(tmp_path: Path) -> None:
+    f = _write(
+        tmp_path,
+        "handler_bad.py",
+        """
+from typing import Any
+
+class HandlerFoo:
+    def handle(self, *args: Any, **kwargs: Any) -> None:
+        pass
+""",
+    )
+    findings = validate_file(f)
+    assert len(findings) == 2
+    assert {finding.detail for finding in findings} == {
+        "param 'args: Any'",
+        "param 'kwargs: Any'",
+    }
 
 
 def test_allows_concrete_typed_handle(tmp_path: Path) -> None:

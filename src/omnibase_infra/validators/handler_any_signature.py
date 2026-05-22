@@ -112,6 +112,10 @@ def validate_file(path: Path) -> list[AnySignatureFinding]:
                 continue
 
             all_args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+            if node.args.vararg is not None:
+                all_args.append(node.args.vararg)
+            if node.args.kwarg is not None:
+                all_args.append(node.args.kwarg)
             for arg in all_args:
                 if arg.arg in ("self", "cls"):
                     continue
