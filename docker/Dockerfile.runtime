@@ -208,7 +208,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # required dependency but we use --no-deps for the source install, so it must
 # be present first. The GitHub archive source avoids recursive submodule
 # checkout from the repository while PyPI publishing is automated.
-ARG OMNIBASE_COMPAT_REF="a0aa0045083e750fd29ad1584fbd028bce95d24e"
+ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"
