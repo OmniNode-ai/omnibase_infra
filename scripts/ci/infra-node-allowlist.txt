@@ -57,6 +57,8 @@ src/omnibase_infra/nodes/node_contract_persistence_effect/handlers/handler_postg
 src/omnibase_infra/nodes/node_contract_persistence_effect/handlers/handler_postgres_mark_stale.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_contract_persistence_effect/handlers/handler_postgres_topic_update.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_contract_resolver_bridge/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_contract_validate_compute/handlers/__init__.py  # OMN-11550: CI contract validation is infra governance; preserve compatibility while callers migrate from omnibase_core service.
+src/omnibase_infra/nodes/node_contract_validate_compute/handlers/handler_contract_validate.py  # OMN-11550: CI contract validation is infra governance; preserve compatibility while callers migrate from omnibase_core service.
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_conflict.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_decision.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
