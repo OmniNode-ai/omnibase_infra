@@ -35,8 +35,11 @@ import logging
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
 from uuid import UUID, uuid4
 
 import yaml  # ONEX_EXCLUDE: manual_yaml - reads node contract for command topic
@@ -60,7 +63,8 @@ class _BaselinesBatchCommand(Protocol):
 
     correlation_id: UUID
 
-    def model_dump(self, *, mode: str) -> dict[str, object]: ...
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        pass
 
 
 def _command_model_module_path() -> Path:

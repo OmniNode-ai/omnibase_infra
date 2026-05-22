@@ -138,11 +138,6 @@ def test_envelope_schema_is_valid_for_bus_consumption() -> None:
 def test_command_model_loads_via_importlib_isolation() -> None:
     """The script must load ModelBaselinesBatchComputeCommand without importing the full node."""
     module = _load_script()
-    command_cls = (
-        module.build_command.__func__
-        if hasattr(module.build_command, "__func__")
-        else None
-    )  # type: ignore[attr-defined]
 
     # Use the module's public build_command function with a known correlation_id
     from uuid import UUID
