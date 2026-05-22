@@ -59,6 +59,7 @@ readonly RUNTIME_SERVICES=(
     omninode-runtime
     runtime-effects
     runtime-worker
+    projection-api
     agent-actions-consumer
     skill-lifecycle-consumer
     intelligence-api
@@ -448,6 +449,20 @@ read_git_sha() {
     fi
 
     echo "${sha}"
+}
+
+read_repo_ref_or_main() {
+    # Return a full git SHA for sibling workspace repos when available. Docker
+    # build args use the value in install URLs, so "main" is only a fallback.
+    local repo_path="$1"
+    local sha
+
+    sha="$(git -C "${repo_path}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "${sha}" ]]; then
+        echo "${sha}"
+    else
+        echo "main"
+    fi
 }
 
 check_git_dirty() {
@@ -1168,6 +1183,15 @@ build_images() {
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    local omni_home="${OMNI_HOME:-}"
+    local compat_ref="main"
+    local omnimarket_ref="main"
+    local occ_ref="main"
+    if [[ -n "${omni_home}" ]]; then
+        compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
+        omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
+        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control")"
+    fi
 
     # Build timeout in seconds (default: 15 minutes). Prevents the known issue
     # where `docker compose build` hangs indefinitely after images are built.
@@ -1185,9 +1209,13 @@ build_images() {
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
         --build-arg "COMPOSE_PROJECT=${compose_project}"
+        --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
+        --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
+        --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
 
@@ -1340,7 +1368,10 @@ print_compose_commands() {
     log_info "    --build-arg VCS_REF=${git_sha} \\"
     log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\") \\"
     log_info "    --build-arg RUNTIME_SOURCE_HASH=${git_sha} \\"
-    log_info "    --build-arg COMPOSE_PROJECT=${compose_project}"
+    log_info "    --build-arg COMPOSE_PROJECT=${compose_project} \\"
+    log_info "    --build-arg OMNIBASE_COMPAT_REF=\${OMNIBASE_COMPAT_REF:-main} \\"
+    log_info "    --build-arg OMNIMARKET_REF=\${OMNIMARKET_REF:-main} \\"
+    log_info "    --build-arg ONEX_CHANGE_CONTROL_REF=\${ONEX_CHANGE_CONTROL_REF:-main}"
     log_info ""
     log_info "Restart runtime services:"
     log_info "  docker compose \\"

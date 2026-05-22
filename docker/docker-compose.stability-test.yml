@@ -149,6 +149,19 @@ services:
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
       - "com.omninode.runtime.id=stability-test-effects"
+  projection-api:
+    container_name: omnimarket-stability-test-projection-api
+    restart: unless-stopped
+    environment:
+      ONEX_ENVIRONMENT: stability-test
+      KAFKA_ENVIRONMENT: stability-test
+      OTEL_SERVICE_NAME: omnimarket-stability-test-projection-api
+    ports: !override
+      - "${STABILITY_TEST_PROJECTION_API_PORT:-13002}:3002"
+    labels:
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-11542"
+      - "com.omninode.service=projection-api"
   runtime-worker:
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped

@@ -720,6 +720,40 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================
+  # OmniMarket Projection API (Runtime Profile)
+  # ==========================================================================
+  # Serves reducer-owned projection snapshots. This is an API over materialized
+  # Postgres projection state; it is not an authority over client state.
+  projection-api:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-projection-api
+    profiles: ["runtime", "full"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["omnimarket-projection-api"]
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omnimarket-projection-api
+      RUNTIME_PROFILE: projection-api
+    ports:
+      - "${PROJECTION_API_PORT:-3002}:3002"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "com.omninode.service=projection-api"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
+  # ==========================================================================
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
   # Scalable worker containers for parallel compute operations.

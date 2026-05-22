@@ -5,8 +5,9 @@
 Without this, Docker's layer cache silently serves stale COPY src/ layers even when
 git is at the correct SHA (root cause of PR #1231 verification failure).
 
-Also covers OMN-10728: OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF must be passed as
-full commit SHAs so the uv cache mount (keyed on URL) misses when main advances.
+Also covers OMN-10728 / OMN-11542: OMNIBASE_COMPAT_REF, OMNIMARKET_REF, and
+ONEX_CHANGE_CONTROL_REF must be passed as full commit SHAs so the uv cache mount
+(keyed on URL) misses when main advances.
 """
 
 from __future__ import annotations
@@ -129,9 +130,11 @@ class TestCacheBust:
 
 
 class TestUvCacheBustPluginRefs:
-    """OMN-10728: _compose_build must pass OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF
-    as full commit SHAs so the BuildKit uv cache mount (keyed on URL) misses when
-    main advances — preventing stale plugin sdists from being served.
+    """Builds must pass plugin refs as full SHAs for BuildKit cache invalidation.
+
+    OMN-10728 covered omnimarket and onex_change_control. OMN-11542 adds
+    omnibase_compat because runtime evidence DTOs were stale even though the
+    installed package version looked current.
     """
 
     def _fake_run_ok(
@@ -175,6 +178,42 @@ class TestUvCacheBustPluginRefs:
         }
         assert f"OMNIMARKET_REF={sentinel_sha}" in build_args, (
             f"Expected OMNIMARKET_REF={sentinel_sha!r} in build args; got {build_args}"
+        )
+
+    def test_compose_build_passes_omnibase_compat_ref_build_arg(self) -> None:
+        """_compose_build must include --build-arg OMNIBASE_COMPAT_REF=<sha>."""
+        executor = DeployExecutor()
+        sentinel_sha = "face1234abcd5678"
+
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        with (
+            patch.dict("os.environ", {"OMNI_HOME": "/workspace/omni_home"}),
+            patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(
+                DeployExecutor, "_resolve_plugin_ref", return_value=sentinel_sha
+            ),
+        ):
+            executor._compose_build(Scope.RUNTIME, "abc123", _noop_phase_update)
+
+        build_cmds = [c for c in captured_cmds if "build" in c]
+        assert build_cmds, "Expected at least one 'docker compose build' call"
+        build_cmd = build_cmds[0]
+        build_args = {
+            build_cmd[i + 1]
+            for i, tok in enumerate(build_cmd)
+            if tok == "--build-arg" and i + 1 < len(build_cmd)
+        }
+        assert f"OMNIBASE_COMPAT_REF={sentinel_sha}" in build_args, (
+            f"Expected OMNIBASE_COMPAT_REF={sentinel_sha!r} in build args; got {build_args}"
         )
 
     def test_compose_build_passes_onex_change_control_ref_build_arg(self) -> None:
@@ -268,6 +307,9 @@ class TestUvCacheBustPluginRefs:
         }
         assert "OMNIMARKET_REF=main" in build_args, (
             f"Expected OMNIMARKET_REF=main when OMNI_HOME unset; got {build_args}"
+        )
+        assert "OMNIBASE_COMPAT_REF=main" in build_args, (
+            f"Expected OMNIBASE_COMPAT_REF=main when OMNI_HOME unset; got {build_args}"
         )
         assert "ONEX_CHANGE_CONTROL_REF=main" in build_args, (
             f"Expected ONEX_CHANGE_CONTROL_REF=main when OMNI_HOME unset; got {build_args}"

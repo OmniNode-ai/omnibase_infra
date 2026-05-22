@@ -1747,8 +1747,9 @@ async def subscribe_wired_contract_topics(
         return {}
 
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
-    subscriptions_by_contract: dict[str, tuple[str, ...]] = {}
 
+    # Collect eligible contracts in priority order (projection appliers first).
+    eligible: list[tuple[str, ModelDiscoveredContract]] = []
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
@@ -1771,16 +1772,27 @@ async def subscribe_wired_contract_topics(
                 contract.name,
             )
             continue
+        eligible.append((result.contract_name, contract))
+
+    # Subscribe all contracts concurrently.  Within each contract,
+    # _subscribe_contract_topics already parallelises its own topics.
+    # Together this reduces cold-start from O(contracts * topics * t) to O(t).
+    async def _subscribe_contract(
+        name: str, contract: ModelDiscoveredContract
+    ) -> tuple[str, tuple[str, ...]]:
         topics_subscribed = await _subscribe_contract_topics(
             contract=contract,
             dispatch_engine=dispatch_engine,
             event_bus=event_bus,
             environment=environment,
-            result_applier=(result_appliers_by_contract or {}).get(contract.name),
+            result_applier=(result_appliers_by_contract or {}).get(name),
         )
-        subscriptions_by_contract[contract.name] = tuple(topics_subscribed)
+        return name, tuple(topics_subscribed)
 
-    return subscriptions_by_contract
+    results = await asyncio.gather(
+        *(_subscribe_contract(name, contract) for name, contract in eligible)
+    )
+    return dict(results)
 
 
 def _prioritize_subscription_results(
@@ -2094,7 +2106,8 @@ async def _subscribe_contract_topics(
         node_identity, EnumConsumerGroupPurpose.CONSUME
     )
 
-    topics_subscribed: list[str] = []
+    # Build callbacks for all topics first (synchronous, no I/O).
+    topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
     for topic in contract.event_bus.subscribe_topics:
         if _is_raw_event_projection_contract(contract):
             if effective_result_applier is None:
@@ -2113,18 +2126,31 @@ async def _subscribe_contract_topics(
                 dispatch_engine,  # type: ignore[arg-type]
                 result_applier=effective_result_applier,
             )
+        topic_callbacks.append((topic, callback))
+
+    # Subscribe all topics concurrently.  Each subscribe() triggers a Kafka
+    # consumer group-join (5-10 s per topic); running them in parallel reduces
+    # cold-start time from O(n*t) to O(t) for n topics.
+    async def _subscribe_one(
+        topic: str,
+        cb: Callable[..., Awaitable[None]],
+    ) -> str:
         await typed_bus.subscribe(
             topic=topic,
             node_identity=node_identity,
-            on_message=callback,
+            on_message=cb,
         )
-        topics_subscribed.append(topic)
         logger.info(
             "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
             topic,
             consumer_group,
             contract.name,
         )
+        return topic
+
+    topics_subscribed: list[str] = list(
+        await asyncio.gather(*(_subscribe_one(t, cb) for t, cb in topic_callbacks))
+    )
 
     return topics_subscribed
 

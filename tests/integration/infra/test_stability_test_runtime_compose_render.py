@@ -31,6 +31,7 @@ EXPECTED_RENDERED_SERVICES = {
     "intelligence-migration",
     "migration-gate",
     "keycloak",
+    "projection-api",
     *REQUIRED_RUNTIME_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
@@ -50,6 +51,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "omninode-runtime": {"18085"},
     "runtime-effects": {"18086"},
     "runtime-worker": set(),
+    "projection-api": {"13002"},
     "forward-migration": set(),
     "intelligence-migration": set(),
     "migration-gate": set(),
@@ -91,6 +93,7 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-phoenix",
     "omnibase-infra-autoheal",
     "omnibase-infra-keycloak",
+    "omnimarket-projection-api",
 }
 
 

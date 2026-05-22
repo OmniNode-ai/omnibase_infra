@@ -664,9 +664,10 @@ class DeployExecutor:
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
 
-        Also passes OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF as full commit
-        SHAs so the uv cache mount (keyed on URL) misses and fetches fresh code
-        every time main advances (OMN-10728).
+        Also passes OMNIBASE_COMPAT_REF, OMNIMARKET_REF, and
+        ONEX_CHANGE_CONTROL_REF as full commit SHAs so the uv cache mount
+        (keyed on URL) misses and fetches fresh code every time main advances
+        (OMN-10728 / OMN-11542).
         """
         timeout = PHASE_TIMEOUTS.get(
             Phase.CORE if scope == Scope.CORE else Phase.RUNTIME, 300
@@ -677,13 +678,19 @@ class DeployExecutor:
         omnimarket_ref = (
             self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "main"
         )
+        compat_ref = (
+            self._resolve_plugin_ref(f"{omni_home}/omnibase_compat")
+            if omni_home
+            else "main"
+        )
         occ_ref = (
             self._resolve_plugin_ref(f"{omni_home}/onex_change_control")
             if omni_home
             else "main"
         )
         logger.info(
-            "_compose_build: OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            "_compose_build: OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            compat_ref[:12],
             omnimarket_ref[:12],
             occ_ref[:12],
         )
@@ -700,6 +707,8 @@ class DeployExecutor:
             "build",
             "--build-arg",
             f"GIT_SHA={git_sha}",
+            "--build-arg",
+            f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
             "--build-arg",

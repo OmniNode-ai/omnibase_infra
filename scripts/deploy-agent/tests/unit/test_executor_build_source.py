@@ -171,3 +171,8 @@ def test_runtime_dockerfile_validates_and_stamps_build_source() -> None:
     assert "BUILD_SOURCE=workspace requires OMNI_HOME" in dockerfile
     assert 'com.omninode.build_source="${BUILD_SOURCE}"' in dockerfile
     assert "BUILD_SOURCE=${BUILD_SOURCE}" in dockerfile
+    assert "ARG OMNIBASE_COMPAT_REF=" in dockerfile
+    assert (
+        "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"
+        in dockerfile
+    )

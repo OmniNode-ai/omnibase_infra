@@ -1419,6 +1419,7 @@ class EventBusKafka(
         # Validate topic name
         self._validate_topic_name(topic, correlation_id)
 
+        need_consumer_start = False
         async with self._lock:
             # Track readiness-required topics (OMN-1931)
             if required_for_readiness:
@@ -1429,16 +1430,28 @@ class EventBusKafka(
                 (effective_group_id, subscription_id, on_message)
             )
 
-            # Start a distinct Kafka consumer for each (topic, group_id) pair.
-            # Multiple callbacks may still fan out behind the same exact group.
+            # Determine whether we need to start a new consumer for this
+            # (topic, group_id) pair.  Mark pending inside the lock so that
+            # concurrent subscribe() calls on the same key see the reservation
+            # immediately and do not try to start a duplicate consumer.
             consumer_key = (topic, effective_group_id)
             if (
                 consumer_key not in self._group_consumers
                 and consumer_key not in self._pending_consumer_keys
                 and self._started
             ):
-                await self._start_consumer_for_topic(topic, effective_group_id)
+                self._pending_consumer_keys.add(consumer_key)
+                need_consumer_start = True
 
+        # Start the consumer outside the lock: consumer.start() involves
+        # a Kafka group-join round-trip (5-10 s per topic) and must not hold
+        # the shared lock, which would serialize all concurrent subscribe()
+        # calls during cold start.  _pending_consumer_keys (set above under
+        # the lock) guards against duplicate starts across concurrent callers.
+        if need_consumer_start:
+            await self._start_consumer_for_topic_unlocked(topic, effective_group_id)
+
+        async with self._lock:
             logger.debug(
                 "Subscriber added",
                 extra={
@@ -1485,9 +1498,34 @@ class EventBusKafka(
     async def _start_consumer_for_topic(self, topic: str, group_id: str) -> None:
         """Start a Kafka consumer for a specific topic.
 
-        This method creates and starts a Kafka consumer for the specified topic,
-        then launches a background task to consume messages. All startup failures
-        are logged and propagated to the caller.
+        Guards against duplicate starts, then delegates to
+        ``_start_consumer_for_topic_unlocked``.  Callers that have already
+        added the key to ``_pending_consumer_keys`` (e.g. ``subscribe()``)
+        should call ``_start_consumer_for_topic_unlocked`` directly to avoid
+        the redundant pending check.
+        """
+        consumer_key = (topic, group_id)
+        if (
+            consumer_key in self._group_consumers
+            or consumer_key in self._pending_consumer_keys
+        ):
+            return
+        self._pending_consumer_keys.add(consumer_key)
+        await self._start_consumer_for_topic_unlocked(topic, group_id)
+
+    async def _start_consumer_for_topic_unlocked(
+        self, topic: str, group_id: str
+    ) -> None:
+        """Start a Kafka consumer without holding the shared lock.
+
+        The caller MUST have already added ``(topic, group_id)`` to
+        ``_pending_consumer_keys`` before calling this method.  This invariant
+        is what prevents duplicate consumers from being created by concurrent
+        ``subscribe()`` calls.
+
+        This method performs the slow part of consumer startup (Kafka
+        group-join, partition assignment) outside ``self._lock`` so that many
+        topics can be subscribed concurrently via ``asyncio.gather``.
 
         Args:
             topic: Topic to consume from
@@ -1510,12 +1548,6 @@ class EventBusKafka(
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
         consumer_key = (topic, group_id)
-        if (
-            consumer_key in self._group_consumers
-            or consumer_key in self._pending_consumer_keys
-        ):
-            return
-        self._pending_consumer_keys.add(consumer_key)
 
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
