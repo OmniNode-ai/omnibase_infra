@@ -258,7 +258,7 @@ class InfraRoutingDecisionsConsumer:
                 "bootstrap_servers": self.config.kafka_bootstrap_servers,
                 "group_id": self.config.kafka_group_id,
                 "topics": self.config.topics,
-                "postgres_dsn": mask_dsn_password(self.config.postgres_dsn),
+                "postgres_configured": bool(self.config.postgres_dsn),
                 "batch_size": self.config.batch_size,
             },
         )
