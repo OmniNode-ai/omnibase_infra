@@ -25,11 +25,11 @@ output_model:
   module: "omnibase_core.models.validation.model_contract_validation_result"
   description: "Validation result with validity, score, violations, warnings, and suggestions."
 handler_routing:
-  routing_strategy: "single_handler"
+  routing_strategy: "operation_match"
   handlers:
     - operation: "validate_contract"
       handler:
-        name: "handle_contract_validate"
+        name: "HandlerContractValidate"
         function: "handle_contract_validate"
         module: "omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate"
         type: "async"
@@ -61,6 +61,7 @@ health_check:
   enabled: false
   description: "Pure compute node — no external health check required."
 metadata:
+  description: "Deterministic contract validation compute boundary for contract YAML, files, and model compliance scoring."
   ticket: "OMN-11550"
   author: "OmniNode Team"
   tags:

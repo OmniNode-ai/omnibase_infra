@@ -9,9 +9,22 @@ from omnibase_core.models.validation.model_contract_validation_result import (
     ModelContractValidationResult,
 )
 from omnibase_core.services.service_contract_validator import ServiceContractValidator
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_contract_validate_compute.models import (
     ModelContractValidateInput,
 )
+
+
+class HandlerContractValidate:
+    """Handler descriptor for deterministic contract validation operations."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
 
 async def handle_contract_validate(
@@ -38,4 +51,4 @@ async def handle_contract_validate(
     )
 
 
-__all__ = ["handle_contract_validate"]
+__all__ = ["HandlerContractValidate", "handle_contract_validate"]
