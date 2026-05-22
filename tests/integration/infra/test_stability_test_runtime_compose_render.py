@@ -57,6 +57,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
     "keycloak": {"38080"},
+    "projection-api": {"13002"},
 }
 PRODUCTION_PUBLISHED_PORTS = {
     "5436",
@@ -93,6 +94,7 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-phoenix",
     "omnibase-infra-autoheal",
     "omnibase-infra-keycloak",
+    "omnimarket-projection-api",
 }
 
 
