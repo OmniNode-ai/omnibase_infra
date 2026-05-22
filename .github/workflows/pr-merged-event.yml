@@ -24,6 +24,7 @@ on:
     types: [closed]
     branches:
       - main
+      - dev
 
 jobs:
   publish-pr-merged-event:
