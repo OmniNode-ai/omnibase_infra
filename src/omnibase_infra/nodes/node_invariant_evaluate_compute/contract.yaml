@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_invariant_evaluate_compute"
+contract_name: "node_invariant_evaluate_compute"
+node_name: "node_invariant_evaluate_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+status: "active"
+description: >
+  Compute node for deterministic invariant evaluation against execution outputs. Preserves ReDoS protection and LRU schema validator caching inside a per-request evaluator so mutable caches are not shared across threads.
+
+input_model:
+  name: "ModelInvariantEvaluateInput"
+  module: "omnibase_infra.nodes.node_invariant_evaluate_compute.models"
+  description: "Single-invariant evaluation input."
+output_model:
+  name: "ModelInvariantResult"
+  module: "omnibase_core.models.invariant"
+  description: "Per-invariant evaluation result."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "invariant.evaluate"
+      handler:
+        name: "handle_invariant_evaluate"
+        function: "handle_invariant_evaluate"
+        module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
+        type: "async"
+      input_model: "ModelInvariantEvaluateInput"
+      output_model: "ModelInvariantResult"
+      description: "Evaluate one invariant against an output payload."
+    - operation: "invariant.evaluate_batch"
+      handler:
+        name: "handle_invariant_evaluate_batch"
+        function: "handle_invariant_evaluate_batch"
+        module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
+        type: "async"
+      input_model: "ModelInvariantEvaluateBatchInput"
+      output_model: "list[ModelInvariantResult]"
+      description: "Evaluate an invariant set and return ordered results."
+    - operation: "invariant.evaluate_all"
+      handler:
+        name: "handle_invariant_evaluate_all"
+        function: "handle_invariant_evaluate_all"
+        module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
+        type: "async"
+      input_model: "ModelInvariantEvaluateAllInput"
+      output_model: "ModelEvaluationSummary"
+      description: "Evaluate an invariant set and return summary statistics."
+io_operations:
+  - operation: "invariant.evaluate"
+    description: "Evaluate one invariant."
+    input_model: "ModelInvariantEvaluateInput"
+    output_model: "ModelInvariantResult"
+  - operation: "invariant.evaluate_batch"
+    description: "Evaluate all selected invariants in order."
+    input_model: "ModelInvariantEvaluateBatchInput"
+    output_model: "list[ModelInvariantResult]"
+  - operation: "invariant.evaluate_all"
+    description: "Evaluate enabled invariants with aggregate summary statistics."
+    input_model: "ModelInvariantEvaluateAllInput"
+    output_model: "ModelEvaluationSummary"
+dependencies:
+  - name: "jsonschema"
+    type: "library"
+    module: "jsonschema"
+    description: "Compiled JSON schema validation for schema invariants."
+    required: true
+health_check:
+  enabled: false
+  description: "Pure compute node; no external health check required."
+metadata:
+  ticket: "OMN-11548"
+  author: "OmniNode Team"
+  tags:
+    - compute
+    - invariant
+    - validation
+    - migration
