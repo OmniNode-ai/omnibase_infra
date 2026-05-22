@@ -157,7 +157,9 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     compose_text = "\n".join(_step_text(s) for s in compose_steps)
     assert "docker network connect omnibase-infra-network" in compose_text
     assert "runner_on_compose_network=true" in compose_text
-    assert "runner appears containerized but could not join" in compose_text
+    assert "compose service endpoints reachable by docker dns" in compose_text
+    assert "compose service endpoints reachable by host-published ports" in compose_text
+    assert "unreachable from the runner by docker dns or localhost" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
     assert "kafka_bootstrap_servers=localhost:19092" in compose_text
     assert "omnibase-infra-postgres:5432" in compose_text
