@@ -65,6 +65,9 @@ _PRE_GROWTH_ENV_VARS = frozenset(
         "LLM_DEEPSEEK_R1_URL",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",
+        # OMN-11595: runtime-effects owns GitHub API polling and must validate
+        # its deploy-time token requirement with the rest of the effects bundle.
+        "GITHUB_TOKEN",
         # omnidash projection DSN: present in ~/.omnibase/.env alongside
         # POSTGRES_PASSWORD; used by intelligence-api and projection consumers.
         "OMNIDASH_ANALYTICS_DB_URL",
@@ -112,6 +115,14 @@ def test_runtime_core_required_env_is_subset_of_pre_growth() -> None:
     assert not drift, (
         f"runtime-core requires env vars not present at 0.34.0 baseline: {drift}"
     )
+
+
+@pytest.mark.unit
+def test_runtime_effects_requires_github_token() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime-core"])
+    assert "runtime-effects" in resolved.service_names
+    assert "GITHUB_TOKEN" in resolved.required_env
 
 
 @pytest.mark.unit

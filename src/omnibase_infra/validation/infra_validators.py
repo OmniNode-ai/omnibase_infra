@@ -769,59 +769,6 @@ def _create_filtered_result(
     )
 
 
-def validate_infra_contract_deep(
-    contract_path: PathInput,
-) -> ModelContractValidationResult:
-    """
-    Perform deep contract validation for ONEX compliance.
-
-    Uses validate_yaml_file() from omnibase_core for comprehensive contract
-    checking suitable for autonomous code generation.
-
-    Args:
-        contract_path: Path to the contract YAML file.
-
-    Returns:
-        ModelContractValidationResult with validation status, score, and any errors.
-
-    Raises:
-        OnexError: If YAML validation fails with an unexpected error.
-    """
-    from uuid import uuid4
-
-    from omnibase_core.enums import EnumCoreErrorCode
-    from omnibase_core.errors import OnexError
-
-    correlation_id = uuid4()
-
-    # Use the validation API from omnibase_core 0.6.x directly
-    try:
-        result = validate_yaml_file(Path(contract_path))
-    except Exception as e:
-        raise OnexError(
-            message=f"YAML validation failed for {contract_path}: {e}",
-            error_code=EnumCoreErrorCode.VALIDATION_ERROR,
-            correlation_id=correlation_id,
-            contract_path=str(contract_path),
-        ) from e
-
-    # Return a ModelContractValidationResult
-    # The API may return a different type, so we adapt it
-    if isinstance(result, ModelContractValidationResult):
-        return result
-
-    # If result is a different type, wrap it in ModelContractValidationResult
-    # Default to is_valid=False for unknown result types to avoid silently masking failures
-    # Check 'is_valid' first, then 'passed' as fallback (some validators use passed)
-    return ModelContractValidationResult(
-        is_valid=getattr(result, "is_valid", getattr(result, "passed", False)),
-        score=getattr(result, "score", 0.0),
-        violations=getattr(result, "violations", getattr(result, "errors", [])),
-        warnings=getattr(result, "warnings", []),
-        interface_version=ModelSemVer(major=1, minor=0, patch=0),
-    )
-
-
 # ==============================================================================
 # Skip Directory Configuration
 # ==============================================================================

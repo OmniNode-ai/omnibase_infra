@@ -51,12 +51,12 @@ EXPECTED_PUBLISHED_PORTS = {
     "omninode-runtime": {"18085"},
     "runtime-effects": {"18086"},
     "runtime-worker": set(),
+    "projection-api": {"13002"},
     "forward-migration": set(),
     "intelligence-migration": set(),
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
     "keycloak": {"38080"},
-    "projection-api": {"13002"},
 }
 PRODUCTION_PUBLISHED_PORTS = {
     "5436",
