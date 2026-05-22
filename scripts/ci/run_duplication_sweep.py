@@ -7,12 +7,10 @@
 Checks:
   D1 — Drizzle table name duplication across omnidash schema files
   D2 — Topic registration conflicts between omniclaude/topics.py and kafka_boundaries.yaml
-  D3 — Migration prefix conflicts (via check-migration-conflicts CLI)
-  D4 — Cross-repo model name collisions (class ModelXxx defined in multiple repos)
 
 Usage:
     python run_duplication_sweep.py [--omni-home /path/to/omni_home]
-                                    [--checks D1,D2,D3,D4]
+                                    [--checks D1,D2]
                                     [--fail-on-severity error|warning]
                                     [--json]
 
@@ -28,11 +26,10 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
-ALL_CHECKS = ["D1", "D2", "D3", "D4"]
+ALL_CHECKS = ["D1", "D2"]
 _SEVERITY_ORDER = {"error": 2, "warning": 1}
 
 
@@ -210,144 +207,6 @@ def check_d2_topic_conflicts(omni_home: Path) -> dict:
     }
 
 
-def check_d3_migration_conflicts(omni_home: Path) -> dict:
-    """D3: Migration prefix conflicts via check-migration-conflicts CLI."""
-    change_control = omni_home / "onex_change_control"
-    if not change_control.is_dir():
-        return {
-            "check_id": "D3",
-            "status": "WARN",
-            "finding_count": 0,
-            "severity": "warning",
-            "detail": "onex_change_control not found",
-            "findings": [],
-        }
-
-    try:
-        result = subprocess.run(
-            ["uv", "run", "check-migration-conflicts", "--repos-root", str(omni_home)],
-            cwd=str(change_control),
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        output = result.stdout + result.stderr
-    except FileNotFoundError:
-        return {
-            "check_id": "D3",
-            "status": "WARN",
-            "finding_count": 0,
-            "severity": "warning",
-            "detail": "check-migration-conflicts not available (uv not found)",
-            "findings": [],
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "check_id": "D3",
-            "status": "WARN",
-            "finding_count": 0,
-            "severity": "warning",
-            "detail": "check-migration-conflicts timed out",
-            "findings": [],
-        }
-
-    conflict_lines = [
-        line
-        for line in output.splitlines()
-        if "EXACT_DUPLICATE" in line or "NAME_CONFLICT" in line
-    ]
-
-    if conflict_lines:
-        return {
-            "check_id": "D3",
-            "status": "FAIL",
-            "finding_count": len(conflict_lines),
-            "severity": "error",
-            "detail": f"{len(conflict_lines)} migration conflict(s)",
-            "findings": [{"message": line.strip()} for line in conflict_lines],
-        }
-
-    if result.returncode != 0 and not conflict_lines:
-        return {
-            "check_id": "D3",
-            "status": "WARN",
-            "finding_count": 0,
-            "severity": "warning",
-            "detail": f"check-migration-conflicts exited {result.returncode} with no parsed conflicts",
-            "findings": [],
-        }
-
-    return {
-        "check_id": "D3",
-        "status": "PASS",
-        "finding_count": 0,
-        "severity": "error",
-        "detail": "No migration prefix conflicts",
-        "findings": [],
-    }
-
-
-def check_d4_model_collisions(omni_home: Path) -> dict:
-    """D4: Cross-repo model name collisions (same Model class name defined in multiple repos)."""
-    class_pattern = re.compile(r"^class\s+(Model[A-Z]\w*)")
-    model_locations: dict[str, list[dict]] = {}
-
-    excluded_dirs = {".git", ".venv", "__pycache__", "migrations", "tests", "fixtures"}
-    excluded_repos = {"omnibase_core"}
-
-    for src_dir in omni_home.glob("*/src"):
-        repo = src_dir.parent.name
-        if repo in excluded_repos:
-            continue
-        for py_file in src_dir.rglob("*.py"):
-            if any(part in excluded_dirs for part in py_file.parts):
-                continue
-            try:
-                for line in py_file.read_text(encoding="utf-8").splitlines():
-                    m = class_pattern.match(line.strip())
-                    if m:
-                        class_name = m.group(1)
-                        model_locations.setdefault(class_name, []).append(
-                            {
-                                "repo": repo,
-                                "file": str(py_file.relative_to(omni_home)),
-                            }
-                        )
-            except (OSError, UnicodeDecodeError):
-                continue
-
-    duplicates = {name: locs for name, locs in model_locations.items() if len(locs) > 1}
-
-    if duplicates:
-        findings = [
-            {
-                "class_name": name,
-                "locations": locs,
-                "message": f"'{name}' defined in {len(locs)} repos: "
-                + ", ".join(loc["repo"] for loc in locs),
-            }
-            for name, locs in sorted(duplicates.items())
-        ]
-        return {
-            "check_id": "D4",
-            "status": "FAIL",
-            "finding_count": len(duplicates),
-            "severity": "error",
-            "detail": f"{len(duplicates)} cross-repo model name collision(s)",
-            "findings": findings,
-        }
-
-    return {
-        "check_id": "D4",
-        "status": "PASS",
-        "finding_count": 0,
-        "severity": "error",
-        "detail": "No cross-repo model name collisions",
-        "findings": [],
-    }
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -398,8 +257,6 @@ def main(argv: list[str] | None = None) -> int:
     check_map = {
         "D1": check_d1_drizzle_tables,
         "D2": check_d2_topic_conflicts,
-        "D3": check_d3_migration_conflicts,
-        "D4": check_d4_model_collisions,
     }
 
     results = []

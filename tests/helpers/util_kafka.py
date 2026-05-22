@@ -395,48 +395,6 @@ def _is_likely_bare_ipv6(address: str, warn_ambiguous: bool = True) -> bool:
     return is_bare_ipv6
 
 
-def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
-    """Normalize a bootstrap server string, wrapping bare IPv6 addresses in brackets.
-
-    Kafka bootstrap servers require IPv6 addresses to be enclosed in brackets
-    when a port is specified (RFC 3986 URI format). This function ensures bare
-    IPv6 addresses are properly formatted for Kafka client connections.
-
-    Args:
-        bootstrap_server: A single bootstrap server string (host:port or bare IPv6).
-
-    Returns:
-        The normalized bootstrap server string with IPv6 addresses bracketed.
-
-    Examples:
-        >>> normalize_ipv6_bootstrap_server("localhost:9092")
-        'localhost:9092'
-        >>> normalize_ipv6_bootstrap_server("[::1]:9092")
-        '[::1]:9092'
-        >>> normalize_ipv6_bootstrap_server("::1")
-        '[::1]:19092'
-        >>> normalize_ipv6_bootstrap_server("2001:db8::1")
-        '[2001:db8::1]:19092'
-        >>> normalize_ipv6_bootstrap_server("192.168.1.1:9092")  # kafka-fallback-ok
-        '192.168.1.1:9092'  # kafka-fallback-ok
-    """
-    if not bootstrap_server or not bootstrap_server.strip():
-        return bootstrap_server
-
-    stripped = bootstrap_server.strip()
-
-    # Already bracketed IPv6 - return as-is
-    if stripped.startswith("["):
-        return stripped
-
-    # Bare IPv6 - wrap in brackets and add default port
-    if _is_likely_bare_ipv6(stripped):
-        return f"[{stripped}]:{KAFKA_DEFAULT_PORT}"
-
-    # Standard format (hostname:port or IPv4:port) - return as-is
-    return stripped
-
-
 def check_host_reachability(
     host: str,
     port: int,
@@ -1535,7 +1493,6 @@ __all__ = [
     "AIOKAFKA_TOPIC_ERRORS_FULL_TUPLE_LEN",
     # Utilities
     "parse_bootstrap_servers",
-    "normalize_ipv6_bootstrap_server",
     "check_host_reachability",
     # Validation
     "validate_bootstrap_servers",

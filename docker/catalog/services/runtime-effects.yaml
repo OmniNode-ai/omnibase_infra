@@ -15,6 +15,7 @@ required_env:
   - LLM_DEEPSEEK_R1_URL
   - LLM_ENDPOINT_CIDR_ALLOWLIST
   - LOCAL_LLM_SHARED_SECRET
+  - GITHUB_TOKEN
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
