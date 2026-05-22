@@ -108,6 +108,9 @@ jobs:
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 
+      - name: Check type-ignore budget gate (OMN-10822)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 

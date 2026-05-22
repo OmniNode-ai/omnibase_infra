@@ -24,12 +24,8 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.models.runtime.model_resolved_dependencies import (
-        ModelResolvedDependencies,
-    )
 
 
-# ONEX_EXCLUDE: declarative_node -- OMN-1732 DEC-003 requires constructor injection
 class NodeDeltaMetricsEffect(NodeEffect):
     """Declarative effect node for delta metrics rollup.
 
@@ -41,23 +37,10 @@ class NodeDeltaMetricsEffect(NodeEffect):
 
     Args:
         container: ONEX dependency injection container.
-        dependencies: Optional pre-resolved protocol dependencies.
     """
 
-    def __init__(
-        self,
-        container: ModelONEXContainer,
-        dependencies: ModelResolvedDependencies | None = None,
-    ) -> None:
-        """Initialise effect node with container dependency injection.
-
-        Args:
-            container: ONEX dependency injection container.
-            dependencies: Optional pre-resolved protocol dependencies from
-                ContractDependencyResolver. Part of OMN-1732.
-        """
+    def __init__(self, container: ModelONEXContainer) -> None:
         super().__init__(container)
-        self._resolved_dependencies = dependencies
 
 
 __all__ = ["NodeDeltaMetricsEffect"]

@@ -226,6 +226,18 @@ repos:
         files: ^src/omnibase_infra/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-10822: Budget gate for # type: ignore[arg-type] and [union-attr].
+      # Budget: 74 (57 arg-type + 17 union-attr) — initial baseline 2026-05-22.
+      # Decrement --max-violations as violations are fixed. Target: 0.
+      # New suppressions must use # substrate-allow: <reason> to justify.
+      - id: type-ignore-budget
+        name: type-ignore budget gate (arg-type + union-attr) (OMN-10822)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       # Union usage validation
       # TECH DEBT: Baseline increased to 108 violations (OMN-871)
       # Target: Reduce to 30 incrementally after PR #37 merges
