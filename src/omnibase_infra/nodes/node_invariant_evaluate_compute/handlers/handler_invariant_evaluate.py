@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from omnibase_core.models.invariant import ModelEvaluationSummary, ModelInvariantResult
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_invariant_evaluate_compute.evaluator_invariant import (
     InvariantEvaluator,
 )
@@ -14,6 +15,18 @@ from omnibase_infra.nodes.node_invariant_evaluate_compute.models import (
     ModelInvariantEvaluateBatchInput,
     ModelInvariantEvaluateInput,
 )
+
+
+class HandlerInvariantEvaluate:
+    """Handler descriptor for deterministic invariant evaluation operations."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
 
 def _new_evaluator(
@@ -56,6 +69,7 @@ async def handle_invariant_evaluate_all(
 
 
 __all__ = [
+    "HandlerInvariantEvaluate",
     "handle_invariant_evaluate",
     "handle_invariant_evaluate_all",
     "handle_invariant_evaluate_batch",

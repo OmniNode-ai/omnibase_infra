@@ -29,7 +29,7 @@ handler_routing:
   handlers:
     - operation: "invariant.evaluate"
       handler:
-        name: "handle_invariant_evaluate"
+        name: "HandlerInvariantEvaluate"
         function: "handle_invariant_evaluate"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
         type: "async"
@@ -38,7 +38,7 @@ handler_routing:
       description: "Evaluate one invariant against an output payload."
     - operation: "invariant.evaluate_batch"
       handler:
-        name: "handle_invariant_evaluate_batch"
+        name: "HandlerInvariantEvaluate"
         function: "handle_invariant_evaluate_batch"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
         type: "async"
@@ -47,7 +47,7 @@ handler_routing:
       description: "Evaluate an invariant set and return ordered results."
     - operation: "invariant.evaluate_all"
       handler:
-        name: "handle_invariant_evaluate_all"
+        name: "HandlerInvariantEvaluate"
         function: "handle_invariant_evaluate_all"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
         type: "async"
