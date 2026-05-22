@@ -215,6 +215,17 @@ repos:
         files: ^src/omnibase_infra/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-10820: Block Any in handler handle()/~__init__() signatures.
+      # Budget starts at 0 (current codebase is clean). Decrement target: stay at 0.
+      # Suppress a justified exception with: # substrate-allow: <reason>
+      - id: handler-any-signature
+        name: Block Any in handler signatures (OMN-10820)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-10822: Budget gate for # type: ignore[arg-type] and [union-attr].
       # Budget: 74 (57 arg-type + 17 union-attr) — initial baseline 2026-05-22.
       # Decrement --max-violations as violations are fixed. Target: 0.
