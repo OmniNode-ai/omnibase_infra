@@ -77,6 +77,9 @@ health_check:
   enabled: false
   description: "Pure compute node; no external health check required."
 metadata:
+  description: >
+    Deterministically evaluates execution outputs against single, batch, and full invariant sets, returning per-invariant results and aggregate summary statistics while preserving ReDoS protection and per-request schema validator caching.
+
   ticket: "OMN-11548"
   author: "OmniNode Team"
   tags:
