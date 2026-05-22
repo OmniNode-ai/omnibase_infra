@@ -46,7 +46,10 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Protocol, cast
+
+import yaml
 
 from omnibase_core.types import JsonType
 from omnibase_infra.adapters.github.adapter_github_client import GitHubHttpClient
@@ -85,6 +88,15 @@ class ProtocolGitHubTriageClient(Protocol):
 TriageState = str
 
 _BLOCKING_LABELS = frozenset({"blocked", "do-not-merge", "wip"})
+_CONFIG_KEYS = frozenset(
+    {
+        "repos",
+        "poll_interval_seconds",
+        "stale_threshold_hours",
+        "github_token_env_var",
+    }
+)
+_CONTRACT_PATH = Path(__file__).resolve().parents[1] / "contract.yaml"
 
 __all__ = ["HandlerGitHubApiPoll", "compute_triage_state"]
 
@@ -181,6 +193,18 @@ def compute_triage_state(
     return "needs_review"
 
 
+def _load_contract_config() -> ModelGitHubPollerConfig:
+    """Load the poller config from this node's contract.yaml."""
+    with _CONTRACT_PATH.open(encoding="utf-8") as contract_file:
+        raw = yaml.safe_load(contract_file)
+    if not isinstance(raw, dict):
+        raise ValueError("GitHub PR poller contract.yaml must contain a mapping")
+    config_raw = raw.get("config") or {}
+    if not isinstance(config_raw, dict):
+        raise ValueError("GitHub PR poller contract config must be a mapping")
+    return ModelGitHubPollerConfig.model_validate(config_raw)
+
+
 class HandlerGitHubApiPoll:
     """Handler for the ``github.poll.prs`` operation.
 
@@ -228,22 +252,22 @@ class HandlerGitHubApiPoll:
         http_timeout: float = 15.0,
         publish_topic: str | None = None,
         github_token: str | None = None,
-        github_client_factory: Callable[
-            ..., ProtocolGitHubTriageClient
-        ] = GitHubHttpClient,
+        github_client_factory: Callable[..., ProtocolGitHubTriageClient] | None = None,
+        config: ModelGitHubPollerConfig | None = None,
     ) -> None:
         self._api_base = api_base
         self._http_timeout = http_timeout
         self._github_token = github_token
-        self._github_client_factory = github_client_factory
+        self._github_client_factory = github_client_factory or GitHubHttpClient
         # Topic from contract.yaml; falls back to class default
         self._publish_topic = publish_topic or self._DEFAULT_PUBLISH_TOPIC
+        self._config = config or _load_contract_config()
         # Per-repo throttle tracker — maps repo identifier to last poll time
         self._last_polled: dict[str, datetime] = {}
 
     async def handle(
         self,
-        config: ModelGitHubPollerConfig,
+        input_data: object = None,
     ) -> ModelGitHubPollerResult:
         """Execute one poll cycle for all configured repositories.
 
@@ -251,13 +275,16 @@ class HandlerGitHubApiPoll:
         successful poll are skipped silently.
 
         Args:
-            config: Poller configuration (repos, interval, stale threshold,
-                token env var).
+            input_data: Optional poller configuration. Auto-wired runtime tick
+                inputs use the contract-loaded configuration captured at
+                construction time.
 
         Returns:
             ``ModelGitHubPollerResult`` with counts, pending events, and any
             non-fatal errors.
         """
+        config = self._resolve_config(input_data)
+
         errors: list[str] = []
         pending_events: list[JsonType] = []
         repos_polled: list[str] = []
@@ -337,6 +364,21 @@ class HandlerGitHubApiPoll:
             errors=errors,
             pending_events=pending_events,
         )
+
+    def _resolve_config(self, input_data: object) -> ModelGitHubPollerConfig:
+        """Resolve explicit config inputs or fall back to contract config."""
+        if isinstance(input_data, ModelGitHubPollerConfig):
+            return input_data
+
+        payload = getattr(input_data, "payload", None)
+        if isinstance(payload, ModelGitHubPollerConfig):
+            return payload
+        if isinstance(payload, dict) and _CONFIG_KEYS.intersection(payload):
+            return ModelGitHubPollerConfig.model_validate(payload)
+        if isinstance(input_data, dict) and _CONFIG_KEYS.intersection(input_data):
+            return ModelGitHubPollerConfig.model_validate(input_data)
+
+        return self._config
 
     async def _poll_repo(
         self,
