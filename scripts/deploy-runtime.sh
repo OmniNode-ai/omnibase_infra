@@ -25,11 +25,16 @@
 
 set -euo pipefail
 
-# Source the single env file so all ${VAR} references in docker-compose.infra.yml
-# resolve from the shell environment. This replaces the old setup_env() approach
-# that copied a stale snapshot into the deployed docker/.env. (F65 / OMN-6910)
+# Source contract-rendered runtime policy first, then operator env overrides, so
+# all ${VAR} references in docker-compose.infra.yml resolve from exported shell
+# environment without making Compose the owner of activation policy.
 # shellcheck source=/dev/null
+SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
+set -a
+source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
 source "${HOME}/.omnibase/.env"
+set +a
 
 # =============================================================================
 # Constants

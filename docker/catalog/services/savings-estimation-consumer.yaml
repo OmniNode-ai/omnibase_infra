@@ -11,7 +11,7 @@ operational_defaults:
   OMNIBASE_INFRA_SAVINGS_BATCH_TIMEOUT_MS: '1000'
   ONEX_LOG_LEVEL: INFO
   ONEX_ENVIRONMENT: local
-  OMNIMEMORY_ENABLED: 'false'
+  OMNIMEMORY_ENABLED: ${AUXILIARY_SERVICES_OMNIMEMORY_ENABLED:?runtime policy contract must set AUXILIARY_SERVICES_OMNIMEMORY_ENABLED}
 ports: null
 # No HTTP health endpoint in this consumer yet — process-level restart is sufficient.
 healthcheck: null

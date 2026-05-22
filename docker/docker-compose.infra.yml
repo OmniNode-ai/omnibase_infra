@@ -146,9 +146,9 @@ x-runtime-env: &runtime-env
   ONEX_STATE_ROOT: /app/data/.onex_state
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-/app/src/omnibase_infra/configs/bifrost_delegation.yaml}
-  BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:-1}
+  BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
   # Restrict the runtime surface to first-party infra + marketplace packages.
-  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
   # OMN-6440: Runtime contract YAMLs from omnibase_core (env var override for Docker)
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
@@ -175,13 +175,11 @@ x-runtime-env: &runtime-env
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
   # --- OmniMemory domain plugin ---
-  # PluginMemory.should_activate() checks OMNIMEMORY_MEMGRAPH_HOST or OMNIMEMORY_ENABLED.
-  # Both default to inactive values so the plugin stays opt-in.
-  # To enable: set OMNIMEMORY_ENABLED=true and OMNIMEMORY_MEMGRAPH_HOST=omnibase-infra-memgraph
-  # in the operator environment (e.g. via the memgraph bundle).
-  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-false}
-  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-}
-  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
+  # PluginMemory activation policy is contract-owned. Compose only consumes the
+  # rendered runtime-policy env values.
+  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:?runtime policy contract must set OMNIMEMORY_ENABLED}
+  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set OMNIMEMORY_MEMGRAPH_HOST}
+  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:?runtime policy contract must set OMNIMEMORY_MEMGRAPH_PORT}
   OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
   # Filesystem crawler path prefixes — comma-separated list of dirs to crawl for .md files
   OMNIMEMORY_CRAWL_PATH_PREFIXES: ${OMNIMEMORY_CRAWL_PATH_PREFIXES:-/data/omninode/omni_home}
@@ -633,6 +631,7 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
+      ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
       KAFKA_INSTANCE_ID: runtime-main
       # OMN-9060: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly
@@ -644,9 +643,9 @@ services:
       # container only. Workers and effects containers inherit x-runtime-env but
       # do NOT set this flag, so they process intelligence events without
       # starting duplicate heartbeat loops for the same deterministic node IDs.
-      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: "true"
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
     ports:
-      - "${RUNTIME_MAIN_PORT:-8085}:8085"
+      - "${RUNTIME_MAIN_PORT:-${DEV_RUNTIME_MAIN_PORT:?runtime policy contract must set DEV_RUNTIME_MAIN_PORT}}:8085"
     stop_grace_period: 90s
     volumes:
       - runtime_logs:/app/logs
@@ -689,6 +688,7 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
+      ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       KAFKA_INSTANCE_ID: runtime-effects
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
@@ -696,7 +696,7 @@ services:
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
       POSTGRES_HOST: postgres
     ports:
-      - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
+      - "${RUNTIME_EFFECTS_PORT:-${DEV_RUNTIME_EFFECTS_PORT:?runtime policy contract must set DEV_RUNTIME_EFFECTS_PORT}}:8085"
     # OMN-8852: runtime-effects must also join omnimemory-network so PluginMemory
     # can reach omnimemory-memgraph:7687. The base anchor only declares omnibase-infra-network.
     networks:
@@ -742,6 +742,7 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
+      ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_WORKER_CAPABILITIES}
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
       KAFKA_INSTANCE_ID: runtime-worker
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
@@ -799,7 +800,7 @@ services:
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_HOST: "0.0.0.0"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
-      OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-false}
+      OMNIMEMORY_ENABLED: ${AUXILIARY_SERVICES_OMNIMEMORY_ENABLED:?runtime policy contract must set AUXILIARY_SERVICES_OMNIMEMORY_ENABLED}
       # TTL cleanup — ServiceTTLCleanup co-runs inside consumer (OMN-7012)
       OMNIBASE_INFRA_TTL_CLEANUP_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_TTL_CLEANUP_RETENTION_DAYS: "30"

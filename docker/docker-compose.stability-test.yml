@@ -94,25 +94,23 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      # Keep PluginMemory inactive in stability lane:
-      # - blank legacy flag
-      # - blank Memgraph host override
-      OMNIMEMORY_ENABLED: ""
-      OMNIMEMORY_MEMGRAPH_HOST: ""
+      OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
-      ONEX_RUNTIME_CAPABILITIES: market.skill-proof,workflow.orchestration,runtime.main
+      ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       KAFKA_INSTANCE_ID: stability-test-main
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-      BIFROST_VERIFY_ENDPOINTS: "0"
+      BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
     ports: !override
-      - "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
+      - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
@@ -126,25 +124,22 @@ services:
     container_name: omninode-stability-test-runtime-effects
     restart: unless-stopped
     environment:
-      # Keep PluginMemory inactive in stability lane:
-      # - blank legacy flag
-      # - blank Memgraph host override
-      OMNIMEMORY_ENABLED: ""
-      OMNIMEMORY_MEMGRAPH_HOST: ""
+      OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-effects
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
-      ONEX_RUNTIME_CAPABILITIES: effects.consumer,market.skill-proof,runtime.effects
+      ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
       KAFKA_INSTANCE_ID: stability-test-effects
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-      BIFROST_VERIFY_ENDPOINTS: "0"
+      BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
     ports: !override
-      - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
+      - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
     volumes: !override
       - effects_logs:/app/logs
       - effects_data:/app/data
@@ -158,22 +153,19 @@ services:
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
     environment:
-      # Keep PluginMemory inactive in stability lane:
-      # - blank legacy flag
-      # - blank Memgraph host override
-      OMNIMEMORY_ENABLED: ""
-      OMNIMEMORY_MEMGRAPH_HOST: ""
+      OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-worker
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker
-      ONEX_RUNTIME_CAPABILITIES: workflow.dispatch,contract.update,runtime.worker
+      ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
       KAFKA_INSTANCE_ID: stability-test-worker
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-      BIFROST_VERIFY_ENDPOINTS: "0"
+      BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_WORKER_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_BIFROST_VERIFY_ENDPOINTS}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
     volumes: !override
       - worker_logs:/app/logs
