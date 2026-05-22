@@ -555,11 +555,6 @@ class InfraRoutingDecisionsConsumer:
 
     async def run_with_health_check(self) -> None:
         """Run consumer and health check server concurrently."""
-        loop = asyncio.get_running_loop()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
-
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
 

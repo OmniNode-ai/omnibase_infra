@@ -78,11 +78,11 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
                 correlation_id=op_correlation_id,
             )
 
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=op_correlation_id,
             transport_type=EnumInfraTransportType.DATABASE,
             operation="write_routing_decisions",
             target_name="infra_routing_decisions",
-            correlation_id=op_correlation_id,
         )
 
         upsert_sql = """
