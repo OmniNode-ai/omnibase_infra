@@ -6,7 +6,7 @@
 # Node: NodeGitHubPRPollerEffect
 #
 # Polls GitHub API for PR triage state changes across configured repos.
-# Triggered by onex.evt.runtime.tick.v1 and publishes ModelGitHubPRStatusEvent
+# Triggered by onex.intent.platform.runtime-tick.v1 and publishes ModelGitHubPRStatusEvent
 # to onex.evt.github.pr-status.v1.
 #
 # Related Tickets:
@@ -24,17 +24,19 @@ node_version:
   minor: 0
   patch: 0
 node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - "effects"
 description: >
-  Effect node that polls the GitHub REST API for open pull-request triage state across configured repositories. Triggered by the runtime tick event; checks elapsed time against poll_interval_seconds before calling the API. Publishes one ModelGitHubPRStatusEvent per open PR to onex.evt.github.pr-status.v1 with partition key "{repo}:{pr_number}".
+  Effect node that polls the GitHub REST API for open pull-request triage state across configured repositories. Triggered by the runtime tick intent; checks elapsed time against poll_interval_seconds before calling the API. Publishes one ModelGitHubPRStatusEvent per open PR to onex.evt.github.pr-status.v1 with partition key "{repo}:{pr_number}".
 
 # Input subscriptions: this is the scheduling trigger
 input_subscriptions:
-  - topic: "onex.evt.runtime.tick.v1"
+  - topic: "onex.intent.platform.runtime-tick.v1"
     operation: "github.poll.prs"
 event_bus:
   version: {major: 1, minor: 0, patch: 0}
   subscribe_topics:
-    - "onex.evt.runtime.tick.v1"
+    - "onex.intent.platform.runtime-tick.v1"
   publish_topics:
     - "onex.evt.github.pr-status.v1"
 input_model:
@@ -49,6 +51,11 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "github.poll.prs"
+      event_model:
+        name: "ModelRuntimeTick"
+        module: "omnibase_infra.runtime.models.model_runtime_tick"
+      event_type: "platform.runtime-tick"
+      message_category: "INTENT"
       handler:
         name: "HandlerGitHubApiPoll"
         module: "omnibase_infra.nodes.node_github_pr_poller_effect.handlers.handler_github_api_poll"
@@ -193,7 +200,7 @@ health_check:
       env_var: "GITHUB_TOKEN"
       description: "Verify GITHUB_TOKEN is set"
 metadata:
-  description: "Polls GitHub REST API for open pull-request triage state across configured repositories on runtime tick events, respecting configurable poll intervals"
+  description: "Polls GitHub REST API for open pull-request triage state across configured repositories on runtime tick intents, respecting configurable poll intervals"
   transport_type: "HTTP"
   author: "OmniNode Team"
   license: "MIT"

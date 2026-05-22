@@ -20,6 +20,5 @@ from .enum_omninode_topic import EnumOmninodeTopic
 from .enum_platform_topic import EnumPlatformTopic
 from .enum_router_topic import EnumRouterTopic
 from .enum_rsd_topic import EnumRsdTopic
-from .enum_runtime_topic import EnumRuntimeTopic
 from .enum_skill_topic import EnumSkillTopic
 from .enum_validation_topic import EnumValidationTopic
