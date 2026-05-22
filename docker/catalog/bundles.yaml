@@ -52,6 +52,7 @@ runtime-observability-projections:
     - consumer-health-projection
     - decision-store-consumer
     - omnimarket-projection-delegation
+    - infra-routing-decisions-consumer
   includes: []
   inject_env: {}
   inject_required_env:
