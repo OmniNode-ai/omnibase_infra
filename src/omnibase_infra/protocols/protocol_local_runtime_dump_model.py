@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Protocol for local runtime result dump models."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class ProtocolLocalRuntimeDumpModel(Protocol):
+    """Model shape used for persisting handler return values."""
+
+    def model_dump(self, *, mode: str) -> object:
+        """Dump the model into a JSON-compatible object."""
+        ...
+
+
+__all__: list[str] = ["ProtocolLocalRuntimeDumpModel"]
