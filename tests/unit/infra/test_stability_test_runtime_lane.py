@@ -11,6 +11,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OVERLAY_FILE = REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
+RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 RUNBOOK_FILE = REPO_ROOT / "docs" / "runbooks" / "stability-test-runtime-lane.md"
 
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
@@ -88,6 +89,16 @@ def _load_overlay() -> dict:
     return overlay
 
 
+def _load_runtime_policy_env() -> dict[str, str]:
+    env: dict[str, str] = {}
+    for line in RUNTIME_POLICY_ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        key, value = line.split("=", maxsplit=1)
+        env[key] = value
+    return env
+
+
 def _labels_by_key(labels: list[str]) -> dict[str, str]:
     label_map: dict[str, str] = {}
     for label in labels:
@@ -142,14 +153,21 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
 @pytest.mark.unit
 def test_stability_lane_runtime_services_have_unique_addresses() -> None:
     overlay = _load_overlay()
+    policy_env = _load_runtime_policy_env()
     services = overlay["services"]
     addresses: list[str] = []
     runtime_ids: list[str] = []
+    capability_keys = {
+        "omninode-runtime": "STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES",
+        "runtime-effects": "STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES",
+        "runtime-worker": "STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES",
+    }
 
     for service_name in RUNTIME_SERVICES:
         service = services[service_name]
         environment = service["environment"]
         labels = _labels_by_key(service["labels"])
+        capability_key = capability_keys[service_name]
 
         assert environment["ONEX_BOX_ID"] == "omninode-pc"
         assert environment["ONEX_RUNTIME_ADDRESS"].startswith(RUNTIME_ADDRESS_PREFIX)
@@ -159,8 +177,8 @@ def test_stability_lane_runtime_services_have_unique_addresses() -> None:
         )
         assert environment["ONEX_RUNTIME_ID"] == labels["com.omninode.runtime.id"]
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
-        assert environment["ONEX_RUNTIME_CAPABILITIES"]
-        assert "runtime." in environment["ONEX_RUNTIME_CAPABILITIES"]
+        assert capability_key in environment["ONEX_RUNTIME_CAPABILITIES"]
+        assert "runtime." in policy_env[capability_key]
 
         addresses.append(environment["ONEX_RUNTIME_ADDRESS"])
         runtime_ids.append(environment["ONEX_RUNTIME_ID"])
@@ -172,6 +190,7 @@ def test_stability_lane_runtime_services_have_unique_addresses() -> None:
 @pytest.mark.unit
 def test_stability_lane_runtime_ports_override_production_bindings() -> None:
     overlay = _load_overlay()
+    policy_env = _load_runtime_policy_env()
     services = overlay["services"]
 
     assert services["postgres"]["ports"] == [
@@ -185,11 +204,13 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
         "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
     ]
     assert services["omninode-runtime"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
+        "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
     ]
+    assert policy_env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
     assert services["runtime-effects"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
+        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
     ]
+    assert policy_env["STABILITY_TEST_RUNTIME_EFFECTS_PORT"] == "18086"
 
 
 @pytest.mark.unit
@@ -228,12 +249,30 @@ def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> Non
 @pytest.mark.unit
 def test_stability_lane_explicitly_leaves_omnimemory_inactive() -> None:
     overlay = _load_overlay()
+    policy_env = _load_runtime_policy_env()
     services = overlay["services"]
+    env_keys = {
+        "omninode-runtime": (
+            "STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED",
+            "STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST",
+        ),
+        "runtime-effects": (
+            "STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED",
+            "STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST",
+        ),
+        "runtime-worker": (
+            "STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED",
+            "STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST",
+        ),
+    }
 
     for service_name in RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
-        assert environment["OMNIMEMORY_ENABLED"] == ""
-        assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
+        enabled_key, host_key = env_keys[service_name]
+        assert enabled_key in environment["OMNIMEMORY_ENABLED"]
+        assert host_key in environment["OMNIMEMORY_MEMGRAPH_HOST"]
+        assert policy_env[enabled_key] == "false"
+        assert policy_env[host_key] == ""
 
 
 @pytest.mark.unit

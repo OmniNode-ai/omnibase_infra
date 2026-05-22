@@ -645,7 +645,7 @@ services:
       # starting duplicate heartbeat loops for the same deterministic node IDs.
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
     ports:
-      - "${RUNTIME_MAIN_PORT:-${DEV_RUNTIME_MAIN_PORT:?runtime policy contract must set DEV_RUNTIME_MAIN_PORT}}:8085"
+      - "${DEV_RUNTIME_MAIN_PORT:?runtime policy contract must set DEV_RUNTIME_MAIN_PORT}:8085"
     stop_grace_period: 90s
     volumes:
       - runtime_logs:/app/logs
@@ -696,7 +696,7 @@ services:
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
       POSTGRES_HOST: postgres
     ports:
-      - "${RUNTIME_EFFECTS_PORT:-${DEV_RUNTIME_EFFECTS_PORT:?runtime policy contract must set DEV_RUNTIME_EFFECTS_PORT}}:8085"
+      - "${DEV_RUNTIME_EFFECTS_PORT:?runtime policy contract must set DEV_RUNTIME_EFFECTS_PORT}:8085"
     # OMN-8852: runtime-effects must also join omnimemory-network so PluginMemory
     # can reach omnimemory-memgraph:7687. The base anchor only declares omnibase-infra-network.
     networks:
