@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 from omnibase_infra.services.observability.infra_routing_decisions.config import (
     ConfigInfraRoutingDecisionsConsumer,
 )
@@ -24,5 +25,4 @@ def test_routing_decisions_config_resolves_registered_topics() -> None:
     )
 
     assert config.topics == [routing_topic]
-    assert config.dlq_topic.endswith(".dlq.v1")
-    assert routing_topic in config.dlq_topic
+    assert config.dlq_topic == get_dlq_topic_for_original(routing_topic)
