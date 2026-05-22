@@ -82,7 +82,34 @@ def _make_omniclaude_source(
     subprocess.run(
         ["git", "push", "-q", "-u", "origin", "main"], cwd=omniclaude, check=True
     )
+    subprocess.run(["git", "switch", "-q", "-c", "dev"], cwd=omniclaude, check=True)
+    subprocess.run(
+        ["git", "push", "-q", "-u", "origin", "dev"], cwd=omniclaude, check=True
+    )
+    subprocess.run(["git", "switch", "-q", "main"], cwd=omniclaude, check=True)
     return omniclaude
+
+
+def _commit_file(repo: Path, rel_path: str, contents: str, message: str) -> None:
+    path = repo / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(contents)
+    subprocess.run(["git", "add", rel_path], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            message,
+        ],
+        cwd=repo,
+        check=True,
+    )
 
 
 def _make_versioned_cache(
@@ -149,6 +176,73 @@ class TestPullAllScript:
         content = PULL_ALL.read_text()
         assert "mktemp -d" in content, "Expected mktemp -d for result aggregation"
         assert "trap" in content, "Expected trap for temp dir cleanup"
+
+    def test_script_pulls_main_and_dev_and_leaves_repo_on_dev(
+        self, tmp_path: Path
+    ) -> None:
+        """pull-all.sh fast-forwards both long-lived branches and ends on dev."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)
+        upstream = omni_home / "omniclaude.git"
+        writer = tmp_path / "writer"
+        subprocess.run(["git", "clone", "-q", str(upstream), str(writer)], check=True)
+
+        _commit_file(writer, "main-only.txt", "main\n", "main update")
+        subprocess.run(["git", "push", "-q", "origin", "main"], cwd=writer, check=True)
+        subprocess.run(["git", "switch", "-q", "dev"], cwd=writer, check=True)
+        _commit_file(writer, "dev-only.txt", "dev\n", "dev update")
+        subprocess.run(["git", "push", "-q", "origin", "dev"], cwd=writer, check=True)
+
+        result = _run_pull_all(omni_home, fake_home)
+
+        assert result.returncode == 0, result.stderr
+        assert "left on dev" in result.stdout
+        current_branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+        ).strip()
+        main_sha = subprocess.check_output(
+            ["git", "rev-parse", "main"], cwd=omniclaude, text=True
+        ).strip()
+        origin_main_sha = subprocess.check_output(
+            ["git", "rev-parse", "origin/main"], cwd=omniclaude, text=True
+        ).strip()
+        dev_sha = subprocess.check_output(
+            ["git", "rev-parse", "dev"], cwd=omniclaude, text=True
+        ).strip()
+        origin_dev_sha = subprocess.check_output(
+            ["git", "rev-parse", "origin/dev"], cwd=omniclaude, text=True
+        ).strip()
+
+        assert current_branch == "dev"
+        assert main_sha == origin_main_sha
+        assert dev_sha == origin_dev_sha
+
+    def test_script_refuses_dirty_repo_before_branch_switch(
+        self, tmp_path: Path
+    ) -> None:
+        """Local uncommitted work blocks branch switching and remains in place."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)
+        dirty_file = omniclaude / "local-notes.txt"
+        dirty_file.write_text("do not lose this\n")
+
+        result = _run_pull_all(omni_home, fake_home)
+
+        assert result.returncode != 0
+        assert "dirty worktree" in result.stdout
+        assert dirty_file.read_text() == "do not lose this\n"
+        current_branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+        ).strip()
+        assert current_branch == "main"
 
     def test_script_handles_missing_repo(self) -> None:
         """Run pull-all.sh with a nonexistent repo name against a temp dir."""
