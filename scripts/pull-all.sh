@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# pull-all.sh — Pull all omni_home canonical repos to latest main
+# pull-all.sh — Pull all omni_home canonical repos to latest dev and main
 #
 # Usage:
 #   ./pull-all.sh           # pull all repos
@@ -67,7 +67,52 @@ fi
 RESULTS_DIR=$(mktemp -d)
 trap 'rm -rf "$RESULTS_DIR"' EXIT
 
-# Fetch a single repo — writes result to a temp file for aggregation.
+# Switch to a branch, creating it from origin/<branch> when needed, then
+# fast-forward it to the fetched remote branch.
+_checkout_and_ff() {
+  local dir="$1"
+  local branch="$2"
+
+  if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$dir" switch "$branch"
+  else
+    git -C "$dir" switch --track -c "$branch" "origin/$branch"
+  fi
+
+  git -C "$dir" merge --ff-only "origin/$branch"
+}
+
+_branch_summary() {
+  local dir="$1"
+  local branch="$2"
+  local before="$3"
+  local after
+
+  after=$(git -C "$dir" rev-parse --verify --quiet "refs/heads/$branch" || true)
+  if [[ -z "$before" ]]; then
+    echo "$branch created"
+  elif [[ "$before" == "$after" ]]; then
+    echo "$branch already up to date"
+  else
+    local commits
+    commits=$(git -C "$dir" rev-list --count "$before..$after" 2>/dev/null | tr -d ' ')
+    echo "$branch +${commits} commit(s)"
+  fi
+}
+
+_leave_on_dev() {
+  local dir="$1"
+
+  if git -C "$dir" show-ref --verify --quiet "refs/heads/dev"; then
+    git -C "$dir" switch dev >/dev/null 2>&1
+  elif git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/dev"; then
+    git -C "$dir" switch --track -c dev origin/dev >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+# Pull a single repo — writes result to a temp file for aggregation.
 _pull_one() {
   local repo="$1"
   local dir="$OMNI_HOME/$repo"
@@ -81,24 +126,50 @@ _pull_one() {
 
   local branch
   branch=$(git -C "$dir" branch --show-current 2>/dev/null)
-  if [[ "$branch" != "main" ]]; then
+  if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
     echo "  SKIPPED  $repo (on branch: $branch)"
     echo "SKIPPED" > "$result_file"
     return
   fi
 
-  local output
-  if output=$(git -C "$dir" pull --ff-only 2>&1); then
-    if echo "$output" | grep -q "Already up to date"; then
-      echo "  OK       $repo (already up to date)"
-    else
-      local commits
-      commits=$(git -C "$dir" log --oneline ORIG_HEAD..HEAD 2>/dev/null | wc -l | tr -d ' ')
-      echo "  UPDATED  $repo (+${commits} commit(s))"
+  local dirty
+  dirty=$(git -C "$dir" status --porcelain)
+  if [[ -n "$dirty" ]]; then
+    echo "  FAILED   $repo (dirty worktree; refusing to switch branches)"
+    echo "           Commit, stash, or remove local changes before re-running."
+    echo "FAILED" > "$result_file"
+    return
+  fi
+
+  local before_main before_dev output
+  before_main=$(git -C "$dir" rev-parse --verify --quiet refs/heads/main || true)
+  before_dev=$(git -C "$dir" rev-parse --verify --quiet refs/heads/dev || true)
+
+  if ! output=$(git -C "$dir" fetch --prune origin main dev 2>&1); then
+    echo "  FAILED   $repo (fetch main/dev)"
+    echo "           $output"
+    echo "FAILED" > "$result_file"
+    return
+  fi
+
+  if ! output=$(_checkout_and_ff "$dir" main 2>&1); then
+    echo "  FAILED   $repo (fast-forward main)"
+    echo "           $output"
+    if ! _leave_on_dev "$dir"; then
+      echo "           WARN: could not return $repo to dev after failure."
     fi
+    echo "FAILED" > "$result_file"
+    return
+  fi
+
+  if output=$(_checkout_and_ff "$dir" dev 2>&1); then
+    local main_summary dev_summary
+    main_summary=$(_branch_summary "$dir" main "$before_main")
+    dev_summary=$(_branch_summary "$dir" dev "$before_dev")
+    echo "  OK       $repo ($main_summary; $dev_summary; left on dev)"
     echo "OK" > "$result_file"
   else
-    echo "  FAILED   $repo"
+    echo "  FAILED   $repo (fast-forward dev)"
     echo "           $output"
     echo "FAILED" > "$result_file"
   fi
