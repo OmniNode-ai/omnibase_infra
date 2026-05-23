@@ -16,7 +16,7 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_type: workflow
 description: >
   Two-handler chain example demonstrating backward-compatible positional routing. Both handlers resolve
-  their input topic by positional index in subscribe_topics. #magic___^_^___line
+  their input topic by positional index in subscribe_topics.
 initial_command: cmd.start.v1
 terminal_event: evt.done.v1
 

@@ -22,6 +22,8 @@ from click.testing import CliRunner
 
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract, run_node_by_name
 
+pytestmark = pytest.mark.unit
+
 
 def test_unknown_node_name_reports_known_names() -> None:
     """Unknown name errors with the list of known names."""

@@ -525,7 +525,7 @@ def test_event_driven_path_does_not_import_state_store(tmp_path: Path) -> None:
     The LocalRuntimeBusAdapter (used by _run_event_driven) must not reference
     ProtocolStateStore — it only publishes handler results to the bus.
     """
-    from omnibase_core.runtime import runtime_local_adapter
+    from omnibase_infra.runtime import runtime_local_adapter
 
     source_file = inspect.getfile(runtime_local_adapter)
     source_text = Path(source_file).read_text(encoding="utf-8")

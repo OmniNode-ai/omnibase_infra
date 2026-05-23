@@ -366,18 +366,12 @@ class RuntimeLocal:
         ``run()`` and ``execute()`` are tried with payload first, then without.
         """
         try:
-            if inspect.iscoroutinefunction(method):
-                result = await cast("Awaitable[object]", method(initial_payload))
-            else:
-                result = method(initial_payload)
+            result = await self._maybe_await(method(initial_payload))
         except TypeError as original_exc:
             # The method may not accept arguments (e.g. run() with no args).
             # Retry without args; if that also fails, re-raise the original.
             try:  # fallback-ok: adapt no-argument handler methods while preserving the original TypeError
-                if inspect.iscoroutinefunction(method):
-                    result = await cast("Awaitable[object]", method())
-                else:
-                    result = method()
+                result = await self._maybe_await(method())
             except TypeError:
                 raise original_exc from None
 
@@ -387,6 +381,24 @@ class RuntimeLocal:
             result = result[-1]
 
         return result
+
+    @staticmethod
+    async def _maybe_await(value: object) -> object:
+        """Await decorated async call results that are not coroutine functions."""
+        if inspect.isawaitable(value):
+            return await cast("Awaitable[object]", value)
+        return value
+
+    @staticmethod
+    def _correlation_id_from_payload(payload: object) -> str | None:
+        """Extract an existing correlation ID from a typed or mapping payload."""
+        if isinstance(payload, dict):
+            value = payload.get("correlation_id")
+        else:
+            value = getattr(payload, "correlation_id", None)
+        if value:
+            return str(value)
+        return None
 
     # ------------------------------------------------------------------
     # Single-handler execution path
@@ -477,6 +489,7 @@ class RuntimeLocal:
         result_obj = await self._invoke_handler_method(
             handle_method, method_name, handler_instance, initial_payload
         )
+        correlation_id = self._correlation_id_from_payload(initial_payload)
 
         # If the handler returned a result, use it directly — don't wait for
         # terminal event since single-handler workflows return synchronously.
@@ -486,7 +499,9 @@ class RuntimeLocal:
         if result_obj is not None:
             self._handler_result = result_obj
             self._result = self._classify_result(result_obj)
-            await self._publish_synthesized_terminal(bus, terminal_topic)
+            await self._publish_synthesized_terminal(
+                bus, terminal_topic, correlation_id=correlation_id
+            )
             logger.info("RuntimeLocal: handler returned, result=%s", self._result.value)
             return
 
@@ -501,12 +516,14 @@ class RuntimeLocal:
                     self._terminal_received.wait(), timeout=self.timeout
                 )
             except TimeoutError:
-                correlation_id = self._contract.get("correlation_id", "unknown")
+                timeout_correlation_id = str(
+                    self._contract.get("correlation_id", "unknown")
+                )
                 logger.warning(
                     "RuntimeLocal: timeout (%ds) waiting for terminal event "
                     "[correlation_id=%s]",
                     self.timeout,
-                    correlation_id,
+                    timeout_correlation_id,
                 )
                 self._result = EnumWorkflowResult.TIMEOUT
                 self._log_timeout_summary()
@@ -515,7 +532,11 @@ class RuntimeLocal:
         logger.info("RuntimeLocal: handler returned, result=%s", self._result.value)
 
     async def _publish_synthesized_terminal(
-        self, bus: ProtocolLocalRuntimeBus, terminal_topic: str
+        self,
+        bus: ProtocolLocalRuntimeBus,
+        terminal_topic: str,
+        *,
+        correlation_id: str | None = None,
     ) -> None:
         """Publish a runtime-synthesized terminal event after sync-return classification.
 
@@ -550,7 +571,7 @@ class RuntimeLocal:
             json.dumps(
                 {
                     "status": status_payload,
-                    "correlation_id": str(uuid.uuid4()),
+                    "correlation_id": correlation_id or str(uuid.uuid4()),
                     "source": "runtime_local",
                 }
             ).encode("utf-8"),
@@ -726,6 +747,13 @@ class RuntimeLocal:
             event_bus_spec.get("subscribe_topics", [])
         )
         publish_topics = self._as_string_list(event_bus_spec.get("publish_topics", []))
+        if not subscribe_topics:
+            logger.error(
+                "RuntimeLocal: event-driven mode requires non-empty "
+                "event_bus.subscribe_topics"
+            )
+            self._result = EnumWorkflowResult.FAILED
+            return
 
         # --- 1. Validate routing (fail fast) ---
         validation_errors = self._validate_routing(

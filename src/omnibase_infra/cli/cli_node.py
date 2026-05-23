@@ -24,6 +24,7 @@ import click
 
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 
 def _resolve_packaged_contract(node_name: str) -> Path:
@@ -162,7 +163,7 @@ def run_node_by_name(
     try:
         backend_overrides = parse_backend_overrides(backend)
     except ModelOnexError as exc:
-        click.echo(f"Error: {exc}", err=True)
+        click.echo(f"Error: {sanitize_error_message(exc)}", err=True)
         sys.exit(1)
 
     runtime = RuntimeLocal(

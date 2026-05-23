@@ -34,7 +34,7 @@ class ProtocolLocalRuntimeBus(Protocol):
         group_id: str,
     ) -> UnsubscribeCallback:
         """Subscribe to a topic and return an unsubscribe callback."""
-        ...
+        raise NotImplementedError
 
 
 __all__: list[str] = ["ProtocolLocalRuntimeBus", "UnsubscribeCallback"]

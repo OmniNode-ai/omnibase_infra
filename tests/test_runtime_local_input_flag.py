@@ -7,8 +7,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_infra.runtime.runtime_local import RuntimeLocal
+
+pytestmark = pytest.mark.integration
 
 
 def test_runtime_local_accepts_input_file(tmp_path: Path) -> None:
