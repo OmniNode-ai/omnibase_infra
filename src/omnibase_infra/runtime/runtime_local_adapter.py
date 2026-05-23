@@ -88,7 +88,7 @@ class LocalRuntimeBusAdapter:
         )
         start = time.monotonic()
         try:
-            handle_method = cast("Callable[..., object]", self.handler.handle)
+            handle_method = self.handler.handle
             model_kwargs = input_model.model_dump(mode="json")
             if asyncio.iscoroutinefunction(handle_method):
                 maybe_result = handle_method(**model_kwargs)
