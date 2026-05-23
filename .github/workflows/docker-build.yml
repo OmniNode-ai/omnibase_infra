@@ -322,6 +322,10 @@ jobs:
       }}
     needs: docker-build
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
     timeout-minutes: 15
 
     steps:
