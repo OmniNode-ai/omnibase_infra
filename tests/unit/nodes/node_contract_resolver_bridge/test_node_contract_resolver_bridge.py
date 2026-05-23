@@ -311,3 +311,16 @@ class TestContractResolverBridgeApp:
         assert "openapi" in schema
         assert "/api/nodes/contract.resolve" in schema.get("paths", {})
         assert "/health" in schema.get("paths", {})
+        assert "/ready" in schema.get("paths", {})
+
+    def test_ready_endpoint_returns_200(self) -> None:
+        """GET /ready must return 200 with status=ok (readiness probe support)."""
+        from fastapi.testclient import TestClient
+
+        app = self._make_app()
+        with TestClient(app) as client:
+            response = client.get("/ready")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "node_contract_resolver_bridge"

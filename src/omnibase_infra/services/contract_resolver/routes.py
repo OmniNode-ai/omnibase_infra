@@ -79,6 +79,24 @@ async def health() -> ModelHealthResponse:
     return ModelHealthResponse()
 
 
+@router.get(
+    "/ready",
+    response_model=ModelHealthResponse,
+    summary="Readiness check",
+    tags=["health"],
+)
+async def ready() -> ModelHealthResponse:
+    """Return service readiness status.
+
+    NodeContractResolveCompute is stateless/pure — ready as soon as the process
+    is up and the lifespan startup hook has completed.
+
+    Returns:
+        :class:`ModelHealthResponse` with ``status="ok"``.
+    """
+    return ModelHealthResponse()
+
+
 @router.post(
     "/api/nodes/contract.resolve",
     response_model=ModelContractResolveOutput,

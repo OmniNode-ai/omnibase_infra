@@ -512,3 +512,31 @@ class TestHealthResponse:
         response, _ = consumer._build_health_response()
 
         assert response["idle"] is False
+
+
+# =============================================================================
+# Readiness Route Tests
+# =============================================================================
+
+
+class TestReadyRoute:
+    """Verify /ready route is registered alongside /health."""
+
+    @pytest.mark.unit
+    def test_ready_route_registered_in_health_app(self) -> None:
+        """/ready must be registered in the aiohttp app used by run_with_health_check."""
+        from aiohttp import web
+
+        consumer = _make_consumer()
+        consumer._running = True
+        consumer.metrics.last_poll_at = datetime.now(UTC)
+
+        app = web.Application()
+        app.router.add_get("/health", consumer._health_handler)
+        app.router.add_get("/ready", consumer._health_handler)
+
+        route_paths = [
+            r.resource.canonical for r in app.router.routes() if r.resource is not None
+        ]
+        assert "/ready" in route_paths
+        assert "/health" in route_paths

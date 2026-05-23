@@ -1456,10 +1456,11 @@ class AgentActionsConsumer(MixinConsumerHealth):
     async def _start_health_server(self) -> None:
         """Start minimal HTTP health check server.
 
-        Starts an aiohttp server on the configured port with a /health endpoint.
+        Starts an aiohttp server on the configured port with /health and /ready endpoints.
         """
         self._health_app = web.Application()
         self._health_app.router.add_get("/health", self._health_handler)
+        self._health_app.router.add_get("/ready", self._health_handler)
 
         self._health_runner = web.AppRunner(self._health_app)
         await self._health_runner.setup()

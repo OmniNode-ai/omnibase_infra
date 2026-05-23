@@ -729,6 +729,7 @@ class SkillLifecycleConsumer:
 
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
+        app.router.add_get("/ready", self._health_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

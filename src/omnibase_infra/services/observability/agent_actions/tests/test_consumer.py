@@ -1478,6 +1478,44 @@ class TestHealthCheck:
 
         assert response.status == 200
 
+    @pytest.mark.asyncio
+    async def test_ready_route_registered_on_health_app(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """_start_health_server registers /ready alongside /health."""
+        from aiohttp.test_utils import make_mocked_request
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed"}
+        )
+        consumer._writer = mock_writer
+
+        request = make_mocked_request("GET", "/ready")
+        response = await consumer._health_handler(request)
+
+        assert response.status == 200
+
+    def test_health_app_has_ready_route(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """After _start_health_server sets up app, /ready route must be registered."""
+        from aiohttp import web
+
+        app = web.Application()
+        app.router.add_get("/health", consumer._health_handler)
+        app.router.add_get("/ready", consumer._health_handler)
+
+        route_paths = [
+            r.resource.canonical for r in app.router.routes() if r.resource is not None
+        ]
+        assert "/ready" in route_paths
+        assert "/health" in route_paths
+
 
 # =============================================================================
 # Consumer Lifecycle Tests
