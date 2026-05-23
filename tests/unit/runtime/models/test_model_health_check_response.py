@@ -289,6 +289,36 @@ class TestModelHealthCheckResponseReadinessIntegration:
         json_str = resp.model_dump_json(exclude_none=True)
         assert '"required_topics":[]' in json_str
 
+    def test_readiness_details_with_tuple_topics_serializes(self) -> None:
+        """Regression test: tuple required_topics must not raise ValidationError.
+
+        model_dump() without mode='json' preserves tuple fields. Pydantic strict
+        mode rejected tuple as non-list, causing /ready to return HTTP 503.
+        Removing strict=True from ModelHealthCheckResponse fixes this.
+        """
+        readiness_details: dict[str, object] = {
+            "is_ready": False,
+            "consumers_started": True,
+            "assignments": {"topic-a": [0, 1]},
+            "consume_tasks_alive": {"topic-a": True},
+            "required_topics": ("topic-a", "topic-b"),  # tuple — the failing case
+            "required_topics_ready": False,
+            "last_error": "",
+        }
+        resp = ModelHealthCheckResponse.success(
+            status="unhealthy",
+            version="0.36.0",
+            details={
+                "ready": False,
+                "is_running": True,
+                "is_draining": False,
+                "event_bus_readiness": readiness_details,
+                "correlation_id": "abc-123",
+            },
+        )
+        json_str = resp.model_dump_json(exclude_none=True)
+        assert '"required_topics"' in json_str
+
 
 class TestModelHealthCheckResponseEquality:
     """Tests for ModelHealthCheckResponse equality comparison."""
