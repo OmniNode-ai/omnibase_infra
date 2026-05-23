@@ -16,7 +16,7 @@ hardcoded_env:
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   BUS_ID: local
   ONEX_CONTRACTS_DIR: /app/contracts
-  ONEX_ACTIVE_RUNTIME_PACKAGES: omnibase_infra,omnimarket
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
   VALKEY_HOST: valkey
   VALKEY_PORT: '6379'
   ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills

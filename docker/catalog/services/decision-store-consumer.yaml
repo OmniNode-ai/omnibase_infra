@@ -12,7 +12,7 @@ hardcoded_env:
 operational_defaults:
   ONEX_LOG_LEVEL: INFO
   ONEX_ENVIRONMENT: local
-  OMNIMEMORY_ENABLED: 'false'
+  OMNIMEMORY_ENABLED: ${AUXILIARY_SERVICES_OMNIMEMORY_ENABLED:?runtime policy contract must set AUXILIARY_SERVICES_OMNIMEMORY_ENABLED}
 ports:
   external: 8091
   internal: 8091

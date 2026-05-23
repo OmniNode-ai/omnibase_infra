@@ -574,6 +574,7 @@ class TestDockerRuntime:
         self,
         docker_available: bool,
         built_test_image: str,
+        project_root: Path,
         available_port: int,
     ) -> None:
         """Verify container handles SIGTERM gracefully.
@@ -596,6 +597,8 @@ class TestDockerRuntime:
                     "-d",
                     "--name",
                     container_name,
+                    "--env-file",
+                    str(project_root / "docker" / "runtime-policy.env"),
                     "-p",
                     f"{available_port}:8085",
                     "-e",
@@ -1104,6 +1107,19 @@ class TestDockerComposeProfiles:
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
                 "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
+                # OMN-11673: runtime policy contract vars are required by
+                # compose even when docker/runtime-policy.env is also loaded.
+                "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
+                "BIFROST_VERIFY_ENDPOINTS": "1",
+                "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
+                "DEV_RUNTIME_EFFECTS_PORT": "8086",
+                "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
+                "DEV_RUNTIME_MAIN_PORT": "8085",
+                "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+                "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+                "OMNIMEMORY_ENABLED": "false",
+                "OMNIMEMORY_MEMGRAPH_PORT": "7687",
+                "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
             }
         )
 
@@ -1111,6 +1127,8 @@ class TestDockerComposeProfiles:
             [
                 "docker",
                 "compose",
+                "--env-file",
+                str(project_root / "docker" / "runtime-policy.env"),
                 "-f",
                 str(compose_file_path),
                 "config",

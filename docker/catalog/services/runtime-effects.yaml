@@ -24,7 +24,7 @@ hardcoded_env:
   BUS_ID: local
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
-  ONEX_ACTIVE_RUNTIME_PACKAGES: omnibase_infra,omnimarket
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
   VALKEY_HOST: valkey
   VALKEY_PORT: '6379'
   ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
@@ -32,6 +32,7 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-runtime-effects
   RUNTIME_PROFILE: effects
+  ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres
   ENABLE_RUNTIME_LOG_BRIDGE: 'true'
