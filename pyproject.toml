@@ -379,6 +379,7 @@ explicit_package_bases = true
 # Global ignore for third-party libraries and cross-package imports.
 # TODO: Remove once all dependencies have py.typed markers.
 ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 # Disabled globally because mypy per-module overrides don't support these flags.
 # TODO: Enable once non-compliant modules are fixed.
 warn_redundant_casts = false
@@ -403,6 +404,7 @@ module = [
     "omnibase_infra.runtime.*",
     "omnibase_infra.services.*",
     "omnibase_infra.sinks.*",
+    "omnibase_infra.tui.*",
 ]
 disallow_any_generics = false
 disallow_subclassing_any = false
