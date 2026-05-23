@@ -10,8 +10,8 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
@@ -26,6 +26,9 @@ from omnibase_infra.protocols.protocol_local_runtime_message import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 
 class LocalRuntimeBusAdapter:

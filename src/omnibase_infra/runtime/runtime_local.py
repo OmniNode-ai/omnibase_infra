@@ -25,13 +25,12 @@ import inspect
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import yaml
-from pydantic import BaseModel
 
 from omnibase_core.enums.enum_cli_exit_code import EnumCLIExitCode
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -41,15 +40,21 @@ from omnibase_infra.protocols.protocol_local_runtime_bus import (
     ProtocolLocalRuntimeBus,
     UnsubscribeCallback,
 )
-from omnibase_infra.protocols.protocol_local_runtime_dump_model import (
-    ProtocolLocalRuntimeDumpModel,
-)
 from omnibase_infra.protocols.protocol_local_runtime_message import (
     ProtocolLocalRuntimeMessage,
 )
-from omnibase_infra.protocols.protocol_local_runtime_payload_model import (
-    ProtocolLocalRuntimePayloadModel,
-)
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
+    from pydantic import BaseModel
+
+    from omnibase_infra.protocols.protocol_local_runtime_dump_model import (
+        ProtocolLocalRuntimeDumpModel,
+    )
+    from omnibase_infra.protocols.protocol_local_runtime_payload_model import (
+        ProtocolLocalRuntimePayloadModel,
+    )
 
 logger = logging.getLogger(__name__)
 
