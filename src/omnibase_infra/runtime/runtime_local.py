@@ -25,12 +25,13 @@ import inspect
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import yaml
+from pydantic import BaseModel
 
 from omnibase_core.enums.enum_cli_exit_code import EnumCLIExitCode
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -40,21 +41,15 @@ from omnibase_infra.protocols.protocol_local_runtime_bus import (
     ProtocolLocalRuntimeBus,
     UnsubscribeCallback,
 )
+from omnibase_infra.protocols.protocol_local_runtime_dump_model import (
+    ProtocolLocalRuntimeDumpModel,
+)
 from omnibase_infra.protocols.protocol_local_runtime_message import (
     ProtocolLocalRuntimeMessage,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
-
-    from pydantic import BaseModel
-
-    from omnibase_infra.protocols.protocol_local_runtime_dump_model import (
-        ProtocolLocalRuntimeDumpModel,
-    )
-    from omnibase_infra.protocols.protocol_local_runtime_payload_model import (
-        ProtocolLocalRuntimePayloadModel,
-    )
+from omnibase_infra.protocols.protocol_local_runtime_payload_model import (
+    ProtocolLocalRuntimePayloadModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +386,8 @@ class RuntimeLocal:
     async def _maybe_await(value: object) -> object:
         """Await decorated async call results that are not coroutine functions."""
         if inspect.isawaitable(value):
-            return await cast("Awaitable[object]", value)
+            awaitable_value: Awaitable[object] = cast("Awaitable[object]", value)
+            return await awaitable_value
         return value
 
     @staticmethod
@@ -818,10 +814,11 @@ class RuntimeLocal:
 
                 return _cb
 
+            input_model_type: type[BaseModel] = cast("type[BaseModel]", input_model_cls)
             adapter = LocalRuntimeBusAdapter(
                 handler=cast("ProtocolLocalRuntimeCallableTarget", handler_instance),
                 handler_name=entry.handler_name,
-                input_model_cls=cast("type[BaseModel]", input_model_cls),
+                input_model_cls=input_model_type,
                 output_topic=entry.output_topic or None,
                 bus=bus,
                 on_error=_make_fail_cb(entry.handler_name),
@@ -878,7 +875,7 @@ class RuntimeLocal:
             # Inject correlation_id if the model supports it
             if hasattr(initial_payload, "correlation_id"):
                 try:
-                    payload_with_correlation = cast(
+                    payload_with_correlation: ProtocolLocalRuntimePayloadModel = cast(
                         "ProtocolLocalRuntimePayloadModel", initial_payload
                     )
                     payload_with_correlation.correlation_id = correlation_id
@@ -886,7 +883,7 @@ class RuntimeLocal:
                     pass  # frozen model or incompatible type
 
             if hasattr(initial_payload, "model_dump_json"):
-                model_payload = cast(
+                model_payload: ProtocolLocalRuntimePayloadModel = cast(
                     "ProtocolLocalRuntimePayloadModel", initial_payload
                 )
                 await bus.publish(
@@ -1356,7 +1353,7 @@ class RuntimeLocal:
             return None
         try:
             mod = importlib.import_module(model_module)
-            cls = cast("type[BaseModel]", getattr(mod, model_class))
+            cls: type[BaseModel] = cast("type[BaseModel]", getattr(mod, model_class))
         except (ImportError, AttributeError) as exc:
             logger.warning(
                 "RuntimeLocal: could not import input model %s.%s: %s",
@@ -1454,7 +1451,7 @@ class RuntimeLocal:
         if self._handler_result is not None:
             try:
                 if hasattr(self._handler_result, "model_dump"):
-                    dump_model = cast(
+                    dump_model: ProtocolLocalRuntimeDumpModel = cast(
                         "ProtocolLocalRuntimeDumpModel", self._handler_result
                     )
                     data["handler_result"] = dump_model.model_dump(mode="json")

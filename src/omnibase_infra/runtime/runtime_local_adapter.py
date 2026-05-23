@@ -10,8 +10,8 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from collections.abc import Awaitable, Callable
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -26,9 +26,6 @@ from omnibase_infra.protocols.protocol_local_runtime_message import (
 )
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
 
 
 class LocalRuntimeBusAdapter:
@@ -94,7 +91,10 @@ class LocalRuntimeBusAdapter:
             model_kwargs = input_model.model_dump(mode="json")
             if asyncio.iscoroutinefunction(handle_method):
                 maybe_result = handle_method(**model_kwargs)
-                result = await cast("Awaitable[object]", maybe_result)
+                awaitable_result: Awaitable[object] = cast(
+                    "Awaitable[object]", maybe_result
+                )
+                result = await awaitable_result
             else:
                 result = handle_method(**model_kwargs)
         except Exception:  # fallback-ok: local runtime adapter records handler failure and continues shutdown
