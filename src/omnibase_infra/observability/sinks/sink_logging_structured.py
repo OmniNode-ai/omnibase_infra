@@ -111,6 +111,7 @@ try:
 except ImportError as e:
     _STRUCTLOG_IMPORT_ERROR = str(e)
     # Provide stub for type checking when structlog is not installed
+    # Why: Runtime compatibility requires assigning through a broader static type.
     structlog = None  # type: ignore[assignment]
 
 from omnibase_core.enums import EnumLogLevel

@@ -9,14 +9,12 @@ including next_cursor for page continuation and total_active for count display.
 
 Note on ModelDecisionStoreEntry dependency:
     ModelDecisionStoreEntry is defined in omnibase_core (OMN-2763, PR #562),
-    which is not yet released. The decisions field uses Any at runtime and is
-    typed as tuple[ModelDecisionStoreEntry, ...] for static analysis only.
+    which is not yet released. The decisions field uses object at runtime until
+    the concrete entry type is available for static analysis.
     Once OMN-2763 is merged, this model can be tightened to use the concrete type.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,13 +41,12 @@ class ModelResultDecisionList(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
-    # NOTE: Using Any pending OMN-2763 (ModelDecisionStoreEntry not yet in installed omnibase_core)
-    decisions: tuple[Any, ...] = Field(
+    decisions: tuple[object, ...] = Field(
         default=(),
         description=(
             "Ordered tuple of matching ModelDecisionStoreEntry instances for this page, "
             "sorted by (created_at DESC, decision_id DESC). "
-            "Element type is Any pending OMN-2763 (omnibase_core) merge."
+            "Element type is object pending OMN-2763 (omnibase_core) merge."
         ),
     )
     next_cursor: str | None = Field(

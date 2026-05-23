@@ -10,7 +10,6 @@ Part of OMN-1976: Contract dependency materialization.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import httpx
 
@@ -36,8 +35,7 @@ class ProviderHttpClient:
         """
         self._config = config
 
-    # ONEX_EXCLUDE: any_type - returns httpx.AsyncClient
-    async def create(self) -> Any:
+    async def create(self) -> httpx.AsyncClient:
         """Create an httpx.AsyncClient.
 
         Returns:
@@ -60,8 +58,7 @@ class ProviderHttpClient:
         return client
 
     @staticmethod
-    # ONEX_EXCLUDE: any_type - resource is httpx.AsyncClient, typed as Any for provider interface
-    async def close(resource: Any) -> None:
+    async def close(resource: httpx.AsyncClient | None) -> None:
         """Close an HTTP client.
 
         Args:

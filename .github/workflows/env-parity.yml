@@ -9,7 +9,7 @@ on:
       - "docker/docker-compose*.yml"
       - "tests/ci/test_env_parity.py"
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
     paths:
       - "docker/docker-compose*.yml"
       - "tests/ci/test_env_parity.py"

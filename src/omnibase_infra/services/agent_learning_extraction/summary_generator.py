@@ -32,6 +32,7 @@ def build_summary_prompt(
     truncated_files = file_paths[:20]
     # Deduplicate preserving first-occurrence order (sequence matters for trace)
     seen: set[str] = set()
+    # Why: Expression relies on set.add side effect to deduplicate while preserving order.
     unique_tools = [t for t in tool_names if t not in seen and not seen.add(t)]  # type: ignore[func-returns-value]
     tool_summary = ", ".join(unique_tools) if unique_tools else "none"
 
@@ -52,6 +53,7 @@ def parse_summary_response(response: dict[str, object]) -> str:
         choices = response.get("choices", [])
         if not choices or not isinstance(choices, list):
             return _FALLBACK_SUMMARY
+        # Why: Runtime response schema validation guarantees this indexed element exists.
         message = choices[0]  # type: ignore[index]
         if isinstance(message, dict):
             content = message.get("message", {})

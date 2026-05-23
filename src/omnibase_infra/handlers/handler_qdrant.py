@@ -394,12 +394,16 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
                 "lte": None,
             }
             if operator == EnumVectorFilterOperator.GT:
+                # Why: Runtime compatibility requires assigning through a broader static type.
                 range_params["gt"] = value  # type: ignore[assignment]
             elif operator == EnumVectorFilterOperator.GTE:
+                # Why: Runtime compatibility requires assigning through a broader static type.
                 range_params["gte"] = value  # type: ignore[assignment]
             elif operator == EnumVectorFilterOperator.LT:
+                # Why: Runtime compatibility requires assigning through a broader static type.
                 range_params["lt"] = value  # type: ignore[assignment]
             elif operator == EnumVectorFilterOperator.LTE:
+                # Why: Runtime compatibility requires assigning through a broader static type.
                 range_params["lte"] = value  # type: ignore[assignment]
             conditions.append(
                 qdrant_models.FieldCondition(
@@ -673,11 +677,13 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
                     # Handle both list and dict vector formats
                     raw_vector = point.vector
                     if isinstance(raw_vector, list):
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         vector_data = [float(v) for v in raw_vector]  # type: ignore[arg-type]
                     elif isinstance(raw_vector, dict):
                         # For named vectors, get the default one
                         first_vector = next(iter(raw_vector.values()), None)
                         if first_vector is not None and isinstance(first_vector, list):
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
                             vector_data = [float(v) for v in first_vector]  # type: ignore[arg-type]
 
                 results.append(

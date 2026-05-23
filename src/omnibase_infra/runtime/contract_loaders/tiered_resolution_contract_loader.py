@@ -179,7 +179,9 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         )
 
 
-# ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict from contract YAML
+# Why: raw contract YAML is heterogeneous until individual tier/trust-domain
+# parsers validate their sections.
+# ONEX_EXCLUDE: any_type - contract YAML values vary by section schema
 def _load_contract_yaml(
     contract_path: Path,
     operation: str,

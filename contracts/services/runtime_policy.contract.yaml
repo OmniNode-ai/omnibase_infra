@@ -1,0 +1,122 @@
+name: runtime_policy
+version: 1
+active_runtime_packages:
+  - omnibase_infra
+  - omnimarket
+omnimemory_memgraph_port: 7687
+auxiliary_services_omnimemory_enabled: false
+profiles:
+  dev:
+    compose_project: omnibase-infra
+    main_port: 8085
+    effects_port: 8086
+    services:
+      main:
+        runtime_id: dev-main
+        runtime_address: runtime://omninode-pc/dev/main
+        capabilities:
+          - market.skill-proof
+          - workflow.orchestration
+          - runtime.main
+        bifrost_verify_endpoints: true
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: true
+      effects:
+        runtime_id: dev-effects
+        runtime_address: runtime://omninode-pc/dev/effects
+        capabilities:
+          - effects.consumer
+          - market.skill-proof
+          - runtime.effects
+        bifrost_verify_endpoints: true
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+      worker:
+        runtime_id: dev-worker
+        runtime_address: runtime://omninode-pc/dev/worker
+        capabilities:
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
+        bifrost_verify_endpoints: true
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+  stability-test:
+    compose_project: omnibase-infra-stability-test
+    main_port: 18085
+    effects_port: 18086
+    services:
+      main:
+        runtime_id: stability-test-main
+        runtime_address: runtime://omninode-pc/stability-test/main
+        capabilities:
+          - market.skill-proof
+          - workflow.orchestration
+          - runtime.main
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: true
+      effects:
+        runtime_id: stability-test-effects
+        runtime_address: runtime://omninode-pc/stability-test/effects
+        capabilities:
+          - effects.consumer
+          - market.skill-proof
+          - runtime.effects
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+      worker:
+        runtime_id: stability-test-worker
+        runtime_address: runtime://omninode-pc/stability-test/worker
+        capabilities:
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+  prod:
+    compose_project: omnibase-infra-prod
+    main_port: 28085
+    effects_port: 28086
+    services:
+      main:
+        runtime_id: prod-main
+        runtime_address: runtime://omninode-pc/prod/main
+        capabilities:
+          - market.skill-proof
+          - workflow.orchestration
+          - runtime.main
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: true
+      effects:
+        runtime_id: prod-effects
+        runtime_address: runtime://omninode-pc/prod/effects
+        capabilities:
+          - effects.consumer
+          - market.skill-proof
+          - runtime.effects
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+      worker:
+        runtime_id: prod-worker
+        runtime_address: runtime://omninode-pc/prod/worker
+        capabilities:
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false

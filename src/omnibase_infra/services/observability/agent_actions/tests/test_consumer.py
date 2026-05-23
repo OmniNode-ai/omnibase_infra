@@ -1228,6 +1228,7 @@ class TestHealthCheck:
         assert health["status"] == EnumHealthStatus.DEGRADED.value
         assert health["degraded_reason"] == "dlq_rate_exceeded"
         assert health["dlq_ratio"] is not None
+        # Why: Suppression is retained for this documented runtime typing boundary.
         assert health["dlq_ratio"] > 0.5  # type: ignore[operator]
 
     @pytest.mark.asyncio

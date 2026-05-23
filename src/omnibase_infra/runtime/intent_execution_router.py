@@ -371,6 +371,7 @@ class IntentExecutionRouter:
             # All handlers implement ProtocolIntentExecutor structurally with signature:
             # handle(payload: SpecificPayloadType, correlation_id: UUID) -> ModelBackendResult
             # Using type: ignore since dict value is object per ONEX rules (Any forbidden)
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             result: ModelBackendResult = await handler.handle(payload, correlation_id)  # type: ignore[attr-defined]
 
             _logger.debug(

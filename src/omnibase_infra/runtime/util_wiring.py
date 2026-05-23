@@ -383,6 +383,7 @@ def wire_default_handlers() -> dict[str, list[str] | dict[str, str]]:
 
         # Activation check: skip optional handlers whose required_env is unset [OMN-5356]
         is_optional = activation.get("optional", False)
+        # Why: Runtime compatibility requires assigning through a broader static type.
         required_env: list[str] = activation.get("required_env", [])  # type: ignore[assignment]
 
         if is_optional and required_env:
@@ -399,6 +400,7 @@ def wire_default_handlers() -> dict[str, list[str] | dict[str, str]]:
 
         # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
         # Mypy cannot verify structural subtyping for registration argument.
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
         logger.debug(
             "Registered handler from contract",
@@ -554,6 +556,7 @@ def wire_handlers_from_contract(
             )
             # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
             # Mypy cannot verify structural subtyping for registration argument.
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
             registered_handlers.append(handler_type)
 

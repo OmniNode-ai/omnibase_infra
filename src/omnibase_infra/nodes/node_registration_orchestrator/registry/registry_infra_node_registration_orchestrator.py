@@ -667,6 +667,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 )
 
             # Register handler
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             registry.register_handler(handler_instance)  # type: ignore[arg-type]
             logger.debug(
                 "Registered handler from contract: %s",

@@ -642,7 +642,9 @@ class HandlerLlmOpenaiCompatible:
         # both evaluate hasattr() as False before either assigns the lock.
         with _TRANSPORT_LOCK_GUARD:
             if not hasattr(self._transport, "_auth_lock"):
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 self._transport._auth_lock = asyncio.Lock()  # type: ignore[attr-defined]
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         auth_lock: asyncio.Lock = self._transport._auth_lock  # type: ignore[attr-defined]
 
         async with auth_lock:

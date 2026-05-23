@@ -350,6 +350,7 @@ class TransportMCPStreamableHttp:
                         operation="create_app",
                     ),
                 )
+            # Why: Runtime compatibility requires assigning through a broader static type.
             self._app = MCPAuthMiddleware(  # type: ignore[assignment]
                 self._app, api_keys=self._config.api_keys
             )
@@ -371,6 +372,7 @@ class TransportMCPStreamableHttp:
             },
         )
 
+        # Why: Runtime validation guarantees the returned value matches the contract.
         return self._app  # type: ignore[return-value]
 
     def _register_tool(

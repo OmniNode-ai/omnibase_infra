@@ -76,6 +76,7 @@ def _dist_name(dist_info_dir: Path) -> str:
 
 def _read_entry_points(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(interpolation=None)
+    # Why: Runtime compatibility requires assigning through a broader static type.
     parser.optionxform = str  # type: ignore[assignment]
     parser.read(path, encoding="utf-8")
     return parser

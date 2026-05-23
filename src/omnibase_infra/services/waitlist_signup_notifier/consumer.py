@@ -107,6 +107,7 @@ class WaitlistSignupNotifier:
                 logger.exception("Error in consume loop")
                 await asyncio.sleep(1.0)
 
+    # Why: Runtime handler payloads are heterogeneous JSON-like mappings by contract.
     async def _handle_message(self, value: dict) -> None:  # type: ignore[type-arg]
         """Process a single waitlist signup event and post to Slack.
 

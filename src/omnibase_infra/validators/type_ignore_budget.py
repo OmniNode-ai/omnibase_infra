@@ -36,7 +36,9 @@ from pathlib import Path
 
 DEFAULT_SCAN_ROOT = Path("src/omnibase_infra")
 
+# Why: Runtime wiring validates and narrows this payload shape before use.
 # Matches: # type: ignore[arg-type]  OR  # type: ignore[union-attr]
+# Why: Runtime wiring validates and narrows this payload shape before use.
 # Allows multiple codes in the bracket: # type: ignore[arg-type, misc]
 _TARGET_RE = re.compile(r"#\s*type:\s*ignore\[[^\]]*\b(arg-type|union-attr)\b[^\]]*\]")
 

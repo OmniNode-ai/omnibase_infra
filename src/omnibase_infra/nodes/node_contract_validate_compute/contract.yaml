@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_contract_validate_compute"
+contract_name: "node_contract_validate_compute"
+node_name: "node_contract_validate_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+status: "active"
+description: >
+  Compute node for ONEX contract validation and AST-based Pydantic model compliance scoring. Provides the runtime node boundary for the legacy ServiceContractValidator API while CI callers migrate.
+
+input_model:
+  name: "ModelContractValidateInput"
+  module: "omnibase_infra.nodes.node_contract_validate_compute.models"
+  description: "Contract content/file path plus optional model code for compliance validation."
+output_model:
+  name: "ModelContractValidationResult"
+  module: "omnibase_core.models.validation.model_contract_validation_result"
+  description: "Validation result with validity, score, violations, warnings, and suggestions."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validate_contract"
+      handler:
+        name: "HandlerContractValidate"
+        function: "handle_contract_validate"
+        module: "omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate"
+        type: "async"
+      description: "Validate contract YAML, contract files, or model compliance inputs."
+io_operations:
+  - operation: "validate_contract"
+    description: "Run contract validation or model compliance scoring."
+    input_model: "ModelContractValidateInput"
+    output_model: "ModelContractValidationResult"
+    input_fields:
+      - contract_content
+      - contract_type
+      - model_code
+      - file_path
+      - base_dir
+    output_fields:
+      - is_valid
+      - score
+      - violations
+      - warnings
+      - suggestions
+dependencies:
+  - name: "contract_validator"
+    type: "library"
+    module: "omnibase_core.services.service_contract_validator"
+    description: "Compatibility validator used until CI callers fully move to this node boundary."
+    required: true
+health_check:
+  enabled: false
+  description: "Pure compute node — no external health check required."
+metadata:
+  description: "Deterministic contract validation compute boundary for contract YAML, files, and model compliance scoring."
+  ticket: "OMN-11550"
+  author: "OmniNode Team"
+  tags:
+    - compute
+    - contract-validation
+    - ci
+    - migration

@@ -22,10 +22,9 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_core.types import JsonType
 from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 
@@ -93,10 +92,7 @@ class ModelLlmUsage(BaseModel):
             "ESTIMATED (locally computed), or MISSING (no data)."
         ),
     )
-    # ONEX_EXCLUDE: any_type - Raw provider usage payload is an untyped dict
-    # because each LLM provider (OpenAI, Ollama, vLLM) returns a different
-    # wire format. The verbatim data is preserved for auditing, not processed.
-    raw_provider_usage: dict[str, Any] | None = Field(
+    raw_provider_usage: dict[str, JsonType] | None = Field(
         default=None,
         description=(
             "Verbatim provider response usage block for auditing. "

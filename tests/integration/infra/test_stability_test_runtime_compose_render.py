@@ -135,6 +135,8 @@ def _docker_compose_command(*args: str) -> list[str]:
     return [
         "docker",
         "compose",
+        "--env-file",
+        "docker/runtime-policy.env",
         "-f",
         COMPOSE_FILES[0],
         "-f",
@@ -237,7 +239,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         environment = services[service_name]["environment"]
         assert "BUILD_SOURCE" not in environment
         assert "EXPECTED_BUILD_SOURCE" not in environment
-        assert environment["OMNIMEMORY_ENABLED"] == ""
+        assert environment["OMNIMEMORY_ENABLED"] == "false"
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"

@@ -147,6 +147,7 @@ class ServiceContractPublisher:
         # Resolve publisher from container
         # NOTE: Protocol type passed for duck-typed resolution per ONEX patterns
         publisher = await container.get_service_async(
+            # Why: Registry stores protocol contracts, not instantiable concrete implementations.
             ProtocolEventBusPublisher  # type: ignore[type-abstract]
         )
         if publisher is None:

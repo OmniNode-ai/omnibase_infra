@@ -423,9 +423,10 @@ repos:
         pass_filenames: false
         files: (platform_topic_suffixes\.py|contract\.yaml|topics\.yaml)
         stages: [pre-commit]
-      # OMN-5440: Verify required docker-compose env vars are set in ~/.omnibase/.env
+      # OMN-5440/OMN-11673: Verify required docker-compose env vars are set in
+      # contract-rendered policy env or operator env.
       - id: check-required-env-vars
-        name: Check required env vars are set in ~/.omnibase/.env
+        name: Check required env vars are set in configured env files
         entry: python scripts/check_required_env_vars.py
         language: python
         files: docker/docker-compose\.infra\.yml

@@ -10,7 +10,6 @@ Part of OMN-1976: Contract dependency materialization.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import asyncpg
 
@@ -36,8 +35,7 @@ class ProviderPostgresPool:
         """
         self._config = config
 
-    # ONEX_EXCLUDE: any_type - returns asyncpg.Pool which is not a standard type
-    async def create(self) -> Any:
+    async def create(self) -> asyncpg.Pool:
         """Create an asyncpg connection pool.
 
         Returns:
@@ -71,8 +69,7 @@ class ProviderPostgresPool:
         return pool
 
     @staticmethod
-    # ONEX_EXCLUDE: any_type - resource is asyncpg.Pool, typed as Any for provider interface
-    async def close(resource: Any) -> None:
+    async def close(resource: asyncpg.Pool | None) -> None:
         """Close an asyncpg connection pool.
 
         Args:

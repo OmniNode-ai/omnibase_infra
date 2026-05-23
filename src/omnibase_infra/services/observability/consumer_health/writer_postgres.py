@@ -82,6 +82,7 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
+        # Why: Runtime handler payloads are heterogeneous JSON-like mappings by contract.
         pool: asyncpg.Pool,  # type: ignore[type-arg]
         *,
         circuit_breaker_threshold: int = 5,

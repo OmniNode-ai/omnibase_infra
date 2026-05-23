@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
 
 from omnibase_infra.runtime.models.model_kafka_producer_config import (
     ModelKafkaProducerConfig,
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaProducer
 
 
 class ProviderKafkaProducer:
@@ -41,8 +44,7 @@ class ProviderKafkaProducer:
         """
         self._config = config
 
-    # ONEX_EXCLUDE: any_type - returns AIOKafkaProducer which varies by runtime
-    async def create(self) -> Any:
+    async def create(self) -> AIOKafkaProducer:
         """Create and start a Kafka producer.
 
         Returns:
@@ -84,8 +86,7 @@ class ProviderKafkaProducer:
         return producer
 
     @staticmethod
-    # ONEX_EXCLUDE: any_type - resource is AIOKafkaProducer, typed as Any for provider interface
-    async def close(resource: Any) -> None:
+    async def close(resource: AIOKafkaProducer | None) -> None:
         """Stop a Kafka producer.
 
         Args:

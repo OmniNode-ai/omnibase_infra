@@ -11,11 +11,12 @@ skipped because the static compose file is never updated.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from deploy_agent.events import Phase, PhaseStatus, Scope
-from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
+from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor, _compose_env
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -28,6 +29,27 @@ def _make_result(
     return subprocess.CompletedProcess(
         args=[], returncode=returncode, stdout=stdout, stderr=stderr
     )
+
+
+@pytest.mark.unit
+def test_compose_env_loads_contract_rendered_runtime_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deploy-agent compose commands must receive contract-rendered policy env."""
+    policy_env = tmp_path / "runtime-policy.env"
+    policy_env.write_text(
+        "ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra,omnimarket\n"
+        "DEV_RUNTIME_MAIN_CAPABILITIES=market.skill-proof,runtime.main\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy_env)
+    monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
+    monkeypatch.delenv("DEV_RUNTIME_MAIN_CAPABILITIES", raising=False)
+
+    env = _compose_env()
+
+    assert env["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
+    assert env["DEV_RUNTIME_MAIN_CAPABILITIES"] == "market.skill-proof,runtime.main"
 
 
 class TestComposeGen:

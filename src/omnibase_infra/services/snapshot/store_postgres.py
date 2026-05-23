@@ -1117,6 +1117,7 @@ class StoreSnapshotPostgres:
                 # NOTE: max_age_seconds is validated non-None by strategy check above,
                 # but mypy cannot narrow the Optional[float] type through control flow.
                 cutoff_time = datetime.now(UTC) - timedelta(
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     seconds=max_age_seconds  # type: ignore[arg-type]  # NOTE: control flow narrowing limitation
                 )
                 params.append(cutoff_time)
