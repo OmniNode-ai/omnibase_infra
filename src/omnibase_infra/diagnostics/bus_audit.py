@@ -41,6 +41,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from confluent_kafka import Consumer, TopicPartition
+
+# Why: Optional dependency or runtime adapter exposes this attribute dynamically.
 from confluent_kafka.admin import (  # type: ignore[attr-defined]
     AdminClient,
     ClusterMetadata,

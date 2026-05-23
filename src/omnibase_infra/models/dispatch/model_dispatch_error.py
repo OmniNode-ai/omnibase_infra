@@ -327,6 +327,7 @@ class ModelDispatchError(BaseModel):
         if self.has_code:
             # NOTE: has_code guard ensures error_code is not None,
             # but mypy cannot narrow the Optional[Enum] type in this context.
+            # Why: Control flow narrows this union at runtime before the attribute access.
             result["error_code"] = self.error_code.name  # type: ignore[union-attr]  # NOTE: property guard narrowing limitation
         if self.has_details:
             result["error_details"] = self.error_details

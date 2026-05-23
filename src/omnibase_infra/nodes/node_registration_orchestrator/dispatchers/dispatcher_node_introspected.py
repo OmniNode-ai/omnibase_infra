@@ -342,6 +342,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 # but lacks the async get_payload() method; mixin_node_introspection uses
                 # the same pattern (mixin_node_introspection.py:2276).
                 await self._event_bus.publish_envelope(
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     ack_envelope,  # type: ignore[arg-type]
                     topic=_ACK_TOPIC,
                 )

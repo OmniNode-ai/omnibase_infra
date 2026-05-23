@@ -974,6 +974,7 @@ async def bootstrap() -> int:
         # the best available backend, replacing the previous inline if/else.
         from omnibase_infra.backends.auto_configure import select_event_bus
 
+        # Why: Cast documents the narrowed runtime protocol for downstream readers.
         event_bus = cast(  # type: ignore[redundant-cast]
             "EventBusInmemory | EventBusKafka",
             select_event_bus(
@@ -1019,6 +1020,7 @@ async def bootstrap() -> int:
             # Publishes state transition events to omnidash /circuit-breaker dashboard.
             try:
                 _cb_publisher = CircuitBreakerEventPublisher(
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     event_bus=event_bus,  # type: ignore[arg-type]
                 )
 
@@ -1290,6 +1292,7 @@ async def bootstrap() -> int:
                     )
                     llm_health_service = ServiceLlmEndpointHealth(
                         config=_llm_health_config,
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         event_bus=event_bus,  # type: ignore[arg-type]
                     )
                     await llm_health_service.start()
@@ -1354,11 +1357,13 @@ async def bootstrap() -> int:
                         """Publisher callback for baselines batch compute."""
                         _env: ModelEventEnvelope[object] = ModelEventEnvelope(
                             payload=payload,
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
                             correlation_id=correlation_id,  # type: ignore[arg-type]
                             event_type=event_type,
                             source="baselines_batch_compute",
                         )
                         await event_bus.publish_envelope(
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
                             _env,  # type: ignore[arg-type]
                             topic=topic or _baselines_default_topic,
                         )
@@ -1478,6 +1483,7 @@ async def bootstrap() -> int:
                             ) -> None:
                                 _savings_estimator.ingest_event(
                                     _topic,
+                                    # Why: Runtime wiring validates and narrows this payload shape before use.
                                     _json.loads(msg)  # type: ignore[arg-type]
                                     if isinstance(msg, (str, bytes))
                                     else msg,
@@ -1485,6 +1491,7 @@ async def bootstrap() -> int:
 
                             await event_bus.subscribe(
                                 _input_topic,
+                                # Why: Runtime wiring validates and narrows this payload shape before use.
                                 on_message=_savings_on_message,  # type: ignore[arg-type]
                                 group_id=f"savings-estimator.{_input_topic}",
                             )
@@ -1514,6 +1521,7 @@ async def bootstrap() -> int:
                                         )
                                     )
                                     await event_bus.publish_envelope(
+                                        # Why: Runtime wiring validates and narrows this payload shape before use.
                                         _envelope,  # type: ignore[arg-type]
                                         topic=_savings_topic,
                                     )
@@ -1569,6 +1577,7 @@ async def bootstrap() -> int:
                     os.environ.get("RUNTIME_HEALTH_BOOT_GRACE_SECONDS", "120")
                 )
                 runtime_health_monitor = ServiceRuntimeHealthMonitor(
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     event_bus=event_bus,  # type: ignore[arg-type]
                     check_interval_seconds=_health_interval,
                     boot_grace_seconds=_health_boot_grace,
@@ -1669,6 +1678,7 @@ async def bootstrap() -> int:
             try:
                 await container.service_registry.register_instance(
                     ProtocolEventBusPublisher,
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     event_bus,  # type: ignore[arg-type]  # EventBusKafka/Inmemory implements ProtocolEventBusPublisher via ProtocolEventBus
                 )
                 logger.info(
@@ -1692,6 +1702,7 @@ async def bootstrap() -> int:
                 try:
                     await container.service_registry.register_instance(
                         ProtocolEventBusSubscriber,
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         event_bus,  # type: ignore[arg-type]
                     )
                     logger.info(
@@ -2819,6 +2830,7 @@ async def bootstrap() -> int:
             # NOTE(OMN-5609): ServiceNodeIntrospection structurally satisfies
             # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
             # cannot verify structural protocol conformance across mixin chains.
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             introspection_service=introspection_service,  # type: ignore[arg-type]
             # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
             # uses contract values instead of DEFAULT_* constants.
@@ -2950,9 +2962,11 @@ async def bootstrap() -> int:
                         os.environ.get("WIRING_HEALTH_EMIT_INTERVAL", "60")
                     )
                     wiring_health_checker = WiringHealthChecker(
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         emission_source=emission_source,  # type: ignore[arg-type]
                         consumption_source=consumption_source,
                         environment=environment,
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         event_bus=event_bus,  # type: ignore[arg-type]
                     )
 

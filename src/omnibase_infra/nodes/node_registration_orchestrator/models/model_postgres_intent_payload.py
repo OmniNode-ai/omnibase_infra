@@ -188,6 +188,7 @@ class ModelPostgresIntentPayload(BaseModel):
                         f"endpoints[{i}][1] (value) must be a string, "
                         f"got {type(val).__name__}"
                     )
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return v  # type: ignore[return-value]  # NOTE: runtime type validated by Pydantic
         if isinstance(v, Mapping):
             if len(v) == 0:

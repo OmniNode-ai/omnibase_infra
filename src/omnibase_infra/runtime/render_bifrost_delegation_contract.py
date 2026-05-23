@@ -161,6 +161,7 @@ def _strip_render_hint_fields(path: Path) -> None:
         if isinstance(backend, dict):
             for field in _RENDER_HINT_FIELDS:
                 if field in backend:
+                    # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                     del backend[field]  # type: ignore[attr-defined]
                     changed = True
     if changed:

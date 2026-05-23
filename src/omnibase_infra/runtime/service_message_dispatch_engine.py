@@ -1968,8 +1968,10 @@ class MessageDispatchEngine:
             if context is not None:
                 # NOTE: Dispatcher signature varies - context param may be optional.
                 # Return type depends on dispatcher implementation (dict or model).
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
             # NOTE: Return type depends on dispatcher implementation (dict or model).
+            # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
             return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
@@ -1993,6 +1995,7 @@ class MessageDispatchEngine:
                 # JsonType is a subset of object, so this is safe at runtime.
                 return await loop.run_in_executor(
                     None,
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     sync_ctx_dispatcher,  # type: ignore[arg-type]
                     envelope_for_handler,
                     context,
@@ -2006,6 +2009,7 @@ class MessageDispatchEngine:
                 # JsonType is a subset of object, so this is safe at runtime.
                 return await loop.run_in_executor(
                     None,
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     sync_dispatcher,  # type: ignore[arg-type]
                     envelope_for_handler,
                 )
@@ -2383,6 +2387,7 @@ class MessageDispatchEngine:
         if hasattr(original_payload, "model_dump"):
             # Pydantic model - serialize to dict with JSON mode
             # NOTE: model_dump returns Any, but we know it's JSON-compatible
+            # Why: Control flow narrows this union at runtime before the attribute access.
             return original_payload.model_dump(mode="json")  # type: ignore[union-attr, no-any-return]
         elif isinstance(original_payload, dict):
             # Dict - recursively serialize values
@@ -2437,6 +2442,7 @@ class MessageDispatchEngine:
             JSON-safe representation.
         """
         if value is None or isinstance(value, (str, int, float, bool)):
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return value  # type: ignore[return-value]
         elif isinstance(value, UUID):
             return str(value)
@@ -2444,6 +2450,7 @@ class MessageDispatchEngine:
             return value.isoformat()
         elif hasattr(value, "model_dump"):
             # Pydantic model - model_dump returns Any, but we know it's JSON-compatible
+            # Why: Control flow narrows this union at runtime before the attribute access.
             return value.model_dump(mode="json")  # type: ignore[union-attr, no-any-return]
         elif isinstance(value, dict):
             return self._serialize_dict_values(value)

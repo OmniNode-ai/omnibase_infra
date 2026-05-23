@@ -42,6 +42,7 @@ from omnibase_infra.event_bus.enum_topic_validation_status import (
 try:
     from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
 except ImportError:
+    # Why: Runtime compatibility requires assigning through a broader static type.
     from omnibase_infra.event_bus.event_bus_inmemory import (  # type: ignore[assignment]
         EventBusInmemory,
     )

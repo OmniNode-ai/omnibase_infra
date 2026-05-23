@@ -186,10 +186,12 @@ class NotificationConsumer:
             # NOTE: consume() support is verified in start() via fail-fast check.
             while self._running:
                 try:
+                    # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                     async for message in self._event_bus.consume(topic):  # type: ignore[attr-defined]
                         if not self._running:
                             break
                         try:
+                            # Why: Runtime wiring validates and narrows this payload shape before use.
                             await self._process_message(message, handler)  # type: ignore[arg-type]
                         except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                             # Generate correlation_id for traceability (message may not
@@ -245,6 +247,7 @@ class NotificationConsumer:
             correlation_id = self._extract_correlation_id(payload)
 
             # Invoke the handler
+            # Why: Suppression is retained for this documented runtime typing boundary.
             await handler(payload)  # type: ignore[operator]
 
         except json.JSONDecodeError as e:

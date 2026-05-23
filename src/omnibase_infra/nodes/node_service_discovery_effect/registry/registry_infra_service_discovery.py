@@ -176,6 +176,7 @@ class RegistryInfraServiceDiscovery:
             return
 
         await container.service_registry.register_instance(
+            # Why: Registry stores protocol contracts, not instantiable concrete implementations.
             interface=ProtocolDiscoveryOperations,  # type: ignore[type-abstract]
             instance=handler,
             scope=EnumInjectionScope.GLOBAL,

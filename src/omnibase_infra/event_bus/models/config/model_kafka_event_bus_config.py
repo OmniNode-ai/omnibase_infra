@@ -651,6 +651,7 @@ class ModelKafkaEventBusConfig(BaseModel):
     # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
     # Pydantic's @computed_field transforms the @property into a computed field.
     # This is a known mypy/Pydantic v2 interaction - the code works correctly at runtime.
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def acks_aiokafka(self) -> int | str:

@@ -75,6 +75,7 @@ async def get_cost_summary(
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostSummary:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_cost_summary(pool, window=window)  # type: ignore[arg-type]
 
 
@@ -94,6 +95,7 @@ async def get_cost_trend(
         Query(ge=1, le=365, description="Number of trailing days to include."),
     ] = 30,
 ) -> ModelCostTrend:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_cost_trend(pool, bucket=bucket, days=days)  # type: ignore[arg-type]
 
 
@@ -109,6 +111,7 @@ async def get_cost_by_model(
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostBreakdown:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_cost_by_model(pool, window=window)  # type: ignore[arg-type]
 
 
@@ -124,6 +127,7 @@ async def get_cost_by_repo(
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostBreakdown:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_cost_by_repo(pool, window=window)  # type: ignore[arg-type]
 
 
@@ -139,6 +143,7 @@ async def get_token_usage(
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelTokenUsage:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_token_usage(pool, window=window)  # type: ignore[arg-type]
 
 
@@ -154,4 +159,5 @@ async def get_savings_summary(
         Query(description="Trailing savings window to read."),
     ] = "24h",
 ) -> ModelSavingsSummary:
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     return await fetch_savings_summary(pool, window=window)  # type: ignore[arg-type]

@@ -50,21 +50,25 @@ class ModelMachineEntry(BaseModel):
             raise ValueError(f"{info.field_name} must be absolute, got: {v}")
         return v
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def onex_state_dir(self) -> str:
         return f"{self.omni_home}/.onex_state"
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def statusline_path(self) -> str:
         return f"{self.omni_home}/omniclaude/plugins/onex/hooks/scripts/statusline.sh"
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def plugin_path(self) -> str:
         return f"{self.omni_home}/omniclaude/plugins/onex"
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def claude_settings_path(self) -> str:

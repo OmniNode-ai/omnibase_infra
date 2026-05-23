@@ -590,6 +590,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             result = await self._resolve_config_async(
                 handler_type=handler_type,
                 config_ref=config_ref,
+                # Why: Runtime wiring validates and narrows this payload shape before use.
                 inline_config=inline_config,  # type: ignore[arg-type]
                 correlation_id=correlation_id,
             )

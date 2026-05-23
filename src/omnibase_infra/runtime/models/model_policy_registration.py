@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 else:
     # NOTE: At runtime we use generic type to avoid circular import.
     # Type checkers see proper protocol type via TYPE_CHECKING block.
+    # Why: Runtime compatibility requires assigning through a broader static type.
     PolicyClass = type  # type: ignore[assignment,misc]
 
 

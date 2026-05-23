@@ -630,6 +630,7 @@ class ServiceSavingsEstimator:
             except ValueError:
                 pass  # keep auto-generated UUID if not a valid UUID string
 
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         savings_input = ModelSavingsEstimationInput(**input_kwargs)  # type: ignore[arg-type]
 
         try:

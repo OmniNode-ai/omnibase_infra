@@ -404,6 +404,7 @@ class ContractDependencyResolver:
 
         # Type ignore: contract is a SimpleNamespace duck-typed to match ModelContractBase
         # The resolver uses getattr() internally so any object with name/dependencies works
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         return await self.resolve(contract, allow_missing=allow_missing)  # type: ignore[arg-type]
 
     # Why: raw contract YAML is heterogeneous until the dependency schema is
