@@ -24,18 +24,23 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.service_kernel import _build_runtime_handler_dependencies
 
 
-def _make_manifest_insert_contract() -> ModelDiscoveredContract:
+def _make_pool_backed_contract(
+    *,
+    name: str = "node_manifest_insert",
+    handler_name: str = "HandlerPostgresRuntimeManifestInsert",
+) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
-        name="node_manifest_insert",
+        name=name,
         node_type="EFFECT_GENERIC",
         contract_version=ModelContractVersion(major=1, minor=0, patch=0),
         contract_path=Path("/fake/contract.yaml"),
-        entry_point_name="node_manifest_insert",
+        entry_point_name=name,
         package_name="test-pkg",
         event_bus=ModelEventBusWiring(
-            subscribe_topics=("onex.evt.platform.manifest-insert.v1",),
+            subscribe_topics=(f"onex.evt.platform.{name}.v1",),
             publish_topics=(),
         ),
         handler_routing=ModelHandlerRouting(
@@ -43,7 +48,7 @@ def _make_manifest_insert_contract() -> ModelDiscoveredContract:
             handlers=(
                 ModelHandlerRoutingEntry(
                     handler=ModelHandlerRef(
-                        name="HandlerPostgresRuntimeManifestInsert",
+                        name=handler_name,
                         module="fake.handler_module",
                     ),
                     event_model=None,
@@ -52,6 +57,10 @@ def _make_manifest_insert_contract() -> ModelDiscoveredContract:
             ),
         ),
     )
+
+
+def _make_manifest_insert_contract() -> ModelDiscoveredContract:
+    return _make_pool_backed_contract()
 
 
 @pytest.mark.integration
@@ -92,6 +101,52 @@ async def test_postgres_pool_threaded_via_materialized_deps() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_kernel_runtime_pool_dependencies_cover_baselines_batch_compute() -> None:
+    """Kernel dependency map covers every runtime-owned handler that requires pool."""
+    from omnibase_infra.runtime.service_message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
+
+    class PoolBackedHandler:
+        def __init__(self, pool: object) -> None:
+            self.pool = pool
+
+        async def handle(self, envelope: object) -> None:
+            return None
+
+    fake_pool = MagicMock()
+    manifest = ModelAutoWiringManifest(
+        contracts=(
+            _make_pool_backed_contract(
+                name="node_manifest_insert",
+                handler_name="HandlerPostgresRuntimeManifestInsert",
+            ),
+            _make_pool_backed_contract(
+                name="node_baselines_batch_compute",
+                handler_name="HandlerBaselinesBatchCompute",
+            ),
+        )
+    )
+    engine = MessageDispatchEngine()
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+        return_value=PoolBackedHandler,
+    ):
+        report = await wire_from_manifest(
+            manifest,
+            engine,
+            materialized_explicit_dependencies=_build_runtime_handler_dependencies(
+                fake_pool
+            ),
+        )
+
+    assert report.total_failed == 0
+    assert report.total_wired == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_no_materialized_deps_when_pool_is_none() -> None:
     """When postgres_pool is None, no materialized deps map is passed (empty dict -> None)."""
     from omnibase_infra.runtime.service_message_dispatch_engine import (
@@ -125,20 +180,19 @@ def test_empty_runtime_manifest_dependencies_is_falsy() -> None:
     """Invariant: empty dict evaluates falsy, so `or None` yields None.
 
     This mirrors the kernel pattern:
-        materialized_explicit_dependencies=(runtime_manifest_dependencies or None)
+        materialized_explicit_dependencies=_build_runtime_handler_dependencies(pool)
     """
-    runtime_manifest_dependencies: dict[str, dict[str, object]] = {}
-    result = runtime_manifest_dependencies or None
+    result = _build_runtime_handler_dependencies(None)
     assert result is None
 
 
 @pytest.mark.integration
-def test_nonempty_runtime_manifest_dependencies_is_truthy() -> None:
-    """Invariant: non-empty dict evaluates truthy, so `or None` passes it through."""
+def test_runtime_handler_dependencies_include_pool_backed_handlers() -> None:
+    """Kernel exposes explicit pool deps for all service_kernel-owned handlers."""
     fake_pool = MagicMock()
-    runtime_manifest_dependencies: dict[str, dict[str, object]] = {
-        "HandlerPostgresRuntimeManifestInsert": {"pool": fake_pool}
-    }
-    result = runtime_manifest_dependencies or None
+    result = _build_runtime_handler_dependencies(fake_pool)
     assert result is not None
     assert "HandlerPostgresRuntimeManifestInsert" in result
+    assert "HandlerBaselinesBatchCompute" in result
+    assert result["HandlerPostgresRuntimeManifestInsert"]["pool"] is fake_pool
+    assert result["HandlerBaselinesBatchCompute"]["pool"] is fake_pool

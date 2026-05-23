@@ -348,6 +348,18 @@ def _get_contracts_dir() -> Path:
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
+def _build_runtime_handler_dependencies(
+    postgres_pool: object | None,
+) -> dict[str, dict[str, object]] | None:
+    """Build constructor dependencies for runtime-owned Postgres handlers."""
+    if postgres_pool is None:
+        return None
+    return {
+        "HandlerPostgresRuntimeManifestInsert": {"pool": postgres_pool},
+        "HandlerBaselinesBatchCompute": {"pool": postgres_pool},
+    }
+
+
 def load_runtime_config(
     contracts_dir: Path,
     correlation_id: UUID | None = None,
@@ -2404,11 +2416,9 @@ async def bootstrap() -> int:
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
 
-                runtime_manifest_dependencies: dict[str, dict[str, object]] = {}
-                if registration_service.postgres_pool is not None:
-                    runtime_manifest_dependencies[
-                        "HandlerPostgresRuntimeManifestInsert"
-                    ] = {"pool": registration_service.postgres_pool}
+                runtime_handler_dependencies = _build_runtime_handler_dependencies(
+                    registration_service.postgres_pool
+                )
 
                 # 5. Wire handlers into dispatch engine
                 auto_wiring_report = await wire_from_manifest(
@@ -2419,9 +2429,7 @@ async def bootstrap() -> int:
                     container=container,
                     subscribe_immediately=False,
                     result_appliers_by_contract=auto_wiring_result_appliers,
-                    materialized_explicit_dependencies=(
-                        runtime_manifest_dependencies or None
-                    ),
+                    materialized_explicit_dependencies=(runtime_handler_dependencies),
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
