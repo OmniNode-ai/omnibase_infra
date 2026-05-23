@@ -155,14 +155,14 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     compose_steps = [s for s in steps if "bring up compose stack" in _step_text(s)]
     assert compose_steps, "compose bring-up step missing"
     compose_text = "\n".join(_step_text(s) for s in compose_steps)
-    assert "docker network connect omnibase-infra-network" in compose_text
+    assert 'docker network connect "${omnibase_infra_network}"' in compose_text
     assert "runner_on_compose_network=true" in compose_text
     assert "compose service endpoints reachable by docker dns" in compose_text
     assert "compose service endpoints reachable by host-published ports" in compose_text
     assert "unreachable from the runner by docker dns or localhost" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
     assert "kafka_bootstrap_servers=localhost:19092" in compose_text
-    assert "omnibase-infra-postgres:5432" in compose_text
+    assert "postgres:5432" in compose_text
     assert "localhost:${{ inputs.compose_pg_port }}" in compose_text
     assert compose_text.index("compose infra healthy after") < compose_text.index(
         "compose service endpoints reachable by docker dns"
