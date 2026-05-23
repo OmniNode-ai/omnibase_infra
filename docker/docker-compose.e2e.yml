@@ -30,7 +30,7 @@
 #   - Infisical: 8880
 #   - Valkey: 6379
 #   - Runtime Health: 8085 (when runtime profile enabled)
-name: omnibase-infra
+name: ${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
 # Older versions will SILENTLY produce malformed DSNs.
@@ -52,7 +52,7 @@ services:
   # ==========================================================================
   postgres:
     image: postgres:16-alpine
-    container_name: omnibase-infra-postgres
+    container_name: ${OMNIBASE_INFRA_POSTGRES_CONTAINER:-omnibase-infra-postgres}
     environment:
       POSTGRES_USER: postgres
       # NOTE: Unlike docker-compose.infra.yml which fails fast when POSTGRES_PASSWORD
@@ -87,7 +87,7 @@ services:
   # ==========================================================================
   redpanda:
     image: redpandadata/redpanda:v24.2.7
-    container_name: omnibase-infra-redpanda
+    container_name: ${OMNIBASE_INFRA_REDPANDA_CONTAINER:-omnibase-infra-redpanda}
     command:
       - redpanda
       - start
@@ -134,7 +134,7 @@ services:
   # ==========================================================================
   redpanda-topic-manager:
     image: redpandadata/redpanda:v24.2.7
-    container_name: omnibase-infra-topic-manager
+    container_name: ${OMNIBASE_INFRA_TOPIC_MANAGER_CONTAINER:-omnibase-infra-topic-manager}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -201,7 +201,7 @@ services:
   # ==========================================================================
   valkey:
     image: valkey/valkey:8.0-alpine
-    container_name: omnibase-infra-valkey
+    container_name: ${OMNIBASE_INFRA_VALKEY_CONTAINER:-omnibase-infra-valkey}
     ports:
       - "${VALKEY_PORT:-6379}:6379"
     networks:
@@ -221,7 +221,7 @@ services:
   # ==========================================================================
   infisical:
     image: infisical/infisical:v0.146.0-postgres
-    container_name: omnibase-infra-infisical
+    container_name: ${OMNIBASE_INFRA_INFISICAL_CONTAINER:-omnibase-infra-infisical}
     depends_on:
       postgres:
         condition: service_healthy
@@ -256,7 +256,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.runtime
-    container_name: omnibase-infra-runtime
+    container_name: ${OMNIBASE_INFRA_RUNTIME_CONTAINER:-omnibase-infra-runtime}
     profiles: ["runtime"]
     depends_on:
       postgres:
@@ -310,17 +310,17 @@ services:
 # ==========================================================================
 networks:
   omnibase-infra-network:
-    name: omnibase-infra-network
+    name: ${OMNIBASE_INFRA_NETWORK:-omnibase-infra-network}
     driver: bridge
 # ==========================================================================
 # Volumes
 # ==========================================================================
 volumes:
   postgres_data:
-    name: omnibase-infra-postgres-data
+    name: ${OMNIBASE_INFRA_POSTGRES_VOLUME:-omnibase-infra-postgres-data}
   redpanda_data:
-    name: omnibase-infra-redpanda-data
+    name: ${OMNIBASE_INFRA_REDPANDA_VOLUME:-omnibase-infra-redpanda-data}
   valkey_data:
-    name: omnibase-infra-valkey-data
+    name: ${OMNIBASE_INFRA_VALKEY_VOLUME:-omnibase-infra-valkey-data}
   runtime_logs:
-    name: omnibase-infra-runtime-logs
+    name: ${OMNIBASE_INFRA_RUNTIME_LOG_VOLUME:-omnibase-infra-runtime-logs}
