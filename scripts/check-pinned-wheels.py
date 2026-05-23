@@ -378,8 +378,6 @@ def _check_uv_sources(
 
             behind = _minor_behind(tag, latest_release)
             drifted = behind > threshold
-            norm_tag = tag.lstrip("v")
-            norm_latest = latest_release.lstrip("v")
             results.append(
                 PinResult(
                     source="pyproject_uv_source",
