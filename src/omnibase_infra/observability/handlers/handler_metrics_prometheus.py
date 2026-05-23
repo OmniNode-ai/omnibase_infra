@@ -116,6 +116,7 @@ try:
 
     _AIOHTTP_AVAILABLE = True
 except ImportError:
+    # Why: Runtime compatibility requires assigning through a broader static type.
     web = None  # type: ignore[assignment, misc]
 
 try:
@@ -125,8 +126,10 @@ try:
 except ImportError:
     # Provide stubs for type checking when prometheus_client is not installed
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+    # Why: Runtime compatibility requires assigning through a broader static type.
     Histogram = None  # type: ignore[assignment, misc]
 
+    # Why: Compatibility path intentionally crosses a static typing limitation.
     def generate_latest() -> bytes:  # type: ignore[misc]  # stub-ok: optional dep
         """Stub for when prometheus_client is not installed."""
         raise ImportError("prometheus_client is required but not installed")

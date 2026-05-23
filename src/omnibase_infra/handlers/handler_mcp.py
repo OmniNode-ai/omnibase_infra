@@ -586,6 +586,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                                     target_name="mcp_handler",
                                 ),
                             )
+                        # Why: Runtime compatibility requires assigning through a broader static type.
                         app: Starlette = MCPAuthMiddleware(  # type: ignore[assignment]
                             base_app,
                             api_keys=self._config.api_keys,

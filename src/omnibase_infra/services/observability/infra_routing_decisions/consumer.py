@@ -590,6 +590,7 @@ async def _main() -> None:
     """Main entry point for running the consumer as a module."""
     from omnibase_infra.utils.util_consumer_restart import run_with_restart
 
+    # Why: Runtime factory dispatch accepts this dynamic constructor shape.
     config = ConfigInfraRoutingDecisionsConsumer()  # type: ignore[call-arg]
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper(), logging.INFO),

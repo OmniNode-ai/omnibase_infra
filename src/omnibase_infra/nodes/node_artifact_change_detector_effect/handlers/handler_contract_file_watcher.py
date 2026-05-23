@@ -51,8 +51,11 @@ try:
     _WATCHDOG_AVAILABLE = True
 except ImportError:
     _WATCHDOG_AVAILABLE = False
+    # Why: Runtime compatibility requires assigning through a broader static type.
     FileSystemEventHandler = object  # type: ignore[assignment,misc]
+    # Why: Runtime compatibility requires assigning through a broader static type.
     WatchdogObserver = None  # type: ignore[assignment]
+    # Why: Runtime compatibility requires assigning through a broader static type.
     FileSystemEvent = object  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:

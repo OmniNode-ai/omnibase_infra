@@ -32,38 +32,57 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from abc import ABC, abstractmethod
 
 _log = logging.getLogger(__name__)
 
 _GITHUB_GRAPHQL = "https://api.github.com/graphql"
 _GITHUB_REST = "https://api.github.com"
-_DEFAULT_TIMEOUT = 30
+_DEFAULT_TIMEOUT = 30.0
 
 
 class GitHubTransport:
     """Low-level HTTP transport for GitHub API (private)."""
 
-    def __init__(self, token: str | None = None) -> None:
+    def __init__(
+        self,
+        token: str | None = None,
+        *,
+        rest_base: str | None = None,
+        graphql_url: str | None = None,
+        timeout: float = _DEFAULT_TIMEOUT,
+    ) -> None:
         self._token = token or os.environ.get("GH_PAT", "")
         if not self._token:
             raise RuntimeError(
                 "GH_PAT environment variable is not set. "
                 "Export it before using GitHubHttpClient."
             )
+        self._rest_base = rest_base
+        self._graphql_url = graphql_url
+        self._timeout = timeout
+
+    def _headers(self, *, content_type: bool = True) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if self._token:
+            headers["Authorization"] = f"bearer {self._token}"
+        if content_type:
+            headers["Content-Type"] = "application/json"
+        return headers
 
     def _graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
         """Execute a GraphQL query. Returns the ``data`` dict. Never raises."""
         payload = json.dumps({"query": query, "variables": variables}).encode()
         req = urllib.request.Request(  # noqa: S310
-            _GITHUB_GRAPHQL,
+            self._graphql_url or _GITHUB_GRAPHQL,
             data=payload,
-            headers={
-                "Authorization": f"bearer {self._token}",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
         )
         try:
-            with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
                 body = json.loads(resp.read())
             if "errors" in body:
                 _log.warning("GraphQL errors: %s", body["errors"])
@@ -74,9 +93,7 @@ class GitHubTransport:
             _log.warning("GraphQL request failed: %s", exc)
             return {}
 
-    def _rest_get(
-        self, path: str, *, timeout: int = _DEFAULT_TIMEOUT
-    ) -> dict[str, object] | None:
+    def _rest_get(self, path: str, *, timeout: float | None = None) -> object | None:
         """REST GET. Returns parsed JSON or None. Never raises."""
         return self._rest_request("GET", path, timeout=timeout)
 
@@ -85,8 +102,8 @@ class GitHubTransport:
         path: str,
         body: dict[str, object] | None = None,
         *,
-        timeout: int = _DEFAULT_TIMEOUT,
-    ) -> dict[str, object] | None:
+        timeout: float | None = None,
+    ) -> object | None:
         """REST POST. Returns parsed JSON or None. Never raises."""
         return self._rest_request("POST", path, json_body=body, timeout=timeout)
 
@@ -96,23 +113,19 @@ class GitHubTransport:
         path: str,
         *,
         json_body: dict[str, object] | None = None,
-        timeout: int = _DEFAULT_TIMEOUT,
-    ) -> dict[str, object] | None:
+        timeout: float | None = None,
+    ) -> object | None:
         """Generic REST request. Returns parsed JSON or None. Never raises."""
-        url = f"{_GITHUB_REST}{path}"
+        url = f"{self._rest_base or _GITHUB_REST}{path}"
         data = json.dumps(json_body).encode() if json_body else None
         req = urllib.request.Request(  # noqa: S310
             url,
             data=data,
             method=method,
-            headers={
-                "Authorization": f"bearer {self._token}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=timeout or self._timeout) as resp:  # noqa: S310
                 raw = resp.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
@@ -343,7 +356,71 @@ query($owner: String!, $name: String!, $number: Int!) {
         return ids
 
 
-class GitHubHttpClient(GitHubPrApi):
+class GitHubPullTriageApi(ABC):
+    """REST helpers for PR-poller deterministic triage."""
+
+    @abstractmethod
+    def _rest_get(self, path: str, *, timeout: float | None = None) -> object | None:
+        """Return a parsed REST GET response."""
+
+    def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
+        """Fetch open PR REST payloads augmented for deterministic triage."""
+        all_prs: list[dict[str, object]] = []
+        per_page = 100
+        page = 1
+        while True:
+            batch = self._rest_get(
+                f"/repos/{repo}/pulls?state=open&per_page={per_page}&page={page}"
+            )
+            if not isinstance(batch, list):
+                raise RuntimeError(f"GitHub PR list request failed for {repo}")
+            prs = [pr for pr in batch if isinstance(pr, dict)]
+            all_prs.extend(prs)
+            if len(batch) < per_page:
+                break
+            page += 1
+
+        for pr in all_prs:
+            pr_number = pr.get("number")
+            if not isinstance(pr_number, int):
+                continue
+            head = pr.get("head")
+            sha = str(head.get("sha", "")) if isinstance(head, dict) else ""
+            pr["combined_status"] = self.fetch_combined_status(repo, sha)
+            pr["review_states"] = self.fetch_review_states(repo, pr_number)
+        return all_prs
+
+    def fetch_combined_status(self, repo: str, sha: str) -> str:
+        """Fetch the combined commit status for a PR head SHA."""
+        if not sha:
+            return "pending"
+        data = self._rest_get(f"/repos/{repo}/commits/{sha}/status")
+        if not isinstance(data, dict):
+            return "pending"
+        return str(data.get("state", "pending"))
+
+    def fetch_review_states(self, repo: str, pr_number: int) -> list[str]:
+        """Fetch latest approving/request-change review states per reviewer."""
+        data = self._rest_get(f"/repos/{repo}/pulls/{pr_number}/reviews")
+        if not isinstance(data, list):
+            return []
+        latest: dict[str, str] = {}
+        for review in data:
+            if not isinstance(review, dict):
+                continue
+            user_data = review.get("user", {})
+            user = (
+                str(user_data.get("login", "unknown"))
+                if isinstance(user_data, dict)
+                else "unknown"
+            )
+            state = str(review.get("state", ""))
+            if state in {"APPROVED", "CHANGES_REQUESTED"}:
+                latest[user] = state
+        return list(latest.values())
+
+
+class GitHubHttpClient(GitHubPrApi, GitHubPullTriageApi):
     """Single GitHub HTTP client. Reads GH_PAT (fail-fast).
 
     Usage::
@@ -366,7 +443,7 @@ class GitHubHttpClient(GitHubPrApi):
     def fetch_branch_protection(self, repo: str, branch: str = "main") -> int | None:
         """Fetch required_approving_review_count for a branch. None = no protection."""
         data = self._rest_get(f"/repos/{repo}/branches/{branch}/protection")
-        if data is None:
+        if not isinstance(data, dict):
             return None
         reviews = data.get("required_pull_request_reviews")
         if not isinstance(reviews, dict):

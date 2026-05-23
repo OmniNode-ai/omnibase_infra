@@ -71,7 +71,7 @@ import importlib
 import logging
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
 import yaml
@@ -767,7 +767,7 @@ class ContractLinter:
     def _validate_required_fields(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate that all required top-level fields are present."""
@@ -791,7 +791,7 @@ class ContractLinter:
     def _validate_node_type(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate node_type is one of the valid ONEX 4-node types."""
@@ -841,7 +841,7 @@ class ContractLinter:
     def _validate_contract_version(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate contract_version has proper semver structure."""
@@ -905,7 +905,7 @@ class ContractLinter:
     def _validate_model_reference(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         field_name: Literal["input_model", "output_model"],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
@@ -985,7 +985,7 @@ class ContractLinter:
         self,
         file_path: str,
         field_name: str,
-        model_ref: dict[str, Any],
+        model_ref: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Check if the model's module is importable."""
@@ -1035,7 +1035,7 @@ class ContractLinter:
     def _validate_name_convention(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate name follows snake_case convention."""
@@ -1064,7 +1064,7 @@ class ContractLinter:
     def _check_recommended_fields(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Check for recommended but optional fields."""
@@ -1089,7 +1089,7 @@ class ContractLinter:
     def _validate_unknown_fields(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Detect unrecognized top-level fields and suggest corrections.
@@ -1144,7 +1144,7 @@ class ContractLinter:
     def _validate_dependencies(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate contract dependency declarations.
@@ -1298,7 +1298,7 @@ class ContractLinter:
     def _validate_version_compatibility(
         self,
         file_path: str,
-        content: dict[str, Any],
+        content: dict[str, object],
         line_map: dict[str, int],
     ) -> list[ModelContractViolation]:
         """Validate contract version is compatible with the current runtime.

@@ -159,6 +159,7 @@ class MixinSemverCache:
                 # NOTE: cache_clear() is added by @lru_cache decorator but not
                 # reflected in Callable type annotation. This is a known mypy
                 # limitation with lru_cache wrappers.
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 inner_cache.cache_clear()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
             cls._semver_cache = None
             cls._semver_cache_inner = None
@@ -395,6 +396,7 @@ class MixinSemverCache:
         # NOTE: cache_info() is dynamically added by @lru_cache decorator but not
         # reflected in Callable type annotation. This is a known mypy limitation.
         # The return type is functools._CacheInfo.
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
         return result
 

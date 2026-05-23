@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -275,8 +274,7 @@ class ModelPricingTable(BaseModel):
         return ModelPricingTable._from_raw_dict(data)
 
     @staticmethod
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for raw YAML manifest data
-    def from_dict(data: dict[str, Any]) -> ModelPricingTable:
+    def from_dict(data: dict[str, object]) -> ModelPricingTable:
         """Construct a pricing table from a raw dictionary.
 
         Useful for programmatic construction and testing.
@@ -290,8 +288,7 @@ class ModelPricingTable(BaseModel):
         return ModelPricingTable._from_raw_dict(data)
 
     @staticmethod
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for raw YAML manifest data
-    def _from_raw_dict(data: dict[str, Any]) -> ModelPricingTable:
+    def _from_raw_dict(data: dict[str, object]) -> ModelPricingTable:
         """Internal constructor from a raw manifest dictionary.
 
         Parses the ``models`` section into :class:`ModelPricingEntry`

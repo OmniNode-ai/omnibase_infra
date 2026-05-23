@@ -13,7 +13,7 @@ verification needs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -78,12 +78,13 @@ class ModelParsedContractForVerification(BaseModel):
     )
 
 
-# ONEX_EXCLUDE: any_type - YAML safe_load returns untyped dicts
 def _extract_handler_names(
-    data: dict[str, Any],
+    data: dict[str, object],
 ) -> tuple[str, ...]:
     """Extract handler names from handler_routing section."""
     handler_routing = data.get("handler_routing", {})
+    if not isinstance(handler_routing, dict):
+        return ()
     if not handler_routing:
         return ()
 
@@ -102,8 +103,7 @@ def _extract_handler_names(
     return tuple(names)
 
 
-# ONEX_EXCLUDE: any_type - YAML safe_load returns untyped dicts
-def _extract_fsm_states(data: dict[str, Any]) -> tuple[str, ...]:
+def _extract_fsm_states(data: dict[str, object]) -> tuple[str, ...]:
     """Extract FSM states from handler_routing state_decision_matrix entries.
 
     The state_decision_matrix can be either:
@@ -111,6 +111,8 @@ def _extract_fsm_states(data: dict[str, Any]) -> tuple[str, ...]:
     - A list of dicts with 'current_state' keys (current format)
     """
     handler_routing = data.get("handler_routing", {})
+    if not isinstance(handler_routing, dict):
+        return ()
     if not handler_routing:
         return ()
 
@@ -132,9 +134,8 @@ def _extract_fsm_states(data: dict[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(states))
 
 
-# ONEX_EXCLUDE: any_type - YAML safe_load returns untyped dicts
 def _extract_event_types(
-    events_section: list[dict[str, Any]] | None,
+    events_section: list[dict[str, object]] | None,
 ) -> tuple[str, ...]:
     """Extract event type names from consumed_events or published_events."""
     if not events_section:
@@ -145,7 +146,7 @@ def _extract_event_types(
         if isinstance(event, dict):
             event_type = event.get("event_type", "")
             if event_type:
-                types.append(event_type)
+                types.append(str(event_type))
     return tuple(types)
 
 
@@ -165,19 +166,20 @@ def parse_contract_for_verification(
         yaml.YAMLError: If the YAML is malformed.
     """
     with open(contract_path) as f:
-        data = yaml.safe_load(f) or {}
+        data = cast("dict[str, object]", yaml.safe_load(f) or {})
 
-    name = data.get("name", contract_path.parent.name)
-    node_type = data.get("node_type", "UNKNOWN")
+    name = str(data.get("name", contract_path.parent.name))
+    node_type = str(data.get("node_type", "UNKNOWN"))
 
     # Event bus topics — entries may be plain strings or dicts with a "topic" key
-    event_bus = data.get("event_bus", {}) or {}
+    event_bus_raw = data.get("event_bus", {}) or {}
+    event_bus = event_bus_raw if isinstance(event_bus_raw, dict) else {}
     subscribe_topics = tuple(
-        entry["topic"] if isinstance(entry, dict) else entry
+        str(entry["topic"] if isinstance(entry, dict) else entry)
         for entry in (event_bus.get("subscribe_topics", []) or [])
     )
     publish_topics = tuple(
-        entry["topic"] if isinstance(entry, dict) else entry
+        str(entry["topic"] if isinstance(entry, dict) else entry)
         for entry in (event_bus.get("publish_topics", []) or [])
     )
 
@@ -186,8 +188,14 @@ def parse_contract_for_verification(
     fsm_states = _extract_fsm_states(data)
 
     # Consumed and published events
-    consumed_events = _extract_event_types(data.get("consumed_events"))
-    published_events = _extract_event_types(data.get("published_events"))
+    consumed_events_raw = data.get("consumed_events")
+    consumed_events = _extract_event_types(
+        consumed_events_raw if isinstance(consumed_events_raw, list) else None
+    )
+    published_events_raw = data.get("published_events")
+    published_events = _extract_event_types(
+        published_events_raw if isinstance(published_events_raw, list) else None
+    )
 
     return ModelParsedContractForVerification(
         name=name,

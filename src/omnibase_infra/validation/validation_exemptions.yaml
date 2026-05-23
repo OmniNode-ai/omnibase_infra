@@ -2486,6 +2486,13 @@ pattern_exemptions:
       'handle' is the standard ONEX handler method name per the ProtocolHandler and ProtocolMessageHandler conventions. All handlers use this name.
 
     ticket: OMN-2136
+  - file_pattern: 'evaluator_invariant\.py'
+    class_pattern: "Class 'InvariantEvaluator'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      OMN-11548 moves the existing invariant evaluator into the infra compute-node boundary without changing its security-sensitive behavior. The methods are the cohesive rule catalog for schema, field, threshold, latency, cost, custom callable, ReDoS, and LRU cache handling. Splitting this migration would change the review surface and risk behavior drift.
+
+    ticket: OMN-11548
   # ==========================================================================
   # ModelPhasePayloadImplement branch_name Exemption (OMN-2143)
   # ==========================================================================

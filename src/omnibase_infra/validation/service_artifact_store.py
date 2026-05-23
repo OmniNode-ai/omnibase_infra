@@ -34,7 +34,7 @@ import logging
 import os
 import uuid as _uuid_mod
 from pathlib import Path
-from typing import Any
+from typing import cast
 from uuid import UUID
 
 import yaml
@@ -292,7 +292,7 @@ class ServiceArtifactStore:
     # ------------------------------------------------------------------
 
     # ONEX_EXCLUDE: any_type - YAML plan data is heterogeneous dict from yaml.safe_load
-    def write_plan(self, candidate_id: UUID, plan_data: dict[str, Any]) -> Path:
+    def write_plan(self, candidate_id: UUID, plan_data: dict[str, object]) -> Path:
         """Write the validation plan to disk.
 
         The plan is stored at ``{candidate_dir}/plan.yaml`` and is
@@ -325,7 +325,7 @@ class ServiceArtifactStore:
 
     # ONEX_EXCLUDE: any_type - YAML result data is heterogeneous dict for yaml.dump
     def write_result(
-        self, candidate_id: UUID, run_id: UUID, result_data: dict[str, Any]
+        self, candidate_id: UUID, run_id: UUID, result_data: dict[str, object]
     ) -> Path:
         """Write the executor result to disk.
 
@@ -355,7 +355,7 @@ class ServiceArtifactStore:
 
     # ONEX_EXCLUDE: any_type - YAML verdict data is heterogeneous dict for yaml.dump
     def write_verdict(
-        self, candidate_id: UUID, run_id: UUID, verdict_data: dict[str, Any]
+        self, candidate_id: UUID, run_id: UUID, verdict_data: dict[str, object]
     ) -> Path:
         """Write the verdict to disk.
 
@@ -385,7 +385,7 @@ class ServiceArtifactStore:
 
     # ONEX_EXCLUDE: any_type - YAML attribution data is heterogeneous dict for yaml.dump
     def write_attribution(
-        self, candidate_id: UUID, run_id: UUID, attribution_data: dict[str, Any]
+        self, candidate_id: UUID, run_id: UUID, attribution_data: dict[str, object]
     ) -> Path:
         """Write attribution data to disk.
 
@@ -476,8 +476,7 @@ class ServiceArtifactStore:
     # Read artifacts
     # ------------------------------------------------------------------
 
-    # ONEX_EXCLUDE: any_type - YAML plan data is heterogeneous dict from yaml.safe_load
-    def read_plan(self, candidate_id: UUID) -> dict[str, Any] | None:
+    def read_plan(self, candidate_id: UUID) -> dict[str, object] | None:
         """Read the validation plan from disk.
 
         Args:
@@ -494,12 +493,12 @@ class ServiceArtifactStore:
         if not plan_path.is_file():
             return None
         content = plan_path.read_text(encoding="utf-8")
-        # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
-        result: dict[str, Any] | None = yaml.safe_load(content)
+        result = cast("dict[str, object] | None", yaml.safe_load(content))
         return result
 
-    # ONEX_EXCLUDE: any_type - YAML verdict data is heterogeneous dict from yaml.safe_load
-    def read_verdict(self, candidate_id: UUID, run_id: UUID) -> dict[str, Any] | None:
+    def read_verdict(
+        self, candidate_id: UUID, run_id: UUID
+    ) -> dict[str, object] | None:
         """Read the verdict from disk.
 
         Args:
@@ -517,8 +516,7 @@ class ServiceArtifactStore:
         if not verdict_path.is_file():
             return None
         content = verdict_path.read_text(encoding="utf-8")
-        # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
-        result: dict[str, Any] | None = yaml.safe_load(content)
+        result = cast("dict[str, object] | None", yaml.safe_load(content))
         return result
 
     # ------------------------------------------------------------------

@@ -3129,6 +3129,7 @@ class RuntimeHostProcess:
                     # New-style handler with dependency injection
                     # Type ignore: handler_cls is typed as ProtocolContainerAware which doesn't
                     # have dependencies param, but runtime introspection confirmed it exists
+                    # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                     handler_instance = handler_cls(  # type: ignore[call-arg]
                         container=container,
                         dependencies=resolved_dependencies,
@@ -3242,7 +3243,9 @@ class RuntimeHostProcess:
 
                         def factory() -> ProtocolContainerAware:
                             if accepts and deps is not None:
+                                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                                 return cls(container=ctr, dependencies=deps)  # type: ignore[call-arg,arg-type]
+                            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                             return cls(container=ctr)  # type: ignore[call-arg,arg-type]
 
                         return factory
@@ -3600,6 +3603,7 @@ class RuntimeHostProcess:
             # Best-effort: failure logs a warning but never blocks materialization.
             _event_bus = getattr(self, "_event_bus", None)
             _bootstrap = (
+                # Why: Control flow narrows this union at runtime before the attribute access.
                 _event_bus._bootstrap_servers  # type: ignore[union-attr]
                 if isinstance(_event_bus, EventBusKafka)
                 else ""
@@ -4618,6 +4622,7 @@ class RuntimeHostProcess:
             correlation_id: The correlation ID for tracing.
         """
         try:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             response = await handler.execute(envelope)  # type: ignore[call-arg]
             await self._publish_handler_response(
                 response, handler_type, operation, correlation_id
@@ -4650,6 +4655,7 @@ class RuntimeHostProcess:
         """
         try:
             async with pool.checkout() as handler:
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 response = await handler.execute(envelope)  # type: ignore[call-arg]
                 await self._publish_handler_response(
                     response, handler_type, operation, correlation_id

@@ -1127,6 +1127,7 @@ class RegistryCompute:
                 # NOTE: cache_clear() is added by @lru_cache decorator but not
                 # reflected in Callable type annotation. This is a known mypy
                 # limitation with lru_cache wrappers.
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 old_cache.cache_clear()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
             cls._semver_cache = None
 

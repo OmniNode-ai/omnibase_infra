@@ -19,7 +19,7 @@ name: Integration Test Check
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # Promotion date: 14 days after first deployment. Update this date
 # when the check is first deployed to track the promotion timeline.

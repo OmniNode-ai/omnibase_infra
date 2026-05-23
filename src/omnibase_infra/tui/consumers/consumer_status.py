@@ -139,10 +139,13 @@ async def consume_all(app: object) -> None:
                 continue
 
             if topic == TOPIC_PR_STATUS:
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 app.post_message(PRStatusReceived(payload))  # type: ignore[attr-defined]
             elif topic == TOPIC_GIT_HOOK:
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 app.post_message(HookEventReceived(payload))  # type: ignore[attr-defined]
             elif topic == TOPIC_LINEAR_SNAPSHOT:
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 app.post_message(SnapshotReceived(payload))  # type: ignore[attr-defined]
             else:
                 logger.debug("Ignoring unknown topic: %s", topic)

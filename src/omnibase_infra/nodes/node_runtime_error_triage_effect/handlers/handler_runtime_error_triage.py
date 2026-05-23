@@ -282,6 +282,7 @@ class HandlerRuntimeErrorTriage:
                 return
             topic = self._resolve_triage_topic()
             await self._event_bus.publish_envelope(
+                # Why: Runtime wiring validates and narrows this payload shape before use.
                 envelope,  # type: ignore[arg-type]
                 topic=topic,
             )

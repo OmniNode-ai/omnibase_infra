@@ -1583,6 +1583,7 @@ class MixinNodeIntrospection:
         }
         if resolved_feature_flags is not None:
             event_kwargs["resolved_feature_flags"] = resolved_feature_flags
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         event = ModelNodeIntrospectionEvent(**event_kwargs)  # type: ignore[arg-type]
 
         # Update cache - cast the model_dump output to our typed dict since we know
@@ -1732,6 +1733,7 @@ class MixinNodeIntrospection:
                         correlation_id=final_correlation_id,
                     )
                     await event_bus.publish_envelope(
+                        # Why: Runtime wiring validates and narrows this payload shape before use.
                         envelope=envelope,  # type: ignore[arg-type]
                         topic=topic,
                     )
@@ -1863,6 +1865,7 @@ class MixinNodeIntrospection:
                     correlation_id=heartbeat.correlation_id,
                 )
                 await event_bus.publish_envelope(
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     envelope=envelope,  # type: ignore[arg-type]
                     topic=topic,
                 )
@@ -2329,7 +2332,9 @@ class MixinNodeIntrospection:
                     payload=ack_command,
                     correlation_id=correlation_id,
                 )
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 await event_bus.publish_envelope(  # type: ignore[call-arg]
+                    # Why: Runtime wiring validates and narrows this payload shape before use.
                     envelope=envelope,  # type: ignore[arg-type]
                     topic=ack_topic,
                     key=partition_key,

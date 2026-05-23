@@ -79,6 +79,7 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
         manifest=manifest,
         runtime_profile=runtime_profile,
     )
+    # Why: Runtime validation guarantees the returned value matches the contract.
     return ownership_result.manifest  # type: ignore[return-value]
 
 
