@@ -155,6 +155,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
+    # [NODE] OMN-11573 narrows the GitHubHttpClient surface used by the PR
+    # poller so handler tests can inject a deterministic triage adapter.
+    "ProtocolGitHubTriageClient": "nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py",
     # [DI] OMN-11142 callable surface for OmniGate validator adapters — narrows the
     # entry-point-registered validator function shape so the registry can inject and
     # unit-test validators without binding to a concrete implementation.
