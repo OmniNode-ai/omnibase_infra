@@ -6,7 +6,7 @@ name: Sibling Compat Check (OMN-4315)
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
     paths:
       - 'pyproject.toml'
       - 'uv.lock'
