@@ -82,6 +82,8 @@ src/omnibase_infra/nodes/node_gmail_intent_poller_effect/handlers/handler_gmail_
 src/omnibase_infra/nodes/node_impact_analyzer_compute/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_impact_analyzer_compute/handlers/constants.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_impact_analyzer_compute/handlers/handler_impact_analysis.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_invariant_evaluate_compute/handlers/__init__.py  # OMN-11548: invariant evaluation is CI/governance validation; migrated from omnibase_core service boundary.
+src/omnibase_infra/nodes/node_invariant_evaluate_compute/handlers/handler_invariant_evaluate.py  # OMN-11548: invariant evaluation is CI/governance validation; migrated from omnibase_core service boundary.
 src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/handler_replay.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_projection_compute/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.

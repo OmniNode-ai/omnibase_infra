@@ -486,6 +486,7 @@ node_github_pr_poller_effect = "omnibase_infra.nodes.node_github_pr_poller_effec
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"
 node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_compute"
+node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_compute"
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"
