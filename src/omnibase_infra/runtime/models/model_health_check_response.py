@@ -66,7 +66,6 @@ class ModelHealthCheckResponse(BaseModel):
     """
 
     model_config = ConfigDict(
-        strict=True,
         frozen=True,
         extra="forbid",
         from_attributes=True,
