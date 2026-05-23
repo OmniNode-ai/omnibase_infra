@@ -123,29 +123,6 @@ def _gh_latest_release(repo: str) -> str | None:
         return None
 
 
-def _gh_default_branch_sha(repo: str) -> str | None:
-    """Return the current HEAD SHA of the default branch."""
-    try:
-        result = subprocess.run(
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/commits/HEAD",
-                "--jq",
-                ".sha",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        sha = result.stdout.strip()
-        if result.returncode != 0 or not sha:
-            return None
-        return sha
-    except FileNotFoundError:
-        return None
-
-
 # ---------------------------------------------------------------------------
 # PyPI helper
 # ---------------------------------------------------------------------------

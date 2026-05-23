@@ -273,10 +273,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          # OMNIBASE_INFRA_DB_URL was set in the resolve_pg step to:
-          #   postgresql://postgres:test-password@postgres:5432/omnibase_infra
-          # The runner is now on the isolated compose network so postgres
-          # resolves by Docker Compose service-name DNS.
+          # resolve_pg only selects the host-side PG_PORT. The compose stack
+          # step sets OMNIBASE_INFRA_DB_URL to the Docker DNS or localhost
+          # path selected by the runner connectivity probe.
           uv run python scripts/run-migrations.py
 
       - name: Pre-warm Redpanda metadata (compose mode)
