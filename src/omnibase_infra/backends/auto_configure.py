@@ -34,6 +34,7 @@ def _import_event_bus_inmemory() -> type:
             EventBusInmemory as _Cls,
         )
     except ImportError:
+        # Why: Runtime compatibility requires assigning through a broader static type.
         from omnibase_infra.event_bus.event_bus_inmemory import (  # type: ignore[assignment]
             EventBusInmemory as _Cls,
         )

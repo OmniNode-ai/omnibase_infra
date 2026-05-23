@@ -20,6 +20,8 @@ import pytest
 
 from omnibase_infra.adapters.github.adapter_github_client import GitHubHttpClient
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Fake GitHub server
 # ---------------------------------------------------------------------------
@@ -162,6 +164,31 @@ class _FakeGitHubHandler(BaseHTTPRequestHandler):
                     ]
                 },
             )
+        elif self.path.startswith("/repos/OmniNode-ai/omnimarket/pulls?"):
+            self._send_json(
+                200,
+                [
+                    {
+                        "number": 42,
+                        "title": "Test PR",
+                        "draft": False,
+                        "updated_at": "2025-01-01T00:00:00Z",
+                        "head": {"sha": "abc123def456"},
+                        "labels": [{"name": "ready"}],
+                    }
+                ],
+            )
+        elif self.path.endswith("/commits/abc123def456/status"):
+            self._send_json(200, {"state": "success"})
+        elif self.path.endswith("/pulls/42/reviews"):
+            self._send_json(
+                200,
+                [
+                    {"user": {"login": "alice"}, "state": "COMMENTED"},
+                    {"user": {"login": "bob"}, "state": "APPROVED"},
+                    {"user": {"login": "alice"}, "state": "CHANGES_REQUESTED"},
+                ],
+            )
         elif "branches" in self.path and "protection" in self.path:
             self._send_json(
                 200,
@@ -234,6 +261,31 @@ class TestGitHubHttpClientIntegration:
         assert prs[0]["number"] == 42
         assert prs[0]["title"] == "Test PR"
         assert prs[0]["labels"] == [{"name": "ready"}]
+
+    def test_fetch_open_prs_for_triage_augments_rest_payload(
+        self, fake_server: str
+    ) -> None:
+        c = GitHubHttpClient(token="fake-token")
+        with patch(
+            "omnibase_infra.adapters.github.adapter_github_client._GITHUB_REST",
+            fake_server,
+        ):
+            prs = c.fetch_open_prs_for_triage("OmniNode-ai/omnimarket")
+        assert len(prs) == 1
+        assert prs[0]["number"] == 42
+        assert prs[0]["combined_status"] == "success"
+        assert prs[0]["review_states"] == ["APPROVED", "CHANGES_REQUESTED"]
+
+    def test_fetch_open_prs_for_triage_raises_on_pr_list_failure(
+        self, fake_server: str
+    ) -> None:
+        c = GitHubHttpClient(token="fake-token")
+        with patch(
+            "omnibase_infra.adapters.github.adapter_github_client._GITHUB_REST",
+            fake_server,
+        ):
+            with pytest.raises(RuntimeError, match="GitHub PR list request failed"):
+                c.fetch_open_prs_for_triage("OmniNode-ai/missing-repo")
 
     def test_resolve_pr_graphql_id(self, fake_server: str) -> None:
         c = GitHubHttpClient(token="fake-token")

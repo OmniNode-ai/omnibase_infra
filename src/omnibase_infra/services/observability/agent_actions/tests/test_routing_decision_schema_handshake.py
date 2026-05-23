@@ -84,6 +84,7 @@ def contract_yaml() -> dict[str, object]:
         f"Contract YAML not found: {_CONTRACT_PATH}\nCreate it at: {_CONTRACT_PATH}"
     )
     with open(_CONTRACT_PATH) as f:
+        # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
         return yaml.safe_load(f)  # type: ignore[no-any-return]
 
 

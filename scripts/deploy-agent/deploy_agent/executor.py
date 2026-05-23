@@ -38,6 +38,7 @@ REPO_DIR = os.environ.get(
 DEPLOY_AGENT_DIR = os.environ.get("DEPLOY_AGENT_DIR", "/data/omninode/deploy-agent")
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
+RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -135,8 +136,26 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
+def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
+    """Load contract-rendered runtime policy env values."""
+    env_path = RUNTIME_POLICY_ENV_FILE if path is None else path
+    if not env_path.exists():
+        return {}
+
+    policy_env: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        policy_env[key.strip()] = value.strip()
+    return policy_env
+
+
 def _compose_env() -> dict[str, str]:
     env = dict(os.environ)
+    for key, value in _load_runtime_policy_env().items():
+        env.setdefault(key, value)
     postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
     postgres_port = env.get("POSTGRES_PORT", "5436")
     postgres_dsn = env.get("OMNIDASH_ANALYTICS_DB_URL") or (

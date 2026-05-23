@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-import httpx
 import pytest
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -50,31 +49,23 @@ def _contract_path() -> Path:
     )
 
 
-def _github_response(request: httpx.Request) -> httpx.Response:
-    if request.url.path == f"/repos/{_REPO}/pulls":
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "number": 1709,
-                    "title": "Register GitHub API poller",
-                    "draft": False,
-                    "labels": [],
-                    "updated_at": "2026-05-22T12:00:00Z",
-                    "head": {"sha": "abc123"},
-                }
-            ],
-            request=request,
-        )
-    if request.url.path == f"/repos/{_REPO}/commits/abc123/status":
-        return httpx.Response(200, json={"state": "success"}, request=request)
-    if request.url.path == f"/repos/{_REPO}/pulls/1709/reviews":
-        return httpx.Response(
-            200,
-            json=[{"user": {"login": "reviewer"}, "state": "APPROVED"}],
-            request=request,
-        )
-    return httpx.Response(404, json={"message": "not found"}, request=request)
+class _FakeGitHubClient:
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    def fetch_open_prs_for_triage(self, repo: str) -> list[dict[str, object]]:
+        assert repo == _REPO
+        return [
+            {
+                "number": 1709,
+                "title": "Register GitHub API poller",
+                "draft": False,
+                "labels": [],
+                "updated_at": "2026-05-22T12:00:00Z",
+                "combined_status": "success",
+                "review_states": ["APPROVED"],
+            }
+        ]
 
 
 @pytest.mark.integration
@@ -92,20 +83,7 @@ async def test_github_api_poll_golden_chain(
             stale_threshold_hours=48,
         ),
     )
-    original_async_client = httpx.AsyncClient
-
-    def mock_async_client(
-        *,
-        headers: dict[str, str] | None = None,
-        timeout: float | None = None,
-    ) -> httpx.AsyncClient:
-        return original_async_client(
-            headers=headers,
-            timeout=timeout,
-            transport=httpx.MockTransport(_github_response),
-        )
-
-    monkeypatch.setattr(handler_github_api_poll.httpx, "AsyncClient", mock_async_client)
+    monkeypatch.setattr(handler_github_api_poll, "GitHubHttpClient", _FakeGitHubClient)
 
     manifest = discover_contracts_from_paths([_contract_path()])
     assert manifest.total_errors == 0

@@ -575,6 +575,7 @@ class ServiceRegistryDiscovery:
             warnings=all_warnings,
             summary=summary,
             nodes=nodes,
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             instance_discovery_status=instance_discovery_status,  # type: ignore[arg-type]
             instance_discovery_message=instance_discovery_message,
             live_instances=instances,
@@ -760,6 +761,7 @@ class ServiceRegistryDiscovery:
             status = "unhealthy"
 
         return ModelRegistryHealthResponse(
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             status=status,  # type: ignore[arg-type]
             timestamp=datetime.now(UTC),
             components=components,
@@ -1556,6 +1558,7 @@ class ServiceRegistryDiscovery:
             try:
                 topic = SUFFIX_FEATURE_FLAG_CHANGED
                 # Use the AIOKafkaProducer send interface
+                # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
                 await kafka_producer.send(  # type: ignore[attr-defined]
                     topic,
                     value=event.model_dump_json().encode(),

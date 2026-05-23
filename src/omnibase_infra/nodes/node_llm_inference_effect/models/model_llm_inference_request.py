@@ -17,11 +17,10 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_core.enums.cost import EnumUsageSource
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.models.llm.model_llm_tool_choice import (
     ModelLlmToolChoice,
@@ -109,10 +108,7 @@ class ModelLlmInferenceRequest(BaseModel):
         min_length=1,
         description="Model identifier to use for inference.",
     )
-    # ONEX_EXCLUDE: any_type - Chat messages follow the OpenAI wire format with
-    # heterogeneous content (text, tool_call results, images). Strict typing would
-    # require a large union type that mirrors the full OpenAI message spec.
-    messages: tuple[dict[str, Any], ...] = Field(
+    messages: tuple[dict[str, JsonType], ...] = Field(
         default_factory=tuple,
         description="Chat messages for CHAT_COMPLETION operations.",
     )

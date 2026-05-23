@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Literal, Self
+from typing import Literal, Self
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
@@ -244,8 +244,7 @@ class ConfigLlmCostAggregation(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for pydantic mode="before" validator
-    def warn_unrecognized_env_vars(cls, data: dict[str, Any]) -> dict[str, Any]:
+    def warn_unrecognized_env_vars(cls, data: object) -> object:
         """Log warnings for environment variables matching the prefix but not a known field.
 
         Pydantic-settings silently drops env vars that match the prefix but

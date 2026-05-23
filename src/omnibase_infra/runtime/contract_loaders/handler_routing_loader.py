@@ -94,9 +94,9 @@ class ModelContractNodeType(BaseModel):
     node_type: EnumNodeType = Field(
         ..., description="Validated node type from contract YAML"
     )
-    # NOTE: raw stores the heterogeneous YAML dict from yaml.safe_load — values
-    # are primitives, lists, or nested dicts; no stricter type is available.
-    # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous contract dict
+    # Why: raw preserves validated contract YAML for downstream schema-specific
+    # loaders; values are heterogeneous until the concrete section parser runs.
+    # ONEX_EXCLUDE: any_type - contract YAML values vary by section schema
     raw: dict[str, Any] = Field(
         ..., description="Full raw contract dict for downstream use"
     )
@@ -280,7 +280,8 @@ def _load_and_validate_contract_yaml(  # stub-ok: tracked in OMN-41
     return contract, handler_routing
 
 
-# ONEX_EXCLUDE: any_type - raw is a heterogeneous YAML dict from yaml.safe_load
+# Why: raw is validated contract YAML loaded before schema-specific parsing.
+# ONEX_EXCLUDE: any_type - contract YAML values vary by section schema
 def _dispatch_contract_model(raw: dict[str, Any]) -> ModelContractNodeType:
     """Validate node_type from raw contract dict and return a typed ModelContractNodeType.
 

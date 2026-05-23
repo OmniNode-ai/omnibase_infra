@@ -79,6 +79,7 @@ def _extract_method_signature(method: object) -> JsonDict:
     Returns:
         Dictionary with parameter details and return annotation.
     """
+    # Why: Runtime wiring validates and narrows this payload shape before use.
     sig = inspect.signature(method)  # type: ignore[arg-type]
     params: list[dict[str, str | None]] = []
 

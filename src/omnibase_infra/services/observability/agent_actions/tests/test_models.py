@@ -47,6 +47,7 @@ class TestModelObservabilityEnvelopeStrict:
                 event_time=datetime.now(UTC),
                 producer_id="test-producer",
                 schema_version="1.0.0",
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 unknown_field="should_fail",  # type: ignore[call-arg]
             )
 
@@ -63,6 +64,7 @@ class TestModelObservabilityEnvelopeStrict:
                 event_time=datetime.now(UTC),
                 producer_id="test-producer",
                 schema_version="1.0.0",
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 extra1="value1",  # type: ignore[call-arg]
                 extra2="value2",
             )
@@ -76,6 +78,7 @@ class TestModelObservabilityEnvelopeStrict:
     def test_envelope_required_fields_enforced(self) -> None:
         """Envelope should require all mandatory fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelObservabilityEnvelope()  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()
@@ -117,6 +120,7 @@ class TestModelObservabilityEnvelopeStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             envelope.producer_id = "new-producer"  # type: ignore[misc]
 
 
@@ -140,6 +144,7 @@ class TestModelAgentActionStrict:
         which are not in the consumer schema. These must be ignored, not rejected.
         """
         # Should NOT raise — extra fields are ignored
+        # Why: Runtime factory dispatch accepts this dynamic constructor shape.
         action = ModelAgentAction(  # type: ignore[call-arg]
             correlation_id=uuid4(),
             agent_name="test-agent",
@@ -161,6 +166,7 @@ class TestModelAgentActionStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             action.agent_name = "new-agent"  # type: ignore[misc]
 
     def test_agent_action_required_fields_enforced(self) -> None:
@@ -170,6 +176,7 @@ class TestModelAgentActionStrict:
         from the producer. id and created_at default to auto-generated values.
         """
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelAgentAction()  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()
@@ -228,6 +235,7 @@ class TestModelRoutingDecisionStrict:
     def test_routing_decision_rejects_extra_fields(self) -> None:
         """Routing decision should reject unknown fields with ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelRoutingDecision(  # type: ignore[call-arg]
                 id=uuid4(),
                 correlation_id=uuid4(),
@@ -252,11 +260,13 @@ class TestModelRoutingDecisionStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             decision.selected_agent = "new-agent"  # type: ignore[misc]
 
     def test_routing_decision_required_fields_enforced(self) -> None:
         """Routing decision should enforce required fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelRoutingDecision()  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()
@@ -274,6 +284,7 @@ class TestModelTransformationEventStrict:
     def test_transformation_event_rejects_extra_fields(self) -> None:
         """Transformation event should reject unknown fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelTransformationEvent(  # type: ignore[call-arg]
                 id=uuid4(),
                 correlation_id=uuid4(),
@@ -298,6 +309,7 @@ class TestModelTransformationEventStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             event.source_agent = "new-agent"  # type: ignore[misc]
 
 
@@ -307,6 +319,7 @@ class TestModelPerformanceMetricStrict:
     def test_performance_metric_rejects_extra_fields(self) -> None:
         """Performance metric should reject unknown fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelPerformanceMetric(  # type: ignore[call-arg]
                 id=uuid4(),
                 metric_name="routing_latency_ms",
@@ -329,6 +342,7 @@ class TestModelPerformanceMetricStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             metric.metric_name = "new_metric"  # type: ignore[misc]
 
 
@@ -338,6 +352,7 @@ class TestModelDetectionFailureStrict:
     def test_detection_failure_rejects_extra_fields(self) -> None:
         """Detection failure should reject unknown fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelDetectionFailure(  # type: ignore[call-arg]
                 correlation_id=uuid4(),
                 failure_reason="No matching pattern",
@@ -358,6 +373,7 @@ class TestModelDetectionFailureStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             failure.failure_reason = "new reason"  # type: ignore[misc]
 
 
@@ -367,6 +383,7 @@ class TestModelExecutionLogStrict:
     def test_execution_log_rejects_extra_fields(self) -> None:
         """Execution log should reject unknown fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelExecutionLog(  # type: ignore[call-arg]
                 execution_id=uuid4(),
                 correlation_id=uuid4(),
@@ -393,6 +410,7 @@ class TestModelExecutionLogStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             log.status = "failed"  # type: ignore[misc]
 
 
@@ -686,6 +704,7 @@ class TestModelExecutionLogSpecific:
                 status="running",
                 created_at=datetime.now(UTC),
                 # missing updated_at
+                # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             )  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()
@@ -754,6 +773,7 @@ class TestModelAgentStatusEventStrict:
     def test_agent_status_event_rejects_extra_fields(self) -> None:
         """Agent status event should reject unknown fields with ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelAgentStatusEvent(  # type: ignore[call-arg]
                 correlation_id=uuid4(),
                 agent_name="test-agent",
@@ -780,11 +800,13 @@ class TestModelAgentStatusEventStrict:
         )
 
         with pytest.raises(ValidationError):
+            # Why: Compatibility path intentionally crosses a static typing limitation.
             event.state = "idle"  # type: ignore[misc]
 
     def test_agent_status_event_required_fields_enforced(self) -> None:
         """Agent status event should enforce required fields."""
         with pytest.raises(ValidationError) as exc_info:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             ModelAgentStatusEvent()  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()

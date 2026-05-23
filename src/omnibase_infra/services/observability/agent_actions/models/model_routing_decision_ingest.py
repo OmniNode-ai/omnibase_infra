@@ -144,6 +144,7 @@ class ModelRoutingDecisionIngest(BaseModel):
     def _normalize_confidence(cls, v: object) -> float:
         """Clamp confidence to [0.0, 1.0]; coerce non-numeric to 0.0."""
         try:
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             f = float(v)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return 0.0

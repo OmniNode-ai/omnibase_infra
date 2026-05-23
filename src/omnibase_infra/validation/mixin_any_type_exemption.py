@@ -516,11 +516,13 @@ class MixinAnyTypeExemption:
         """
         # Check if value is a Field() call
         # NOTE: OMN-1305 - _is_field_call from MixinAnyTypeClassification (mixin composition)
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]
             return False
 
         # Check if annotation contains Any
         # NOTE: OMN-1305 - _contains_any from AnyTypeDetector (mixin composition)
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         if not self._contains_any(node.annotation):  # type: ignore[attr-defined]
             return False
 
@@ -550,6 +552,7 @@ class MixinAnyTypeExemption:
         # Check for type: ignore with valid NOTE on preceding line
         # This handles the pattern:
         #   # NOTE: OMN-1234 - Required for Pydantic discriminated union
+        # Why: Suppression is retained for this documented runtime typing boundary.
         #   field: Any = Field(...)  # type: ignore[valid-type]
         if _has_type_ignore_with_valid_note(self.source_lines, line_num):
             return True

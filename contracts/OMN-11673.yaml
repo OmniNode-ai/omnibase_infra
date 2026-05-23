@@ -1,0 +1,86 @@
+# OMN-11673 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11673"
+title: "Move runtime activation policy out of Docker Compose into contracts"
+summary: >-
+  Runtime activation policy for dev, stability-test, and prod is declared in contracts/services/runtime_policy.contract.yaml and rendered to docker/runtime-policy.env. Docker Compose consumes contract-rendered env vars instead of owning hardcoded runtime capabilities, OmniMemory activation, Bifrost verification, active package allowlists, introspection publishing, or runtime lane ports.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: "tests"
+    description: "Runtime policy contract, rendered env, and compose hardcode boundary tests pass"
+    command: >-
+      env -u PYTHONPATH uv run pytest tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py tests/integration/runtime/test_runtime_policy_contract.py -q
+  - kind: "tests"
+    description: "Deploy-agent compose generation tests pass"
+    command: >-
+      env -u PYTHONPATH uv run pytest scripts/deploy-agent/tests/unit/test_executor_compose_gen.py -q
+  - kind: "manual"
+    description: "Contract-rendered runtime policy env artifact matches the runtime policy contract"
+    command: >-
+      env -u PYTHONPATH uv run python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+  - kind: "manual"
+    description: "Dev runtime compose config renders with contract-owned runtime policy env"
+    command: >-
+      env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml --profile runtime config --quiet
+  - kind: "manual"
+    description: "Stability runtime compose config renders with contract-owned runtime policy env"
+    command: >-
+      env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+  - kind: "manual"
+    description: "Production runtime compose config renders with contract-owned runtime policy env"
+    command: >-
+      env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=false ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.prod.yml --profile runtime config --quiet
+  - kind: "ci"
+    description: "CI gates pass on OMN-11673 PR"
+    command: "gh pr checks {pr} --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-runtime-policy-tests"
+    description: "Runtime policy contract and compose hardcode boundary tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env -u PYTHONPATH uv run pytest tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py tests/integration/runtime/test_runtime_policy_contract.py -q
+  - id: "dod-deploy-agent-compose-gen"
+    description: "Deploy-agent compose generation tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env -u PYTHONPATH uv run pytest scripts/deploy-agent/tests/unit/test_executor_compose_gen.py -q
+  - id: "dod-runtime-policy-render"
+    description: "Rendered policy env is generated from the runtime policy contract"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env -u PYTHONPATH uv run python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+  - id: "dod-compose-dev"
+    description: "Dev runtime compose config renders with contract-owned policy env"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml --profile runtime config --quiet
+  - id: "dod-compose-stability"
+    description: "Stability runtime compose config renders with contract-owned policy env"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+  - id: "dod-compose-prod"
+    description: "Production runtime compose config renders with contract-owned policy env"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=false ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.prod.yml --profile runtime config --quiet

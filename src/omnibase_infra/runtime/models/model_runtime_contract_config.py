@@ -102,6 +102,7 @@ class ModelRuntimeContractConfig(BaseModel):
         description="Correlation ID for tracing this load session.",
     )
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def all_successful(self) -> bool:
@@ -112,6 +113,7 @@ class ModelRuntimeContractConfig(BaseModel):
         """
         return self.total_errors == 0 and self.total_contracts_found > 0
 
+    # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def success_rate(self) -> float:

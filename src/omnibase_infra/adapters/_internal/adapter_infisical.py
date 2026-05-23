@@ -132,6 +132,7 @@ class AdapterInfisical:
                 host=self._config.host,
             )
             # Authenticate using Universal Auth (machine identity)
+            # Why: Control flow narrows this union at runtime before the attribute access.
             self._client.auth.universal_auth.login(  # type: ignore[union-attr]
                 client_id=self._config.client_id.get_secret_value(),
                 client_secret=self._config.client_secret.get_secret_value(),
@@ -230,6 +231,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             result = self._client.secrets.get_secret_by_name(  # type: ignore[attr-defined]
                 secret_name=secret_name,
                 project_id=effective_project,
@@ -308,6 +310,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             result = self._client.secrets.list_secrets(  # type: ignore[attr-defined]
                 project_id=effective_project,
                 environment_slug=effective_env,
@@ -433,6 +436,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             self._client.secrets.create_secret_by_name(  # type: ignore[attr-defined]
                 secret_name=secret_name,
                 project_id=effective_project,
@@ -490,6 +494,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
+            # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
             self._client.secrets.update_secret_by_name(  # type: ignore[attr-defined]
                 current_secret_name=secret_name,
                 project_id=effective_project,

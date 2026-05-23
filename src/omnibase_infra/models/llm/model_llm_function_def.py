@@ -12,9 +12,9 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.types import JsonType
 
 
 class ModelLlmFunctionDef(BaseModel):
@@ -46,10 +46,7 @@ class ModelLlmFunctionDef(BaseModel):
         default="",
         description="Human-readable summary shown to the model.",
     )
-    # ONEX_EXCLUDE: any_type - JSON Schema objects are inherently untyped dicts.
-    # The parameters field mirrors the OpenAI function-calling spec where parameter
-    # schemas are arbitrary JSON Schema objects with no fixed structure.
-    parameters: dict[str, Any] = Field(
+    parameters: dict[str, JsonType] = Field(
         default_factory=dict,
         description="JSON Schema object describing accepted arguments.",
     )

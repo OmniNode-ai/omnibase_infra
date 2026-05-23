@@ -142,8 +142,10 @@ class ModelTimeoutEmissionResult(BaseModel):
         # NOTE: isinstance checks validate runtime type, but mypy cannot narrow
         # the generic Sequence type to tuple[str, ...] in this validator context.
         if isinstance(v, tuple):
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return v  # type: ignore[return-value]  # NOTE: runtime type validated above
         if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return tuple(v)  # type: ignore[return-value]  # NOTE: runtime type validated above
         raise ValueError(
             f"errors must be a tuple or Sequence (excluding str/bytes), "
@@ -588,6 +590,7 @@ class ServiceTimeoutEmitter:
             correlation_id=correlation_id,
         )
         await self._event_bus.publish_envelope(
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )
@@ -682,6 +685,7 @@ class ServiceTimeoutEmitter:
             correlation_id=correlation_id,
         )
         await self._event_bus.publish_envelope(
+            # Why: Runtime wiring validates and narrows this payload shape before use.
             envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )

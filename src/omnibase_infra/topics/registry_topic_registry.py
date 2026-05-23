@@ -68,6 +68,7 @@ class RegistryTopicRegistry:
         registry = ServiceTopicRegistry.from_defaults()
 
         await container.service_registry.register_instance(
+            # Why: Registry stores protocol contracts, not instantiable concrete implementations.
             interface=ProtocolTopicRegistry,  # type: ignore[type-abstract]
             instance=registry,
             scope=EnumInjectionScope.GLOBAL,

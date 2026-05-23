@@ -15,10 +15,10 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import yaml
 
+from omnibase_core.types import JsonType
 from omnibase_infra.verification.models import ModelContractVerificationReport
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 # Path to this module's contract.yaml (co-located).
 _CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
 
-# ONEX_EXCLUDE: any_type - event payloads are heterogeneous dicts for Kafka serialization
-PublishFn = Callable[[str, dict[str, Any]], None]
+PublishFn = Callable[[str, dict[str, JsonType]], None]
 
 
 def _load_publish_topic() -> str:
@@ -47,10 +46,9 @@ def _load_publish_topic() -> str:
     return result
 
 
-# ONEX_EXCLUDE: any_type - event payloads are heterogeneous dicts for Kafka serialization
 def _build_event_payload(
     report: ModelContractVerificationReport,
-) -> dict[str, Any]:
+) -> dict[str, JsonType]:
     """Build the event payload from a verification report.
 
     Includes freshness fields (checked_at, fingerprint) so consumers

@@ -34,7 +34,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 # Third-party imports
 import yaml
@@ -169,8 +169,9 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
         }
 
 
-# ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict, values vary by exemption schema
-def _convert_yaml_exemptions(yaml_list: list[dict[str, Any]]) -> list[ExemptionPattern]:
+def _convert_yaml_exemptions(
+    yaml_list: list[dict[str, object]],
+) -> list[ExemptionPattern]:
     """
     Convert YAML exemption entries to ExemptionPattern format.
 
@@ -1349,6 +1350,7 @@ def validate_infra_union_usage(
     return ModelValidationResult(
         is_valid=is_valid,
         errors=filtered_issues,
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         metadata=ModelValidationMetadata.model_construct(**metadata_fields),  # type: ignore[arg-type]
     )
 

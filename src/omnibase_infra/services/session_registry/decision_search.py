@@ -91,6 +91,7 @@ class DecisionSearchClient:
             if isinstance(result, list):
                 return result
             # Assume awaitable
+            # Why: Runtime validation guarantees the returned value matches the contract.
             return await result  # type: ignore[return-value]
 
         base_url = os.getenv("LLM_EMBEDDING_URL", _DEFAULT_EMBEDDING_URL)
@@ -102,6 +103,7 @@ class DecisionSearchClient:
             )
             response.raise_for_status()
             data = response.json()
+            # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
             return data["data"][0]["embedding"]  # type: ignore[no-any-return]
 
     async def search(

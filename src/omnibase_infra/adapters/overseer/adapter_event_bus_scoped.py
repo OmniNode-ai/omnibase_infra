@@ -82,10 +82,12 @@ class AdapterEventBusScoped:
     ) -> Callable[[], Awaitable[None]]:
         self._check(_ACTION_SUBSCRIBE)
         inner = self._inner
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         return await inner.subscribe(topic, identity, handler)  # type: ignore[attr-defined, no-any-return]
 
     async def close(self) -> None:
         self._check(_ACTION_CLOSE)
+        # Why: Optional dependency or runtime adapter exposes this attribute dynamically.
         await self._inner.close()  # type: ignore[attr-defined]
 
 

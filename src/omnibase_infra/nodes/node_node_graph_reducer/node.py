@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 
+# Why: Runtime handler payloads are heterogeneous JSON-like mappings by contract.
 class NodeNodeGraphReducer(NodeReducer):  # type: ignore[type-arg]
     """Declarative reducer node for runtime node graph lifecycle.
 

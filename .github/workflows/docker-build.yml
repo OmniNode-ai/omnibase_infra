@@ -16,7 +16,7 @@ on:
       - 'tests/integration/docker/**'
       - 'src/omnibase_infra/runtime/**'
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
     paths:
       - 'docker/**'
       - 'Dockerfile*'

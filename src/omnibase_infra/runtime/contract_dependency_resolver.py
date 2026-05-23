@@ -114,6 +114,9 @@ class ContractDependencyResolver:
             return ModelResolvedDependencies()
 
         # Resolve each protocol from container
+        # Why: protocol instances are open-ended DI objects resolved from
+        # contract-declared classes; the concrete protocol type is known only
+        # after the dependency's module/class pair is imported.
         # ONEX_EXCLUDE: any_type - dict holds heterogeneous protocol instances resolved at runtime
         resolved: dict[str, Any] = {}
         missing: list[str] = []
@@ -233,6 +236,8 @@ class ContractDependencyResolver:
 
         return dependencies
 
+    # Why: dependency declarations can arrive as contract model objects or raw
+    # YAML dicts while this resolver bridges old and new contract loaders.
     # ONEX_EXCLUDE: any_type - dep can be ModelContractDependency or dict from various sources
     def _is_protocol_dependency(self, dep: Any) -> bool:
         """Check if a dependency is a protocol dependency.
@@ -307,6 +312,8 @@ class ContractDependencyResolver:
                 f"Class '{class_name}' not found in module '{module_path}': {e}"
             ) from e
 
+    # Why: container lookups return an implementation of the runtime-imported
+    # protocol class; callers cast to the protocol they requested.
     # ONEX_EXCLUDE: any_type - returns protocol instance, type varies by resolved protocol class
     async def _resolve_from_container(self, protocol_class: type) -> Any:
         """Resolve a protocol instance from the container.
@@ -397,8 +404,11 @@ class ContractDependencyResolver:
 
         # Type ignore: contract is a SimpleNamespace duck-typed to match ModelContractBase
         # The resolver uses getattr() internally so any object with name/dependencies works
+        # Why: Runtime wiring validates and narrows this payload shape before use.
         return await self.resolve(contract, allow_missing=allow_missing)  # type: ignore[arg-type]
 
+    # Why: raw contract YAML is heterogeneous until the dependency schema is
+    # normalized into SimpleNamespace declarations.
     # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict, values vary by contract schema
     def _load_contract_yaml(self, path: Path) -> dict[str, Any]:
         """Load and parse a contract.yaml file.

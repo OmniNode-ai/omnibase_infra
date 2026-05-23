@@ -117,8 +117,10 @@ class HandlerPool:
         if not (hasattr(instance, "initialize") and callable(instance.initialize)):
             return
         if self._handler_config is not None:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             await instance.initialize(self._handler_config)  # type: ignore[call-arg]
         else:
+            # Why: Runtime factory dispatch accepts this dynamic constructor shape.
             await instance.initialize()  # type: ignore[call-arg]
 
     async def initialize(self) -> None:
