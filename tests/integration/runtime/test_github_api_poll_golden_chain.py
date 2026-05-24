@@ -61,7 +61,7 @@ class _FakeGitHubClient:
                 "title": "Register GitHub API poller",
                 "draft": False,
                 "labels": [],
-                "updated_at": "2026-05-22T12:00:00Z",
+                "updated_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                 "combined_status": "success",
                 "review_states": ["APPROVED"],
             }
