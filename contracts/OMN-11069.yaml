@@ -2,10 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-11069
 title: "feat(OMN-11069): Contract-overlay configuration — replace .env with contract overlays"
 summary: >-
-  Wire the overlay infrastructure into runtime boot and onboarding so that
-  contracts plus overlays replace .env files as the single configuration source
-  of truth. Includes OverlayFileLoader, OverlayWriter, cold-start detection, and
-  typed overlay error handling.
+  Wire the overlay infrastructure into runtime boot and onboarding so that contracts plus overlays replace .env files as the single configuration source of truth. Includes OverlayFileLoader, OverlayWriter, cold-start detection, and typed overlay error handling.
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
