@@ -445,12 +445,12 @@ class TestDockerRuntime:
         self,
         docker_available: bool,
         built_test_image: str,
-        available_port: int,
     ) -> None:
         """Verify container starts without immediate crash.
 
         The container should start and remain running for basic
-        initialization. This tests the entrypoint and basic configuration.
+        initialization. This tests the entrypoint and basic configuration
+        without publishing a host port, avoiding CI port collisions.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
@@ -467,8 +467,6 @@ class TestDockerRuntime:
                     "-d",
                     "--name",
                     container_name,
-                    "-p",
-                    f"{available_port}:8085",
                     "-e",
                     "POSTGRES_PASSWORD=test_password",
                     "-e",
@@ -575,12 +573,12 @@ class TestDockerRuntime:
         docker_available: bool,
         built_test_image: str,
         project_root: Path,
-        available_port: int,
     ) -> None:
         """Verify container handles SIGTERM gracefully.
 
         Containers should respond to SIGTERM with orderly shutdown,
-        not abrupt termination.
+        not abrupt termination. No host port is required for this signal-path
+        test, which keeps it isolated from parallel Docker jobs.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
@@ -599,8 +597,6 @@ class TestDockerRuntime:
                     container_name,
                     "--env-file",
                     str(project_root / "docker" / "runtime-policy.env"),
-                    "-p",
-                    f"{available_port}:8085",
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",

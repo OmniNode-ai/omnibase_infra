@@ -14,7 +14,7 @@ models:
     base_url_env: LLM_CODER_URL
     health_path: "/health"
     # cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit on 192.168.86.201:8000
-    # Context extended to 112K via TurboQuant aither-kvcache K4/V3 compression
+    # Context extended to 114688 via TurboQuant aither-kvcache K4/V3 compression
     capabilities:
       - code_generation
       - refactoring
@@ -44,20 +44,22 @@ models:
       - deep_reasoning
       - code_review
       - math
-    context_window: 32768
+    context_window: 8192
     hardware: "M2 Ultra"
     tier: local
   - model_key: "qwen3-next-80b"
     provider: local
     transport: http
     base_url_env: LLM_QWEN3_NEXT_URL
-    # Qwen3-Next-80B-A3B-Instruct-4bit on localhost:8102 (MLX, multi-model server)
+    health_path: "/health"
+    # mlx-community/Qwen3.6-35B-A3B-8bit on .200:8102 (replaced Qwen3-Next-80B 2026-04-18)
+    # model_key retained for routing key stability
     capabilities:
       - code_review
       - reasoning
       - documentation
-    context_window: 32768
-    hardware: "MLX localhost"
+    context_window: 8192
+    hardware: "M2 Ultra"
     tier: local
   - model_key: "qwen3-embedding-8b"
     provider: local
