@@ -334,6 +334,37 @@ services:
       - "com.omninode.service=redpanda"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
+  # Redpanda Partition Cap - Init Service (OMN-11886)
+  # ==========================================================================
+  # One-shot init container that raises the per-shard partition limit from the
+  # Redpanda default (1000) to 7000 via rpk cluster config set, matching the
+  # prod and stability-test lane values. This complements the --set flag already
+  # passed in dev-container mode by ensuring the value is persisted to cluster
+  # config and visible to rpk introspection tools.
+  #
+  # Runtime services that auto-create topics (omninode-runtime) must wait for
+  # this container to complete before starting, to avoid hitting partition limits
+  # on fresh Redpanda volumes.
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda-partition-cap
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    labels:
+      - "com.omninode.service=redpanda-partition-cap"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-11886"
+  # ==========================================================================
   # Topic Provisioning
   # ==========================================================================
   # Topics are provisioned by TopicProvisioner on runtime boot (service_kernel.py).
@@ -625,6 +656,8 @@ services:
         condition: service_completed_successfully
       redpanda:
         condition: service_healthy
+      redpanda-partition-cap:
+        condition: service_completed_successfully
       valkey:
         condition: service_healthy
     environment:
