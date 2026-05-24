@@ -92,6 +92,56 @@ class TestModelLlmEndpointEntry:
                 }
             )
 
+    def test_unknown_role_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="role must be one of"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="not_a_role",
+                status="planned",
+            )
+
+    def test_endpoint_url_must_be_base_url(self) -> None:
+        with pytest.raises(ValidationError, match="base URL"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="coder_slow",
+                status="running",
+                host="192.168.86.201",
+                port=8000,
+                endpoint_url="http://192.168.86.201:8000/v1/chat/completions",
+                model_hf_id="org/model",
+            )
+
+    def test_endpoint_url_must_match_host_and_port(self) -> None:
+        with pytest.raises(ValidationError, match="endpoint_url port must match port"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="coder_slow",
+                status="running",
+                host="192.168.86.201",
+                port=8000,
+                endpoint_url="http://192.168.86.201:8001",
+                model_hf_id="org/model",
+            )
+
+    def test_endpoint_env_vars_use_llm_url_naming(self) -> None:
+        with pytest.raises(ValidationError, match=r"LLM_\*_URL"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="coder_slow",
+                status="planned",
+                role_env_alias="CODER_URL",
+            )
+
+    def test_context_window_budget_must_be_positive_when_set(self) -> None:
+        with pytest.raises(ValidationError, match="context_window_budgeted"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="coder_slow",
+                status="planned",
+                context_window_budgeted=0,
+            )
+
     def test_running_missing_required_fields_rejected(self) -> None:
         with pytest.raises(ValidationError, match="running endpoints require non-null"):
             ModelLlmEndpointEntry(slot_id="x", role="coder_slow", status="running")

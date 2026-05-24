@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -75,6 +76,18 @@ _RUNTIME_REQUIRED_URL_ENV_VARS: frozenset[str] = frozenset(
         "LLM_DEEPSEEK_R1_URL",
     ]
 )
+_SUPPORTED_TOPOLOGY_FIELDS: frozenset[str] = frozenset(
+    [
+        "role",
+        "status",
+        "endpoint_url",
+        "model_hf_id",
+        "url_env_var",
+        "role_env_alias",
+        "launchd_unit_or_none",
+        "context_window_budgeted",
+    ]
+)
 
 
 def _load_endpoints() -> list[dict[str, Any]]:
@@ -112,6 +125,63 @@ class TestLlmEndpointsContract:
                     assert slot[key] is not None, (
                         f"running slot {slot['slot_id']!r} must have non-null {key}"
                     )
+
+    def test_supported_topology_fields_are_declared_on_every_slot(self) -> None:
+        """Real YAML carries the convergence fields supported by today's schema."""
+        for slot in _load_endpoints():
+            missing = _SUPPORTED_TOPOLOGY_FIELDS - slot.keys()
+            assert not missing, (
+                f"slot {slot.get('slot_id')!r} missing supported topology fields: "
+                f"{sorted(missing)}"
+            )
+
+            assert slot["role"], f"slot {slot['slot_id']!r} must declare endpoint role"
+            assert slot["status"], (
+                f"slot {slot['slot_id']!r} must declare deployment status"
+            )
+
+            if slot["endpoint_url"] is not None:
+                parsed = urlparse(slot["endpoint_url"])
+                assert parsed.scheme in {"http", "https"}, (
+                    f"slot {slot['slot_id']!r} endpoint_url must be http(s)"
+                )
+                assert parsed.hostname == slot["host"], (
+                    f"slot {slot['slot_id']!r} endpoint_url host must match host"
+                )
+                assert parsed.port == slot["port"], (
+                    f"slot {slot['slot_id']!r} endpoint_url port must match port"
+                )
+                assert parsed.path in {"", "/"}, (
+                    f"slot {slot['slot_id']!r} endpoint_url must be a base URL"
+                )
+                assert not parsed.query and not parsed.fragment, (
+                    f"slot {slot['slot_id']!r} endpoint_url must not carry query/fragment"
+                )
+
+            if slot["model_hf_id"] is not None:
+                assert "/" in slot["model_hf_id"], (
+                    f"slot {slot['slot_id']!r} model_hf_id must include namespace/model"
+                )
+
+            if slot["launchd_unit_or_none"] is not None:
+                assert slot["launchd_unit_or_none"].startswith("com."), (
+                    f"slot {slot['slot_id']!r} launchd unit must be a launchd label"
+                )
+
+            if slot["context_window_budgeted"] is not None:
+                assert slot["context_window_budgeted"] > 0, (
+                    f"slot {slot['slot_id']!r} context window budget must be positive"
+                )
+
+    def test_endpoint_alias_fields_are_canonical_when_present(self) -> None:
+        for slot in _load_endpoints():
+            for key in ("url_env_var", "role_env_alias"):
+                value = slot.get(key)
+                if value is None:
+                    continue
+                assert value.startswith("LLM_") and value.endswith("_URL"), (
+                    f"slot {slot['slot_id']!r} {key} must use LLM_*_URL naming"
+                )
 
     def test_required_slot_ids_present(self) -> None:
         present = {ep["slot_id"] for ep in _load_endpoints()}
