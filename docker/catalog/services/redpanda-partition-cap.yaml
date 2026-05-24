@@ -1,0 +1,27 @@
+name: redpanda-partition-cap
+description: One-shot Redpanda init service that persists partition capacity settings before runtime startup
+image: redpandadata/redpanda:v24.2.7
+layer: infrastructure
+container_name: omnibase-infra-redpanda-partition-cap
+required_env: []
+hardcoded_env: {}
+operational_defaults: {}
+ports: null
+healthcheck: null
+volumes: []
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+restart: "no"
+resources: null
+command:
+  - /bin/sh
+  - -c
+  - |
+    set -eu
+    /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+    /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+labels:
+  com.omninode.service: redpanda-partition-cap
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-11886
