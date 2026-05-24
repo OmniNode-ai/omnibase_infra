@@ -111,6 +111,9 @@ jobs:
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
 
+      - name: LLM topology contract drift validator (OMN-11926)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 
