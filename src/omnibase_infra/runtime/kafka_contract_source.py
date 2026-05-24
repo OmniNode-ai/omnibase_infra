@@ -1160,31 +1160,53 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
 
         entries: list[ModelHandlerRoutingEntry] = []
         handlers_raw = hr_raw.get("handlers")
-        for handler_item in handlers_raw if isinstance(handlers_raw, list) else []:
-            if not isinstance(handler_item, dict):
-                continue
-            handler_data = handler_item.get("handler") or {}
-            if not isinstance(handler_data, dict):
-                continue
-            event_model_ref = None
-            event_model_data = handler_item.get("event_model")
-            if isinstance(event_model_data, dict):
-                event_model_ref = ModelHandlerRef(
-                    name=event_model_data.get("name", ""),
-                    module=event_model_data.get("module", ""),
+
+        # When a handlers list is present it takes priority.  When absent,
+        # fall back to the ``default_handler`` shorthand.
+        if not isinstance(handlers_raw, list):
+            default_handler = hr_raw.get("default_handler")
+            if (
+                isinstance(default_handler, str)
+                and default_handler
+                and ":" in default_handler
+            ):
+                module_ref, class_name = default_handler.rsplit(":", 1)
+                # Bare name (no dots) like ``handler`` is kept as-is; fully
+                # qualified paths (``pkg.sub.module``) are used verbatim.
+                entries.append(
+                    ModelHandlerRoutingEntry(
+                        handler=ModelHandlerRef(
+                            name=class_name.strip(),
+                            module=module_ref.strip(),
+                        ),
+                    )
                 )
-            entries.append(
-                ModelHandlerRoutingEntry(
-                    handler=ModelHandlerRef(
-                        name=handler_data.get("name", ""),
-                        module=handler_data.get("module", ""),
-                    ),
-                    event_model=event_model_ref,
-                    operation=handler_item.get("operation"),
-                    event_type=handler_item.get("event_type"),
-                    message_category=handler_item.get("message_category"),
+        else:
+            for handler_item in handlers_raw:
+                if not isinstance(handler_item, dict):
+                    continue
+                handler_data = handler_item.get("handler") or {}
+                if not isinstance(handler_data, dict):
+                    continue
+                event_model_ref = None
+                event_model_data = handler_item.get("event_model")
+                if isinstance(event_model_data, dict):
+                    event_model_ref = ModelHandlerRef(
+                        name=event_model_data.get("name", ""),
+                        module=event_model_data.get("module", ""),
+                    )
+                entries.append(
+                    ModelHandlerRoutingEntry(
+                        handler=ModelHandlerRef(
+                            name=handler_data.get("name", ""),
+                            module=handler_data.get("module", ""),
+                        ),
+                        event_model=event_model_ref,
+                        operation=handler_item.get("operation"),
+                        event_type=handler_item.get("event_type"),
+                        message_category=handler_item.get("message_category"),
+                    )
                 )
-            )
 
         return ModelHandlerRouting(
             routing_strategy=hr_raw.get("routing_strategy", "payload_type_match"),
