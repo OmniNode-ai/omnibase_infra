@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS llm_delegation_call_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_delegation_call_log_date
-    ON llm_delegation_call_log (date(created_at));
+    ON llm_delegation_call_log ((created_at::date));
 
 CREATE INDEX IF NOT EXISTS idx_llm_delegation_call_log_task_type
     ON llm_delegation_call_log (task_type);
