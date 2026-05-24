@@ -507,6 +507,15 @@ repos:
         language: script
         pass_filenames: true
         stages: [commit-msg]
+      # OMN-11926: LLM topology contract drift validator
+      # Fails on any shape violation in contracts/llm_endpoints.yaml.
+      - id: llm-topology-validator
+        name: LLM topology contract drift validator (OMN-11926)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+        language: system
+        files: ^contracts/llm_endpoints\.yaml$
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
