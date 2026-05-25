@@ -118,6 +118,28 @@ class TestEarlyExit:
         bus.publish_envelope.assert_not_called()
         executor.execute_all.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_none_result_suppresses_terminal_event(self) -> None:
+        """None result must skip all publication and intent execution (OMN-12151).
+
+        Multi-step FSM orchestrators (e.g. swarm dispatcher) return None from
+        handle_async for non-terminal FSM states.  The result applier must not
+        publish any terminal event or execute any intents when it receives None,
+        preventing the FSM from being short-circuited before sub-commands fire.
+        """
+        bus = AsyncMock()
+        executor = AsyncMock()
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+            intent_executor=executor,
+        )
+
+        await applier.apply(None)
+
+        bus.publish_envelope.assert_not_called()
+        executor.execute_all.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Ordering contract tests
