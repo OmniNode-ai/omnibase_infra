@@ -360,16 +360,25 @@ def _make_dispatch_callback(
         None,
     )
     _candidate_handle_async = getattr(handler_instance, "handle_async", None)
-    _effective_handle = cast(
-        "Callable[[object], object]",
-        (
-            _candidate_handle_async
-            if _handle_async_method is not None
-            and callable(_handle_async_method)
-            and callable(_candidate_handle_async)
-            else handler_instance.handle
-        ),
-    )
+    _candidate_handle = getattr(handler_instance, "handle", None)
+    if (
+        _handle_async_method is not None
+        and callable(_handle_async_method)
+        and callable(_candidate_handle_async)
+    ):
+        _effective_handle = cast("Callable[[object], object]", _candidate_handle_async)
+    elif callable(_candidate_handle):
+        _effective_handle = cast("Callable[[object], object]", _candidate_handle)
+    else:
+
+        def _missing_handle(_payload: object) -> object:
+            raise ModelOnexError(
+                "Auto-wired handler "
+                f"{type(handler_instance).__name__} does not expose a callable "
+                "handle() or handle_async() dispatch entrypoint."
+            )
+
+        _effective_handle = _missing_handle
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -400,7 +409,7 @@ def _make_dispatch_callback(
             else model_cls.model_validate(payload)
         )
         if _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handler_instance.handle)
+            cast("Callable[..., object]", handle_method)
         ):
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
