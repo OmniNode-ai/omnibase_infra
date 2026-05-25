@@ -214,9 +214,7 @@ class AdapterLlmProviderOpenai:
         """
         self._provider_name_value = provider_name
         self._provider_type_value = provider_type
-        self._base_url = base_url or os.environ.get(
-            "LLM_CODER_URL", "http://localhost:8000"
-        )
+        self._base_url = base_url or os.environ["LLM_CODER_URL"]
         self._default_model = default_model
         self._api_key = api_key
         self._is_available = True

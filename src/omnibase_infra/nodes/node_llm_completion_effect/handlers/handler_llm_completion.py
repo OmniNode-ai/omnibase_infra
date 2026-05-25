@@ -140,14 +140,7 @@ class HandlerLLMCompletion:
             if url:
                 return url.rstrip("/")
 
-        url = os.environ.get(  # ONEX_EXCLUDE: archive port
-            "LLM_CODER_URL", ""
-        )
-        if url:
-            return url.rstrip("/")
-
-        # Last resort fallback
-        return "http://localhost:8000"
+        return os.environ["LLM_CODER_URL"].rstrip("/")  # ONEX_EXCLUDE: archive port
 
     async def close(self) -> None:
         """Release HTTP resources if owned by this handler."""
