@@ -10,8 +10,8 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   Effect node that sends chat completion requests to OpenAI-compatible LLM endpoints (vLLM, LiteLLM, Ollama).  Supports model routing by token count and async streaming.
 
