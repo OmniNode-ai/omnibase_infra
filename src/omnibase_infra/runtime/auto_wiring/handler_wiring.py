@@ -338,12 +338,37 @@ def _make_dispatch_callback(
     handlers receive a validated payload model and may be sync or async. Handlers
     that declare an envelope-shaped signature keep receiving a typed envelope
     even when their contract declares ``event_model``.
+
+    When a handler exposes ``handle_async`` in addition to ``handle``, the async
+    variant is preferred for dispatch.  This allows orchestrator handlers that
+    perform side-effect publishes inside ``handle_async`` (e.g. FSM-driven swarm
+    coordinators that flush command topics after each transition) to participate
+    correctly in the event-bus dispatch loop.  ``handle`` stays the test/
+    standalone entry point; ``handle_async`` is the runtime entry point.
+    See OMN-12002.
     """
+    # Prefer handle_async when the handler class explicitly declares it.
+    # Performed once at wiring time so the per-message hot path has no overhead.
+    # We inspect the MRO (not the instance) to exclude auto-generated attributes
+    # such as MagicMock's dynamic attribute creation.
+    _handle_async_method = next(
+        (
+            cls.__dict__["handle_async"]
+            for cls in type(handler_instance).__mro__
+            if "handle_async" in cls.__dict__
+        ),
+        None,
+    )
+    _effective_handle: object = (
+        handler_instance.handle_async
+        if _handle_async_method is not None and callable(_handle_async_method)
+        else handler_instance.handle
+    )
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        handle_method = handler_instance.handle
+        handle_method = _effective_handle
         if event_model is None:
             from omnibase_infra.models.dispatch.model_dispatch_result import (
                 ModelDispatchResult,
@@ -363,7 +388,9 @@ def _make_dispatch_callback(
             if isinstance(payload, model_cls)
             else model_cls.model_validate(payload)
         )
-        if _handler_accepts_event_envelope(handle_method):
+        if _handler_accepts_event_envelope(
+            cast("Callable[..., object]", handler_instance.handle)
+        ):
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
                 typed_payload,
