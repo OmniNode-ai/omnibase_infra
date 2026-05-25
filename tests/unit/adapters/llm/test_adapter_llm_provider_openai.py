@@ -26,6 +26,12 @@ from omnibase_infra.adapters.llm.model_llm_provider_config import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _llm_coder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide the required contract-driven LLM endpoint for adapter unit tests."""
+    monkeypatch.setenv("LLM_CODER_URL", "http://10.0.0.1:8000")
+
+
 class TestAdapterLlmProviderOpenaiProperties:
     """Tests for provider properties."""
 

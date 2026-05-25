@@ -192,9 +192,7 @@ class AdapterSummarizationEnrichment:
         if not (0.0 <= temperature <= 2.0):
             raise ValueError(f"temperature must be in [0.0, 2.0], got {temperature}")
 
-        self._base_url: str = base_url or os.environ.get(
-            "LLM_QWEN_72B_URL", "http://localhost:8100"
-        )
+        self._base_url: str = base_url or os.environ["LLM_QWEN_72B_URL"]
         self._model: str = model
         self._token_threshold: int = token_threshold
         self._summary_max_tokens: int = summary_max_tokens

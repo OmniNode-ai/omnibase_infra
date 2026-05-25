@@ -203,8 +203,8 @@ class AdapterLlmProviderOpenai:
         """Initialize the OpenAI-compatible provider adapter.
 
         Args:
-            base_url: Base URL of the LLM endpoint. Defaults to
-                ``LLM_CODER_URL`` env var, falling back to ``http://localhost:8000``.
+            base_url: Base URL of the LLM endpoint. Defaults to the required
+                ``LLM_CODER_URL`` env var.
             default_model: Default model identifier.
             api_key: Optional API key for Bearer token auth.
             provider_name: Provider identifier for logging/routing.
@@ -214,9 +214,7 @@ class AdapterLlmProviderOpenai:
         """
         self._provider_name_value = provider_name
         self._provider_type_value = provider_type
-        self._base_url = base_url or os.environ.get(
-            "LLM_CODER_URL", "http://localhost:8000"
-        )
+        self._base_url = base_url or os.environ["LLM_CODER_URL"]
         self._default_model = default_model
         self._api_key = api_key
         self._is_available = True

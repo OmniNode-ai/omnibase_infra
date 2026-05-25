@@ -2059,6 +2059,60 @@ class TestKafkaEventBusStartConsuming:
             # Task should complete
             await asyncio.wait_for(task, timeout=1.0)
 
+    @pytest.mark.asyncio
+    async def test_start_consuming_starts_consumers_concurrently(
+        self, mock_producer: AsyncMock
+    ) -> None:
+        """start_consuming() launches all consumers concurrently via asyncio.gather.
+
+        Verifies that _start_consumer_for_topic_unlocked is called once per
+        distinct (topic, group_id) pair, that pending keys are reserved inside
+        the lock before any concurrent call begins (no duplicates), and that
+        the wall-clock order of completion does not cause double-starts.
+        """
+        call_log: list[tuple[str, str]] = []
+
+        async def fake_start_unlocked(topic: str, group_id: str) -> None:
+            call_log.append((topic, group_id))
+            # Yield control to simulate concurrent group-join latency
+            await asyncio.sleep(0)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+            await event_bus.start()
+
+            # Pre-register three distinct subscriptions without triggering
+            # consumer startup (bus is already started but we bypass it here by
+            # directly injecting into _subscribers so we can test start_consuming
+            # in isolation).
+            group_id_a = "svc-a"
+            group_id_b = "svc-b"
+
+            async with event_bus._lock:
+                event_bus._subscribers["topic-x"] = [
+                    (group_id_a, "sub-1", AsyncMock()),
+                    (group_id_b, "sub-2", AsyncMock()),
+                ]
+                event_bus._subscribers["topic-y"] = [
+                    (group_id_a, "sub-3", AsyncMock()),
+                ]
+
+            event_bus._start_consumer_for_topic_unlocked = fake_start_unlocked  # type: ignore[method-assign]
+
+            # Run start_consuming briefly then shut down
+            task = asyncio.create_task(event_bus.start_consuming())
+            await asyncio.sleep(0.1)
+            await event_bus.shutdown()
+            await asyncio.wait_for(task, timeout=2.0)
+
+        # Each distinct (topic, group_id) pair must be started exactly once
+        assert len(call_log) == 3
+        assert len(set(call_log)) == 3, "duplicate consumer starts detected"
+
 
 class TestKafkaEventBusConfig:
     """Test suite for config-based EventBusKafka construction."""

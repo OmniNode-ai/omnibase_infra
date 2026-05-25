@@ -255,9 +255,7 @@ class AdapterCodeReviewAnalysis:
                 "Provide a valid URL or set the LLM_CODER_FAST_URL environment variable.",
                 context=context,
             )
-        resolved_base_url: str = base_url or os.environ.get(
-            "LLM_CODER_FAST_URL", "http://localhost:8001"
-        )
+        resolved_base_url: str = base_url or os.environ["LLM_CODER_FAST_URL"]
         if not resolved_base_url.strip():
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,

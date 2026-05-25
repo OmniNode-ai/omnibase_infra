@@ -371,6 +371,72 @@ class TestDiscoverContracts:
         assert manifest.total_errors == 1
         assert "No contract.yaml found" in manifest.errors[0].error
 
+    @pytest.mark.unit
+    def test_duplicate_contract_name_across_packages_is_surfaced_as_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Two packages shipping the same contract name must not cause DUPLICATE_REGISTRATION.
+
+        OMN-11958: when omnibase_infra and omnimarket both register an entry point
+        whose contract.yaml declares the same ``name`` field, the second registration
+        would crash the effects runtime with ONEX_CORE_064_DUPLICATE_REGISTRATION.
+        The discovery engine must detect the collision, keep the first occurrence,
+        and record the duplicate as a ModelDiscoveryError.
+        """
+        dir_a = tmp_path / "node_arch_query_infra"
+        dir_a.mkdir()
+        _make_contract_yaml(
+            dir_a, name="node_architecture_graph_query_effect", node_type="effect"
+        )
+        module_file_a = dir_a / "node.py"
+        module_file_a.write_text("")
+
+        dir_b = tmp_path / "node_arch_query_market"
+        dir_b.mkdir()
+        _make_contract_yaml(
+            dir_b, name="node_architecture_graph_query_effect", node_type="effect"
+        )
+        module_file_b = dir_b / "node.py"
+        module_file_b.write_text("")
+
+        cls_a = type("NodeArchQueryInfra", (), {})
+        cls_b = type("NodeArchQueryMarket", (), {})
+
+        ep_a = _make_entry_point(
+            "node_architecture_graph_query_effect",
+            node_cls=cls_a,
+            dist_name="omnibase_infra",
+            dist_version="0.36.1",
+        )
+        ep_b = _make_entry_point(
+            "node_architecture_graph_query_effect",
+            node_cls=cls_b,
+            dist_name="omnimarket",
+            dist_version="0.4.0",
+        )
+
+        def fake_getfile(cls: type) -> str:
+            if cls is cls_a:
+                return str(module_file_a)
+            return str(module_file_b)
+
+        with (
+            patch(_EP_MODULE, return_value=[ep_a, ep_b]),
+            patch("inspect.getfile", side_effect=fake_getfile),
+        ):
+            manifest = discover_contracts()
+
+        # First occurrence wins — only one contract registered.
+        assert manifest.total_discovered == 1
+        assert manifest.contracts[0].package_name == "omnibase_infra"
+        assert manifest.contracts[0].name == "node_architecture_graph_query_effect"
+
+        # Duplicate is recorded as a discovery error with a clear message.
+        assert manifest.total_errors == 1
+        assert "Duplicate contract name" in manifest.errors[0].error
+        assert "node_architecture_graph_query_effect" in manifest.errors[0].error
+        assert manifest.errors[0].package_name == "omnimarket"
+
 
 class TestDiscoverContractsFromPaths:
     """Tests for discover_contracts_from_paths."""

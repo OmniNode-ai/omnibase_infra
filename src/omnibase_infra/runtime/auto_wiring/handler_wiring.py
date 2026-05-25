@@ -338,18 +338,54 @@ def _make_dispatch_callback(
     handlers receive a validated payload model and may be sync or async. Handlers
     that declare an envelope-shaped signature keep receiving a typed envelope
     even when their contract declares ``event_model``.
+
+    When a handler exposes ``handle_async`` in addition to ``handle``, the async
+    variant is preferred for dispatch.  This allows orchestrator handlers that
+    perform side-effect publishes inside ``handle_async`` (e.g. FSM-driven swarm
+    coordinators that flush command topics after each transition) to participate
+    correctly in the event-bus dispatch loop.  ``handle`` stays the test/
+    standalone entry point; ``handle_async`` is the runtime entry point.
+    See OMN-12002.
     """
+    # Prefer handle_async when the handler class explicitly declares it.
+    # Performed once at wiring time so the per-message hot path has no overhead.
+    # We inspect the MRO (not the instance) to exclude auto-generated attributes
+    # such as MagicMock's dynamic attribute creation.
+    _handle_async_method = next(
+        (
+            cls.__dict__["handle_async"]
+            for cls in type(handler_instance).__mro__
+            if "handle_async" in cls.__dict__
+        ),
+        None,
+    )
+    _candidate_handle_async = getattr(handler_instance, "handle_async", None)
+    _effective_handle = cast(
+        "Callable[[object], object]",
+        (
+            _candidate_handle_async
+            if _handle_async_method is not None
+            and callable(_handle_async_method)
+            and callable(_candidate_handle_async)
+            else handler_instance.handle
+        ),
+    )
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        handle_method = handler_instance.handle
+        handle_method = _effective_handle
         if event_model is None:
             from omnibase_infra.models.dispatch.model_dispatch_result import (
                 ModelDispatchResult,
             )
 
-            raw_result = await handle_method(envelope)
+            raw_result_obj = handle_method(envelope)
+            raw_result = (
+                await cast("Awaitable[object]", raw_result_obj)
+                if asyncio.iscoroutine(raw_result_obj)
+                else raw_result_obj
+            )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
             if isinstance(raw_result, str | list):
@@ -363,22 +399,22 @@ def _make_dispatch_callback(
             if isinstance(payload, model_cls)
             else model_cls.model_validate(payload)
         )
-        if _handler_accepts_event_envelope(handle_method):
+        if _handler_accepts_event_envelope(
+            cast("Callable[..., object]", handler_instance.handle)
+        ):
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
                 typed_payload,
                 event_model.name,
             )
-            typed_handle = cast("Callable[[object], object]", handle_method)
-            envelope_result: object = typed_handle(handler_envelope)
+            envelope_result = handle_method(handler_envelope)
             if asyncio.iscoroutine(envelope_result):
                 envelope_result = await cast("Awaitable[object]", envelope_result)
             return _normalize_handler_result(
                 envelope_result, envelope, event_model.name
             )
 
-        typed_handle = cast("Callable[[object], object]", handle_method)
-        typed_result: object = typed_handle(typed_payload)
+        typed_result = handle_method(typed_payload)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
         return _normalize_handler_result(typed_result, envelope, event_model.name)
@@ -805,9 +841,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             adapted_row = {
-                key: psycopg2.extras.Json(value)
-                if isinstance(value, (dict, list))
-                else value
+                key: psycopg2.extras.Json(value) if isinstance(value, dict) else value
                 for key, value in row.items()
             }
             # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
