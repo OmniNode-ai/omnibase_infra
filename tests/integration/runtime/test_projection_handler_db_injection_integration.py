@@ -410,7 +410,9 @@ def test_projection_callback_no_op_when_db_url_missing(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_sync_psycopg2_adapter_preserves_text_array_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_psycopg2_adapter_preserves_text_array_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The sync adapter must not JSON-wrap Postgres text[] values."""
 
     captured_execute: dict[str, object] = {}
