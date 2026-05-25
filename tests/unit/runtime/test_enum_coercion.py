@@ -4,10 +4,10 @@
 
 These tests verify that ``coerce_message_category`` behaves correctly when imported
 from the new ``_enum_coercion`` module, and that the re-export from
-``service_message_dispatch_engine`` remains backward-compatible.
+``message_dispatch_engine`` remains backward-compatible.
 
 The module was extracted to break the circular import chain:
-    registry_dispatcher → service_message_dispatch_engine → dispatch_context_enforcer
+    registry_dispatcher → message_dispatch_engine → dispatch_context_enforcer
     → registry_dispatcher
 """
 
@@ -114,19 +114,19 @@ def test_unrelated_foreign_enum_raises_value_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests — backward-compatible re-export from service_message_dispatch_engine
+# Tests — backward-compatible re-export from message_dispatch_engine
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_reexport_from_dispatch_engine_is_same_function() -> None:
-    """coerce_message_category re-exported from service_message_dispatch_engine is the same object."""
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    """coerce_message_category re-exported from message_dispatch_engine is the same object."""
+    from omnibase_infra.runtime.message_dispatch_engine import (
         coerce_message_category as engine_coerce,
     )
 
     assert engine_coerce is coerce_message_category, (
-        "service_message_dispatch_engine.coerce_message_category must be the same function "
+        "message_dispatch_engine.coerce_message_category must be the same function "
         "object as _enum_coercion.coerce_message_category (OMN-4087 backward compat)"
     )
 

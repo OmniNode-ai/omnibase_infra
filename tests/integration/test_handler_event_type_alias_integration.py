@@ -113,7 +113,7 @@ def test_registration_emits_alias_matching_dispatch_engine_normalization() -> No
     )
 
     # Symmetry check: dispatch-engine normalization of the wire value.
-    # service_message_dispatch_engine.py:1106-1108 does
+    # message_dispatch_engine.py:1106-1108 does
     #     str(envelope_event_type).strip()
     # so the key produced on the wire for a whitespace-polluted event_type
     # must equal what registration emitted.

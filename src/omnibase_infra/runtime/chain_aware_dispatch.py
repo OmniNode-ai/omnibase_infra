@@ -80,7 +80,7 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.validation.validator_chain_propagation import (
     ChainPropagationValidator,
     get_correlation_id,

@@ -23,6 +23,7 @@ APPROVED_INFIX_PATTERNS=(
     "/runtime/overlay/"
     "/runtime/config_discovery/config_prefetcher.py"
     "/runtime/runtime_profile.py"
+    "/services/registry_api/registry_discovery.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

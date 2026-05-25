@@ -17,7 +17,7 @@ from omnibase_infra.idempotency import (
     ModelIdempotencyGuardConfig,
     StoreIdempotencyInmemory,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 

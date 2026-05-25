@@ -329,7 +329,7 @@ class TestTerminalEventResultApplier:
     async def test_multi_publish_contract_applies_output_to_terminal_event(
         self,
     ) -> None:
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -557,7 +557,7 @@ class TestWireFromManifest:
     @pytest.mark.asyncio
     async def test_wire_success(self) -> None:
         """Test successful wiring with a mock handler class."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -593,7 +593,7 @@ class TestWireFromManifest:
         self,
     ) -> None:
         """Unregistered zero-arg handlers must not re-enter sync container lookup."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -630,7 +630,7 @@ class TestWireFromManifest:
         self,
     ) -> None:
         """A valid but falsey container must still reach known-param injection."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -712,7 +712,7 @@ class TestWireFromManifest:
     async def test_unsatisfiable_di_raises_on_startup(self) -> None:
         """OMN-8735 negative test: handler with unsatisfiable DI deps must raise."""
         from omnibase_core.models.errors import ModelOnexError
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -741,7 +741,7 @@ class TestWireFromManifest:
     @pytest.mark.asyncio
     async def test_multi_handler_orchestrator_distinct_route_ids(self) -> None:
         """OMN-8735 positive test: N handlers x M topics produce N*M distinct route_ids."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -864,7 +864,7 @@ class TestWireFromManifest:
         HandlerLlmCliSubprocess for both ``inference.gemini_cli`` and
         ``inference.codex_cli``.
         """
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 

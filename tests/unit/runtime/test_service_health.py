@@ -21,7 +21,7 @@ from aiohttp import web
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
-from omnibase_infra.services.service_health import (
+from omnibase_infra.services.health_checker import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
     ServiceHealth,
@@ -77,13 +77,13 @@ class TestServiceHealthLifecycle:
 
         # Patch aiohttp components
         with patch(
-            "omnibase_infra.services.service_health.web.Application"
+            "omnibase_infra.services.health_checker.web.Application"
         ) as mock_app:
             with patch(
-                "omnibase_infra.services.service_health.web.AppRunner"
+                "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.service_health.web.TCPSite"
+                    "omnibase_infra.services.health_checker.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -116,13 +116,13 @@ class TestServiceHealthLifecycle:
         server = ServiceHealth(runtime=mock_runtime)
 
         with patch(
-            "omnibase_infra.services.service_health.web.Application"
+            "omnibase_infra.services.health_checker.web.Application"
         ) as mock_app:
             with patch(
-                "omnibase_infra.services.service_health.web.AppRunner"
+                "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.service_health.web.TCPSite"
+                    "omnibase_infra.services.health_checker.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -166,13 +166,13 @@ class TestServiceHealthLifecycle:
         server = ServiceHealth(runtime=mock_runtime, port=8085)
 
         with patch(
-            "omnibase_infra.services.service_health.web.Application"
+            "omnibase_infra.services.health_checker.web.Application"
         ) as mock_app:
             with patch(
-                "omnibase_infra.services.service_health.web.AppRunner"
+                "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.service_health.web.TCPSite"
+                    "omnibase_infra.services.health_checker.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -312,7 +312,7 @@ class TestServiceHealthEndpoints:
         server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
         mock_request = MagicMock(spec=web.Request)
 
-        with patch("omnibase_infra.services.service_health.logger.info") as mock_info:
+        with patch("omnibase_infra.services.health_checker.logger.info") as mock_info:
             await server._handle_health(mock_request)
             await server._handle_health(mock_request)
 
@@ -332,7 +332,7 @@ class TestServiceHealthEndpoints:
         server = ServiceHealth(container=mock_container)
         mock_request = MagicMock(spec=web.Request)
 
-        with patch("omnibase_infra.services.service_health.logger.info") as mock_info:
+        with patch("omnibase_infra.services.health_checker.logger.info") as mock_info:
             response = await server._handle_health(mock_request)
 
         assert response.status == 200

@@ -13,7 +13,7 @@ handler routing. Verifies:
 Related:
     - OMN-2081: Investor demo - runtime contract routing verification
     - src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml
-    - src/omnibase_infra/runtime/service_message_dispatch_engine.py
+    - src/omnibase_infra/runtime/message_dispatch_engine.py
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ class TestDispatchEngineRoutesIntrospection:
         matching ModelNodeIntrospectionEvent on EVENT category, dispatch a
         mock envelope, and verify the dispatcher was invoked.
         """
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 

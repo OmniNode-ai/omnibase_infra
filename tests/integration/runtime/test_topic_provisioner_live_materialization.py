@@ -39,7 +39,7 @@ async def test_live_materialization_provisions_each_topic_best_effort(
     tmp_path: Path,
 ) -> None:
     """Live materialization provisions every subscribed topic before wiring."""
-    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
     contracts_dir = tmp_path / "contracts"
     contracts_dir.mkdir()

@@ -19,7 +19,7 @@ Related:
     - OMN-758: INFRA-017: Version compatibility matrix check
     - OMN-3203: Automate version_compatibility.py matrix updates
     - pyproject.toml: Declarative dependency constraints (single source of truth)
-    - service_runtime_host_process.py: Runtime startup integration
+    - runtime_host_process.py: Runtime startup integration
     - scripts/update_version_matrix.py: Standalone BUMP-phase update script
 
 .. versionadded:: 0.11.0

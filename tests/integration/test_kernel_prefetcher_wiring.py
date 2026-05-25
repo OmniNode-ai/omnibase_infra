@@ -33,7 +33,7 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
     ModelPrefetchResult,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config
 
 _EXTRACTOR_PATH = (

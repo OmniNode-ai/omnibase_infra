@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 
 @pytest.mark.integration

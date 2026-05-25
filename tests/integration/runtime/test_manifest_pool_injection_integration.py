@@ -67,7 +67,7 @@ def _make_manifest_insert_contract() -> ModelDiscoveredContract:
 @pytest.mark.asyncio
 async def test_postgres_pool_threaded_via_materialized_deps() -> None:
     """postgres_pool is materialized and threaded into HandlerPostgresRuntimeManifestInsert."""
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
@@ -103,7 +103,7 @@ async def test_postgres_pool_threaded_via_materialized_deps() -> None:
 @pytest.mark.asyncio
 async def test_kernel_runtime_pool_dependencies_cover_baselines_batch_compute() -> None:
     """Kernel dependency map covers every runtime-owned handler that requires pool."""
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
@@ -149,7 +149,7 @@ async def test_kernel_runtime_pool_dependencies_cover_baselines_batch_compute() 
 @pytest.mark.asyncio
 async def test_no_materialized_deps_when_pool_is_none() -> None:
     """When postgres_pool is None, no materialized deps map is passed (empty dict -> None)."""
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

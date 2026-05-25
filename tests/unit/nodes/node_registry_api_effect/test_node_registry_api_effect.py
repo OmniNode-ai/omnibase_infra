@@ -86,7 +86,7 @@ class TestServiceModuleConstants:
 
     def test_max_node_type_filter_fetch_importable(self) -> None:
         """MAX_NODE_TYPE_FILTER_FETCH must be importable from service module."""
-        from omnibase_infra.services.registry_api.service import (
+        from omnibase_infra.services.registry_api.registry_discovery import (
             MAX_NODE_TYPE_FILTER_FETCH,
         )
 
@@ -97,7 +97,7 @@ class TestServiceModuleConstants:
         """DEFAULT_WIDGET_MAPPING_PATH must be importable and point to widget_mapping.yaml."""
         from pathlib import Path
 
-        from omnibase_infra.services.registry_api.service import (
+        from omnibase_infra.services.registry_api.registry_discovery import (
             DEFAULT_WIDGET_MAPPING_PATH,
         )
 
@@ -106,7 +106,7 @@ class TestServiceModuleConstants:
 
     def test_default_widget_mapping_path_exists(self) -> None:
         """The widget_mapping.yaml file must exist at the resolved path."""
-        from omnibase_infra.services.registry_api.service import (
+        from omnibase_infra.services.registry_api.registry_discovery import (
             DEFAULT_WIDGET_MAPPING_PATH,
         )
 

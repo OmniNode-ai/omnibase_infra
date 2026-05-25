@@ -48,7 +48,7 @@ ENV_PREFIX_PATTERNS: list[str] = [
 # These are the files where hardcoded topics were historically introduced.
 CHECKED_FILES: list[str] = [
     "src/omnibase_infra/runtime/service_kernel.py",
-    "src/omnibase_infra/runtime/service_runtime_host_process.py",
+    "src/omnibase_infra/runtime/runtime_host_process.py",
 ]
 
 

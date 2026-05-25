@@ -12,8 +12,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-import omnibase_infra.runtime.service_runtime_host_process as runtime_host_module
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+import omnibase_infra.runtime.runtime_host_process as runtime_host_module
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 pytestmark = [pytest.mark.integration]

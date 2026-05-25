@@ -23,7 +23,7 @@ Exports:
     DEFAULT_HTTP_PORT: Default HTTP port (8085)
 
 Example (Direct Runtime Injection):
-    >>> from omnibase_infra.services.service_health import ServiceHealth
+    >>> from omnibase_infra.services.health_checker import ServiceHealth
     >>> from omnibase_infra.runtime import RuntimeHostProcess
     >>>
     >>> async def main():
@@ -34,7 +34,7 @@ Example (Direct Runtime Injection):
     ...     await server.stop()
 
 Example (Container-Based Injection - ONEX-Compliant):
-    >>> from omnibase_infra.services.service_health import ServiceHealth
+    >>> from omnibase_infra.services.health_checker import ServiceHealth
     >>> from omnibase_core.container import ModelONEXContainer
     >>>
     >>> async def main():
@@ -100,7 +100,7 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
         ModelAutoWiringManifest,
     )
-    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +450,7 @@ class ServiceHealth:
         if not callable(try_resolve):
             return False
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -563,7 +563,7 @@ class ServiceHealth:
             ProtocolConfigurationError: Failed to resolve RuntimeHostProcess from container: ...
             (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
         """
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 

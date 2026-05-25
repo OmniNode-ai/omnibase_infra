@@ -27,7 +27,7 @@ def test_runtime_host_accepts_runtime_node_graph_config() -> None:
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
         ModelRuntimeNodeGraphConfig,
     )
-    from omnibase_infra.runtime.service_runtime_host_process import (
+    from omnibase_infra.runtime.runtime_host_process import (
         RuntimeHostProcess,
     )
 
@@ -53,7 +53,7 @@ def test_runtime_host_accepts_runtime_node_graph_config() -> None:
 @pytest.mark.unit
 def test_runtime_host_without_config_uses_defaults() -> None:
     """Without runtime_node_graph_config, module-level defaults still work."""
-    from omnibase_infra.runtime.service_runtime_host_process import (
+    from omnibase_infra.runtime.runtime_host_process import (
         DEFAULT_DRAIN_TIMEOUT_SECONDS,
         DEFAULT_HEALTH_CHECK_TIMEOUT,
         RuntimeHostProcess,
@@ -70,7 +70,7 @@ def test_config_dict_overrides_contract_config() -> None:
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
         ModelRuntimeNodeGraphConfig,
     )
-    from omnibase_infra.runtime.service_runtime_host_process import (
+    from omnibase_infra.runtime.runtime_host_process import (
         RuntimeHostProcess,
     )
 

@@ -16,7 +16,7 @@ Test Coverage:
 Related:
     - OMN-1095: Handler Source Mode Hybrid Resolution
     - src/omnibase_infra/runtime/handler_source_resolver.py
-    - src/omnibase_infra/runtime/service_runtime_host_process.py
+    - src/omnibase_infra/runtime/runtime_host_process.py
     - src/omnibase_infra/models/handlers/model_handler_source_config.py
 
 Note:
@@ -53,7 +53,7 @@ from omnibase_infra.runtime.handler_registry import (
     get_handler_registry,
 )
 from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 # =============================================================================
 # Constants for Handler Contract Templates

@@ -19,7 +19,7 @@ from enum import Enum
 import pytest
 
 from omnibase_core.enums import EnumMessageCategory
-from omnibase_infra.runtime.service_message_dispatch_engine import (
+from omnibase_infra.runtime.message_dispatch_engine import (
     coerce_message_category,
 )
 

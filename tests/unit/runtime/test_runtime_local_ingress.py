@@ -23,13 +23,13 @@ from omnibase_infra.runtime.models import (
     ModelLocalRuntimeIngressRequest,
     ModelLocalRuntimeIngressResponse,
 )
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 pytestmark = pytest.mark.unit
@@ -139,7 +139,7 @@ async def test_runtime_host_process_skips_local_ingress_for_disallowed_profile(
 ) -> None:
     monkeypatch.setenv("RUNTIME_PROFILE", "effects")
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
         lambda _packages: pytest.fail("effects profile must not discover routes"),
     )
 

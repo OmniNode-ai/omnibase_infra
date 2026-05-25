@@ -15,7 +15,7 @@ Test Coverage:
 Related:
     - OMN-1087: HandlerBootstrapSource for hardcoded handler registration
     - src/omnibase_infra/runtime/handler_bootstrap_source.py
-    - src/omnibase_infra/runtime/service_runtime_host_process.py
+    - src/omnibase_infra/runtime/runtime_host_process.py
 
 Note:
     These tests verify handler REGISTRATION, not handler EXECUTION.
@@ -43,7 +43,7 @@ from omnibase_infra.runtime.handler_registry import (
     RegistryProtocolBinding,
     get_handler_registry,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.testing import is_ci_environment
 
 # Evaluated at import time intentionally; CI env vars are set before pytest runs.

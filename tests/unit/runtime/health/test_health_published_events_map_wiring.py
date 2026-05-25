@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 

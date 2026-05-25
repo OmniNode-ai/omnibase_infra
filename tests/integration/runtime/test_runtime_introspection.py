@@ -12,7 +12,7 @@ Test Coverage:
 
 Related:
     - OMN-1930: Phase 1 - Fix Auto-Introspection (P0)
-    - src/omnibase_infra/runtime/service_runtime_host_process.py
+    - src/omnibase_infra/runtime/runtime_host_process.py
     - src/omnibase_infra/protocols/protocol_node_introspection.py
     - src/omnibase_infra/models/runtime/model_runtime_introspection_config.py
 """
@@ -30,7 +30,7 @@ import pytest
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 pytestmark = pytest.mark.integration

@@ -47,8 +47,8 @@ src/omnibase_infra/runtime/contract_registration_event_router.py:74
 src/omnibase_infra/runtime/contract_registration_event_router.py:75
 src/omnibase_infra/runtime/contract_registration_event_router.py:76
 src/omnibase_infra/runtime/contract_registration_event_router.py:77
-src/omnibase_infra/runtime/service_runtime_host_process.py:4299
-src/omnibase_infra/runtime/service_runtime_host_process.py:4303
+src/omnibase_infra/runtime/runtime_host_process.py:4299
+src/omnibase_infra/runtime/runtime_host_process.py:4303
 src/omnibase_infra/services/observability/agent_actions/config.py:62
 src/omnibase_infra/services/observability/agent_actions/config.py:63
 src/omnibase_infra/services/observability/agent_actions/config.py:64
