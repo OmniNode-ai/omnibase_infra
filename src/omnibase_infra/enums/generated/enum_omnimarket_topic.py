@@ -19,3 +19,5 @@ class EnumOmnimarketTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
+    EVT_DELEGATE_SKILL_COMPLETED_V1 = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex.evt.omnimarket.delegate-skill-completed.v1
+    EVT_DELEGATE_SKILL_FAILED_V1 = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex.evt.omnimarket.delegate-skill-failed.v1

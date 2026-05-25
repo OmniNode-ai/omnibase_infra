@@ -518,6 +518,19 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 """Command topic for baseline comparison compute from the delegation orchestrator."""
 
 
+# ---------------------------------------------------------------------------
+# Delegate-Skill Orchestrator Topics (OMN-11996)
+# ---------------------------------------------------------------------------
+
+TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
+    "onex.evt.omnimarket.delegate-skill-completed.v1"
+)
+"""Terminal success event from node_delegate_skill_orchestrator."""
+
+TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
+"""Terminal failure event from node_delegate_skill_orchestrator."""
+
+
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
@@ -529,6 +542,8 @@ __all__ = [
     "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
     "TOPIC_DELEGATION_REQUEST",
     "TOPIC_DELEGATION_ROUTING_DECISION",
+    "TOPIC_DELEGATE_SKILL_COMPLETED",
+    "TOPIC_DELEGATE_SKILL_FAILED",
     "TOPIC_EVAL_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
