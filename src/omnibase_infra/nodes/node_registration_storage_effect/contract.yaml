@@ -14,6 +14,7 @@
 # changing the node interface.
 # Contract identifiers
 name: "node_registration_storage_effect"
+version: "0.1.0"
 contract_name: "node_registration_storage_effect"
 node_name: "node_registration_storage_effect"
 contract_version:

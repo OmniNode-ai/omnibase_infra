@@ -12,6 +12,7 @@
 #   - OMN-5653: Row count diagnostic probe
 #   - OMN-7114: Register missing topics in provisioner
 name: "node_row_count_diagnostic_effect"
+version: "0.1.0"
 contract_version:
   major: 1
   minor: 0

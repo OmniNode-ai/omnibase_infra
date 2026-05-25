@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 name: "node_invariant_evaluate_compute"
+version: "0.1.0"
 contract_name: "node_invariant_evaluate_compute"
 node_name: "node_invariant_evaluate_compute"
 contract_version:

@@ -3,6 +3,7 @@
 # ONEX Node Contract - Scope File Read Effect
 #
 name: "node_scope_file_read_effect"
+version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

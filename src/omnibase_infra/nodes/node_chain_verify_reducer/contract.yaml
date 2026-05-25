@@ -5,6 +5,7 @@
 # FSM-based state tracking for the chain learning workflow.
 #
 name: "node_chain_verify_reducer"
+version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1

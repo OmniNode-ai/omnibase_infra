@@ -14,6 +14,7 @@
 #   - OMN-3332: Remove SLACK_WEBHOOK_URL fallback, enforce Web API-only
 # Contract identifiers
 name: "node_slack_alerter_effect"
+version: "0.1.0"
 contract_name: "node_slack_alerter_effect"
 node_name: "node_slack_alerter_effect"
 contract_version:

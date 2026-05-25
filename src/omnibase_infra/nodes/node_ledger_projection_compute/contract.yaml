@@ -19,6 +19,7 @@
 #   - OMN-1648: Ledger Projection Compute Node
 # Contract identifiers
 name: "node_ledger_projection_compute"
+version: "0.1.0"
 contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:

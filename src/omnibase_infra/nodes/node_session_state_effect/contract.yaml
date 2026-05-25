@@ -13,6 +13,7 @@
 #   - OMN-2005: Workflow Automation (parent)
 # Contract identifiers
 name: "node_session_state_effect"
+version: "0.1.0"
 contract_name: "node_session_state_effect"
 node_name: "node_session_state_effect"
 contract_version:

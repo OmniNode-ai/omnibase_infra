@@ -13,6 +13,7 @@
 # registry entry and dashboard proxy code remain identical.
 #
 name: "node_contract_resolver_bridge"
+version: "0.1.0"
 contract_name: "node_contract_resolver_bridge"
 node_name: "node_contract_resolver_bridge"
 contract_version:

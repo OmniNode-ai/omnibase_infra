@@ -7,6 +7,7 @@
 # Ported from archive: omniarchon/python/src/server/nodes/handlers.
 #
 name: "node_event_forward_effect"
+version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

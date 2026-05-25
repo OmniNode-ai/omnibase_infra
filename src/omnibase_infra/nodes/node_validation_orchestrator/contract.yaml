@@ -12,6 +12,7 @@
 #
 # Contract identifiers
 name: "node_validation_orchestrator"
+version: "0.1.0"
 contract_name: "node_validation_orchestrator"
 node_name: "node_validation_orchestrator"
 contract_version:

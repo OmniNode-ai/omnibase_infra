@@ -17,6 +17,7 @@
 #   - OMN-1647: Ledger Write Effect Node
 # Contract identifiers
 name: "node_ledger_write_effect"
+version: "0.1.0"
 contract_name: "node_ledger_write_effect"
 node_name: "node_ledger_write_effect"
 contract_version:

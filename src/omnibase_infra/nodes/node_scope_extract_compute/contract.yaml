@@ -3,6 +3,7 @@
 # ONEX Node Contract - Scope Extract Compute
 #
 name: "node_scope_extract_compute"
+version: "0.1.0"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1

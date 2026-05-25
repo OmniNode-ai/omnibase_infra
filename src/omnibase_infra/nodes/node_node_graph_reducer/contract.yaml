@@ -3,6 +3,7 @@
 # Source: omnibase_core/contracts/runtime/node_graph_reducer.yaml
 node_type: REDUCER_GENERIC
 name: node_node_graph_reducer
+version: "0.1.0"
 node_version: {major: 1, minor: 1, patch: 0}
 description: Node graph lifecycle reducer using FSM pattern for ONEX runtime self-hosting
 input_model:

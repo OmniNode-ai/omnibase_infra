@@ -8,6 +8,7 @@
 # Ticket: OMN-7268
 #
 name: "node_routing_score_reducer"
+version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1

@@ -3,6 +3,7 @@
 # ONEX Node Contract - RSD Data Fetch Effect
 #
 name: "node_rsd_data_fetch_effect"
+version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

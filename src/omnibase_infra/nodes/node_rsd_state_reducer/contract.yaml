@@ -3,6 +3,7 @@
 # ONEX Node Contract - RSD State Reducer
 #
 name: "node_rsd_state_reducer"
+version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1

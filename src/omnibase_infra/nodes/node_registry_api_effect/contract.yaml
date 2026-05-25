@@ -9,6 +9,7 @@
 # making all configuration contract-driven and eliminating hardcoded constants.
 #
 name: "node_registry_api_effect"
+version: "0.1.0"
 contract_name: "node_registry_api_effect"
 node_name: "node_registry_api_effect"
 contract_version:

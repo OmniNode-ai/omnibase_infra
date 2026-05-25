@@ -3,6 +3,7 @@
 # Copyright (c) 2026 OmniNode Team
 # Ticket: OMN-3495
 name: "node_setup_orchestrator"
+version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1

@@ -3,6 +3,7 @@
 # ONEX Contract: node_rrh_storage_effect
 # Ticket: OMN-2136
 name: "node_rrh_storage_effect"
+version: "0.1.0"
 contract_version:
   major: 1
   minor: 0

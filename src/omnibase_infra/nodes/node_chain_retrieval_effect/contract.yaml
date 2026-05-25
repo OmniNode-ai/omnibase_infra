@@ -6,6 +6,7 @@
 # Embeds incoming prompt and queries Qdrant for similar verified chains.
 #
 name: "node_chain_retrieval_effect"
+version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

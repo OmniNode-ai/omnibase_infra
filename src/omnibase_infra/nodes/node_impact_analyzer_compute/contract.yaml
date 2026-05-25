@@ -12,6 +12,7 @@
 #   - OMN-3935: Task 3 - Impact Analyzer COMPUTE Node
 #   - OMN-3925: Artifact Reconciliation + Update Planning MVP
 name: "node_impact_analyzer_compute"
+version: "0.1.0"
 contract_name: "node_impact_analyzer_compute"
 node_name: "node_impact_analyzer_compute"
 contract_version:

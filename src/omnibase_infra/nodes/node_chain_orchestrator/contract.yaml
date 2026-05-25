@@ -6,6 +6,7 @@
 # Manages: retrieval -> decide shortcut/explore -> execute -> verify -> store.
 #
 name: "node_chain_orchestrator"
+version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1

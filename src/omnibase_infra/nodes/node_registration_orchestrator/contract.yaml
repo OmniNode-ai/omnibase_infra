@@ -37,6 +37,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_registration_orchestrator"
+version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
 # MCP (Model Context Protocol) Configuration
