@@ -1,0 +1,33 @@
+-- Swarm dispatch projection table (OMN-11998)
+-- Owned by node_projection_swarm in omnimarket
+CREATE TABLE IF NOT EXISTS swarm_runs (
+  run_id            TEXT PRIMARY KEY,
+  correlation_id    TEXT NOT NULL,
+  status            TEXT NOT NULL,
+  task_hash         TEXT NOT NULL DEFAULT '',
+  subtask_count     INTEGER NOT NULL DEFAULT 0,
+  succeeded_count   INTEGER NOT NULL DEFAULT 0,
+  failed_count      INTEGER NOT NULL DEFAULT 0,
+  skipped_count     INTEGER NOT NULL DEFAULT 0,
+  models_used       TEXT[] DEFAULT '{}',
+  machines_used     TEXT[] DEFAULT '{}',
+  total_cost_usd                DOUBLE PRECISION DEFAULT 0.0,
+  cloud_equivalent_cost_usd     DOUBLE PRECISION DEFAULT 0.0,
+  savings_usd                   DOUBLE PRECISION DEFAULT 0.0,
+  parallelism_speedup_ratio     DOUBLE PRECISION DEFAULT 1.0,
+  decomposition_latency_ms      INTEGER DEFAULT 0,
+  dispatch_wall_latency_ms      INTEGER DEFAULT 0,
+  aggregation_latency_ms        INTEGER DEFAULT 0,
+  total_latency_ms              INTEGER DEFAULT 0,
+  endpoint_registry_hash        TEXT DEFAULT '',
+  registry_schema_version       TEXT DEFAULT '',
+  projection_cursor             TEXT DEFAULT '',
+  source_event_id               TEXT DEFAULT '',
+  source_topic                  TEXT DEFAULT '',
+  source_partition              INTEGER DEFAULT 0,
+  source_offset                 INTEGER DEFAULT 0,
+  reducer_version               TEXT DEFAULT '1.0.0',
+  freshness_state               TEXT DEFAULT 'fresh',
+  observed_at                   TIMESTAMPTZ,
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
