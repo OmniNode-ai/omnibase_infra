@@ -95,3 +95,49 @@ async def test_concurrent_duplicate_subscription_starts_one_consumer() -> None:
     assert len(started) == 1
     assert started[0][0] == topic
     assert len(bus._subscribers[topic]) == 5
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_starts_distinct_consumers_in_parallel() -> None:
+    """start_consuming reserves all keys and starts distinct consumers concurrently."""
+    bus = _make_bus()
+    bus._started = True
+
+    active_starts = 0
+    max_active_starts = 0
+    started: list[tuple[str, str]] = []
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        nonlocal active_starts, max_active_starts
+        active_starts += 1
+        max_active_starts = max(max_active_starts, active_starts)
+        await asyncio.sleep(0)
+        bus._group_consumers[(topic, group_id)] = AsyncMock()
+        bus._pending_consumer_keys.discard((topic, group_id))
+        started.append((topic, group_id))
+        active_starts -= 1
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    group_a = "service-a"
+    group_b = "service-b"
+    async with bus._lock:
+        bus._subscribers["onex.evt.omnibase-infra.start-consuming-a.v1"] = [
+            (group_a, "sub-a-1", _handler),
+            (group_b, "sub-a-2", _handler),
+        ]
+        bus._subscribers["onex.evt.omnibase-infra.start-consuming-b.v1"] = [
+            (group_a, "sub-b-1", _handler),
+        ]
+
+    task = asyncio.create_task(bus.start_consuming())
+    await asyncio.sleep(0.1)
+    await bus.shutdown()
+    await asyncio.wait_for(task, timeout=2.0)
+
+    assert bus._start_consumer_for_topic_unlocked.await_count == 3
+    assert len(started) == 3
+    assert len(set(started)) == 3
+    assert max_active_starts > 1

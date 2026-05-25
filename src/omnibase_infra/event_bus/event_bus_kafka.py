@@ -2275,7 +2275,11 @@ class EventBusKafka(
         if not self._started:
             await self.start()
 
-        # Collect topics that need consumers while holding lock briefly
+        # Collect topics that need consumers while holding lock briefly.
+        # Pre-populate _pending_consumer_keys inside the lock so concurrent
+        # _start_consumer_for_topic_unlocked calls (via asyncio.gather below)
+        # cannot race and create duplicate consumers — the same reservation
+        # pattern used by subscribe().
         topics_to_start: list[tuple[str, str]] = []
         async with self._lock:
             for topic in self._subscribers:
@@ -2284,12 +2288,30 @@ class EventBusKafka(
                     if group_id in seen_group_ids:
                         continue
                     seen_group_ids.add(group_id)
-                    if (topic, group_id) not in self._group_consumers:
+                    consumer_key = (topic, group_id)
+                    if (
+                        consumer_key not in self._group_consumers
+                        and consumer_key not in self._pending_consumer_keys
+                    ):
+                        self._pending_consumer_keys.add(consumer_key)
                         topics_to_start.append((topic, group_id))
 
-        # Start consumers outside the lock to avoid blocking
-        for topic, group_id in topics_to_start:
-            await self._start_consumer_for_topic(topic, group_id)
+        # Start all consumers concurrently — wall-clock time becomes the
+        # slowest single consumer rather than the sum of all N consumers.
+        # return_exceptions=True lets every consumer attempt to start; we
+        # collect failures and re-raise the first one after all have settled
+        # so a single bad topic does not starve the rest.
+        if topics_to_start:
+            results = await asyncio.gather(
+                *[
+                    self._start_consumer_for_topic_unlocked(topic, group_id)
+                    for topic, group_id in topics_to_start
+                ],
+                return_exceptions=True,
+            )
+            errors = [r for r in results if isinstance(r, BaseException)]
+            if errors:
+                raise errors[0]
 
         # Block until shutdown
         while not self._shutdown:
