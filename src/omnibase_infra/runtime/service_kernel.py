@@ -2011,19 +2011,14 @@ async def bootstrap() -> int:
 
             # node_delegate_skill_orchestrator publishes completed/failed to omnimarket topics.
             # Without this applier the handler result is silently discarded and the CLI adapter
-            # times out waiting for the completed topic (OMN-11996).
-            from omnibase_infra.event_bus.topic_constants import (
-                TOPIC_DELEGATE_SKILL_COMPLETED,
-                TOPIC_DELEGATE_SKILL_FAILED,
-            )
-
+            # times out waiting for onex.evt.omnimarket.delegate-skill-completed.v1 (OMN-11996).
             auto_wiring_result_appliers["node_delegate_skill_orchestrator"] = (
                 DispatchResultApplier(
                     event_bus=event_bus,
-                    output_topic=TOPIC_DELEGATE_SKILL_COMPLETED,
+                    output_topic=EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value,
                     allowed_output_topics=[
-                        TOPIC_DELEGATE_SKILL_COMPLETED,
-                        TOPIC_DELEGATE_SKILL_FAILED,
+                        EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value,
+                        EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1.value,
                     ],
                 )
             )
