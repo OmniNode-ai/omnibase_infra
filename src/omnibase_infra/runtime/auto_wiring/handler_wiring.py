@@ -359,10 +359,16 @@ def _make_dispatch_callback(
         ),
         None,
     )
-    _effective_handle: object = (
-        handler_instance.handle_async
-        if _handle_async_method is not None and callable(_handle_async_method)
-        else handler_instance.handle
+    _candidate_handle_async = getattr(handler_instance, "handle_async", None)
+    _effective_handle = cast(
+        "Callable[[object], object]",
+        (
+            _candidate_handle_async
+            if _handle_async_method is not None
+            and callable(_handle_async_method)
+            and callable(_candidate_handle_async)
+            else handler_instance.handle
+        ),
     )
 
     async def _callback(
@@ -374,7 +380,12 @@ def _make_dispatch_callback(
                 ModelDispatchResult,
             )
 
-            raw_result = await handle_method(envelope)
+            raw_result_obj = handle_method(envelope)
+            raw_result = (
+                await cast("Awaitable[object]", raw_result_obj)
+                if asyncio.iscoroutine(raw_result_obj)
+                else raw_result_obj
+            )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
             if isinstance(raw_result, str | list):
@@ -396,16 +407,14 @@ def _make_dispatch_callback(
                 typed_payload,
                 event_model.name,
             )
-            typed_handle = cast("Callable[[object], object]", handle_method)
-            envelope_result: object = typed_handle(handler_envelope)
+            envelope_result = handle_method(handler_envelope)
             if asyncio.iscoroutine(envelope_result):
                 envelope_result = await cast("Awaitable[object]", envelope_result)
             return _normalize_handler_result(
                 envelope_result, envelope, event_model.name
             )
 
-        typed_handle = cast("Callable[[object], object]", handle_method)
-        typed_result: object = typed_handle(typed_payload)
+        typed_result = handle_method(typed_payload)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
         return _normalize_handler_result(typed_result, envelope, event_model.name)
