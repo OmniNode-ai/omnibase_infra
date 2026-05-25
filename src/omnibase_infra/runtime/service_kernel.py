@@ -2009,6 +2009,24 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+            # node_delegate_skill_orchestrator publishes completed/failed to omnimarket topics.
+            # Without this applier the handler result is silently discarded and the CLI adapter
+            # times out waiting for onex.evt.omnimarket.delegate-skill-completed.v1 (OMN-11996).
+            _DSO_COMPLETED = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex-topic-allow: declared in node_delegate_skill_orchestrator contract
+            _DSO_FAILED = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex-topic-allow: declared in node_delegate_skill_orchestrator contract
+            auto_wiring_result_appliers["node_delegate_skill_orchestrator"] = (
+                DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=_DSO_COMPLETED,
+                    allowed_output_topics=[_DSO_COMPLETED, _DSO_FAILED],
+                )
+            )
+            logger.info(
+                "Delegate-skill orchestrator terminal result applier registered "
+                "(contract=node_delegate_skill_orchestrator, correlation_id=%s)",
+                correlation_id,
+            )
+
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
         if event_bus is not None and build_loop_dsn:
             from omnibase_infra.handlers.handler_db import HandlerDb
