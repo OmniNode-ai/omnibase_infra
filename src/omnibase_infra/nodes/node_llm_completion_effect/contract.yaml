@@ -13,7 +13,7 @@ contract_version:
   patch: 1
 node_version: "1.0.1"
 description: >
-  Effect node that sends chat completion requests to OpenAI-compatible LLM endpoints (vLLM, LiteLLM, Ollama).  Supports model routing by token count and async streaming.
+  Effect node that sends chat completion requests to OpenAI-compatible LLM endpoints (vLLM, LiteLLM, Ollama). Supports model routing by token count and async streaming. Endpoint resolution is contract/config driven and requires LLM_CODER_URL when no provider endpoint is supplied.
 
 input_model:
   name: "ModelLLMCompletionRequest"
@@ -43,7 +43,7 @@ handler_routing:
 dependencies:
   - type: "environment"
     name: "LLM_CODER_URL"
-    description: "Base URL for the primary LLM endpoint"
+    description: "Required base URL for the primary LLM endpoint when no contract/provider endpoint is supplied; no localhost fallback is permitted"
   - type: "environment"
     name: "LLM_CODER_FAST_URL"
     description: "Base URL for the fast/mid-tier LLM endpoint"

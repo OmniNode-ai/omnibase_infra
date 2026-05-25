@@ -525,7 +525,6 @@ TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
 TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
 """Event topic published by node_delegate_skill_orchestrator on skill dispatch failure."""
 
-
 __all__ = [
     "TOPIC_DELEGATE_SKILL_COMPLETED",
     "TOPIC_DELEGATE_SKILL_FAILED",
