@@ -7,7 +7,10 @@
 # COMPUTE_GENERIC node that emits verification results as Kafka events.
 # No subscriptions — triggered programmatically by the verification batch runner.
 name: "verification_event_emitter"
-version: "0.1.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 node_type: "COMPUTE_GENERIC"
 event_bus:
   subscribe_topics: []
