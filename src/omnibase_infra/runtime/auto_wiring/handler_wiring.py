@@ -805,9 +805,7 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             adapted_row = {
-                key: psycopg2.extras.Json(value)
-                if isinstance(value, (dict, list))
-                else value
+                key: psycopg2.extras.Json(value) if isinstance(value, dict) else value
                 for key, value in row.items()
             }
             # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
