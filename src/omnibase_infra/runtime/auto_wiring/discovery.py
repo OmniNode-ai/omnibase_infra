@@ -74,12 +74,21 @@ def discover_contracts() -> ModelAutoWiringManifest:
 
     Errors on individual entry points are captured — they never abort the full scan.
 
+    Duplicate contract names (same ``name`` field from two different packages) are
+    detected and surfaced as :class:`ModelDiscoveryError` entries.  The first
+    occurrence wins; subsequent duplicates are dropped to prevent
+    ``ONEX_CORE_064_DUPLICATE_REGISTRATION`` crashes at dispatcher registration
+    time (OMN-11958).
+
     Returns:
         A :class:`ModelAutoWiringManifest` with all discovered contracts and errors.
     """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
     active_packages = get_active_runtime_packages()
+    # Tracks first-seen package for each contract name — used to detect
+    # cross-package duplicates before they reach the dispatch engine.
+    seen_contract_names: dict[str, str] = {}
 
     for ep in entry_points(group=ENTRY_POINT_GROUP):
         dist = ep.dist
@@ -159,6 +168,39 @@ def discover_contracts() -> ModelAutoWiringManifest:
             )
             continue
 
+        # Duplicate contract name guard (OMN-11958): two packages shipping a
+        # contract with the same ``name`` field would produce identical dispatcher
+        # IDs and crash with ONEX_CORE_064_DUPLICATE_REGISTRATION.  Surface the
+        # collision as a discovery error and skip the duplicate so the runtime
+        # boots cleanly.  The first occurrence (by entry_point iteration order)
+        # wins; the owning package should remove the stale copy.
+        if contract.name in seen_contract_names:
+            first_owner = seen_contract_names[contract.name]
+            error_msg = (
+                f"Duplicate contract name '{contract.name}' already registered "
+                f"by package '{first_owner}'. Skipping registration from "
+                f"'{dist_name}' to prevent DUPLICATE_REGISTRATION crash. "
+                f"Remove the stale entry point from one of these packages."
+            )
+            logger.error(
+                "DUPLICATE_REGISTRATION prevented: contract='%s' "
+                "first_owner='%s' duplicate_package='%s' "
+                "entry_point='%s'",
+                contract.name,
+                first_owner,
+                dist_name,
+                ep.name,
+            )
+            errors.append(
+                ModelDiscoveryError(
+                    entry_point_name=ep.name,
+                    package_name=dist_name,
+                    error=error_msg,
+                )
+            )
+            continue
+
+        seen_contract_names[contract.name] = dist_name
         contracts.append(contract)
         logger.info(
             "Discovered contract: %s (%s) from %s %s",
