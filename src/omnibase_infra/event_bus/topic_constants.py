@@ -525,20 +525,6 @@ TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
 TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
 """Event topic published by node_delegate_skill_orchestrator on skill dispatch failure."""
 
-
-# ---------------------------------------------------------------------------
-# Delegate-Skill Orchestrator Topics (OMN-11996)
-# ---------------------------------------------------------------------------
-
-TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
-    "onex.evt.omnimarket.delegate-skill-completed.v1"
-)
-"""Terminal success event from node_delegate_skill_orchestrator."""
-
-TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
-"""Terminal failure event from node_delegate_skill_orchestrator."""
-
-
 __all__ = [
     "TOPIC_DELEGATE_SKILL_COMPLETED",
     "TOPIC_DELEGATE_SKILL_FAILED",
