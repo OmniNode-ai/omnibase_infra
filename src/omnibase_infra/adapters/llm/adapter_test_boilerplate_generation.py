@@ -264,9 +264,7 @@ class AdapterTestBoilerplateGeneration:
                 "Provide a valid URL or set the LLM_CODER_FAST_URL environment variable.",
                 context=context,
             )
-        self._base_url: str = base_url or os.environ.get(
-            "LLM_CODER_FAST_URL", "http://localhost:8001"
-        )
+        self._base_url: str = base_url or os.environ["LLM_CODER_FAST_URL"]
         if not self._base_url.strip():
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
