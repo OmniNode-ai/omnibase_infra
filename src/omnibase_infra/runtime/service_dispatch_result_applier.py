@@ -296,6 +296,38 @@ class DispatchResultApplier:
             *self._allowed_output_topic_set,
         }
 
+    @staticmethod
+    def _derive_event_type_from_topic(topic: str) -> str | None:
+        """Derive the event_type routing key from an ONEX topic name.
+
+        ONEX topics follow the convention::
+
+            onex.{kind}.{producer}.{event-name}.v{n}
+
+        This method extracts ``{producer}.{event-name}`` as a dot-path routing
+        key suitable for ``ModelEventEnvelope.event_type``, which is the alias
+        format used by dispatcher registration (e.g.
+        ``omnimarket.swarm-endpoint-health-completed``).
+
+        Args:
+            topic: Full topic name following ONEX naming convention
+                (e.g., ``'onex.evt.omnimarket.swarm-endpoint-health-completed.v1'``).
+
+        Returns:
+            Derived event_type as ``'{producer}.{event-name}'``
+            (e.g., ``'omnimarket.swarm-endpoint-health-completed'``), or ``None``
+            if the topic does not follow the expected ONEX format.
+
+        .. versionadded:: 0.41.0 (OMN-12116)
+        """
+        parts = topic.split(".")
+        if len(parts) >= 5 and parts[0] == "onex":
+            # onex.{kind}.{producer}.{event-name}.v{n}
+            producer = parts[2]
+            event_name = parts[3]
+            return f"{producer}.{event_name}"
+        return None
+
     def _execute_projection(
         self,
         intent: ModelProjectionIntent,
@@ -548,6 +580,22 @@ class DispatchResultApplier:
                             self._resolve_mapped_output_topic(output_event),
                         )
                     )
+
+                    # OMN-12116: Derive event_type from the resolved topic so
+                    # multi-step FSM orchestrators can match the dispatcher
+                    # registration alias (e.g. 'omnimarket.swarm-endpoint-health-completed').
+                    # Without this, the envelope arrives with event_type=None
+                    # and the orchestrator's dispatcher — registered under the
+                    # topic-derived alias — cannot find a matching handler,
+                    # causing the response event to be routed to DLQ.
+                    derived_event_type = self._derive_event_type_from_topic(
+                        resolved_topic
+                    )
+                    if derived_event_type is not None:
+                        output_envelope = output_envelope.model_copy(
+                            update={"event_type": derived_event_type}
+                        )
+
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
                         topic=resolved_topic,
