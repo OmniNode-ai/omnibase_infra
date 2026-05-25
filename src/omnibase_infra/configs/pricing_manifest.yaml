@@ -291,61 +291,76 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  qwen3-coder-30b-a3b:
+  qwen3.6-35b-a3b:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
-    effective_date: '2026-03-19'
-    note: Local model on RTX 5090 (port 8000) - zero API cost
+    effective_date: '2026-05-25'
+    note: Local model on RTX 5090 .201:8000 (vLLM, GPTQ-Int4, 131072 ctx, ~180 t/s) - zero API cost
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
     evidence:
-      generated_at: '2026-04-29T00:00:00+00:00'
+      generated_at: '2026-05-25T00:00:00+00:00'
       sample_window_days: 7
       sample_count: 0
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  qwen3-14b:
+  qwen3.6-27b-mtp-iq4xs:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
-    effective_date: '2026-03-19'
-    note: Local model on RTX 4090 (port 8001) - zero API cost
+    effective_date: '2026-05-25'
+    note: Local model on .201:8001 (llamacpp, Qwen3.6-27B-MTP-IQ4_XS.gguf, 98304 ctx) - zero API cost
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
     evidence:
-      generated_at: '2026-04-29T00:00:00+00:00'
+      generated_at: '2026-05-25T00:00:00+00:00'
       sample_window_days: 7
       sample_count: 0
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  qwen3-embedding-8b:
+  text-embedding-gte:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
-    effective_date: '2026-03-19'
-    note: Local embedding model on M2 Ultra (port 8100) - zero API cost
+    effective_date: '2026-05-25'
+    note: Local embedding model on .201:8002 (vLLM, gte-Qwen2-1.5B, 8192 ctx) - zero API cost
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
     evidence:
-      generated_at: '2026-04-29T00:00:00+00:00'
+      generated_at: '2026-05-25T00:00:00+00:00'
       sample_window_days: 7
       sample_count: 0
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  deepseek-r1-distill-qwen-32b:
+  deepseek-v4-flash:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
-    effective_date: '2026-03-19'
-    note: Local model on RTX 4090 .201 (port 8001) - zero API cost
+    effective_date: '2026-05-25'
+    note: Local model on .200:8101 (ds4.c, DeepSeek V4 Flash 284B, 131072 ctx) - zero API cost
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0
     evidence:
-      generated_at: '2026-04-29T00:00:00+00:00'
+      generated_at: '2026-05-25T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+  deepseek-v4-pro:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-05-25'
+    note: Local model on .200:8101 (ds4.c, DeepSeek V4 Flash 284B alias with higher reasoning effort, 131072 ctx) - zero API cost
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-05-25T00:00:00+00:00'
       sample_window_days: 7
       sample_count: 0
       min_samples: 20
