@@ -2,19 +2,14 @@
 -- SPDX-License-Identifier: MIT
 --
 -- Migration: 025_fix_llm_delegation_call_log_date_index
--- Description: Corrective migration for idx_llm_delegation_call_log_date.
---              Migration 024 used date(created_at) which is STABLE not IMMUTABLE
---              in PostgreSQL, causing CREATE INDEX to fail on some deployments.
---              This migration drops the broken index (if it exists) and
---              recreates it using the IMMUTABLE (created_at::date) cast form.
--- Ticket: OMN-11966
+-- Description: Remove idx_llm_delegation_call_log_date introduced in migration 024.
+--              (created_at::date) is not IMMUTABLE in PostgreSQL 16, so the functional
+--              index fails to build. The plain created_at index (also in 024) already
+--              serves range and equality queries on the timestamp column; the date cast
+--              index provides no additional query coverage.
+-- Ticket: OMN-11997
 --
 -- Idempotency:
---   DROP INDEX IF EXISTS + CREATE INDEX IF NOT EXISTS — safe to re-apply.
+--   DROP INDEX IF EXISTS — safe to re-apply.
 
--- Drop the STABLE-function-based index if it was successfully created
 DROP INDEX IF EXISTS idx_llm_delegation_call_log_date;
-
--- Recreate with IMMUTABLE ::date cast form
-CREATE INDEX IF NOT EXISTS idx_llm_delegation_call_log_date
-    ON llm_delegation_call_log ((created_at::date));
