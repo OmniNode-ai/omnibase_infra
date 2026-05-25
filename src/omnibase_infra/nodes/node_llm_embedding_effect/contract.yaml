@@ -13,7 +13,6 @@ contract_version:
   patch: 1
 node_version: "1.0.1"
 name: "node_llm_embedding_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 description: >
   Effect node for LLM embedding generation. Provides batch embedding generation via OpenAI-compatible endpoints with retry logic, circuit breaker protection, and dimension uniformity validation.

@@ -17,7 +17,6 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_contract_registry_reducer"
-version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 # Enum Usage (CLAUDE.md reference):
 #   - node_type uses EnumNodeOutputType.REDUCER for validation

@@ -12,7 +12,6 @@
 # =============================================================================
 # Contract identifiers
 name: "node_update_plan_reducer"
-version: "0.1.0"
 contract_name: "node_update_plan_reducer"
 node_name: "node_update_plan_reducer"
 contract_version:

@@ -7,7 +7,6 @@
 # Converts the scope-check Claude Code skill to an event-driven ONEX workflow.
 #
 name: "node_scope_workflow_orchestrator"
-version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1

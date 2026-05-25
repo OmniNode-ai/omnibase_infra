@@ -17,7 +17,6 @@
 #   - OMN-1908: Cross-Repo Validation Ledger Persistence
 # Contract identifiers
 name: "node_validation_ledger_projection_compute"
-version: "0.1.0"
 contract_name: "node_validation_ledger_projection_compute"
 node_name: "node_validation_ledger_projection_compute"
 contract_version:

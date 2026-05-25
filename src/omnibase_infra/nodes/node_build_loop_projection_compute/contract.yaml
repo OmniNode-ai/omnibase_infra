@@ -14,7 +14,6 @@
 #   - OMN-8943: Prove Full Four-Node ONEX Pattern End-to-End (parent epic)
 #   - OMN-10867: Update build_loop contract schemas to current format
 name: "node_build_loop_projection_compute"
-version: "0.1.0"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1

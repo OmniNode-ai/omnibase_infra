@@ -13,7 +13,6 @@
 #   - OMN-2730: feat(omnibase_infra): add node_gmail_intent_poller_effect
 #   - OMN-2728: Gmail Integration epic (omnibase_infra)
 name: "node_gmail_intent_poller_effect"
-version: "0.1.0"
 contract_name: "node_gmail_intent_poller_effect"
 node_name: "node_gmail_intent_poller_effect"
 contract_version:

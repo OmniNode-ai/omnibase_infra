@@ -6,7 +6,6 @@
 # Coordinates: scan repos -> classify PRs -> enable auto-merge.
 #
 name: "node_merge_sweep_workflow_orchestrator"
-version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1

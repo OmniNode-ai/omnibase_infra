@@ -6,7 +6,6 @@
 # Classifies PRs into Track A (merge-ready) vs Track B (needs polish).
 #
 name: "node_merge_sweep_classify_compute"
-version: "0.1.0"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1

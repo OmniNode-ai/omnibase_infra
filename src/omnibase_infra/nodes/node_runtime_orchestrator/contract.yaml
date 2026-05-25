@@ -4,7 +4,6 @@
 # Contract Metadata
 node_type: ORCHESTRATOR_GENERIC
 name: node_runtime_orchestrator
-version: "0.1.0"
 node_version: {major: 1, minor: 1, patch: 0}
 description: Self-hosted ONEX runtime orchestrator using 4-node architecture
 input_model:

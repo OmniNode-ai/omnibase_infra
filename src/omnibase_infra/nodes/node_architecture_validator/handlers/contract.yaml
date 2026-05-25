@@ -20,7 +20,6 @@
 # =============================================================================
 # Handler identifier
 name: "handler_architecture_validation"
-version: "0.1.0"
 handler_id: "handler-architecture-validation"
 # Version (semantic versioning)
 contract_version:

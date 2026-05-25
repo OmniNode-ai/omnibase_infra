@@ -3,7 +3,6 @@
 # ONEX Node Contract - Scope Workflow Reducer
 #
 name: "node_scope_workflow_reducer"
-version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1

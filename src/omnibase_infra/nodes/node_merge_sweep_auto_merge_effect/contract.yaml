@@ -9,7 +9,6 @@
 # additionally be enqueued or they sit idle forever.
 #
 name: "node_merge_sweep_auto_merge_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

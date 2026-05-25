@@ -14,7 +14,6 @@
 #   - OMN-3140: NodeMergeGateEffect + migration
 # Contract identifiers
 name: "node_merge_gate_effect"
-version: "0.1.0"
 contract_name: "node_merge_gate_effect"
 node_name: "node_merge_gate_effect"
 contract_version:

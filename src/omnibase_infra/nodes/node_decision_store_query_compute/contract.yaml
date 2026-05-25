@@ -16,7 +16,6 @@
 #
 # Contract identifiers
 name: "node_decision_store_query_compute"
-version: "0.1.0"
 contract_name: "node_decision_store_query_compute"
 node_name: "node_decision_store_query_compute"
 contract_version:

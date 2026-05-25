@@ -13,7 +13,6 @@
 #   - OMN-2155: Baselines + ROI -- A/B Run Infrastructure
 # Contract identifiers
 name: "node_baseline_comparison_compute"
-version: "0.1.0"
 contract_name: "node_baseline_comparison_compute"
 node_name: "node_baseline_comparison_compute"
 contract_version:

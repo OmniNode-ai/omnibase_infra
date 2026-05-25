@@ -7,7 +7,6 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_runtime_manifest_reducer"
-version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 description: "Append-only reducer that persists runtime manifests to PostgreSQL. Receives runtime-manifest-published events and inserts one row per startup into runtime_manifests."
 input_model:

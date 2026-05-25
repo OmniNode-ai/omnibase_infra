@@ -6,7 +6,6 @@
 # FSM-based state tracking for the merge-sweep workflow.
 #
 name: "node_merge_sweep_workflow_reducer"
-version: "0.1.0"
 node_type: "REDUCER_GENERIC"
 contract_version:
   major: 1

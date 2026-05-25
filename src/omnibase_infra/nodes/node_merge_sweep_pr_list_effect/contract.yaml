@@ -6,7 +6,6 @@
 # Lists open PRs across GitHub repositories via gh CLI.
 #
 name: "node_merge_sweep_pr_list_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

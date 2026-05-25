@@ -7,7 +7,6 @@
 # Submits routed remote-agent invocation commands to protocol-specific
 # transports and emits remote task lifecycle events.
 name: "node_remote_agent_invoke_effect"
-version: "0.1.0"
 contract_name: "node_remote_agent_invoke_effect"
 node_name: "node_remote_agent_invoke_effect"
 contract_version:

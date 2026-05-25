@@ -8,7 +8,6 @@
 # Ticket: OMN-7266
 #
 name: "node_model_health_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

@@ -4,7 +4,6 @@
 # Contract Metadata
 node_type: EFFECT_GENERIC
 name: node_event_bus_wiring_effect
-version: "0.1.0"
 node_version: {major: 1, minor: 1, patch: 0}
 description: Event bus wiring effect node for ONEX runtime self-hosting architecture
 input_model:

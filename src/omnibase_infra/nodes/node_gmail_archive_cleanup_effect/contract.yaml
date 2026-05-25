@@ -12,7 +12,6 @@
 #   - OMN-2731: Add node_gmail_archive_cleanup_effect
 #   - OMN-2728: Gmail Integration epic (omnibase_infra)
 name: "node_gmail_archive_cleanup_effect"
-version: "0.1.0"
 contract_name: "node_gmail_archive_cleanup_effect"
 node_name: "node_gmail_archive_cleanup_effect"
 contract_version:

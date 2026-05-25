@@ -12,7 +12,6 @@
 #   - OMN-2147: Validation Skeleton -- Orchestrator + Executor
 # Contract identifiers
 name: "node_pattern_lifecycle_effect"
-version: "0.1.0"
 contract_name: "node_pattern_lifecycle_effect"
 node_name: "node_pattern_lifecycle_effect"
 contract_version:

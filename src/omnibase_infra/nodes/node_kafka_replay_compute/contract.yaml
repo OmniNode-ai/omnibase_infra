@@ -4,7 +4,6 @@
 #
 # Ticket: OMN-10392
 name: "node_kafka_replay_compute"
-version: "0.1.0"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1

@@ -6,7 +6,6 @@
 # Persists verified chain trajectories to Qdrant for future retrieval.
 #
 name: "node_chain_store_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

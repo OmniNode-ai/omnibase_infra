@@ -27,7 +27,6 @@
 # =============================================================================
 # Contract identifiers
 name: "node_architecture_validator"
-version: "0.1.0"
 contract_name: "node_architecture_validator"
 node_name: "node_architecture_validator"
 # Version (semantic versioning)

@@ -14,7 +14,6 @@
 #   - OMN-1653: ContractRegistryReducer (source of intents)
 # Contract identifiers
 name: "node_contract_persistence_effect"
-version: "0.1.0"
 contract_name: "node_contract_persistence_effect"
 node_name: "node_contract_persistence_effect"
 contract_version:

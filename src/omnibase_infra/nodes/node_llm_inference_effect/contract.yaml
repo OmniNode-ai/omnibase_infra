@@ -12,7 +12,6 @@
 # handlers (OpenAI-compatible, GLM, Gemini).
 # Contract identifiers
 name: "node_llm_inference_effect"
-version: "0.1.0"
 contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:

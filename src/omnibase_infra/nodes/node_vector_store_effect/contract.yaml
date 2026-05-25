@@ -6,7 +6,6 @@
 # Ported from archive: ai-dev/containers/vector_store.
 #
 name: "node_vector_store_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

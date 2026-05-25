@@ -17,7 +17,6 @@
 #   - OMN-3940: Task 5 — Change Detector EFFECT Node
 #   - OMN-3925: Epic — Artifact Reconciliation + Update Planning MVP
 name: "node_artifact_change_detector_effect"
-version: "0.1.0"
 contract_name: "node_artifact_change_detector_effect"
 node_name: "node_artifact_change_detector_effect"
 contract_version:

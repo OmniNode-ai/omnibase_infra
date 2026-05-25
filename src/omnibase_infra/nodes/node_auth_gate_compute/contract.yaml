@@ -14,7 +14,6 @@
 #   - OMN-2006: Auth Gate Nodes (parent)
 # Contract identifiers
 name: "node_auth_gate_compute"
-version: "0.1.0"
 contract_name: "node_auth_gate_compute"
 node_name: "node_auth_gate_compute"
 contract_version:

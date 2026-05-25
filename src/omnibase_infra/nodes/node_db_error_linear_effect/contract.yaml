@@ -21,7 +21,6 @@
 #   - OMN-3407: PostgreSQL Error Emitter (hard prerequisite)
 # Contract identifiers
 name: "node_db_error_linear_effect"
-version: "0.1.0"
 contract_name: "node_db_error_linear_effect"
 node_name: "node_db_error_linear_effect"
 contract_version:

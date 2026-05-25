@@ -12,7 +12,6 @@
 #   - OMN-9139: Deployed-artifact source-hash attestation
 #   - OMN-9122: runtime_sweep (consumes this signal)
 name: "node_runtime_source_attestor_effect"
-version: "0.1.0"
 contract_name: "node_runtime_source_attestor_effect"
 node_name: "node_runtime_source_attestor_effect"
 contract_version:

@@ -16,7 +16,6 @@
 # =============================================================================
 # Contract identifiers
 name: "node_validation_adjudicator"
-version: "0.1.0"
 contract_name: "node_validation_adjudicator"
 node_name: "node_validation_adjudicator"
 contract_version:

@@ -13,7 +13,6 @@
 #   - OMN-6964: Token savings emitter
 #   - OMN-7494: Heuristic savings from validator catches, counterfactual model
 name: "node_savings_estimation_compute"
-version: "0.1.0"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
 contract_version:

@@ -14,7 +14,6 @@
 #   - OMN-5529: Runtime Health Event Pipeline (epic)
 # Contract identifiers
 name: "node_consumer_health_triage_effect"
-version: "0.1.0"
 contract_name: "node_consumer_health_triage_effect"
 node_name: "node_consumer_health_triage_effect"
 contract_version:

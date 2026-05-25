@@ -5,7 +5,6 @@
 # Coordinates the fetch -> score -> store cycle for RSD priority scoring.
 #
 name: "node_rsd_orchestrator"
-version: "0.1.0"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1

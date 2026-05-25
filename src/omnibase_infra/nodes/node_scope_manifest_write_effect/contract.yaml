@@ -3,7 +3,6 @@
 # ONEX Node Contract - Scope Manifest Write Effect
 #
 name: "node_scope_manifest_write_effect"
-version: "0.1.0"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1

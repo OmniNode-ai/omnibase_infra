@@ -14,7 +14,6 @@
 #   - OMN-6091: Full ONEX node conversion (deferred)
 #   - OMN-7114: Register missing topics in provisioner
 name: "node_runner_health_snapshot_effect"
-version: "0.1.0"
 contract_version:
   major: 1
   minor: 0
