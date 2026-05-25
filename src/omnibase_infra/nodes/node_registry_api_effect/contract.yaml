@@ -36,7 +36,7 @@ output_model:
   description: "Output envelope for registry API effect operations."
 # ---------------------------------------------------------------------------
 # Contract-Driven Configuration
-# Replaces all hardcoded constants in services/registry_api/service.py
+# Replaces all hardcoded constants in services/registry_api/registry_discovery.py
 # ---------------------------------------------------------------------------
 config:
   # Maximum records to fetch when node_type filtering requires in-memory pagination.

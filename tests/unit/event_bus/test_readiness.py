@@ -331,7 +331,7 @@ class TestRuntimeHostProcessReadiness:
     @pytest.mark.asyncio
     async def test_ready_when_running_and_bus_ready(self) -> None:
         """Runtime is ready when running, not draining, and bus is ready."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -358,7 +358,7 @@ class TestRuntimeHostProcessReadiness:
     @pytest.mark.asyncio
     async def test_not_ready_when_draining(self) -> None:
         """Runtime is not ready when draining (graceful shutdown)."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -383,7 +383,7 @@ class TestRuntimeHostProcessReadiness:
     @pytest.mark.asyncio
     async def test_not_ready_when_bus_not_ready(self) -> None:
         """Runtime is not ready when event bus is not ready."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -408,7 +408,7 @@ class TestRuntimeHostProcessReadiness:
     @pytest.mark.asyncio
     async def test_fallback_for_bus_without_readiness(self) -> None:
         """Runtime falls back to health_check() for buses without get_readiness_status."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -435,7 +435,7 @@ class TestServiceHealthReadyEndpoint:
         """GET /ready returns 200 when runtime is ready."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        from omnibase_infra.services.service_health import ServiceHealth
+        from omnibase_infra.services.health_checker import ServiceHealth
 
         mock_runtime = AsyncMock()
         mock_runtime.health_check = AsyncMock(
@@ -465,7 +465,7 @@ class TestServiceHealthReadyEndpoint:
         """GET /ready returns 503 when runtime is not ready."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        from omnibase_infra.services.service_health import ServiceHealth
+        from omnibase_infra.services.health_checker import ServiceHealth
 
         mock_runtime = AsyncMock()
         mock_runtime.readiness_check = AsyncMock(
@@ -489,7 +489,7 @@ class TestServiceHealthReadyEndpoint:
         """GET /health and GET /ready can return different statuses."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        from omnibase_infra.services.service_health import ServiceHealth
+        from omnibase_infra.services.health_checker import ServiceHealth
 
         mock_runtime = AsyncMock()
         # Health says healthy (process is alive)

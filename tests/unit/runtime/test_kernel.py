@@ -594,7 +594,7 @@ class TestBootstrap:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
+        with patch("omnibase_infra.services.health_checker.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -836,7 +836,7 @@ class TestBootstrap:
                 side_effect=fake_subscribe_wired_contract_topics,
             ),
             patch(
-                "omnibase_infra.runtime.service_message_dispatch_engine.MessageDispatchEngine.freeze",
+                "omnibase_infra.runtime.message_dispatch_engine.MessageDispatchEngine.freeze",
                 new=freeze_and_record,
             ),
             patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
@@ -1129,7 +1129,7 @@ shutdown:
         ServiceHealth constructor must not require RuntimeHostProcess.
         """
         from omnibase_infra.runtime.service_kernel import KERNEL_VERSION
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
@@ -1370,7 +1370,7 @@ class TestIntegration:
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch(
-            "omnibase_infra.services.service_health.ServiceHealth"
+            "omnibase_infra.services.health_checker.ServiceHealth"
         ) as mock_health:
             mock_health_instance = MagicMock()
             mock_health_instance.start = AsyncMock()
@@ -1426,7 +1426,7 @@ class TestIntegration:
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch(
-            "omnibase_infra.services.service_health.ServiceHealth"
+            "omnibase_infra.services.health_checker.ServiceHealth"
         ) as mock_health:
             mock_health_instance = MagicMock()
             mock_health_instance.start = AsyncMock()
@@ -1534,7 +1534,7 @@ class TestHttpPortValidation:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
+        with patch("omnibase_infra.services.health_checker.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -1557,7 +1557,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 0 is rejected and falls back to default."""
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "0")
 
@@ -1593,7 +1593,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 65536 is rejected and falls back to default."""
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "65536")
 
@@ -1679,7 +1679,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that negative port is rejected and falls back to default."""
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "-1")
 
@@ -1715,7 +1715,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that very large port number is rejected."""
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "100000")
 
@@ -1742,7 +1742,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that non-numeric port string is rejected and falls back to default."""
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
         # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)
@@ -1802,7 +1802,7 @@ class TestHttpPortValidation:
         - Mixed numeric/alphabetic ("12abc")
         - Decimal strings ("8080.5")
         """
-        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.health_checker import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
         # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)

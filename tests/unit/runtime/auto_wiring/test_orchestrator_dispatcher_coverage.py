@@ -113,7 +113,7 @@ async def test_strict_coverage_rejects_orchestrator_start_without_handler(
 async def test_strict_coverage_accepts_contract_event_type_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
@@ -142,7 +142,7 @@ async def test_strict_coverage_accepts_contract_event_type_alias(
 async def test_strict_coverage_accepts_topic_derived_event_type_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

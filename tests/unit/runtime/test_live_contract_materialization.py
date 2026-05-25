@@ -22,7 +22,7 @@ from omnibase_infra.runtime.kafka_contract_source import (
     KafkaContractCache,
     KafkaContractSource,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 pytestmark = pytest.mark.unit
 
@@ -179,7 +179,7 @@ class TestMaterializeHandlerLive:
                 return_value=mock_registry,
             ),
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
             ) as mock_import,
         ):
             mock_module = MagicMock()
@@ -299,7 +299,7 @@ class TestMaterializeHandlerLive:
                 new_callable=AsyncMock,
             ) as mock_resolve,
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
             ) as mock_import,
         ):
             mock_module = MagicMock()
@@ -342,7 +342,7 @@ class TestMaterializeHandlerLive:
                 runtime, "_get_or_create_container", return_value=mock_container
             ),
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
             ) as mock_import,
         ):
             mock_module = MagicMock()
@@ -394,7 +394,7 @@ class TestMaterializeHandlerLive:
                 return_value=mock_registry,
             ),
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
             ) as mock_import,
         ):
             mock_module = MagicMock()
@@ -438,7 +438,7 @@ class TestMaterializeHandlerLive:
                 return_value=mock_registry,
             ),
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
             ) as mock_import,
         ):
             mock_module = MagicMock()

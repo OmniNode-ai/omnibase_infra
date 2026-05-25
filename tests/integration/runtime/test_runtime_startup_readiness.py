@@ -11,8 +11,8 @@ using the in-memory event bus. These tests verify:
 
 Related:
     - OMN-2081: Investor demo - runtime contract routing verification
-    - src/omnibase_infra/runtime/service_runtime_host_process.py
-    - src/omnibase_infra/services/service_health.py
+    - src/omnibase_infra/runtime/runtime_host_process.py
+    - src/omnibase_infra/services/health_checker.py
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import aiohttp
 import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.services.health_checker import ServiceHealth
 from tests.helpers.aiohttp_utils import get_aiohttp_bound_port
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 

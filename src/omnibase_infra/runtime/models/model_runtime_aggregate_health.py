@@ -3,7 +3,7 @@
 """Canonical typed model for the :8085/health aggregate response shape.
 
 This module defines the canonical response model for the ``GET /health``
-endpoint served by :class:`~omnibase_infra.services.service_health.ServiceHealth`
+endpoint served by :class:`~omnibase_infra.services.health_checker.ServiceHealth`
 on port 8085.  It replaces the ``[provisional-field-source]`` annotation in
 ``docs/tracking/2026-04-19-runtime-state-inventory.md §E`` by naming each
 response field and citing its authoritative source.
@@ -13,7 +13,7 @@ Field provenance
 The ``/health`` response is assembled in two layers:
 
 1. **``RuntimeHostProcess.health_check()``**
-   (``omnibase_infra/src/omnibase_infra/runtime/service_runtime_host_process.py``,
+   (``omnibase_infra/src/omnibase_infra/runtime/runtime_host_process.py``,
    method ``health_check``, return dict literal at lines 5153-5179)
    — owns: ``healthy``, ``degraded``, ``startup_in_progress``, ``is_running``,
    ``is_draining``, ``pending_message_count``, ``max_concurrent_handlers``,
@@ -24,7 +24,7 @@ The ``/health`` response is assembled in two layers:
    ``config_prefetch_status``, ``local_ingress``, ``components``.
 
 2. **``ServiceHealth._handle_health()`` enrichment**
-   (``omnibase_infra/src/omnibase_infra/services/service_health.py``,
+   (``omnibase_infra/src/omnibase_infra/services/health_checker.py``,
    method ``_handle_health``, enrichment block at lines 1064-1076)
    — appends: ``degraded`` (overwrite), ``startup_in_progress`` (overwrite),
    ``components`` (overwrite with typed dicts).
@@ -110,12 +110,12 @@ class ModelRuntimeAggregateHealth(BaseModel):
     The response is assembled from two authoritative sources:
 
     * ``RuntimeHostProcess.health_check()`` — produces the outer dict
-      (``service_runtime_host_process.py``, ``health_check`` return literal,
+      (``runtime_host_process.py``, ``health_check`` return literal,
       lines 5153-5179).
     * ``ServiceHealth._handle_health()`` enrichment — overwrites ``degraded``,
       ``startup_in_progress``, and replaces the raw ``components`` list with
       typed :class:`~omnibase_infra.runtime.models.model_component_health.ModelComponentHealth`
-      dicts (``service_health.py``, lines 1064-1076).
+      dicts (``health_checker.py``, lines 1064-1076).
 
     Validation
     ----------

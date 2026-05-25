@@ -99,7 +99,7 @@ def _skip_materialize_dependencies() -> Generator[None, None, None]:
                 yield  # no-op — let real materialisation run
     """
     with patch(
-        "omnibase_infra.runtime.service_runtime_host_process"
+        "omnibase_infra.runtime.runtime_host_process"
         ".RuntimeHostProcess._materialize_dependencies",
         new_callable=AsyncMock,
     ):

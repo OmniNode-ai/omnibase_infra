@@ -20,7 +20,7 @@ from omnibase_infra.runtime.auto_wiring import (
     subscribe_wired_contract_topics,
     wire_from_manifest,
 )
-from omnibase_infra.runtime.service_message_dispatch_engine import (
+from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
 

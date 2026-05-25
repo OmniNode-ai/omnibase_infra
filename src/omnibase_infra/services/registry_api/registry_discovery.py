@@ -85,7 +85,7 @@ _default_widget_mapping_rel: str = str(
     _NODE_CFG.get("default_widget_mapping_path", "configs/widget_mapping.yaml")
 )
 # Resolve relative to the omnibase_infra package root (three levels up from this file:
-# services/registry_api/service.py → services/registry_api → services → omnibase_infra)
+# services/registry_api/registry_discovery.py → services/registry_api → services → omnibase_infra)
 DEFAULT_WIDGET_MAPPING_PATH: Path = (
     Path(__file__).parent.parent.parent / _default_widget_mapping_rel
 )

@@ -108,7 +108,7 @@ async def test_auto_wiring_wires_contract_without_plugin_class() -> None:
     )
 
     # Create a real MessageDispatchEngine
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
@@ -248,7 +248,7 @@ async def test_auto_wiring_detects_duplicate_topic_ownership() -> None:
         errors=(),
     )
 
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

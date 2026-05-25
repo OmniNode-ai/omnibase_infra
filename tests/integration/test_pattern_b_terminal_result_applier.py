@@ -24,7 +24,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 
 class ModelTerminalResult(BaseModel):

@@ -175,7 +175,7 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
         results: VerificationResult to record step outcome and timing.
     """
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
     print("\n--- Step 1: Runtime Startup Timing ---")
 
@@ -318,7 +318,7 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

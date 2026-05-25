@@ -249,7 +249,7 @@ pattern_exemptions:
   # - Message handling (_on_message, _handle_envelope)
   # - Graceful shutdown (shutdown_ready, drain logic)
   # - Handler management (register_handler, get_handler)
-  - file_pattern: 'service_runtime_host_process\.py'
+  - file_pattern: 'runtime_host_process\.py'
     class_pattern: "Class 'RuntimeHostProcess'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -259,7 +259,7 @@ pattern_exemptions:
       - docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
       - docs/adr/ADR-001-graceful-shutdown-drain-period.md
     ticket: OMN-756
-  - file_pattern: 'service_runtime_host_process\.py'
+  - file_pattern: 'runtime_host_process\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -514,7 +514,7 @@ pattern_exemptions:
   # Message Dispatch Engine Exemptions (OMN-934, OMN-983)
   # ==========================================================================
   # Central dispatch coordinator pattern requires comprehensive routing capabilities.
-  - file_pattern: 'service_message_dispatch_engine\.py'
+  - file_pattern: 'message_dispatch_engine\.py'
     class_pattern: "Class 'MessageDispatchEngine'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -524,7 +524,7 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
       - docs/as_is/05_RUNTIME_DISPATCH_SHAPES.md
     ticket: OMN-934
-  - file_pattern: 'service_message_dispatch_engine\.py'
+  - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function '_build_log_context'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -533,7 +533,7 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-934
-  - file_pattern: 'service_message_dispatch_engine\.py'
+  - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -542,7 +542,7 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
-  - file_pattern: 'service_message_dispatch_engine\.py'
+  - file_pattern: 'message_dispatch_engine\.py'
     method_pattern: "Function 'register_dispatcher'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -752,7 +752,7 @@ pattern_exemptions:
   # ServiceHealth follows the CLAUDE.md Service<Name> naming convention and
   # requires multiple __init__ parameters to support dual initialization modes
   # (direct runtime injection and container-based DI).
-  - file_pattern: 'service_health\.py'
+  - file_pattern: 'health_checker.py'
     class_pattern: "Class name 'ServiceHealth'"
     violation_pattern: "contains anti-pattern 'Service'"
     reason: >
@@ -824,7 +824,7 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1246
-  - file_pattern: 'service_health\.py'
+  - file_pattern: 'health_checker.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >

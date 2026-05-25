@@ -19,10 +19,10 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
 from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
     ModelLocalRuntimeIngressRequest,
 )
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import (
     discover_runtime_local_ingress_routes,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config
 
 pytestmark = pytest.mark.integration

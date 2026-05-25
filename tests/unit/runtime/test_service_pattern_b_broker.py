@@ -22,9 +22,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 pytestmark = pytest.mark.unit
 
@@ -810,12 +810,12 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
             captured["start_mock"] = self.start
 
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
         lambda packages: captured.setdefault("packages", packages)
         and {"session_orchestrator": route},
     )
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
         FakeBroker,
     )
 
@@ -852,11 +852,11 @@ async def test_runtime_host_process_skips_pattern_b_broker_for_disallowed_profil
 ) -> None:
     monkeypatch.setenv("RUNTIME_PROFILE", "effects")
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
         lambda _packages: pytest.fail("effects profile must not discover routes"),
     )
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
         lambda *_args, **_kwargs: pytest.fail(
             "effects profile must not start Pattern B broker"
         ),
@@ -926,12 +926,12 @@ async def test_runtime_host_process_broker_package_names_ignore_active_runtime_e
 
     monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra")
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
         lambda packages: captured.setdefault("packages", packages)
         and {"session_orchestrator": route},
     )
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
         FakeBroker,
     )
 
@@ -977,11 +977,11 @@ async def test_runtime_host_process_reuses_local_ingress_routes_for_pattern_b_br
             self.start = AsyncMock()
 
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
         lambda _packages: pytest.fail("broker should reuse local ingress routes"),
     )
     monkeypatch.setattr(
-        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
         FakeBroker,
     )
 

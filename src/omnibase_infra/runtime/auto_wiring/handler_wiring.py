@@ -2319,7 +2319,7 @@ def _prepare_handler_wiring(
     # the dispatcher lookup falls back to type(payload).__name__ which resolves
     # to "dict" on object-erased envelopes and never matches the class-name key.
     # Strip surrounding whitespace so registration matches the dispatch-engine
-    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
+    # normalization (message_dispatch_engine.py normalizes via .strip()).
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
@@ -2548,7 +2548,7 @@ def _commit_handler_wiring(
 
     from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
     from omnibase_core.models.errors import ModelOnexError
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

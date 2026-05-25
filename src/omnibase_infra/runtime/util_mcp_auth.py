@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Utility: MCP API key injection from environment variables.
 
-Extracted from ``service_runtime_host_process.py`` so the injection logic can
+Extracted from ``runtime_host_process.py`` so the injection logic can
 be exercised by unit tests against the **real** production code path (OMN-1419
 CR thread fix — "tests don't execute the production injection path").
 
@@ -73,7 +73,7 @@ def inject_mcp_api_keys(
     """Apply MCP key injection rules to *effective_config* (mutates in place).
 
     Rules (same semantics as the original inline block in
-    ``service_runtime_host_process.py``):
+    ``runtime_host_process.py``):
 
     1. If env-derived ``parsed_keys`` is not None AND ``effective_config``
        does not already have ``api_keys``, inject ``parsed_keys``.

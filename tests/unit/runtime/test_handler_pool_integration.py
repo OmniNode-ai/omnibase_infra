@@ -25,7 +25,7 @@ from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handler
 
 _RUNTIME_HOST_IMPLEMENTED = False
 try:
-    from omnibase_infra.runtime.service_runtime_host_process import (
+    from omnibase_infra.runtime.runtime_host_process import (
         RuntimeHostProcess,
     )
 

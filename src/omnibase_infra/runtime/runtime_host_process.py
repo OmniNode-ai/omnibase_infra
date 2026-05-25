@@ -184,14 +184,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_infra.runtime.message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
         ModelRuntimeNodeGraphConfig,
     )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
-    )
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
-        MessageDispatchEngine,
     )
 
 # Imports for PluginLoaderContractSource adapter class
@@ -227,7 +227,7 @@ from omnibase_infra.topics import (
 )
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
-# Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
+# Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
 wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)

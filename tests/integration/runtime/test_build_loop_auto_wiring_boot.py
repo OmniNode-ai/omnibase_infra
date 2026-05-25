@@ -30,7 +30,7 @@ from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
     wire_from_manifest,
 )
-from omnibase_infra.runtime.service_message_dispatch_engine import (
+from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
 

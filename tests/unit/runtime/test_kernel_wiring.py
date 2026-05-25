@@ -32,7 +32,7 @@ class TestKernelDispatchEngineWiring:
         2. Register dispatchers
         3. Freeze the engine
         """
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -51,10 +51,10 @@ class TestKernelDispatchEngineWiring:
         """Verify dispatch_engine can be set on ModelDomainPluginConfig."""
         from uuid import uuid4
 
-        from omnibase_infra.runtime.models import ModelDomainPluginConfig
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
+        from omnibase_infra.runtime.models import ModelDomainPluginConfig
 
         engine = MessageDispatchEngine()
         bus = EventBusInmemory(environment="test", group="test-kernel")

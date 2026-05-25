@@ -129,8 +129,8 @@ from omnibase_infra.runtime.models import (
 # at module level to avoid a circular import. The import chain is:
 #
 #   1. omnibase_infra/runtime/__init__.py imports kernel_bootstrap from kernel.py
-#   2. If kernel.py imported ServiceHealth at module level, it would load service_health.py
-#   3. service_health.py imports ModelHealthCheckResponse from runtime.models
+#   2. If kernel.py imported ServiceHealth at module level, it would load health_checker.py
+#   3. health_checker.py imports ModelHealthCheckResponse from runtime.models
 #   4. This triggers initialization of omnibase_infra.runtime package (step 1)
 #   5. Runtime package tries to import kernel.py which is still initializing -> circular!
 #
@@ -149,8 +149,8 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_profile import load_runtime_profile
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -736,7 +736,7 @@ async def bootstrap() -> int:
     """
     # Lazy import to break circular dependency chain - see "Circular Import Note"
     # comment near line 98 for detailed explanation of the import cycle.
-    from omnibase_infra.services.service_health import (
+    from omnibase_infra.services.health_checker import (
         DEFAULT_HTTP_PORT,
         ServiceHealth,
     )
@@ -1942,7 +1942,7 @@ async def bootstrap() -> int:
         #   Pass 1: initialize -> wire_handlers -> wire_dispatchers (all plugins)
         #   Freeze: dispatch_engine.freeze()
         #   Pass 2: start_consumers (all plugins)
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
