@@ -520,10 +520,10 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
     "onex.evt.omnimarket.delegate-skill-completed.v1"
 )
-"""Event topic for successful delegate-skill terminal responses."""
+"""Event topic published by node_delegate_skill_orchestrator on successful skill dispatch."""
 
 TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
-"""Event topic for failed delegate-skill terminal responses."""
+"""Event topic published by node_delegate_skill_orchestrator on skill dispatch failure."""
 
 
 __all__ = [
