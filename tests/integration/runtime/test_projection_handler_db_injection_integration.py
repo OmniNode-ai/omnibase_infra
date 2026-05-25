@@ -12,12 +12,15 @@ Uses in-memory fakes only — no real DB or Kafka required.
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _build_sync_db_adapter,
     _make_projection_dispatch_callback,
     _read_db_io_tables,
 )
@@ -404,3 +407,63 @@ def test_projection_callback_no_op_when_db_url_missing(tmp_path: Path) -> None:
 
     assert result is None
     assert call_count[0] == 0
+
+
+@pytest.mark.integration
+def test_sync_psycopg2_adapter_preserves_text_array_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sync adapter must not JSON-wrap Postgres text[] values."""
+
+    captured_execute: dict[str, object] = {}
+
+    class FakeJson:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+    class FakeCursor:
+        def __enter__(self) -> FakeCursor:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: object) -> None:
+            captured_execute["sql"] = sql
+            captured_execute["params"] = params
+
+    class FakeConnection:
+        closed = False
+        autocommit = False
+
+        def cursor(self, *args: object, **kwargs: object) -> FakeCursor:
+            return FakeCursor()
+
+    fake_extras = types.SimpleNamespace(Json=FakeJson, RealDictCursor=object)
+    fake_psycopg2 = types.SimpleNamespace(
+        connect=lambda dsn: FakeConnection(),
+        extras=fake_extras,
+    )
+
+    monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
+    monkeypatch.setitem(sys.modules, "psycopg2.extras", fake_extras)
+
+    adapter = _build_sync_db_adapter("postgresql://example")
+    result = adapter.upsert(
+        "swarm_runs",
+        "run_id",
+        {
+            "run_id": "run-1",
+            "models_used": ["qwen3", "gpt-5"],
+            "machines_used": ["worker-a", "worker-b"],
+            "metadata": {"source": "integration-test"},
+        },
+    )
+
+    assert result is True
+    params = captured_execute["params"]
+    assert isinstance(params, dict)
+    assert params["models_used"] == ["qwen3", "gpt-5"]
+    assert params["machines_used"] == ["worker-a", "worker-b"]
+    assert isinstance(params["metadata"], FakeJson)
+    assert params["metadata"].value == {"source": "integration-test"}
