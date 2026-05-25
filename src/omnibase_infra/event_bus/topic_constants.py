@@ -517,8 +517,18 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 )
 """Command topic for baseline comparison compute from the delegation orchestrator."""
 
+TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
+    "onex.evt.omnimarket.delegate-skill-completed.v1"
+)
+"""Event topic for successful delegate-skill terminal responses."""
+
+TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
+"""Event topic for failed delegate-skill terminal responses."""
+
 
 __all__ = [
+    "TOPIC_DELEGATE_SKILL_COMPLETED",
+    "TOPIC_DELEGATE_SKILL_FAILED",
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
     "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
