@@ -1339,16 +1339,34 @@ def _materialize_known_handler_dependencies(
     }
     if (
         "dispatch_port" in constructor_params
-        and event_bus is not None
         and requires_delegation_port
     ):
-        from omnibase_infra.runtime.service_delegation_dispatch_port import (
-            RuntimeDelegationDispatchPort,
-        )
+        # When container is available, inject ContainerBackedDelegationDispatchPort
+        # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
+        # PluginDelegation at start_consumers() time. This avoids the asyncio stall
+        # that occurs when the Kafka-backed RuntimeDelegationDispatchPort subscribes
+        # to delegation-completed and awaits while the delegation orchestrator runs
+        # in the same event loop.
+        if container is not None:
+            from omnibase_infra.runtime.service_delegation_dispatch_port import (
+                ContainerBackedDelegationDispatchPort,
+                RuntimeDelegationDispatchPort,
+            )
 
-        available["dispatch_port"] = RuntimeDelegationDispatchPort(
-            cast("ProtocolPatternBBrokerTransport", event_bus)
-        )
+            available["dispatch_port"] = ContainerBackedDelegationDispatchPort(
+                container=container,
+                fallback_event_bus=cast(
+                    "ProtocolPatternBBrokerTransport | None", event_bus
+                ),
+            )
+        elif event_bus is not None:
+            from omnibase_infra.runtime.service_delegation_dispatch_port import (
+                RuntimeDelegationDispatchPort,
+            )
+
+            available["dispatch_port"] = RuntimeDelegationDispatchPort(
+                cast("ProtocolPatternBBrokerTransport", event_bus)
+            )
     if not required_params <= set(available):
         return materialized_explicit_dependencies
 
