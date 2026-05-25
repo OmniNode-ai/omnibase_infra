@@ -87,9 +87,6 @@ CREATE TABLE IF NOT EXISTS llm_delegation_call_log (
         CHECK (latency_ms >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_llm_delegation_call_log_date
-    ON llm_delegation_call_log ((created_at::date));
-
 CREATE INDEX IF NOT EXISTS idx_llm_delegation_call_log_task_type
     ON llm_delegation_call_log (task_type);
 
