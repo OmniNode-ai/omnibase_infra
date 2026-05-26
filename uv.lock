@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -9,8 +9,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=7631ef3321e1a6561f4b2c70019ee57d24160620" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.21.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0" },
 ]
 
 [[package]]
@@ -1980,8 +1980,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.41.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=7631ef3321e1a6561f4b2c70019ee57d24160620#7631ef3321e1a6561f4b2c70019ee57d24160620" }
+version = "0.42.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0#fc211e3648681a79f609c2c153a254baaef682ab" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.36.1"
+version = "0.37.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -2093,8 +2093,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=7631ef3321e1a6561f4b2c70019ee57d24160620" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.21.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.64" },
@@ -2148,8 +2148,8 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.21.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.21.0#5a169824fbe30070f9d4e3fe25e40118371fae33" }
+version = "0.22.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0#c01f70cd14e4b68ee83d20468df87e5ce91bee90" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
@@ -2159,7 +2159,7 @@ dependencies = [
 [[package]]
 name = "onex-change-control"
 version = "0.5.0"
-source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#b50ce95d84e5b1ae8653e0040f8b4a542b649340" }
+source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#c3d38e71fb17dc71380be2aeeb204994c885424a" }
 dependencies = [
     { name = "colorama" },
     { name = "omnibase-core" },
