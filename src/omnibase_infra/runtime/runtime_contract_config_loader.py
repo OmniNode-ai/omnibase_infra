@@ -45,11 +45,17 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import yaml
 
 from omnibase_core.models.contracts.model_contract_base import ModelContractBase
+
+if TYPE_CHECKING:
+    from omnibase_core.models.contracts.subcontracts.model_hook_activation import (
+        ModelHookActivation,
+    )
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.bindings import ModelOperationBindingsSubcontract
@@ -484,6 +490,39 @@ class RuntimeContractConfigLoader:
             operation_bindings=operation_bindings,
             correlation_id=correlation_id,
         )
+
+    def load_hook_activations_from_path(
+        self,
+        contracts_dir: Path,
+    ) -> list[ModelHookActivation]:
+        """Load hook_activations.yaml from a package contracts directory.
+
+        Returns empty list if file absent, malformed, or contains unknown bits (lenient policy).
+        """
+        from omnibase_core.models.contracts.subcontracts.model_hook_activation import (
+            ModelHookActivation,
+        )
+
+        yaml_path = contracts_dir / "hook_activations.yaml"
+        if not yaml_path.exists():
+            return []
+        try:
+            raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                logger.warning(
+                    "hook_activations.yaml at %s is not a mapping — skipping",
+                    yaml_path,
+                )
+                return []
+            raw_activations = raw.get("hook_activations", [])
+            return [ModelHookActivation.model_validate(a) for a in raw_activations]
+        except Exception as exc:  # noqa: BLE001 — boundary: log warning and degrade
+            logger.warning(
+                "Skipping malformed hook_activations.yaml at %s: %s",
+                yaml_path,
+                exc,
+            )
+            return []
 
     def load_from_directory(self, search_path: Path) -> list[ModelContractBase]:
         """Scan a directory tree for contract.yaml files and return typed contract models.
