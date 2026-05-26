@@ -44,6 +44,9 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ONEX_RUNTIME_INFISICAL_ENVIRONMENT",
     # Keycloak: opt-in auth; empty = keycloak not configured
     "KEYCLOAK_ADMIN_CLIENT_SECRET",
+    # OMN-12196: bifrost source contract path; empty = resolve from omnimarket
+    # package via importlib.resources (opt-in override for custom source path)
+    "BIFROST_SOURCE_CONTRACT_PATH",
 }
 
 
