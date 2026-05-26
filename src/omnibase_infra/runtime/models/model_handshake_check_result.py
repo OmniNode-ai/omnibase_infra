@@ -29,6 +29,6 @@ class ModelHandshakeCheckResult(BaseModel):
 
     model_config = ConfigDict(frozen=False)
 
-    check_name: str
+    check_name: str  # pattern-ok: handshake check identifier, not an entity name
     passed: bool
     message: str = ""

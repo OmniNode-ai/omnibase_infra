@@ -15,14 +15,14 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = [pytest.mark.integration]
 
 
-def _route() -> RuntimeLocalIngressRoute:
-    return RuntimeLocalIngressRoute(
+def _route() -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
         node_name="node_delegate_skill_orchestrator",
         contract_name="delegate_skill.orchestrate",
         command_topic="onex.cmd.omnimarket.delegate-skill.v1",
@@ -100,7 +100,7 @@ class _KafkaLikeTransport:
     )
     _bootstrap_servers = "pattern-b-test-broker"
 
-    def __init__(self, route: RuntimeLocalIngressRoute) -> None:
+    def __init__(self, route: ModelRuntimeLocalIngressRoute) -> None:
         self._route = route
 
     def _build_auth_kwargs(self) -> dict[str, object]:

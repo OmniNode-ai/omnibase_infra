@@ -15,7 +15,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
     _normalize_result_payload,
@@ -31,8 +31,8 @@ def _route(
     terminal_events: tuple[str, ...],
     command_topic: str | None = None,
     contract_name: str = "node_delegation_orchestrator",
-) -> RuntimeLocalIngressRoute:
-    return RuntimeLocalIngressRoute(
+) -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
         node_name=contract_name,
         contract_name=contract_name,
         command_topic=(
@@ -129,7 +129,7 @@ async def _dispatch_with_fake_broker(
     monkeypatch: pytest.MonkeyPatch,
     **dispatch_kwargs: object,
 ) -> tuple[
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     list[dict[str, object]],
     list[float],
     list[dict[str, object]],

@@ -61,7 +61,7 @@ class ModelPluginDiscoveryEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    entry_point_name: str
+    entry_point_name: str  # pattern-ok: Python entry-point label, not an entity name
     module_path: str
     status: PluginDiscoveryStatus
     reason: str = ""

@@ -375,7 +375,9 @@ async def test_auto_backend_selects_deployed_when_healthy(
     from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
         ModelDispatchBusTerminalResult,
     )
-    from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+    from omnibase_infra.runtime.runtime_local_ingress import (
+        ModelRuntimeLocalIngressRoute,
+    )
     from omnibase_infra.runtime.service_delegation_dispatch_port import (
         RuntimeDelegationDispatchPort,
     )
@@ -384,7 +386,7 @@ async def test_auto_backend_selects_deployed_when_healthy(
         async def health_check(self) -> dict[str, object]:
             return {"healthy": True}
 
-    fake_route = RuntimeLocalIngressRoute(
+    fake_route = ModelRuntimeLocalIngressRoute(
         node_name="test_node",
         contract_name="test_node",
         command_topic=_CMD_TOPIC,
@@ -401,7 +403,7 @@ async def test_auto_backend_selects_deployed_when_healthy(
 
         async def dispatch_request(
             self, command: object
-        ) -> tuple[RuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
+        ) -> tuple[ModelRuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
             return fake_route, ModelDispatchBusTerminalResult(
                 correlation_id=uuid4(),
                 status="completed",

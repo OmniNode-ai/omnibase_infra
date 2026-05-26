@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 logger = logging.getLogger(__name__)
 
 
-class MetricEvent(BaseModel):
+class ModelMetricEvent(BaseModel):
     """A single metric event captured from the Kafka bus.
 
     Attributes:
@@ -37,9 +37,9 @@ class MetricEvent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     topic: str
-    correlation_id: str
+    correlation_id: str  # pattern-ok: eval run correlation token, not a UUID
     timestamp: datetime
-    metric_name: str
+    metric_name: str  # pattern-ok: metric label, not an entity name
     metric_value: float
     metadata: dict[str, str] = Field(default_factory=dict)
 
@@ -67,7 +67,7 @@ class MetricCollector:
         self._window_start = window_start or datetime.now(UTC)
         self._window_end: datetime | None = None
         self._topics = topics or []
-        self._events: list[MetricEvent] = []
+        self._events: list[ModelMetricEvent] = []
 
     @property
     def correlation_id(self) -> str:
@@ -81,7 +81,7 @@ class MetricCollector:
     def is_collecting(self) -> bool:
         return self._window_end is None
 
-    def record_event(self, event: MetricEvent) -> bool:
+    def record_event(self, event: ModelMetricEvent) -> bool:
         """Record a metric event if it matches the correlation ID, topic, and window.
 
         Returns True if the event was accepted, False if filtered out.
@@ -132,4 +132,4 @@ class MetricCollector:
         return summary
 
 
-__all__: list[str] = ["MetricCollector", "MetricEvent"]
+__all__: list[str] = ["MetricCollector", "ModelMetricEvent"]

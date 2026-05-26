@@ -27,7 +27,7 @@ from omnibase_infra.event_bus.models.model_event_message import ModelEventMessag
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
@@ -75,7 +75,7 @@ class RuntimePatternBBroker:
         event_bus: ProtocolPatternBBrokerTransport,
         *,
         command_topic: str,
-        routes: Mapping[str, RuntimeLocalIngressRoute],
+        routes: Mapping[str, ModelRuntimeLocalIngressRoute],
     ) -> None:
         self._event_bus = event_bus
         self._command_topic = command_topic
@@ -132,7 +132,7 @@ class RuntimePatternBBroker:
     async def dispatch_request(
         self,
         command: ModelDispatchBusCommand,
-    ) -> tuple[RuntimeLocalIngressRoute | None, ModelDispatchBusTerminalResult]:
+    ) -> tuple[ModelRuntimeLocalIngressRoute | None, ModelDispatchBusTerminalResult]:
         correlation_id = command.correlation_id
         route = self._routes.get(command.command_name)
         if route is None:
@@ -190,7 +190,7 @@ class RuntimePatternBBroker:
     async def _dispatch_and_wait_with_event_bus_subscription(
         self,
         command: ModelDispatchBusCommand,
-        route: RuntimeLocalIngressRoute,
+        route: ModelRuntimeLocalIngressRoute,
     ) -> TerminalPayload:
         correlation_id = command.correlation_id
         terminal_queue: asyncio.Queue[TerminalPayload] = asyncio.Queue(maxsize=1)
@@ -241,7 +241,7 @@ class RuntimePatternBBroker:
     async def _dispatch_and_wait_with_direct_kafka_consumer(
         self,
         command: ModelDispatchBusCommand,
-        route: RuntimeLocalIngressRoute,
+        route: ModelRuntimeLocalIngressRoute,
     ) -> TerminalPayload:
         terminal_topics = _terminal_topics(route)
         if not terminal_topics:
@@ -381,7 +381,7 @@ class RuntimePatternBBroker:
     async def _publish_worker_command(
         self,
         command: ModelDispatchBusCommand,
-        route: RuntimeLocalIngressRoute,
+        route: ModelRuntimeLocalIngressRoute,
     ) -> None:
         worker_envelope = ModelEventEnvelope[object](
             payload=command.payload,
@@ -420,7 +420,7 @@ class RuntimePatternBBroker:
         )
 
 
-def _terminal_topics(route: RuntimeLocalIngressRoute) -> tuple[str, ...]:
+def _terminal_topics(route: ModelRuntimeLocalIngressRoute) -> tuple[str, ...]:
     topics: list[str] = []
     if route.terminal_events:
         topics.extend(route.terminal_events)
@@ -429,7 +429,7 @@ def _terminal_topics(route: RuntimeLocalIngressRoute) -> tuple[str, ...]:
     return tuple(topics)
 
 
-def _status_for_terminal_topic(route: RuntimeLocalIngressRoute, topic: str) -> str:
+def _status_for_terminal_topic(route: ModelRuntimeLocalIngressRoute, topic: str) -> str:
     success_topic = route.terminal_event
     if success_topic is None:
         terminal_topics = _terminal_topics(route)

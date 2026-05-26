@@ -62,7 +62,7 @@ class ModelHandshakeResult(BaseModel):
 
     model_config = ConfigDict(frozen=False)
 
-    plugin_id: str
+    plugin_id: str  # pattern-ok: plugin name identifier, not a UUID
     passed: bool
     checks: list[ModelHandshakeCheckResult] = Field(default_factory=list)
     error_message: str | None = None
