@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _TRACKED_PACKAGES: tuple[str, ...] = ("omnibase_core", "omnibase_spi")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: module-internal version check helper
 class VersionConstraint:
     """A version constraint for a dependency package.
 

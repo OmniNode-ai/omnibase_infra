@@ -23,14 +23,14 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = pytest.mark.unit
 
 
-def _route() -> RuntimeLocalIngressRoute:
-    return RuntimeLocalIngressRoute(
+def _route() -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
@@ -41,9 +41,9 @@ def _route() -> RuntimeLocalIngressRoute:
     )
 
 
-def _route_with_failure_terminal() -> RuntimeLocalIngressRoute:
+def _route_with_failure_terminal() -> ModelRuntimeLocalIngressRoute:
     route = _route()
-    return RuntimeLocalIngressRoute(
+    return ModelRuntimeLocalIngressRoute(
         node_name=route.node_name,
         contract_name=route.contract_name,
         command_topic=route.command_topic,
@@ -58,9 +58,9 @@ def _route_with_failure_terminal() -> RuntimeLocalIngressRoute:
     )
 
 
-def _route_with_plural_only_terminal() -> RuntimeLocalIngressRoute:
+def _route_with_plural_only_terminal() -> ModelRuntimeLocalIngressRoute:
     route = _route()
-    return RuntimeLocalIngressRoute(
+    return ModelRuntimeLocalIngressRoute(
         node_name=route.node_name,
         contract_name=route.contract_name,
         command_topic=route.command_topic,
@@ -198,7 +198,7 @@ class _FakeKafkaTransport:
 
     def __init__(
         self,
-        route: RuntimeLocalIngressRoute,
+        route: ModelRuntimeLocalIngressRoute,
         consumers: list[_FakeAIOKafkaConsumer],
         *,
         terminal_topic: str | None = None,

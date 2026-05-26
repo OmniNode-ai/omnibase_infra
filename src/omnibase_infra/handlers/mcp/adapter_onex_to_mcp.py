@@ -98,7 +98,7 @@ class AdapterMcpMetadataDict(TypedDict, total=False):
     source: str
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: mcp-adapter-internal
 class MCPToolParameter:
     """MCP tool parameter definition.
 
@@ -124,7 +124,7 @@ class MCPToolParameter:
         return self.required
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: mcp-adapter-internal
 class MCPToolDefinition:
     """MCP tool definition.
 

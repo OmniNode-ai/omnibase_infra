@@ -99,7 +99,7 @@ _KAFKA_HEARTBEAT_INTERVAL_MS = 15000
 _KAFKA_MAX_POLL_INTERVAL_MS = 300000
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds asyncio.Task, asyncio.Future, and AIOKafkaConsumer — not Pydantic-serializable
 class RequestResponseInstanceState:
     """Internal state for a single request-response instance.
 

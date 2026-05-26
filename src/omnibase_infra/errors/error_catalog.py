@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from omnibase_infra.enums import EnumInfraTransportType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: errors-internal
 class ErrorResolution:
     """A suggested resolution for an infrastructure error.
 

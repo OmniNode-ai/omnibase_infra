@@ -145,7 +145,7 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
@@ -1334,7 +1334,7 @@ class RuntimeHostProcess:
         # Bridges contract-declared topics to Kafka subscriptions.
         # None until wired during start() when dispatch_engine is available.
         self._event_bus_wiring: EventBusSubcontractWiring | None = None
-        self._local_ingress_routes: dict[str, RuntimeLocalIngressRoute] = {}
+        self._local_ingress_routes: dict[str, ModelRuntimeLocalIngressRoute] = {}
         self._local_ingress_server: RuntimeLocalIngressServer | None = None
         self._local_ingress_dispatch_result_applier: DispatchResultApplier | None = None
         self._local_ingress_active_packages: tuple[str, ...] = ()
@@ -2533,7 +2533,7 @@ class RuntimeHostProcess:
                 self._pending_message_count += 1
 
             async def _dispatch_through_broker() -> tuple[
-                RuntimeLocalIngressRoute | None,
+                ModelRuntimeLocalIngressRoute | None,
                 ModelDispatchBusTerminalResult,
             ]:
                 return await broker.dispatch_request(

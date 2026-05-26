@@ -8,13 +8,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
-@dataclass(frozen=True)
-class ModelInfisicalSecretResult:
+class ModelInfisicalSecretResult(BaseModel):
     """Result of a single secret fetch from Infisical.
 
     Attributes:
@@ -24,6 +21,8 @@ class ModelInfisicalSecretResult:
         secret_path: The path where the secret was found.
         environment: The environment slug.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     key: str
     value: SecretStr

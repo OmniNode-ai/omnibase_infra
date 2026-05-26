@@ -2,18 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Plugin discovery entry model.
 
-The ModelPluginDiscoveryEntry dataclass and the
-PluginDiscoveryStatus Literal type for structured diagnostics of
-individual plugin entry-point discovery outcomes.
+The ModelPluginDiscoveryEntry and the PluginDiscoveryStatus Literal type
+for structured diagnostics of individual plugin entry-point discovery outcomes.
 
 Design Pattern:
     Each entry records the disposition of a single entry-point discovered
     via ``importlib.metadata``, making "why didn't my plugin load?" a
     10-second debugging problem.
-
-Thread Safety:
-    The dataclass uses ``frozen=True`` to prevent attribute reassignment
-    after construction.
 
 Example:
     >>> from omnibase_infra.runtime.models import ModelPluginDiscoveryEntry
@@ -34,8 +29,9 @@ Related:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 PluginDiscoveryStatus = Literal[
     "accepted",
@@ -47,8 +43,7 @@ PluginDiscoveryStatus = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class ModelPluginDiscoveryEntry:
+class ModelPluginDiscoveryEntry(BaseModel):
     """A single entry-point discovery result.
 
     Records the outcome of attempting to load one plugin entry-point,
@@ -58,32 +53,15 @@ class ModelPluginDiscoveryEntry:
         entry_point_name: Name of the entry-point as declared in
             ``pyproject.toml`` or ``setup.cfg``.
         module_path: Dotted module path the entry-point resolves to.
-        status: Disposition of this entry-point. One of:
-            ``"accepted"`` -- successfully loaded and registered.
-            ``"namespace_rejected"`` -- blocked by namespace allowlist.
-            ``"import_error"`` -- ``importlib`` could not load the module.
-            ``"instantiation_error"`` -- class loaded but constructor failed.
-            ``"protocol_invalid"`` -- class does not satisfy required protocol.
-            ``"duplicate_skipped"`` -- a plugin with the same ID was already
-            registered.
+        status: Disposition of this entry-point.
         reason: Human-readable explanation. Empty string for accepted entries.
         plugin_id: Plugin identifier. Set only for ``"accepted"`` and
             ``"duplicate_skipped"`` entries; ``None`` otherwise.
-
-    Example:
-        >>> entry = ModelPluginDiscoveryEntry(
-        ...     entry_point_name="my_plugin",
-        ...     module_path="myapp.plugins.my_plugin",
-        ...     status="accepted",
-        ...     plugin_id="my_plugin",
-        ... )
-        >>> entry.status
-        'accepted'
-        >>> entry.reason
-        ''
     """
 
-    entry_point_name: str
+    model_config = ConfigDict(frozen=True)
+
+    entry_point_name: str  # pattern-ok: Python entry-point label, not an entity name
     module_path: str
     status: PluginDiscoveryStatus
     reason: str = ""

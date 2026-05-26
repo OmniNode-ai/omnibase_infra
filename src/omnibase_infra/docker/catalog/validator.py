@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass, field
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class ValidationResult:
     """Result of env var validation."""
 

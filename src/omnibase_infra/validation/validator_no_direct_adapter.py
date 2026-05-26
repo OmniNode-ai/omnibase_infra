@@ -37,7 +37,7 @@ _ALLOWED_IMPORT_PATTERNS: frozenset[str] = frozenset(
 _INTERNAL_ADAPTER_MODULE = "omnibase_infra.adapters._internal"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: validator-internal finding
 class AdapterViolation:
     """A single violation of the no-direct-adapter-usage rule.
 

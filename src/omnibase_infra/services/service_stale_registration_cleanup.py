@@ -47,7 +47,9 @@ from omnibase_infra.utils import sanitize_error_message
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: service-internal cleanup report
 class StaleCleanupReport:
     """Report from a stale registration cleanup run.
 

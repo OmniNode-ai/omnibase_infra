@@ -7,13 +7,12 @@ Part of the Multi-Session Coordination Layer (OMN-6850, Task 9).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["ModelGraphMutation"]
 
 
-@dataclass(frozen=True)
-class ModelGraphMutation:
+class ModelGraphMutation(BaseModel):
     """A single Cypher MERGE mutation with parameters.
 
     Attributes:
@@ -21,5 +20,7 @@ class ModelGraphMutation:
         params: Parameter dict for the query.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     cypher: str
-    params: dict[str, str] = field(default_factory=dict)
+    params: dict[str, str] = Field(default_factory=dict)

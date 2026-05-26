@@ -21,7 +21,9 @@ DEFAULT_STRIPPED_GROUPS = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: script-internal model; asdict() is used for JSON serialization in main()
 class StrippedEntryPointDist:
     """Entry-point groups stripped from one installed distribution."""
 
@@ -31,7 +33,9 @@ class StrippedEntryPointDist:
     removed_file: bool
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: script-internal model; asdict() is used for JSON serialization in main()
 class StripEntryPointReport:
     """Summary of runtime entry-point metadata stripping."""
 

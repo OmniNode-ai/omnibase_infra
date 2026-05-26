@@ -22,7 +22,7 @@ from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
@@ -35,13 +35,15 @@ _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal routing helper
 class ModelSelectedDelegationRoute:
     alias: str
-    route: RuntimeLocalIngressRoute
+    route: ModelRuntimeLocalIngressRoute
 
 
-def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
+def _has_delegation_terminal_interface(route: ModelRuntimeLocalIngressRoute) -> bool:
     return (
         route.contract_name == _DELEGATION_CONTRACT_NAME
         and bool(route.command_topic)
@@ -50,11 +52,11 @@ def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
 
 
 def _select_delegation_route(
-    routes: Mapping[str, RuntimeLocalIngressRoute],
+    routes: Mapping[str, ModelRuntimeLocalIngressRoute],
 ) -> ModelSelectedDelegationRoute:
     """Select the single route with the delegation terminal interface."""
 
-    candidates: dict[str, tuple[str, RuntimeLocalIngressRoute]] = {}
+    candidates: dict[str, tuple[str, ModelRuntimeLocalIngressRoute]] = {}
     for alias, route in routes.items():
         if route.contract_name != _DELEGATION_CONTRACT_NAME:
             continue
@@ -137,7 +139,7 @@ class RuntimeDelegationDispatchPort:
         event_bus: ProtocolPatternBBrokerTransport,
         *,
         package_names: Sequence[str] | None = None,
-        routes: Mapping[str, RuntimeLocalIngressRoute] | None = None,
+        routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
         command_topic: str | None = None,
         response_topic: str | None = None,
     ) -> None:
@@ -149,7 +151,7 @@ class RuntimeDelegationDispatchPort:
         self._command_topic = command_topic
         self._response_topic = response_topic
 
-    def _resolved_routes(self) -> dict[str, RuntimeLocalIngressRoute]:
+    def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
         if self._routes is not None:
             return dict(self._routes)
         package_names = parse_active_runtime_packages(

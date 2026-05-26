@@ -25,7 +25,7 @@ from omnibase_infra.runtime.models import (
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
@@ -39,8 +39,8 @@ _SESSION_ORCHESTRATOR_CONTRACT_PATH = (
 )
 
 
-def _session_orchestrator_route() -> RuntimeLocalIngressRoute:
-    return RuntimeLocalIngressRoute(
+def _session_orchestrator_route() -> ModelRuntimeLocalIngressRoute:
+    return ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
@@ -622,7 +622,7 @@ async def test_runtime_host_process_dispatch_local_ingress_preserves_request_tim
 async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_payload_before_broker() -> (
     None
 ):
-    route = RuntimeLocalIngressRoute(
+    route = ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
@@ -660,7 +660,7 @@ async def test_runtime_host_process_dispatch_local_ingress_rejects_invalid_paylo
 async def test_runtime_host_process_dispatch_local_ingress_publishes_validated_payload() -> (
     None
 ):
-    route = RuntimeLocalIngressRoute(
+    route = ModelRuntimeLocalIngressRoute(
         node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
         command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
@@ -800,7 +800,7 @@ async def test_runtime_host_process_dispatch_local_ingress_uses_handler_semaphor
 async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -> None:
     async def _sleepy_dispatch(
         *_args: object, **_kwargs: object
-    ) -> tuple[RuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
+    ) -> tuple[ModelRuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
         await asyncio.sleep(0.05)
         return _session_orchestrator_route(), ModelDispatchBusTerminalResult(
             status="completed",

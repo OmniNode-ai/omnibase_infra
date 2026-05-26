@@ -3448,7 +3448,88 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Handler convention)
     ticket: OMN-11273
-# Architecture validator exemptions
+    # Architecture validator exemptions
+  # ==========================================================================
+  # ModelRuntimeLocalIngressRoute field name exemptions (OMN-12184)
+  # ==========================================================================
+  # Structural route descriptor fields: node_name, contract_name, package_name
+  # are protocol-level structural identifiers, not entity display names.
+  # Renaming them would cascade to 100+ call sites across the runtime.
+  - file_pattern: 'runtime_local_ingress\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      Structural route descriptor field. node_name is a ONEX node identifier string (e.g. "node_registration_orchestrator"), not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  - file_pattern: 'runtime_local_ingress\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      Structural route descriptor field. contract_name is a contract file identifier string, not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  - file_pattern: 'runtime_local_ingress\.py'
+    violation_pattern: "Field 'package_name' might reference an entity"
+    reason: >
+      Structural route descriptor field. package_name is a Python package identifier string (e.g. "omnimarket"), not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  # ==========================================================================
+  # ModelPluginDiscoveryEntry field name exemption (OMN-12184)
+  # ==========================================================================
+  - file_pattern: 'model_plugin_discovery_entry\.py'
+    violation_pattern: "Field 'entry_point_name' might reference an entity"
+    reason: >
+      entry_point_name is a Python importlib.metadata entry-point label string, not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  # ==========================================================================
+  # ModelHandshakeCheckResult field name exemption (OMN-12184)
+  # ==========================================================================
+  - file_pattern: 'model_handshake_check_result\.py'
+    violation_pattern: "Field 'check_name' might reference an entity"
+    reason: >
+      check_name is a handshake validation check label string (e.g. "db_ownership"), not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  # ==========================================================================
+  # ModelHandshakeResult plugin_id exemption (OMN-12184)
+  # ==========================================================================
+  - file_pattern: 'model_handshake_result\.py'
+    violation_pattern: "Field 'plugin_id' should use UUID type instead of str"
+    reason: >
+      plugin_id is a human-readable plugin name string (e.g. "registration"), not a UUID. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  # ==========================================================================
+  # ModelEvalRegressionResult field exemptions (OMN-12184)
+  # ==========================================================================
+  - file_pattern: 'eval_regression_check\.py'
+    violation_pattern: "Field 'report_id' should use UUID type instead of str"
+    reason: >
+      report_id is an opaque eval report identifier sourced from external eval system, not a UUID. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  - file_pattern: 'eval_regression_check\.py'
+    violation_pattern: "Field 'suite_id' should use UUID type instead of str"
+    reason: >
+      suite_id is an opaque eval suite identifier sourced from external eval system, not a UUID. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  # ==========================================================================
+  # ModelMetricEvent field exemptions (OMN-12184)
+  # ==========================================================================
+  - file_pattern: 'metric_collector\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID type instead of str"
+    reason: >
+      correlation_id is an eval run correlation token in string format passed from external callers, not a UUID. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
+  - file_pattern: 'metric_collector\.py'
+    violation_pattern: "Field 'metric_name' might reference an entity"
+    reason: >
+      metric_name is a metric label string (e.g. "latency_ms"), not an entity display name. Converted from @dataclass in OMN-12184.
+
+    ticket: OMN-12184
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

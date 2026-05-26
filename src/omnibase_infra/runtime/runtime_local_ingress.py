@@ -11,12 +11,11 @@ import logging
 import os
 import stat
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.types import JsonType
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
@@ -45,17 +44,18 @@ def _preferred_request_name(raw: object) -> str:
     return "unknown"
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeLocalIngressRoute:
+class ModelRuntimeLocalIngressRoute(BaseModel):
     """Resolved route for a node exposed through the local runtime ingress."""
 
-    node_name: str
-    contract_name: str
+    model_config = ConfigDict(frozen=True)
+
+    node_name: str  # pattern-ok: structural route identifier, not an entity name
+    contract_name: str  # pattern-ok: contract file identifier, not an entity name
     command_topic: str
     event_type: str | None
     terminal_event: str | None
     contract_path: str
-    package_name: str
+    package_name: str  # pattern-ok: Python package identifier, not an entity name
     terminal_events: tuple[str, ...] = ()
     input_model_module: str | None = None
     input_model_name: str | None = None
@@ -83,10 +83,10 @@ def parse_active_runtime_packages(
 
 def discover_runtime_local_ingress_routes(
     package_names: Sequence[str],
-) -> dict[str, RuntimeLocalIngressRoute]:
+) -> dict[str, ModelRuntimeLocalIngressRoute]:
     """Discover local-ingress routes from installed package node contracts."""
 
-    routes: dict[str, RuntimeLocalIngressRoute] = {}
+    routes: dict[str, ModelRuntimeLocalIngressRoute] = {}
     alias_sources: dict[str, str] = {}
     ambiguous_public_aliases: set[str] = set()
 
@@ -132,7 +132,7 @@ def discover_runtime_local_ingress_routes(
 
             node_dir_name = contract_path.parent.name
             input_model_module, input_model_name = _extract_input_model_ref(raw)
-            route = RuntimeLocalIngressRoute(
+            route = ModelRuntimeLocalIngressRoute(
                 node_name=node_dir_name,
                 contract_name=contract_name,
                 command_topic=command_topic,
@@ -238,10 +238,10 @@ def discover_runtime_local_ingress_routes(
 
 
 def _register_local_ingress_route_alias(
-    routes: dict[str, RuntimeLocalIngressRoute],
+    routes: dict[str, ModelRuntimeLocalIngressRoute],
     alias_sources: dict[str, str],
     alias: str,
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
     *,
     source: str,
     ambiguous_public_aliases: set[str] | None = None,
@@ -302,8 +302,8 @@ def _is_public_alias_source(source: str | None) -> bool:
 
 
 def _local_ingress_routes_equivalent(
-    left: RuntimeLocalIngressRoute,
-    right: RuntimeLocalIngressRoute,
+    left: ModelRuntimeLocalIngressRoute,
+    right: ModelRuntimeLocalIngressRoute,
 ) -> bool:
     """Return whether two routes expose the same local-ingress interface."""
     return (
@@ -343,7 +343,7 @@ def _extract_terminal_events(raw: dict[object, object]) -> tuple[str, ...]:
 
 
 def _package_scoped_route_aliases(
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
 ) -> tuple[str, ...]:
     """Return package-scoped aliases that stay deterministic across repos."""
 
@@ -355,7 +355,7 @@ def _package_scoped_route_aliases(
 
 
 def _package_scoped_operation_aliases(
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
     operation_alias: str,
 ) -> tuple[str, ...]:
     """Return package-scoped operation aliases for colliding public names."""
@@ -368,7 +368,7 @@ def _package_scoped_operation_aliases(
 
 
 def _qualified_operation_aliases(
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
     operation_alias: str,
 ) -> tuple[str, ...]:
     """Return deterministic qualified aliases for a handler operation."""
@@ -394,8 +394,8 @@ def _extract_handler_operation_aliases(raw: dict[object, object]) -> tuple[str, 
 
 def _extract_handler_operation_routes(
     raw: dict[object, object],
-    base_route: RuntimeLocalIngressRoute | None,
-) -> tuple[tuple[str, RuntimeLocalIngressRoute], ...]:
+    base_route: ModelRuntimeLocalIngressRoute | None,
+) -> tuple[tuple[str, ModelRuntimeLocalIngressRoute], ...]:
     """Return handler operation aliases with handler-specific route metadata."""
     handler_routing = raw.get("handler_routing")
     if not isinstance(handler_routing, dict):
@@ -405,7 +405,7 @@ def _extract_handler_operation_routes(
     if not isinstance(handlers, list):
         return ()
 
-    aliases: list[tuple[str, RuntimeLocalIngressRoute]] = []
+    aliases: list[tuple[str, ModelRuntimeLocalIngressRoute]] = []
     for handler in handlers:
         if not isinstance(handler, dict):
             continue
@@ -419,17 +419,19 @@ def _extract_handler_operation_routes(
         if route is not None:
             event_type = _handler_event_type(handler, route.event_type)
             input_model_module, input_model_name = _extract_input_model_ref(handler)
-            route = replace(
-                route,
-                event_type=event_type,
-                input_model_module=input_model_module or route.input_model_module,
-                input_model_name=input_model_name or route.input_model_name,
+            route = route.model_copy(
+                update={
+                    "event_type": event_type,
+                    "input_model_module": input_model_module
+                    or route.input_model_module,
+                    "input_model_name": input_model_name or route.input_model_name,
+                }
             )
         aliases.append(
             (
                 normalized,
                 route
-                or RuntimeLocalIngressRoute(
+                or ModelRuntimeLocalIngressRoute(
                     node_name="",
                     contract_name="",
                     command_topic="",
@@ -454,7 +456,7 @@ def _handler_event_type(
 
 
 def validate_runtime_local_ingress_payload(
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
     payload: dict[str, JsonType],
 ) -> dict[str, JsonType]:
     """Validate and JSON-normalize an ingress payload against its route contract."""
@@ -468,7 +470,7 @@ def validate_runtime_local_ingress_payload(
 
 
 def _load_route_input_model(
-    route: RuntimeLocalIngressRoute,
+    route: ModelRuntimeLocalIngressRoute,
 ) -> type[BaseModel] | None:
     if route.input_model_module is None and route.input_model_name is None:
         return None
@@ -713,7 +715,7 @@ def _derive_route_event_type(
 
 
 __all__ = [
-    "RuntimeLocalIngressRoute",
+    "ModelRuntimeLocalIngressRoute",
     "RuntimeLocalIngressServer",
     "discover_runtime_local_ingress_routes",
     "parse_active_runtime_packages",

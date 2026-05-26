@@ -125,7 +125,7 @@ def _resolve_counterfactual(actual_model_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: service-internal event signal
 class InjectionSignal:
     """Raw injection signal accumulated from hook-context-injected events."""
 
@@ -133,7 +133,7 @@ class InjectionSignal:
     patterns_count: int = 0
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: service-internal event signal
 class LlmCallSignal:
     """Raw LLM call signal accumulated from llm-call-completed events."""
 
@@ -142,7 +142,7 @@ class LlmCallSignal:
     completion_tokens: int = 0
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: service-internal event signal
 class ValidatorCatchSignal:
     """Raw validator catch signal with severity for heuristic savings."""
 
@@ -150,7 +150,7 @@ class ValidatorCatchSignal:
     validator_type: str = ""
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: service-internal event signal
 class DispatchEvalSignal:
     """Raw dispatch evaluation signal for task-level savings projection."""
 
@@ -168,7 +168,7 @@ class DispatchEvalSignal:
     model_cloud_baseline: str | None = None
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: service-internal session accumulation buffer
 class SessionBuffer:
     """Accumulates signals for a single session."""
 

@@ -83,7 +83,9 @@ _JSON_FAILURE_THRESHOLD = 0.10
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: diagnostics-internal audit config with type[BaseModel] field
 class AuditConfig:
     """Configuration for a bus health audit run.
 

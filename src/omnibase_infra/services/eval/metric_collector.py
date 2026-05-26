@@ -15,14 +15,14 @@ Related:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class MetricEvent:
+class ModelMetricEvent(BaseModel):
     """A single metric event captured from the Kafka bus.
 
     Attributes:
@@ -34,12 +34,14 @@ class MetricEvent:
         metadata: Additional event metadata.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     topic: str
-    correlation_id: str
+    correlation_id: str  # pattern-ok: eval run correlation token, not a UUID
     timestamp: datetime
-    metric_name: str
+    metric_name: str  # pattern-ok: metric label, not an entity name
     metric_value: float
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class MetricCollector:
@@ -65,7 +67,7 @@ class MetricCollector:
         self._window_start = window_start or datetime.now(UTC)
         self._window_end: datetime | None = None
         self._topics = topics or []
-        self._events: list[MetricEvent] = []
+        self._events: list[ModelMetricEvent] = []
 
     @property
     def correlation_id(self) -> str:
@@ -79,7 +81,7 @@ class MetricCollector:
     def is_collecting(self) -> bool:
         return self._window_end is None
 
-    def record_event(self, event: MetricEvent) -> bool:
+    def record_event(self, event: ModelMetricEvent) -> bool:
         """Record a metric event if it matches the correlation ID, topic, and window.
 
         Returns True if the event was accepted, False if filtered out.
@@ -111,15 +113,7 @@ class MetricCollector:
         return sum(values) / len(values)
 
     def get_summary(self) -> dict[str, float | int | str]:
-        """Get a summary of all collected metrics.
-
-        Returns a dict with:
-            - correlation_id: The run's correlation ID
-            - event_count: Total events collected
-            - window_start: ISO timestamp of collection start
-            - window_end: ISO timestamp of collection end (or 'active')
-            - Per-metric averages as metric_name_avg keys
-        """
+        """Get a summary of all collected metrics."""
         summary: dict[str, float | int | str] = {
             "correlation_id": self._correlation_id,
             "event_count": len(self._events),
@@ -138,4 +132,4 @@ class MetricCollector:
         return summary
 
 
-__all__: list[str] = ["MetricCollector", "MetricEvent"]
+__all__: list[str] = ["MetricCollector", "ModelMetricEvent"]

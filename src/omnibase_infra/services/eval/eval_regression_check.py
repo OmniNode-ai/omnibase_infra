@@ -16,10 +16,10 @@ Related:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from onex_change_control.enums.enum_eval_verdict import EnumEvalVerdict
 from onex_change_control.models.model_eval_report import ModelEvalReport
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_REGRESSION_THRESHOLD = 0.30
 
 
-@dataclass(frozen=True)
-class EvalRegressionResult:
+class ModelEvalRegressionResult(BaseModel):
     """Result of an eval regression check.
 
     Attributes:
@@ -41,13 +40,15 @@ class EvalRegressionResult:
         suite_id: The eval suite that was evaluated.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     is_regression: bool
     worse_count: int
     total_tasks: int
     worse_ratio: float
     threshold: float
-    report_id: str
-    suite_id: str
+    report_id: str  # pattern-ok: opaque eval report identifier from external source
+    suite_id: str  # pattern-ok: opaque eval suite identifier from external source
 
     @property
     def summary(self) -> str:
@@ -68,7 +69,7 @@ class EvalRegressionResult:
 def check_eval_regression(
     report: ModelEvalReport,
     threshold: float = DEFAULT_REGRESSION_THRESHOLD,
-) -> EvalRegressionResult:
+) -> ModelEvalRegressionResult:
     """Check if the latest eval report shows a regression.
 
     Args:
@@ -77,7 +78,7 @@ def check_eval_regression(
             Must be in [0.0, 1.0].
 
     Returns:
-        EvalRegressionResult with the check outcome.
+        ModelEvalRegressionResult with the check outcome.
 
     Raises:
         ValueError: If threshold is outside [0.0, 1.0].
@@ -90,7 +91,7 @@ def check_eval_regression(
         logger.warning(
             "Empty eval report %s, skipping regression check", report.report_id
         )
-        return EvalRegressionResult(
+        return ModelEvalRegressionResult(
             is_regression=False,
             worse_count=0,
             total_tasks=0,
@@ -103,7 +104,7 @@ def check_eval_regression(
     worse_count = report.summary.onex_worse_count
     worse_ratio = worse_count / total
 
-    result = EvalRegressionResult(
+    result = ModelEvalRegressionResult(
         is_regression=worse_ratio > threshold,
         worse_count=worse_count,
         total_tasks=total,
@@ -123,6 +124,6 @@ def check_eval_regression(
 
 __all__: list[str] = [
     "DEFAULT_REGRESSION_THRESHOLD",
-    "EvalRegressionResult",
+    "ModelEvalRegressionResult",
     "check_eval_regression",
 ]

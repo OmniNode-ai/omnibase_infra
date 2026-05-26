@@ -49,7 +49,9 @@ from omnibase_core.validation.validator_base import ValidatorBase
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: validator-internal compiled regex state
 class CompiledPatterns:
     """Pre-compiled regex patterns for security validation.
 
@@ -70,7 +72,9 @@ class CompiledPatterns:
     sensitive_params: frozenset[str] = field(default_factory=frozenset)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: validator-internal method context
 class MethodContext:
     """Context for method validation - groups related parameters."""
 

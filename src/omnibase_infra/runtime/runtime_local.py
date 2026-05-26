@@ -83,7 +83,9 @@ RawWorkflowMap = dict[str, object]
 RuntimeCallable = Callable[..., object]
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: module-internal routing entry used only within runtime_local.py
 class ResolvedRoutingEntry:
     """A single resolved handler routing entry with concrete topics."""
 
