@@ -16,11 +16,15 @@ if TYPE_CHECKING:
 
 
 class ProtocolDispatchResultApplier(Protocol):
-    """Applies a handler dispatch result to its output/effect path."""
+    """Applies a handler dispatch result to its output/effect path.
+
+    When ``result`` is ``None`` the applier must return immediately without
+    publishing any terminal event or executing any intents (OMN-12151).
+    """
 
     async def apply(
         self,
-        result: ModelDispatchResult,
+        result: ModelDispatchResult | None,
         correlation_id: UUID | None = None,
     ) -> None:
         raise NotImplementedError
