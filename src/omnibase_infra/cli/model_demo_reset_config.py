@@ -15,6 +15,14 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_INTELLIGENCE_PATTERN_LEARNED,
+    SUFFIX_NODE_HEARTBEAT,
+    SUFFIX_OMNICLAUDE_AGENT_STATUS,
+    SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD,
+    SUFFIX_REQUEST_INTROSPECTION,
+)
+
 __all__: list[str] = [
     "ModelDemoResetConfig",
 ]
@@ -27,12 +35,17 @@ _DEFAULT_CONSUMER_GROUP_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"(registration|projector|introspection)", re.IGNORECASE
 )
 
+
+def _domain_topic_prefix(topic: str) -> str:
+    return f"{topic.rsplit('.', 2)[0]}."
+
+
 _DEFAULT_TOPIC_PREFIXES: Final[tuple[str, ...]] = (
-    "onex.evt.platform.",  # onex-topic-allow: pending contract auto-wiring
-    "onex.cmd.platform.",  # onex-topic-allow: pending contract auto-wiring
-    "onex.evt.omniintelligence.",  # onex-topic-allow: pending contract auto-wiring
-    "onex.cmd.omniintelligence.",  # onex-topic-allow: pending contract auto-wiring
-    "onex.evt.omniclaude.",  # onex-topic-allow: pending contract auto-wiring
+    _domain_topic_prefix(SUFFIX_NODE_HEARTBEAT),
+    _domain_topic_prefix(SUFFIX_REQUEST_INTROSPECTION),
+    _domain_topic_prefix(SUFFIX_INTELLIGENCE_PATTERN_LEARNED),
+    _domain_topic_prefix(SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD),
+    _domain_topic_prefix(SUFFIX_OMNICLAUDE_AGENT_STATUS),
     # "onex.evt.agent." removed: agent-status topic renamed to onex.evt.omniclaude.agent-status.v1  # onex-topic-allow: pending contract auto-wiring
     # which is already covered by the "onex.evt.omniclaude." prefix (OMN-2846).  # onex-topic-allow: pending contract auto-wiring
 )
