@@ -294,15 +294,14 @@ def _calculate_time_decay(ticket: ModelTicketData) -> float:
     if ticket.created_at is None:
         return 0.5
 
-    now = datetime.now(
-        tz=ticket.created_at.tzinfo if ticket.created_at.tzinfo else None
+    now = datetime.now(tz=UTC)
+    created_at = (
+        ticket.created_at.replace(tzinfo=UTC)
+        if ticket.created_at.tzinfo is None
+        else ticket.created_at
     )
-    if now.tzinfo is None and ticket.created_at.tzinfo is not None:
-        now = datetime.now(tz=UTC)
-    elif now.tzinfo is not None and ticket.created_at.tzinfo is None:
-        now = datetime.now()
 
-    age_days = max(0, (now - ticket.created_at).days)
+    age_days = max(0, (now - created_at).days)
 
     # Exponential decay with 30-day half-life (score increases with age)
     decay_factor = 0.5 ** (age_days / 30.0)
