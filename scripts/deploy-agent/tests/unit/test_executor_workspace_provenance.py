@@ -342,10 +342,7 @@ def test_dockerfile_workspace_copy_and_provenance_present() -> None:
         encoding="utf-8"
     )
 
-    assert (
-        "COPY --if-present workspace/sibling-repos/ /workspace/sibling-repos/"
-        in dockerfile
-    )
+    assert "COPY workspace/sibling-repos/ /workspace/sibling-repos/" in dockerfile
     assert "scripts/runtime_build/compute_workspace_provenance.py" in dockerfile
     assert "/workspace/compute_workspace_provenance.py" in dockerfile
     assert "build-provenance.json" in dockerfile

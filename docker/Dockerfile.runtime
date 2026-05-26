@@ -218,7 +218,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # workspace mode: copy staged sibling repos into the build image
 # (stage_workspace.sh must be run before `docker compose build` for workspace mode)
-COPY --if-present workspace/sibling-repos/ /workspace/sibling-repos/
+# workspace/sibling-repos/ is committed as an empty placeholder (.gitkeep) so
+# this COPY is always valid — release mode copies an empty dir, workspace mode
+# copies the repos staged by stage_workspace.sh.
+COPY workspace/sibling-repos/ /workspace/sibling-repos/
 
 # Copy provenance helper (always present — used in workspace mode, no-op otherwise)
 COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_workspace_provenance.py
