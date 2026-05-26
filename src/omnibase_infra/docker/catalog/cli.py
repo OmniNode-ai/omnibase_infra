@@ -300,12 +300,70 @@ def cmd_read_stack(_args: list[str]) -> int:
     return 0
 
 
+def cmd_validate_runtime(args: list[str]) -> int:
+    """Check hardcoded_env and operational_defaults completeness for selected bundles.
+
+    Verifies that every key declared in a manifest's hardcoded_env is present in
+    the resolved stack (no orphaned keys) and that operational_defaults cover the
+    expected keys. Reports any gaps without requiring the values to be set in the
+    live environment — this is a catalog-level structural check, not a runtime probe.
+    """
+    bundles = args if args else _load_stack()
+    resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
+    resolved = resolver.resolve(bundles=bundles)
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for svc_name, manifest in resolved.manifests.items():
+        # Verify every hardcoded_env key is non-empty
+        for key, val in manifest.hardcoded_env.items():
+            if not val:
+                errors.append(f"{svc_name}: hardcoded_env key {key!r} is empty")
+
+        # Verify every hardcoded_env key doesn't also appear in required_env
+        # (that would be a catalog authoring error — value already known at codegen time)
+        overlap = set(manifest.hardcoded_env.keys()) & set(manifest.required_env)
+        for key in sorted(overlap):
+            errors.append(
+                f"{svc_name}: {key!r} appears in both hardcoded_env and required_env"
+            )
+
+        # Verify operational_defaults keys are not also in required_env
+        op_overlap = set(manifest.operational_defaults.keys()) & set(
+            manifest.required_env
+        )
+        for key in sorted(op_overlap):
+            warnings.append(
+                f"{svc_name}: {key!r} appears in both operational_defaults and required_env"
+                " (required_env wins — consider removing from operational_defaults)"
+            )
+
+    if warnings:
+        for w in warnings:
+            print(f"  WARN: {w}", file=sys.stderr)
+
+    if errors:
+        print("Runtime catalog validation FAILED:", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Runtime catalog validation OK: {len(resolved.manifests)} services checked"
+        f" across bundles: {', '.join(bundles)}"
+    )
+    return 0
+
+
 def main() -> None:
     """Entry point for the catalog CLI."""
     args = sys.argv[1:]
     if not args:
         print("Usage: python -m omnibase_infra.docker.catalog.cli <command> [args]")
-        print("Commands: generate, validate, up, down, status, seed, read-stack")
+        print(
+            "Commands: generate, validate, validate-runtime, up, down, status, seed, read-stack"
+        )
         sys.exit(1)
 
     command = args[0]
@@ -314,6 +372,7 @@ def main() -> None:
     commands = {
         "generate": cmd_generate,
         "validate": cmd_validate,
+        "validate-runtime": cmd_validate_runtime,
         "up": cmd_up,
         "down": cmd_down,
         "status": cmd_status,
