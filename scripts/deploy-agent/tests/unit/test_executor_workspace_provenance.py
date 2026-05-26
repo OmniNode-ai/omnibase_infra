@@ -347,3 +347,4 @@ def test_dockerfile_workspace_copy_and_provenance_present() -> None:
     assert "/workspace/compute_workspace_provenance.py" in dockerfile
     assert "build-provenance.json" in dockerfile
     assert "com.omninode.workspace_provenance_manifest" in dockerfile
+    assert "--if-present" not in dockerfile
