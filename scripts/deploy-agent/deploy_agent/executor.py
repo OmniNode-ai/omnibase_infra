@@ -643,7 +643,7 @@ class DeployExecutor:
         if result.returncode == 0:
             return result.stdout.strip()
         logger.warning(
-            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to 'main'",
+            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to branch default",
             repo_dir,
             result.returncode,
             result.stderr[:200],
@@ -676,7 +676,7 @@ class DeployExecutor:
 
         omni_home = os.environ.get("OMNI_HOME", "").strip()
         omnimarket_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "main"
+            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "dev"
         )
         compat_ref = (
             self._resolve_plugin_ref(f"{omni_home}/omnibase_compat")

@@ -272,8 +272,10 @@ class TestUvCacheBustPluginRefs:
             sha = DeployExecutor._resolve_plugin_ref("/nonexistent/repo")
         assert sha == "main"
 
-    def test_compose_build_uses_main_fallback_when_omni_home_unset(self) -> None:
-        """When OMNI_HOME is not set, OMNIMARKET_REF and ONEX_CHANGE_CONTROL_REF default to 'main'."""
+    def test_compose_build_uses_dev_fallback_for_omnimarket_when_omni_home_unset(
+        self,
+    ) -> None:
+        """When OMNI_HOME is not set, OMNIMARKET_REF defaults to 'dev' (OMN-12195: dev is the default branch)."""
         executor = DeployExecutor()
         captured_cmds: list[list[str]] = []
 
@@ -305,8 +307,8 @@ class TestUvCacheBustPluginRefs:
             for i, tok in enumerate(build_cmd)
             if tok == "--build-arg" and i + 1 < len(build_cmd)
         }
-        assert "OMNIMARKET_REF=main" in build_args, (
-            f"Expected OMNIMARKET_REF=main when OMNI_HOME unset; got {build_args}"
+        assert "OMNIMARKET_REF=dev" in build_args, (
+            f"Expected OMNIMARKET_REF=dev when OMNI_HOME unset (OMN-12195: dev is omnimarket default branch); got {build_args}"
         )
         assert "OMNIBASE_COMPAT_REF=main" in build_args, (
             f"Expected OMNIBASE_COMPAT_REF=main when OMNI_HOME unset; got {build_args}"
