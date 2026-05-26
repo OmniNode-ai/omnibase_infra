@@ -82,7 +82,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: handler-internal output context
 class OutputContext:
     """Context for creating handler output, bundling common parameters.
 

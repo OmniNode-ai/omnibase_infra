@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import aiohttp
 
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 
 def get_aiohttp_bound_port(health_server: ServiceHealth) -> int:

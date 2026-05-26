@@ -68,3 +68,32 @@ class TestSplitSqlStatements:
         stmts = runner.split_sql_statements(sql)
         assert len(stmts) == 1
         assert "CREATE TABLE x" in stmts[0]
+
+
+@pytest.mark.unit
+class TestConnectDirective:
+    def test_extracts_leading_connect_directive(self):
+        runner = load_runner()
+        sql = "-- comment\n\n\\connect omnidash_analytics\nCREATE TABLE x (id INT);"
+
+        database, cleaned = runner.parse_connect_directive(sql)
+
+        assert database == "omnidash_analytics"
+        assert "\\connect" not in cleaned
+        assert "CREATE TABLE x" in cleaned
+
+    def test_rejects_unsupported_meta_command(self):
+        runner = load_runner()
+        with pytest.raises(ValueError, match="unsupported psql meta-command"):
+            runner.parse_connect_directive("CREATE TABLE x (id INT);\n\\dt\n")
+
+    def test_builds_database_specific_url(self):
+        runner = load_runner()
+        db_url = (
+            "postgresql://user:pass@example.test:5432/omnibase_infra?sslmode=prefer"
+        )
+
+        assert (
+            runner.database_url_for_database(db_url, "omnidash_analytics")
+            == "postgresql://user:pass@example.test:5432/omnidash_analytics?sslmode=prefer"
+        )

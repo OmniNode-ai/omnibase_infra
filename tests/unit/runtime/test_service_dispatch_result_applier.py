@@ -118,6 +118,28 @@ class TestEarlyExit:
         bus.publish_envelope.assert_not_called()
         executor.execute_all.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_none_result_suppresses_terminal_event(self) -> None:
+        """None result must skip all publication and intent execution (OMN-12151).
+
+        Multi-step FSM orchestrators (e.g. swarm dispatcher) return None from
+        handle_async for non-terminal FSM states.  The result applier must not
+        publish any terminal event or execute any intents when it receives None,
+        preventing the FSM from being short-circuited before sub-commands fire.
+        """
+        bus = AsyncMock()
+        executor = AsyncMock()
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+            intent_executor=executor,
+        )
+
+        await applier.apply(None)
+
+        bus.publish_envelope.assert_not_called()
+        executor.execute_all.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Ordering contract tests
@@ -464,3 +486,105 @@ async def test_no_topic_router_uses_output_topic() -> None:
     await applier.apply(result)
     published_topic = bus.publish_envelope.call_args.kwargs["topic"]
     assert published_topic == "responses"
+
+
+# ---------------------------------------------------------------------------
+# event_type derivation tests (OMN-12116)
+# ---------------------------------------------------------------------------
+
+
+class TestEventTypeDerivedFromTopic:
+    """Verify that event_type is set on output envelopes from the resolved topic.
+
+    Without this fix multi-step FSM orchestrators DLQ response events because
+    the dispatcher is registered under the topic-derived alias
+    (e.g. 'omnimarket.swarm-endpoint-health-completed') but the envelope
+    arrived with event_type=None.
+    """
+
+    def test_derive_event_type_from_onex_topic(self) -> None:
+        """Topic alias derives to '{producer}.{event-name}'."""
+        result = DispatchResultApplier._derive_event_type_from_topic(
+            "onex.evt.omnimarket.swarm-endpoint-health-completed.v1"
+        )
+        assert result == "omnimarket.swarm-endpoint-health-completed"
+
+    def test_derive_event_type_from_cmd_topic(self) -> None:
+        """Works for cmd-kind topics too."""
+        result = DispatchResultApplier._derive_event_type_from_topic(
+            "onex.cmd.platform.node-registration.v2"
+        )
+        assert result == "platform.node-registration"
+
+    def test_derive_event_type_non_onex_topic_returns_none(self) -> None:
+        """Non-ONEX topic format returns None without crashing."""
+        assert DispatchResultApplier._derive_event_type_from_topic("responses") is None
+        assert DispatchResultApplier._derive_event_type_from_topic("") is None
+        assert DispatchResultApplier._derive_event_type_from_topic("a.b.c") is None
+
+    @pytest.mark.asyncio
+    async def test_event_type_set_on_published_envelope_from_onex_topic(
+        self,
+    ) -> None:
+        """OMN-12116: output envelope must carry the topic-derived event_type.
+
+        When the resolved topic is an ONEX-format topic, the published envelope
+        must have event_type set to '{producer}.{event-name}' so multi-step FSM
+        orchestrators can match it to the dispatcher registration alias.
+        """
+        bus = AsyncMock()
+        event = _StubEvent(value="health-result")
+        router = {
+            "_StubEvent": "onex.evt.omnimarket.swarm-endpoint-health-completed.v1"
+        }
+        result = _make_result(output_events=[event])
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="responses",
+            topic_router=router,
+        )
+        await applier.apply(result)
+
+        published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
+        assert (
+            published_envelope.event_type
+            == "omnimarket.swarm-endpoint-health-completed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_event_type_none_for_non_onex_fallback_topic(self) -> None:
+        """When resolved topic is not ONEX format, event_type stays None."""
+        bus = AsyncMock()
+        event = _StubEvent(value="generic")
+        result = _make_result(output_events=[event])
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="generic-responses",
+        )
+        await applier.apply(result)
+
+        published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
+        # Non-ONEX topic → no derivation possible → event_type stays None.
+        assert published_envelope.event_type is None
+
+    @pytest.mark.asyncio
+    async def test_event_type_set_via_output_topic_map(self) -> None:
+        """event_type derives from topic resolved via output_topic_map."""
+        bus = AsyncMock()
+        event = _StubEvent(value="mapped")
+        output_topic_map = {
+            "_StubEvent": "onex.evt.omnimarket.swarm-dispatch-completed.v1"
+        }
+        result = _make_result(output_events=[event])
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="responses",
+            output_topic_map=output_topic_map,
+        )
+        await applier.apply(result)
+
+        published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
+        assert published_envelope.event_type == "omnimarket.swarm-dispatch-completed"

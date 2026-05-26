@@ -46,7 +46,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: contains Callable fields (unsubscribe_callbacks) not suitable for Pydantic serialization
 class ModelDomainPluginResult:
     """Result model returned by domain plugin lifecycle hooks.
 

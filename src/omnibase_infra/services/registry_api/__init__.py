@@ -24,7 +24,9 @@ from omnibase_infra.services.registry_api.models import (
     ModelWarning,
     ModelWidgetMapping,
 )
-from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+from omnibase_infra.services.registry_api.registry_discovery import (
+    ServiceRegistryDiscovery,
+)
 
 __all__ = [
     "create_app",

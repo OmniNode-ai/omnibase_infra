@@ -145,7 +145,7 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
@@ -184,14 +184,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_infra.runtime.message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
         ModelRuntimeNodeGraphConfig,
     )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
-    )
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
-        MessageDispatchEngine,
     )
 
 # Imports for PluginLoaderContractSource adapter class
@@ -227,7 +227,7 @@ from omnibase_infra.topics import (
 )
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
-# Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
+# Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
 wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
@@ -1334,7 +1334,7 @@ class RuntimeHostProcess:
         # Bridges contract-declared topics to Kafka subscriptions.
         # None until wired during start() when dispatch_engine is available.
         self._event_bus_wiring: EventBusSubcontractWiring | None = None
-        self._local_ingress_routes: dict[str, RuntimeLocalIngressRoute] = {}
+        self._local_ingress_routes: dict[str, ModelRuntimeLocalIngressRoute] = {}
         self._local_ingress_server: RuntimeLocalIngressServer | None = None
         self._local_ingress_dispatch_result_applier: DispatchResultApplier | None = None
         self._local_ingress_active_packages: tuple[str, ...] = ()
@@ -2533,7 +2533,7 @@ class RuntimeHostProcess:
                 self._pending_message_count += 1
 
             async def _dispatch_through_broker() -> tuple[
-                RuntimeLocalIngressRoute | None,
+                ModelRuntimeLocalIngressRoute | None,
                 ModelDispatchBusTerminalResult,
             ]:
                 return await broker.dispatch_request(
@@ -5180,7 +5180,8 @@ class RuntimeHostProcess:
 
         # Degraded state:
         # - running with failed handlers (reduced functionality)
-        # - actively starting with a live event bus (liveness OK, not ready yet)
+        # - actively starting with a live event bus (structured degraded state;
+        #   ServiceHealth still fails Docker probes until is_running=True)
         startup_in_progress = (
             self._is_starting and not self._is_running and event_bus_healthy
         )

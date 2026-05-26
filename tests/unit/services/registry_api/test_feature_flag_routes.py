@@ -26,7 +26,9 @@ from omnibase_infra.models.projection.model_projected_flag_meta import (
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
-from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+from omnibase_infra.services.registry_api.registry_discovery import (
+    ServiceRegistryDiscovery,
+)
 
 
 def _make_projection(

@@ -14,7 +14,7 @@ class TestRuntimeHostProcessWiringAccess:
 
     def test_has_event_bus_wiring_property(self) -> None:
         """RuntimeHostProcess must expose event_bus_wiring as a public property."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -25,7 +25,7 @@ class TestRuntimeHostProcessWiringAccess:
 
     def test_event_bus_wiring_is_property_descriptor(self) -> None:
         """event_bus_wiring must be a @property, not a plain attribute."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -36,7 +36,7 @@ class TestRuntimeHostProcessWiringAccess:
 
     def test_event_bus_wiring_is_read_only(self) -> None:
         """event_bus_wiring must not have a setter."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 

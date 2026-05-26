@@ -18,7 +18,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 pytestmark = pytest.mark.integration
@@ -32,11 +32,11 @@ from omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep import (
 )
 
 
-def _route() -> RuntimeLocalIngressRoute:
+def _route() -> ModelRuntimeLocalIngressRoute:
     package = importlib.import_module("omnimarket")
     node_dir = Path(package.__file__).resolve().parent
     contract_path = node_dir / "nodes" / "node_aislop_sweep" / "contract.yaml"
-    return RuntimeLocalIngressRoute(
+    return ModelRuntimeLocalIngressRoute(
         node_name="node_aislop_sweep",
         contract_name="aislop_sweep",
         command_topic="onex.cmd.omnimarket.aislop-sweep-start.v1",

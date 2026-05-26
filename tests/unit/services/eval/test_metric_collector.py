@@ -9,7 +9,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from omnibase_infra.services.eval.metric_collector import MetricCollector, MetricEvent
+from omnibase_infra.services.eval.metric_collector import (
+    MetricCollector,
+    ModelMetricEvent,
+)
 
 
 @pytest.fixture
@@ -25,8 +28,8 @@ def _make_event(
     metric_name: str = "latency_ms",
     metric_value: float = 100.0,
     timestamp: datetime | None = None,
-) -> MetricEvent:
-    return MetricEvent(
+) -> ModelMetricEvent:
+    return ModelMetricEvent(
         topic="onex.evt.test.v1",
         correlation_id=correlation_id,
         timestamp=timestamp or datetime(2026, 1, 1, 0, 30, tzinfo=UTC),

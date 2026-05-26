@@ -23,7 +23,7 @@ Exports:
     DEFAULT_HTTP_PORT: Default HTTP port (8085)
 
 Example (Direct Runtime Injection):
-    >>> from omnibase_infra.services.service_health import ServiceHealth
+    >>> from omnibase_infra.services.health_checker import ServiceHealth
     >>> from omnibase_infra.runtime import RuntimeHostProcess
     >>>
     >>> async def main():
@@ -34,7 +34,7 @@ Example (Direct Runtime Injection):
     ...     await server.stop()
 
 Example (Container-Based Injection - ONEX-Compliant):
-    >>> from omnibase_infra.services.service_health import ServiceHealth
+    >>> from omnibase_infra.services.health_checker import ServiceHealth
     >>> from omnibase_core.container import ModelONEXContainer
     >>>
     >>> async def main():
@@ -100,7 +100,7 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
         ModelAutoWiringManifest,
     )
-    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +450,7 @@ class ServiceHealth:
         if not callable(try_resolve):
             return False
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -563,7 +563,7 @@ class ServiceHealth:
             ProtocolConfigurationError: Failed to resolve RuntimeHostProcess from container: ...
             (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
         """
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -633,8 +633,8 @@ class ServiceHealth:
 
         HTTP Status Codes:
             /health:
-                - 200: Healthy or degraded (container operational)
-                - 503: Unhealthy (container should be restarted)
+                - 200: Healthy, or degraded while the runtime is running
+                - 503: Unhealthy, runtime not attached, or runtime not running
             /ready:
                 - 200: Ready (all consumers subscribed with partition assignments)
                 - 503: Not ready (starting up or lost assignments)
@@ -886,9 +886,9 @@ class ServiceHealth:
             - unhealthy: Critical failure, return HTTP 503
 
         Degraded State HTTP 200 Design Decision:
-            Degraded containers intentionally return HTTP 200 to keep them in service
-            rotation. This is a deliberate design choice that prioritizes investigation
-            over automatic restarts.
+            Degraded containers only return HTTP 200 when the runtime is attached and
+            running. A startup-pending or stopped runtime returns HTTP 503 so Docker
+            healthchecks cannot report success while the runtime is unavailable.
 
             Rationale:
                 1. Automatic restarts may mask recurring issues that need investigation
@@ -916,8 +916,8 @@ class ServiceHealth:
         Returns:
             JSON response with health status information. The HTTP status code
             indicates container health to orchestration platforms:
-                - HTTP 200: Container is healthy or degraded (operational)
-                - HTTP 503: Container is unhealthy (restart recommended)
+                - HTTP 200: Runtime is healthy or running with degraded components
+                - HTTP 503: Runtime is unhealthy, pending attachment, or stopped
 
         Response Format (Success):
             {
@@ -927,6 +927,7 @@ class ServiceHealth:
                     "healthy": bool,
                     "degraded": bool,
                     "is_running": bool,
+                    "runtime_attached": bool,
                     "is_draining": bool,  // True during graceful shutdown drain
                     "pending_message_count": int,  // In-flight messages
                     "handlers": {...},
@@ -991,7 +992,7 @@ class ServiceHealth:
                 )
                 return web.Response(
                     text=response.model_dump_json(exclude_none=True),
-                    status=200,
+                    status=503,
                     content_type="application/json",
                 )
 
@@ -1018,18 +1019,24 @@ class ServiceHealth:
             is_degraded = bool(health_details.get("degraded", False))
             startup_in_progress = bool(health_details.get("startup_in_progress", False))
             is_running = bool(health_details.get("is_running", False))
+            runtime_attached = health_details.get("runtime_attached", True) is not False
+            runtime_operational = (
+                runtime_attached and health_details.get("is_running") is not False
+            )
             event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
 
-            if is_healthy:
+            if is_healthy and runtime_operational:
                 status: Literal["healthy", "degraded", "unhealthy"] = "healthy"
                 http_status = 200
             elif is_degraded:
-                # DESIGN DECISION: Degraded status returns HTTP 200 (not 503)
+                # DESIGN DECISION: Running degraded status returns HTTP 200 (not 503)
                 #
                 # Rationale: Degraded containers remain in service rotation to allow
                 # operators to investigate issues without triggering automatic restarts.
                 # The "degraded" status in the response body indicates reduced functionality
-                # while keeping the container operational for Docker/Kubernetes probes.
+                # while keeping the running container operational for Docker/Kubernetes probes.
+                # If the runtime is not attached or reports is_running=false, return HTTP
+                # 503 so Docker cannot mark a non-operational runtime healthy.
                 #
                 # Why HTTP 200 instead of 503:
                 #   1. Prevents cascading failures if multiple containers degrade together
@@ -1037,24 +1044,19 @@ class ServiceHealth:
                 #   3. Automatic restarts may mask recurring issues needing investigation
                 #   4. Operators can monitor "degraded" status via metrics/alerts
                 #
-                # Alternative considered: HTTP 503 would remove degraded containers from
-                # load balancer rotation while keeping liveness probes passing. Rejected
-                # because it reduces capacity during partial outages when degraded
-                # containers may still serve valuable traffic.
-                #
                 # Customization: To remove degraded containers from rotation, either:
                 #   - Subclass ServiceHealth and override _handle_health()
                 #   - Configure load balancer to inspect response body "status" field
                 #   - Change http_status below to 503 if restart-on-degrade is preferred
                 status = "degraded"
-                http_status = 200
+                http_status = 200 if runtime_operational else 503
             else:
                 status = "unhealthy"
                 http_status = 503
 
             self._log_health_transition(
                 status=status,
-                runtime_attached=True,
+                runtime_attached=runtime_attached,
                 startup_in_progress=startup_in_progress,
                 is_running=is_running,
                 event_bus_healthy=event_bus_healthy,
@@ -1065,6 +1067,7 @@ class ServiceHealth:
             enriched_details = dict(health_details)
             enriched_details["degraded"] = is_degraded
             enriched_details["startup_in_progress"] = startup_in_progress
+            enriched_details["runtime_attached"] = runtime_attached
             enriched_details["components"] = {
                 name: comp.model_dump(mode="json", exclude_none=True)
                 for name, comp in components.items()

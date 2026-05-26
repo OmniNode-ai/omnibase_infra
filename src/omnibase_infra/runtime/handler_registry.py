@@ -61,8 +61,6 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
-
 # Import registry classes from their canonical locations
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
     RegistryEventBusBinding,
@@ -242,53 +240,6 @@ def get_event_bus_class(bus_kind: str) -> type[ProtocolEventBus]:
     return get_event_bus_registry().get(bus_kind)
 
 
-def register_handlers_from_config(  # stub-ok: tracked in OMN-41
-    runtime: object,  # Will be BaseRuntimeHostProcess
-    protocol_configs: list[ModelProtocolRegistrationConfig],
-) -> None:
-    """Register protocol handlers from configuration.
-
-    Called by BaseRuntimeHostProcess to wire up handlers based on contract config.
-    This function validates and processes protocol registration configurations,
-    registering the appropriate handlers with the runtime.
-
-    Args:
-        runtime: The runtime host process instance (BaseRuntimeHostProcess).
-            Typed as object temporarily until BaseRuntimeHostProcess is implemented.
-        protocol_configs: List of ModelProtocolRegistrationConfig instances from contract.
-            Each config specifies type, protocol_class, enabled flag, and options.
-
-    Example:
-        >>> from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
-        >>> protocol_configs = [
-        ...     ModelProtocolRegistrationConfig(
-        ...         type="http", protocol_class="HttpHandler", enabled=True
-        ...     ),
-        ...     ModelProtocolRegistrationConfig(
-        ...         type="db", protocol_class="PostgresHandler", enabled=True
-        ...     ),
-        ... ]
-        >>> register_handlers_from_config(runtime, protocol_configs)
-
-    Note:
-        **Placeholder implementation** - only validates config structure.
-
-        TODO(OMN-41): Implement full handler resolution:
-        1. Use importlib to resolve protocol_class string to actual class
-        2. Validate class implements ProtocolContainerAware protocol
-        3. Register handler with runtime via get_handler_registry()
-        4. Support handler instantiation options from config.options
-    """
-    # Placeholder: validate config structure only, defer registration to OMN-41
-    for config in protocol_configs:
-        if not config.enabled:
-            continue
-
-        if config.type and config.protocol_class:
-            # Config structure is valid - actual resolution deferred to OMN-41
-            _ = config  # Explicit acknowledgment that config is intentionally unused
-
-
 # =============================================================================
 # Module Exports
 # =============================================================================
@@ -317,5 +268,4 @@ __all__: list[str] = [
     "get_handler_class",
     # Singleton accessors
     "get_handler_registry",
-    "register_handlers_from_config",
 ]

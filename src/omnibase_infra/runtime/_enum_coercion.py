@@ -3,22 +3,22 @@
 """Shared enum coercion utilities for the runtime layer.
 
 This module exists at a layer below both ``registry_dispatcher`` and
-``service_message_dispatch_engine`` so that both can import ``coerce_message_category``
+``message_dispatch_engine`` so that both can import ``coerce_message_category``
 without introducing a circular dependency.
 
 Circular import chain that motivated this extraction (OMN-4087):
 
     registry_dispatcher
-      → service_message_dispatch_engine
+      → message_dispatch_engine
         → dispatch_context_enforcer
           → registry_dispatcher   ← cycle
 
 By placing ``coerce_message_category`` here — with zero imports from either
-``registry_dispatcher`` or ``service_message_dispatch_engine`` — both modules can safely
+``registry_dispatcher`` or ``message_dispatch_engine`` — both modules can safely
 import from this shared location.
 
 .. versionadded:: 0.8.1
-    Extracted from ``service_message_dispatch_engine`` (OMN-4087) to break the circular
+    Extracted from ``message_dispatch_engine`` (OMN-4087) to break the circular
     import cycle and eliminate inlined coercion copies in ``registry_dispatcher``.
 """
 

@@ -113,7 +113,7 @@ class TestPackageNodeSubscriptionWiring:
     def test_legacy_package_node_wiring_disabled_when_runtime_package_filter_set(
         self,
     ) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _package_node_subscription_wiring_disabled,
         )
 
@@ -124,7 +124,7 @@ class TestPackageNodeSubscriptionWiring:
 
     @pytest.mark.unit
     def test_legacy_package_node_wiring_disabled_by_explicit_flag(self) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _package_node_subscription_wiring_disabled,
         )
 
@@ -135,7 +135,7 @@ class TestPackageNodeSubscriptionWiring:
 
     @pytest.mark.unit
     def test_legacy_package_node_wiring_allowed_without_filters(self) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _package_node_subscription_wiring_disabled,
         )
 
@@ -146,7 +146,7 @@ class TestPackageNodeSubscriptionWiring:
 
     @pytest.mark.unit
     def test_baseline_subscription_wiring_disabled_for_effects(self) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _baseline_subscription_wiring_disabled,
         )
 
@@ -154,7 +154,7 @@ class TestPackageNodeSubscriptionWiring:
 
     @pytest.mark.unit
     def test_baseline_subscription_wiring_enabled_for_main(self) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _baseline_subscription_wiring_disabled,
         )
 
@@ -165,7 +165,7 @@ class TestPackageNodeSubscriptionWiring:
         self, tmp_nodes_dir: Path, mock_event_bus_wiring: MagicMock
     ) -> None:
         """Nodes with subscribe_topics get wire_subscriptions() called."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
         )
 
@@ -176,7 +176,7 @@ class TestPackageNodeSubscriptionWiring:
             if c.get("event_bus") and c["event_bus"].get("subscribe_topics")
         ]
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _wire_package_node_subscriptions,
         )
 
@@ -202,7 +202,7 @@ class TestPackageNodeSubscriptionWiring:
         self, tmp_nodes_dir: Path, mock_event_bus_wiring: MagicMock
     ) -> None:
         """Nodes already wired by domain plugins are not double-wired."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -230,7 +230,7 @@ class TestPackageNodeSubscriptionWiring:
         self, tmp_nodes_dir: Path, mock_event_bus_wiring: MagicMock
     ) -> None:
         """Nodes without subscribe_topics are silently skipped."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -274,7 +274,7 @@ class TestPackageNodeSubscriptionWiring:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -300,7 +300,7 @@ class TestPackageNodeSubscriptionWiring:
         self, tmp_nodes_dir: Path, mock_event_bus_wiring: MagicMock
     ) -> None:
         """Calling wiring twice with same already_wired produces same count."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -353,7 +353,7 @@ class TestPluginManagedSkipsRuntimeHostSubscription:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -395,7 +395,7 @@ class TestPluginManagedSkipsRuntimeHostSubscription:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -448,7 +448,7 @@ class TestPluginManagedSkipsRuntimeHostSubscription:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -483,7 +483,7 @@ class TestPatternBDispatchTopicNotConsumedByGenericDispatcher:
         import yaml
 
         import omnibase_infra as _pkg
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
         )
 
@@ -540,7 +540,7 @@ class TestPatternBDispatchTopicNotConsumedByGenericDispatcher:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -583,7 +583,7 @@ class TestPatternBDispatchTopicNotConsumedByGenericDispatcher:
             """)
         )
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
             _wire_package_node_subscriptions,
         )
@@ -610,7 +610,7 @@ class TestDiscoverPackageNodeContracts:
     """Tests for _discover_package_node_contracts."""
 
     def test_discovers_contracts_from_nodes_dir(self, tmp_nodes_dir: Path) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
         )
 
@@ -622,7 +622,7 @@ class TestDiscoverPackageNodeContracts:
         assert "node_delta" in names
 
     def test_returns_empty_for_missing_dir(self, tmp_path: Path) -> None:
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             _discover_package_node_contracts,
         )
 

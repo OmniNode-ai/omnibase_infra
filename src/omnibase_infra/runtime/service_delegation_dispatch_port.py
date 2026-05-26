@@ -18,8 +18,11 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
+from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
+    ProtocolDelegationDispatchPort,
+)
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
@@ -32,13 +35,15 @@ _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal routing helper
 class ModelSelectedDelegationRoute:
     alias: str
-    route: RuntimeLocalIngressRoute
+    route: ModelRuntimeLocalIngressRoute
 
 
-def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
+def _has_delegation_terminal_interface(route: ModelRuntimeLocalIngressRoute) -> bool:
     return (
         route.contract_name == _DELEGATION_CONTRACT_NAME
         and bool(route.command_topic)
@@ -47,11 +52,11 @@ def _has_delegation_terminal_interface(route: RuntimeLocalIngressRoute) -> bool:
 
 
 def _select_delegation_route(
-    routes: Mapping[str, RuntimeLocalIngressRoute],
+    routes: Mapping[str, ModelRuntimeLocalIngressRoute],
 ) -> ModelSelectedDelegationRoute:
     """Select the single route with the delegation terminal interface."""
 
-    candidates: dict[str, tuple[str, RuntimeLocalIngressRoute]] = {}
+    candidates: dict[str, tuple[str, ModelRuntimeLocalIngressRoute]] = {}
     for alias, route in routes.items():
         if route.contract_name != _DELEGATION_CONTRACT_NAME:
             continue
@@ -134,7 +139,7 @@ class RuntimeDelegationDispatchPort:
         event_bus: ProtocolPatternBBrokerTransport,
         *,
         package_names: Sequence[str] | None = None,
-        routes: Mapping[str, RuntimeLocalIngressRoute] | None = None,
+        routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
         command_topic: str | None = None,
         response_topic: str | None = None,
     ) -> None:
@@ -146,7 +151,7 @@ class RuntimeDelegationDispatchPort:
         self._command_topic = command_topic
         self._response_topic = response_topic
 
-    def _resolved_routes(self) -> dict[str, RuntimeLocalIngressRoute]:
+    def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
         if self._routes is not None:
             return dict(self._routes)
         package_names = parse_active_runtime_packages(
@@ -210,4 +215,82 @@ class RuntimeDelegationDispatchPort:
         )
 
 
-__all__ = ["RuntimeDelegationDispatchPort"]
+class ContainerBackedDelegationDispatchPort:
+    """Delegation dispatch port that lazy-resolves a bridge-backed port from the container.
+
+    At construction time the bridge singleton may not yet exist (plugins register it
+    during start_consumers(), which runs after auto-wiring). This port holds a reference
+    to the container and resolves the ``DirectBridgeDelegationDispatchPort`` on first
+    dispatch, falling back to the Kafka-backed ``RuntimeDelegationDispatchPort`` if
+    the bridge port is not yet registered.
+    """
+
+    _BRIDGE_PORT_KEY = "DirectBridgeDelegationDispatchPort"
+
+    def __init__(
+        self,
+        *,
+        container: object,
+        fallback_event_bus: ProtocolPatternBBrokerTransport | None = None,
+    ) -> None:
+        self._container = container
+        self._fallback_event_bus = fallback_event_bus
+        self._resolved: ProtocolDelegationDispatchPort | None = None
+
+    async def _resolve(self) -> ProtocolDelegationDispatchPort:
+        if self._resolved is not None:
+            return self._resolved
+        registry = getattr(self._container, "service_registry", None)
+        if registry is not None:
+            try:
+                port: ProtocolDelegationDispatchPort = await registry.resolve_service(
+                    self._BRIDGE_PORT_KEY
+                )
+                self._resolved = port
+                return port
+            except Exception:  # noqa: BLE001 — fallback-ok: bridge not yet registered, use Kafka port
+                pass
+        if self._fallback_event_bus is not None:
+            fallback: ProtocolDelegationDispatchPort = RuntimeDelegationDispatchPort(
+                self._fallback_event_bus
+            )
+            self._resolved = fallback
+            return fallback
+        raise RuntimeError(
+            "ContainerBackedDelegationDispatchPort: no bridge port in container and "
+            "no fallback event_bus provided"
+        )
+
+    async def dispatch(
+        self,
+        *,
+        prompt: str,
+        task_type: str,
+        correlation_id: UUID,
+        max_tokens: int,
+        source_file_path: str | None,
+        source_session_id: str | None,
+        wait: bool,
+        output_schema_key: str | None = None,
+        quality_contract_mode: str = "extend_task_class",
+        acceptance_criteria: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        port = await self._resolve()
+        return await port.dispatch(
+            prompt=prompt,
+            task_type=task_type,
+            correlation_id=correlation_id,
+            max_tokens=max_tokens,
+            source_file_path=source_file_path,
+            source_session_id=source_session_id,
+            wait=wait,
+            quality_contract_mode=quality_contract_mode,
+            acceptance_criteria=acceptance_criteria,
+        )
+
+
+__all__ = [
+    "ContainerBackedDelegationDispatchPort",
+    "ProtocolDelegationDispatchPort",
+    "RuntimeDelegationDispatchPort",
+]

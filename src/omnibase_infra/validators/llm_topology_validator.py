@@ -58,7 +58,7 @@ RUNNING_REQUIRED_FIELDS = ("host", "port", "endpoint_url", "model_hf_id")
 PLANNED_NULL_FIELDS = ("host", "port", "endpoint_url", "model_hf_id")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  # internal-dataclass-ok: validator-internal finding
 class Finding:
     """A single topology violation."""
 

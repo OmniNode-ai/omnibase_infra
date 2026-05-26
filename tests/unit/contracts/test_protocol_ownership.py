@@ -122,6 +122,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
+    "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
     "ProtocolLocalRuntimeBus": "protocols/protocol_local_runtime_bus.py",  # [RUNTIME] OMN-11570 local runtime bus adapter boundary
     "ProtocolLocalRuntimeCallableTarget": "protocols/protocol_local_runtime_callable_target.py",  # [RUNTIME] OMN-11570 local handler invocation boundary
     "ProtocolLocalRuntimeDumpModel": "protocols/protocol_local_runtime_dump_model.py",  # [RUNTIME] OMN-11570 local result serialization boundary

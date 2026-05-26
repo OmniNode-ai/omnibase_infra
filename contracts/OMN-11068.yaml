@@ -1,0 +1,49 @@
+# OMN-11068 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-11068"
+title: "fix(OMN-11068): fail runtime health probes when runtime is degraded unavailable"
+summary: >-
+  Runtime /health now returns a failing HTTP status while RuntimeHostProcess is not attached or explicitly reports is_running=false, preventing Docker healthchecks from marking the stability-test runtime healthy while the runtime is pending or stopped.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: "tests"
+    description: "Runtime health endpoint returns HTTP 503 for runtime_pending and is_running=false while preserving running degraded HTTP 200"
+    command: >-
+      uv run pytest tests/unit/runtime/test_service_health.py tests/integration/test_omn_9741_health_liveness.py -q
+  - kind: "tests"
+    description: "Stability-test runtime compose lane inherits curl --fail healthchecks that fail on HTTP 503"
+    command: >-
+      uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR"
+    command: "gh pr checks {pr} --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-runtime-health-http-status"
+    description: "Runtime health endpoint fails Docker probes for runtime_pending and is_running=false"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/test_service_health.py tests/integration/test_omn_9741_health_liveness.py -q
+  - id: "dod-stability-compose-healthcheck"
+    description: "Stability-test runtime compose render inherits curl --fail /health probes"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - id: "dod-post-merge-deploy-validation"
+    description: "Runtime healthcheck rollout requires normal post-merge deploy validation before claiming live runtime health"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy omninode-stability-test-runtime after merge, then verify docker compose healthcheck fails while /health reports runtime_attached=false or is_running=false and succeeds only after runtime attachment reports is_running=true

@@ -296,6 +296,38 @@ class DispatchResultApplier:
             *self._allowed_output_topic_set,
         }
 
+    @staticmethod
+    def _derive_event_type_from_topic(topic: str) -> str | None:
+        """Derive the event_type routing key from an ONEX topic name.
+
+        ONEX topics follow the convention::
+
+            onex.{kind}.{producer}.{event-name}.v{n}
+
+        This method extracts ``{producer}.{event-name}`` as a dot-path routing
+        key suitable for ``ModelEventEnvelope.event_type``, which is the alias
+        format used by dispatcher registration (e.g.
+        ``omnimarket.swarm-endpoint-health-completed``).
+
+        Args:
+            topic: Full topic name following ONEX naming convention
+                (e.g., ``'onex.evt.omnimarket.swarm-endpoint-health-completed.v1'``).
+
+        Returns:
+            Derived event_type as ``'{producer}.{event-name}'``
+            (e.g., ``'omnimarket.swarm-endpoint-health-completed'``), or ``None``
+            if the topic does not follow the expected ONEX format.
+
+        .. versionadded:: 0.41.0 (OMN-12116)
+        """
+        parts = topic.split(".")
+        if len(parts) >= 5 and parts[0] == "onex":
+            # onex.{kind}.{producer}.{event-name}.v{n}
+            producer = parts[2]
+            event_name = parts[3]
+            return f"{producer}.{event_name}"
+        return None
+
     def _execute_projection(
         self,
         intent: ModelProjectionIntent,
@@ -363,7 +395,7 @@ class DispatchResultApplier:
 
     async def apply(
         self,
-        result: ModelDispatchResult,
+        result: ModelDispatchResult | None,
         correlation_id: UUID | None = None,
     ) -> None:
         """Process a dispatch result: project, execute intents, then publish output events.
@@ -386,8 +418,18 @@ class DispatchResultApplier:
             intents are published on projection failure — no partial state
             emission.
 
+        None-result opt-out (OMN-12151):
+            When ``result`` is ``None``, the applier exits immediately without
+            publishing any terminal event or executing any intents.  This is the
+            canonical opt-out for multi-step FSM orchestrators that publish
+            sub-commands mid-flight and must not emit a terminal event until the
+            FSM reaches its final state.  Handlers that drive their own event
+            publication (e.g. ``handle_async`` flushes sub-commands directly)
+            should return ``None`` for non-terminal FSM states.
+
         Args:
-            result: The dispatch result from the dispatch engine.
+            result: The dispatch result from the dispatch engine, or ``None``
+                to suppress terminal-event publication entirely.
             correlation_id: Optional correlation ID for tracing.
 
         Raises:
@@ -395,6 +437,13 @@ class DispatchResultApplier:
             RuntimeHostError: If intent execution misconfiguration is detected.
             Exception: Re-raised from intent execution or Kafka publish failures.
         """
+        if result is None:
+            logger.debug(
+                "DispatchResultApplier.apply received None result — "
+                "suppressing terminal event publication (OMN-12151)"
+            )
+            return
+
         effective_correlation_id = correlation_id or result.correlation_id
         if effective_correlation_id is None:
             effective_correlation_id = uuid4()
@@ -548,6 +597,22 @@ class DispatchResultApplier:
                             self._resolve_mapped_output_topic(output_event),
                         )
                     )
+
+                    # OMN-12116: Derive event_type from the resolved topic so
+                    # multi-step FSM orchestrators can match the dispatcher
+                    # registration alias (e.g. 'omnimarket.swarm-endpoint-health-completed').
+                    # Without this, the envelope arrives with event_type=None
+                    # and the orchestrator's dispatcher — registered under the
+                    # topic-derived alias — cannot find a matching handler,
+                    # causing the response event to be routed to DLQ.
+                    derived_event_type = self._derive_event_type_from_topic(
+                        resolved_topic
+                    )
+                    if derived_event_type is not None:
+                        output_envelope = output_envelope.model_copy(
+                            update={"event_type": derived_event_type}
+                        )
+
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
                         topic=resolved_topic,

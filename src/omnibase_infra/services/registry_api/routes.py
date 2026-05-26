@@ -45,7 +45,9 @@ from omnibase_infra.services.registry_api.models import (
     ModelTopicView,
     ModelWidgetMapping,
 )
-from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+from omnibase_infra.services.registry_api.registry_discovery import (
+    ServiceRegistryDiscovery,
+)
 
 
 def get_correlation_id(

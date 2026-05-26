@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 from omnibase_infra.cli.enum_reset_action import EnumResetAction
 
@@ -18,8 +18,7 @@ __all__: list[str] = [
 ]
 
 
-@dataclass(frozen=True)
-class ModelResetActionResult:
+class ModelResetActionResult(BaseModel):
     """Result of a single reset action.
 
     Attributes:
@@ -27,6 +26,8 @@ class ModelResetActionResult:
         action: What was done (reset, preserved, skipped, error).
         detail: Human-readable description of what happened.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     resource: str
     action: EnumResetAction

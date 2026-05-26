@@ -314,7 +314,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         self,
     ) -> None:
         """wire_from_manifest exposes materialized deps for runtime-owned pools."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -458,7 +458,7 @@ class TestWireFromManifestResolverOutcomes:
     @pytest.mark.asyncio
     async def test_skip_surfaces_in_wiring_report(self) -> None:
         """Plan Task 5 acceptance: skip-path invariant test."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -508,7 +508,7 @@ class TestWireFromManifestResolverOutcomes:
     @pytest.mark.asyncio
     async def test_typeerror_propagates_unchanged(self) -> None:
         """Plan Task 5 acceptance: unresolvable-path invariant test (OMN-8735)."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -534,7 +534,7 @@ class TestWireFromManifestResolverOutcomes:
     @pytest.mark.asyncio
     async def test_report_is_deterministic(self) -> None:
         """Plan Task 5 acceptance: determinism across two identical runs."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
@@ -577,7 +577,7 @@ class TestWireFromManifestResolverOutcomes:
     @pytest.mark.asyncio
     async def test_wired_handler_outcome_is_recorded(self) -> None:
         """Per-handler ModelWiringOutcome rows are populated."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 

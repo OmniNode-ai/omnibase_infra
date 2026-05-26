@@ -43,8 +43,10 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.services.cost_api import router as cost_api_router
+from omnibase_infra.services.registry_api.registry_discovery import (
+    ServiceRegistryDiscovery,
+)
 from omnibase_infra.services.registry_api.routes import router
-from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
 if TYPE_CHECKING:
     import asyncpg

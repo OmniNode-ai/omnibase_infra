@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.cli.enum_reset_action import EnumResetAction
 from omnibase_infra.cli.model_reset_action_result import ModelResetActionResult
@@ -19,8 +19,7 @@ __all__: list[str] = [
 ]
 
 
-@dataclass
-class ModelDemoResetReport:
+class ModelDemoResetReport(BaseModel):
     """Aggregate report of all demo reset actions.
 
     Attributes:
@@ -28,7 +27,9 @@ class ModelDemoResetReport:
         dry_run: Whether this was a dry-run (no changes made).
     """
 
-    actions: list[ModelResetActionResult] = field(default_factory=list)
+    model_config = ConfigDict(frozen=False)
+
+    actions: list[ModelResetActionResult] = Field(default_factory=list)
     dry_run: bool = False
 
     @property
@@ -62,7 +63,6 @@ class ModelDemoResetReport:
         lines.append(f"Demo Reset Report ({mode})")
         lines.append("=" * 60)
 
-        # Group by action type
         for action_type in EnumResetAction:
             group = [a for a in self.actions if a.action == action_type]
             if not group:

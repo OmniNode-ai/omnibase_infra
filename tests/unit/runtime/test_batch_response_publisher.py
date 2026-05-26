@@ -462,7 +462,7 @@ class TestRuntimeHostProcessIntegration:
     def test_batch_disabled_by_default(self) -> None:
         """Batch publishing is disabled by default."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
         from tests.helpers.runtime_helpers import make_runtime_config
@@ -476,7 +476,7 @@ class TestRuntimeHostProcessIntegration:
     def test_batch_enabled_via_config(self) -> None:
         """Batch publishing is enabled via config dict."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
         from tests.helpers.runtime_helpers import make_runtime_config
@@ -496,7 +496,7 @@ class TestRuntimeHostProcessIntegration:
     def test_batch_enabled_via_string_config(self) -> None:
         """Batch publishing enabled with string 'true' value."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
         from tests.helpers.runtime_helpers import make_runtime_config
@@ -512,7 +512,7 @@ class TestRuntimeHostProcessIntegration:
         from unittest.mock import AsyncMock, patch
 
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
         from tests.helpers.runtime_helpers import (

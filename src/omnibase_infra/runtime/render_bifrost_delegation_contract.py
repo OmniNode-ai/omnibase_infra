@@ -11,6 +11,7 @@ contract artifact, not scattered environment variables.
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import os
 import sys
@@ -24,8 +25,30 @@ import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
 
-_DEFAULT_SOURCE_PATH = Path("/app/src/omnibase_infra/configs/bifrost_delegation.yaml")
+_LEGACY_SOURCE_PATH = Path("/app/src/omnibase_infra/configs/bifrost_delegation.yaml")
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
+
+
+def _resolve_default_source_path() -> Path:
+    """Resolve the bundled bifrost_delegation.yaml source path.
+
+    Prefers the omnimarket package (canonical home since OMN-10865). Falls back
+    to the legacy infra path so existing explicit BIFROST_SOURCE_CONTRACT_PATH
+    overrides continue to work without change.
+    """
+    try:
+        ref = importlib.resources.files("omnimarket").joinpath(
+            "configs/bifrost_delegation.yaml"
+        )
+        candidate = Path(str(ref))
+        if candidate.exists():
+            return candidate
+    except (ModuleNotFoundError, TypeError, AttributeError):
+        pass
+    return _LEGACY_SOURCE_PATH
+
+
+_DEFAULT_SOURCE_PATH = _resolve_default_source_path()
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 
 EndpointProbe = Callable[[str, str, float], str | None]
@@ -317,9 +340,8 @@ def render_bifrost_delegation_contract(
         else verify_endpoints
     )
     probe = endpoint_probe or _probe_openai_model_endpoint
-    source = source_path or Path(
-        env.get("BIFROST_SOURCE_CONTRACT_PATH", str(_DEFAULT_SOURCE_PATH))
-    )
+    _source_env = env.get("BIFROST_SOURCE_CONTRACT_PATH", "").strip()
+    source = source_path or (Path(_source_env) if _source_env else _DEFAULT_SOURCE_PATH)
     target = target_path or Path(
         env.get("BIFROST_CONTRACT_PATH", str(_DEFAULT_TARGET_PATH))
     )

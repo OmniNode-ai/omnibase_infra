@@ -22,7 +22,7 @@ from omnibase_infra.runtime.models.model_component_health import ModelComponentH
 from omnibase_infra.runtime.models.model_detailed_health_response import (
     ModelDetailedHealthResponse,
 )
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 # ---------------------------------------------------------------------------
 # ModelComponentHealth tests

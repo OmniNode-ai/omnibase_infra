@@ -16,7 +16,7 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
   shared with ci.yml
 * `jobs.boot.steps` contains checkout, uv setup, conditional compose bring-up,
   launch + hard-gate checks for both runtime (`:8085`) and runtime-effects
-  (`:8086`) health (matches service_health.py::_handle_health response shape),
+  (`:8086`) health (matches health_checker.py::_handle_health response shape),
   60s hold with both PIDs alive + both health checks (compose) / flapping
   tolerance (real), startup log gating for duplicate dispatcher /
   auto-wiring / service-resolution failures (OMN-9458), psql
@@ -251,7 +251,7 @@ def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
 
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
-    """Health-wait step must assert the actual shape from service_health.py:
+    """Health-wait step must assert the actual shape from health_checker.py:
     top-level `.status == "healthy"` AND `.details.is_running == true`, AND
     must probe runtime-effects on :8086 as a hard gate (OMN-9458).
     """
@@ -259,13 +259,13 @@ def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
     matched = [s for s in steps if "8085/health" in _step_text(s)]
     assert matched, "health-wait step missing"
     step_texts = "\n".join(_step_text(s) for s in matched)
-    # Probe the real JSON shape emitted by service_health.py::_handle_health.
+    # Probe the real JSON shape emitted by health_checker.py::_handle_health.
     assert ".status ==" in step_texts, (
-        "must assert top-level .status field (see service_health.py)"
+        "must assert top-level .status field (see health_checker.py)"
     )
     assert '"healthy"' in step_texts or "'healthy'" in step_texts
     assert ".details.is_running" in step_texts, (
-        "is_running lives under .details, not top-level (see service_health.py)"
+        "is_running lives under .details, not top-level (see health_checker.py)"
     )
     assert "true" in step_texts
     assert "8086/health" in step_texts, "runtime-effects health gate missing (OMN-9458)"

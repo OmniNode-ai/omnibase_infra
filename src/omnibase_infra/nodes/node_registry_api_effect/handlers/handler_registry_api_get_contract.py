@@ -20,7 +20,9 @@ from omnibase_infra.nodes.node_registry_api_effect.models import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+    from omnibase_infra.services.registry_api.registry_discovery import (
+        ServiceRegistryDiscovery,
+    )
 
 logger = logging.getLogger(__name__)
 

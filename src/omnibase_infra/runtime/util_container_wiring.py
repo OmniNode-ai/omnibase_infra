@@ -82,10 +82,10 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
     )
-    from omnibase_infra.runtime.projector_shell import ProjectorShell
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 # Default semantic version for infrastructure components (from omnibase_core)
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
@@ -1169,7 +1169,7 @@ async def wire_registration_dispatchers(
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
-        >>> from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+        >>> from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
         >>> import asyncpg
         >>>
         >>> container = ModelONEXContainer()

@@ -79,7 +79,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: mixin-internal error context
 class PostgresErrorContext:
     """Context for PostgreSQL error handling.
 

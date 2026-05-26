@@ -643,12 +643,41 @@ class DeployExecutor:
         if result.returncode == 0:
             return result.stdout.strip()
         logger.warning(
-            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to 'main'",
+            "_resolve_plugin_ref: git rev-parse failed for %s (exit=%d): %s — falling back to branch default",
             repo_dir,
             result.returncode,
             result.stderr[:200],
         )
         return "main"
+
+    @staticmethod
+    def _stage_workspace(repo_dir: str, omni_home: str) -> None:
+        """Stage sibling repos into the Docker build context for workspace mode.
+
+        Runs docker/runtime_build/stage_workspace.sh from the repo root so that
+        workspace/sibling-repos/ is populated before `docker compose build`.
+        Raises RuntimeError on failure.
+        """
+        script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
+        if not script.exists():
+            raise RuntimeError(
+                f"workspace staging script not found: {script}. "
+                "Cannot proceed with BUILD_SOURCE=workspace."
+            )
+        result = subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=repo_dir,
+            env={**os.environ, "OMNI_HOME": omni_home},
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Workspace staging failed (exit={result.returncode}): "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        logger.info("_stage_workspace: %s", result.stdout.strip())
 
     def _compose_build(
         self,
@@ -668,15 +697,34 @@ class DeployExecutor:
         ONEX_CHANGE_CONTROL_REF as full commit SHAs so the uv cache mount
         (keyed on URL) misses and fetches fresh code every time main advances
         (OMN-10728 / OMN-11542).
+
+        For BUILD_SOURCE=workspace, stages sibling repos into the build context
+        via stage_workspace.sh before invoking docker compose build (OMN-9470).
         """
         timeout = PHASE_TIMEOUTS.get(
             Phase.CORE if scope == Scope.CORE else Phase.RUNTIME, 300
         )
         profile = "core" if scope == Scope.CORE else "runtime"
 
+        # Validate build-source selector agreement before any side effects.
+        # This surfaces selector mismatch and missing OMNI_HOME before staging.
+        validated_args = _build_source_build_args(
+            build_source,
+            expected_build_source=expected_build_source,
+        )
+
+        selected_source = _coerce_build_source(build_source, layer="deploy-agent")
         omni_home = os.environ.get("OMNI_HOME", "").strip()
+
+        if selected_source == BuildSource.WORKSPACE:
+            if not omni_home:
+                raise RuntimeError(
+                    "BUILD_SOURCE=workspace requires OMNI_HOME before build"
+                )
+            self._stage_workspace(REPO_DIR, omni_home)
+
         omnimarket_ref = (
-            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "main"
+            self._resolve_plugin_ref(f"{omni_home}/omnimarket") if omni_home else "dev"
         )
         compat_ref = (
             self._resolve_plugin_ref(f"{omni_home}/omnibase_compat")
@@ -689,11 +737,16 @@ class DeployExecutor:
             else "main"
         )
         logger.info(
-            "_compose_build: OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s ONEX_CHANGE_CONTROL_REF=%s",
+            selected_source.value,
             compat_ref[:12],
             omnimarket_ref[:12],
             occ_ref[:12],
         )
+
+        import datetime
+
+        build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         cmd = [
             "docker",
@@ -708,18 +761,17 @@ class DeployExecutor:
             "--build-arg",
             f"GIT_SHA={git_sha}",
             "--build-arg",
+            f"VCS_REF={git_sha}",
+            "--build-arg",
+            f"BUILD_DATE={build_date}",
+            "--build-arg",
             f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
             "--build-arg",
             f"ONEX_CHANGE_CONTROL_REF={occ_ref}",
         ]
-        cmd.extend(
-            _build_source_build_args(
-                build_source,
-                expected_build_source=expected_build_source,
-            )
-        )
+        cmd.extend(validated_args)
         result = _run(cmd, timeout=timeout, env=_compose_env())
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")

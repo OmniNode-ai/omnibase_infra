@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config
 
 # ContractConfigExtractor and ConfigPrefetcher are lazy-imported inside the
@@ -252,8 +252,8 @@ class TestNodeContractDiscoveryInvariant:
         package_root = Path(_pkg.__file__).parent
         runtime_parent_parent = Path(
             __import__(
-                "omnibase_infra.runtime.service_runtime_host_process",
-                fromlist=["service_runtime_host_process"],
+                "omnibase_infra.runtime.runtime_host_process",
+                fromlist=["runtime_host_process"],
             ).__file__
         ).parent.parent
         # Both should resolve to the same directory — but the import-based

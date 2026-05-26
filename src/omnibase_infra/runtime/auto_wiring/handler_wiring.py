@@ -225,7 +225,7 @@ class ProtocolHandleable(Protocol):
     ) -> ModelDispatchResult | None: ...
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds non-serializable dispatcher callables and runtime wiring state
 class PreparedWiring:
     """Data needed to register one contract entry with the dispatch engine.
 
@@ -267,7 +267,7 @@ class PreparedWiring:
         return self.quarantine_reason is not None
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds non-serializable dispatcher callables and runtime wiring state
 class PreparedContractWiring:
     """All validated wiring data for one contract — no side effects yet.
 
@@ -360,16 +360,25 @@ def _make_dispatch_callback(
         None,
     )
     _candidate_handle_async = getattr(handler_instance, "handle_async", None)
-    _effective_handle = cast(
-        "Callable[[object], object]",
-        (
-            _candidate_handle_async
-            if _handle_async_method is not None
-            and callable(_handle_async_method)
-            and callable(_candidate_handle_async)
-            else handler_instance.handle
-        ),
-    )
+    _candidate_handle = getattr(handler_instance, "handle", None)
+    if (
+        _handle_async_method is not None
+        and callable(_handle_async_method)
+        and callable(_candidate_handle_async)
+    ):
+        _effective_handle = cast("Callable[[object], object]", _candidate_handle_async)
+    elif callable(_candidate_handle):
+        _effective_handle = cast("Callable[[object], object]", _candidate_handle)
+    else:
+
+        def _missing_handle(_payload: object) -> object:
+            raise ModelOnexError(
+                "Auto-wired handler "
+                f"{type(handler_instance).__name__} does not expose a callable "
+                "handle() or handle_async() dispatch entrypoint."
+            )
+
+        _effective_handle = _missing_handle
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -400,7 +409,7 @@ def _make_dispatch_callback(
             else model_cls.model_validate(payload)
         )
         if _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handler_instance.handle)
+            cast("Callable[..., object]", handle_method)
         ):
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
@@ -1053,10 +1062,32 @@ def _make_event_bus_callback(
                 data = json.loads(
                     raw.decode("utf-8") if isinstance(raw, bytes) else raw
                 )
-                envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
-                    object
-                ].model_validate(data)
-                explicit_event_type = data.get("event_type")
+                from pydantic import ValidationError as PydanticValidationError
+
+                try:
+                    envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
+                        object
+                    ].model_validate(data)
+                except PydanticValidationError:
+                    # Raw command payload (no envelope wrapper) — synthesize one.
+                    from datetime import UTC, datetime
+                    from uuid import uuid4
+
+                    raw_corr = (
+                        data.get("correlation_id") if isinstance(data, dict) else None
+                    )
+                    corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    derived = _derive_event_type_from_topic(topic)
+                    envelope = ModelEventEnvelope[object](
+                        payload=data,
+                        correlation_id=corr,
+                        envelope_timestamp=datetime.now(UTC),
+                        event_type=derived or topic,
+                        source_tool="auto-wiring",
+                    )
+                explicit_event_type = (
+                    data.get("event_type") if isinstance(data, dict) else None
+                )
                 if explicit_event_type:
                     envelope = envelope.model_copy(
                         update={"event_type": explicit_event_type}
@@ -1328,18 +1359,33 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
-    if (
-        "dispatch_port" in constructor_params
-        and event_bus is not None
-        and requires_delegation_port
-    ):
-        from omnibase_infra.runtime.service_delegation_dispatch_port import (
-            RuntimeDelegationDispatchPort,
-        )
+    if "dispatch_port" in constructor_params and requires_delegation_port:
+        # When container is available, inject ContainerBackedDelegationDispatchPort
+        # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
+        # PluginDelegation at start_consumers() time. This avoids the asyncio stall
+        # that occurs when the Kafka-backed RuntimeDelegationDispatchPort subscribes
+        # to delegation-completed and awaits while the delegation orchestrator runs
+        # in the same event loop.
+        if container is not None:
+            from omnibase_infra.runtime.service_delegation_dispatch_port import (
+                ContainerBackedDelegationDispatchPort,
+                RuntimeDelegationDispatchPort,
+            )
 
-        available["dispatch_port"] = RuntimeDelegationDispatchPort(
-            cast("ProtocolPatternBBrokerTransport", event_bus)
-        )
+            available["dispatch_port"] = ContainerBackedDelegationDispatchPort(
+                container=container,
+                fallback_event_bus=cast(
+                    "ProtocolPatternBBrokerTransport | None", event_bus
+                ),
+            )
+        elif event_bus is not None:
+            from omnibase_infra.runtime.service_delegation_dispatch_port import (
+                RuntimeDelegationDispatchPort,
+            )
+
+            available["dispatch_port"] = RuntimeDelegationDispatchPort(
+                cast("ProtocolPatternBBrokerTransport", event_bus)
+            )
     if not required_params <= set(available):
         return materialized_explicit_dependencies
 
@@ -2319,7 +2365,7 @@ def _prepare_handler_wiring(
     # the dispatcher lookup falls back to type(payload).__name__ which resolves
     # to "dict" on object-erased envelopes and never matches the class-name key.
     # Strip surrounding whitespace so registration matches the dispatch-engine
-    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
+    # normalization (message_dispatch_engine.py normalizes via .strip()).
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
@@ -2548,7 +2594,7 @@ def _commit_handler_wiring(
 
     from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
     from omnibase_core.models.errors import ModelOnexError
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
+    from omnibase_infra.runtime.message_dispatch_engine import (
         MessageDispatchEngine,
     )
 

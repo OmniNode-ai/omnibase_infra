@@ -37,7 +37,7 @@ from omnibase_infra.gateway.services.service_envelope_validator import (
     ServiceEnvelopeValidator,
 )
 from omnibase_infra.gateway.services.service_policy_engine import ServicePolicyEngine
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 pytestmark = pytest.mark.integration
 

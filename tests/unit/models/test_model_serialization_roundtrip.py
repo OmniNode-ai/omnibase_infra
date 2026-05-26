@@ -187,6 +187,8 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelRuntimeAggregateHealth": "Round-trip covered in test_model_runtime_aggregate_health; extra='allow' complicates generic factory",
     "ModelDynamicMaterializationResult": "Covered by test_kafka_contract_source_materialization.py",
     "ModelLocalStateStoreEntry": "Internal entry model for ModelLocalStateStore; covered by test_node_invocation_adapter.py",
+    "ModelPluginDiscoveryEntry": "Converted from dataclass in OMN-12184; covered by test_model_plugin_discovery_report.py",
+    "ModelPluginDiscoveryReport": "Converted from dataclass in OMN-12184; covered by test_model_plugin_discovery_report.py",
 }
 
 

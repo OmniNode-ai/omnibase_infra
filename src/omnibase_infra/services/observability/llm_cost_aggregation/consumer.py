@@ -215,7 +215,7 @@ class EnumHealthStatus(StrEnum):
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: service-internal health snapshot
 class HealthSnapshot:
     """Immutable snapshot of ConsumerMetrics fields needed for health checks.
 

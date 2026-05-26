@@ -58,7 +58,7 @@ class TestRuntimeHostProcessPluginManagedGate:
         mock_event_bus.subscribe = AsyncMock(return_value=MagicMock())
         mock_dispatch = MagicMock()
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -80,7 +80,7 @@ class TestRuntimeHostProcessPluginManagedGate:
 
         with (
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.EventBusSubcontractWiring",
+                "omnibase_infra.runtime.runtime_host_process.EventBusSubcontractWiring",
                 return_value=mock_wiring,
             ),
             patch.object(
@@ -102,7 +102,7 @@ class TestRuntimeHostProcessPluginManagedGate:
         mock_event_bus = MagicMock()
         mock_dispatch = MagicMock()
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -122,7 +122,7 @@ class TestRuntimeHostProcessPluginManagedGate:
 
         with (
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.EventBusSubcontractWiring",
+                "omnibase_infra.runtime.runtime_host_process.EventBusSubcontractWiring",
                 return_value=mock_wiring,
             ),
             patch.object(
@@ -131,7 +131,7 @@ class TestRuntimeHostProcessPluginManagedGate:
                 return_value="test",
             ),
             patch(
-                "omnibase_infra.runtime.service_runtime_host_process.load_event_bus_subcontract",
+                "omnibase_infra.runtime.runtime_host_process.load_event_bus_subcontract",
             ) as mock_load,
         ):
             mock_subcontract = MagicMock()

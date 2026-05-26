@@ -62,7 +62,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: topic-extractor-internal
 class ExtractedTopic:
     """A single topic extracted from a contract YAML.
 
@@ -79,7 +79,7 @@ class ExtractedTopic:
     contract_path: Path
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: topic-extractor-internal
 class NodeTopics:
     """All topics declared by a single node contract.
 
@@ -96,7 +96,7 @@ class NodeTopics:
     publish_topics: list[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: topic-extractor-internal
 class TopicManifest:
     """Aggregate manifest of all topics across all scanned contracts.
 

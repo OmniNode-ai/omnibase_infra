@@ -63,7 +63,7 @@ REQUIRED_MODEL_FIELDS = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  # internal-dataclass-ok: validator-internal finding
 class Finding:
     """A single registry violation."""
 

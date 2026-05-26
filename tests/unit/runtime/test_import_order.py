@@ -129,7 +129,7 @@ class TestImportOrderIndependence:
 
     def test_import_message_dispatch_engine_first(self) -> None:
         """Test that message_dispatch_engine can be imported directly."""
-        from omnibase_infra.runtime.service_message_dispatch_engine import (
+        from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
