@@ -225,14 +225,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"
 
-# Install omnimarket from git main until PyPI releases are automated (OMN-7980).
-# Pinned to main so every image rebuild picks up the latest merged nodes.
-# Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
-# is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
+# Install omnimarket from git dev until PyPI releases are automated (OMN-7980).
+# Pinned to dev (omnimarket's default branch) so every image rebuild picks up
+# the latest merged nodes. Switch back to PyPI range pin once the auto-tag-on-merge
+# release pipeline is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
 # OMN-10728: OMNIMARKET_REF must be the full commit SHA so that the install URL
-# itself changes when main advances — this busts the uv cache mount (keyed on
+# itself changes when dev advances — this busts the uv cache mount (keyed on
 # URL, not on resolved HEAD) and forces a fresh fetch.
-ARG OMNIMARKET_REF=main
+# OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
+# Docker's git cache resolving @main to an older commit.
+ARG OMNIMARKET_REF=dev
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"

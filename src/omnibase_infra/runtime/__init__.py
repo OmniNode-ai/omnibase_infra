@@ -80,7 +80,6 @@ from omnibase_infra.runtime.handler_registry import (
     get_event_bus_registry,
     get_handler_class,
     get_handler_registry,
-    register_handlers_from_config,
 )
 
 from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
@@ -363,7 +362,6 @@ __all__: list[str] = [
     "load_runtime_config",
     "validate_kafka_broker_allowlist",
     "propagate_chain_context",
-    "register_handlers_from_config",
     "validate_dispatch_chain",
     "validate_envelope",
     "wire_custom_event_bus",
