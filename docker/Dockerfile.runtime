@@ -454,7 +454,9 @@ USER omniinfra
 # This should match the port your runtime listens on for health checks
 EXPOSE 8085
 
-# Health check using the runtime's health endpoint
+# Health check using the runtime's health endpoint. The endpoint returns a
+# failing status while runtime_attached=false or is_running=false, so plain
+# curl --fail cannot mark a degraded runtime as Docker healthy.
 # - interval: Check every 30 seconds
 # - timeout: Fail if check takes more than 10 seconds
 # - start-period: Allow 120 seconds for startup (Kafka consumer init is slow)

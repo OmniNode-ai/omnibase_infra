@@ -325,6 +325,20 @@ def test_stability_lane_runtime_socket_uses_owned_tmpfs() -> None:
 
 
 @pytest.mark.integration
+def test_stability_lane_render_inherits_failing_runtime_healthcheck() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        assert services[service_name]["healthcheck"]["test"] == [
+            "CMD",
+            "curl",
+            "-sf",
+            "http://localhost:8085/health",
+        ]
+
+
+@pytest.mark.integration
 def test_stability_lane_render_does_not_expose_production_ports_or_services() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
