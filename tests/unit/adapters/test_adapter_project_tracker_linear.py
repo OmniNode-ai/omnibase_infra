@@ -17,9 +17,13 @@ import pytest
 from omnibase_infra.adapters.project_tracker.adapter_project_tracker_linear import (
     AdapterProjectTrackerLinear,
 )
-from omnibase_infra.adapters.project_tracker.model_project_tracker_team import (
+from omnibase_infra.adapters.project_tracker.model_project_tracker_issue_status import (
     ModelProjectTrackerIssueStatus,
+)
+from omnibase_infra.adapters.project_tracker.model_project_tracker_label import (
     ModelProjectTrackerLabel,
+)
+from omnibase_infra.adapters.project_tracker.model_project_tracker_team import (
     ModelProjectTrackerTeam,
 )
 from omnibase_infra.errors import (

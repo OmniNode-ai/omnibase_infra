@@ -14,13 +14,18 @@ the standard infra error hierarchy.
 from __future__ import annotations
 
 import os
-from typing import Any, Final, cast
+from collections.abc import Mapping
+from typing import Final, cast
 
 import httpx
 
-from omnibase_infra.adapters.project_tracker.model_project_tracker_team import (
+from omnibase_infra.adapters.project_tracker.model_project_tracker_issue_status import (
     ModelProjectTrackerIssueStatus,
+)
+from omnibase_infra.adapters.project_tracker.model_project_tracker_label import (
     ModelProjectTrackerLabel,
+)
+from omnibase_infra.adapters.project_tracker.model_project_tracker_team import (
     ModelProjectTrackerTeam,
 )
 from omnibase_infra.enums import EnumInfraTransportType
@@ -37,6 +42,7 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 DEFAULT_LINEAR_GRAPHQL_ENDPOINT: Final[str] = "https://api.linear.app/graphql"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 SERVICE_NAME: Final[str] = "linear-project-tracker"
+JsonObject = dict[str, object]
 
 _QUERY_LIST_TEAMS: Final[str] = """
 query {
@@ -61,23 +67,37 @@ query ($filter: WorkflowStateFilter!) {
 """
 
 
-def _nested_id(raw: dict[str, Any], key: str) -> str | None:
+def _nested_id(raw: Mapping[str, object], key: str) -> str | None:
     val = raw.get(key)
-    if isinstance(val, dict):
+    if isinstance(val, Mapping):
         inner = val.get("id")
         return inner if isinstance(inner, str) else None
     return None
 
 
-def _extract_nodes(data: dict[str, Any], root_key: str) -> list[dict[str, Any]]:
+def _required_str(raw: Mapping[str, object], key: str) -> str:
+    val = raw.get(key)
+    if isinstance(val, str):
+        return val
+    raise ValueError(f"Missing string field '{key}' in Linear response node: {raw}")
+
+
+def _optional_str(raw: Mapping[str, object], key: str) -> str | None:
+    val = raw.get(key)
+    if val is None or isinstance(val, str):
+        return val
+    raise ValueError(f"Expected optional string field '{key}' in Linear response node")
+
+
+def _extract_nodes(data: Mapping[str, object], root_key: str) -> list[JsonObject]:
     # _execute already unwraps the top-level "data" envelope; receive it directly.
     root = data.get(root_key)
-    if not isinstance(root, dict):
+    if not isinstance(root, Mapping):
         raise ValueError(f"Missing '{root_key}' in Linear response: {data}")
     nodes = root.get("nodes")
     if not isinstance(nodes, list):
         raise ValueError(f"Missing 'nodes' under '{root_key}': {root}")
-    return [n for n in nodes if isinstance(n, dict)]
+    return [cast("JsonObject", n) for n in nodes if isinstance(n, dict)]
 
 
 class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
@@ -144,12 +164,12 @@ class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
 
     async def list_teams(self) -> list[ModelProjectTrackerTeam]:
         data = await self._execute(_QUERY_LIST_TEAMS, operation="list_teams")
-        nodes = _extract_nodes(cast("dict[str, Any]", data), "teams")
+        nodes = _extract_nodes(data, "teams")
         return [
             ModelProjectTrackerTeam(
-                id=n["id"],
-                name=n["name"],
-                key=n["key"],
+                id=_required_str(n, "id"),
+                name=_required_str(n, "name"),
+                key=_required_str(n, "key"),
             )
             for n in nodes
         ]
@@ -160,12 +180,12 @@ class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
             operation="list_issue_labels",
             variables={"filter": {"team": {"key": {"eq": team}}}},
         )
-        nodes = _extract_nodes(cast("dict[str, Any]", data), "issueLabels")
+        nodes = _extract_nodes(data, "issueLabels")
         return [
             ModelProjectTrackerLabel(
-                id=n["id"],
-                name=n["name"],
-                color=n.get("color"),
+                id=_required_str(n, "id"),
+                name=_required_str(n, "name"),
+                color=_optional_str(n, "color"),
                 team_id=_nested_id(n, "team"),
             )
             for n in nodes
@@ -179,12 +199,12 @@ class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
             operation="list_issue_statuses",
             variables={"filter": {"team": {"key": {"eq": team}}}},
         )
-        nodes = _extract_nodes(cast("dict[str, Any]", data), "workflowStates")
+        nodes = _extract_nodes(data, "workflowStates")
         return [
             ModelProjectTrackerIssueStatus(
-                id=n["id"],
-                name=n["name"],
-                type=n["type"],
+                id=_required_str(n, "id"),
+                name=_required_str(n, "name"),
+                type=_required_str(n, "type"),
                 team_id=_nested_id(n, "team"),
             )
             for n in nodes
@@ -195,7 +215,7 @@ class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
         query: str,
         operation: str,
         variables: dict[str, object] | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(operation=operation)
 
@@ -322,7 +342,7 @@ class AdapterProjectTrackerLinear(MixinAsyncCircuitBreaker):
         data = body.get("data")
         if not isinstance(data, dict):
             return {}
-        return cast("dict[str, object]", data)
+        return cast("JsonObject", data)
 
 
 __all__: list[str] = [
