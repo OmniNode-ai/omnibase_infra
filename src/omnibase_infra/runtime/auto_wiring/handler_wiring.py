@@ -1053,10 +1053,32 @@ def _make_event_bus_callback(
                 data = json.loads(
                     raw.decode("utf-8") if isinstance(raw, bytes) else raw
                 )
-                envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
-                    object
-                ].model_validate(data)
-                explicit_event_type = data.get("event_type")
+                from pydantic import ValidationError as PydanticValidationError
+
+                try:
+                    envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
+                        object
+                    ].model_validate(data)
+                except PydanticValidationError:
+                    # Raw command payload (no envelope wrapper) — synthesize one.
+                    from datetime import UTC, datetime
+                    from uuid import uuid4
+
+                    raw_corr = (
+                        data.get("correlation_id") if isinstance(data, dict) else None
+                    )
+                    corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    derived = _derive_event_type_from_topic(topic)
+                    envelope = ModelEventEnvelope[object](
+                        payload=data,
+                        correlation_id=corr,
+                        envelope_timestamp=datetime.now(UTC),
+                        event_type=derived or topic,
+                        source_tool="auto-wiring",
+                    )
+                explicit_event_type = (
+                    data.get("event_type") if isinstance(data, dict) else None
+                )
                 if explicit_event_type:
                     envelope = envelope.model_copy(
                         update={"event_type": explicit_event_type}
