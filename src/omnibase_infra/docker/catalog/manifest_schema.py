@@ -18,7 +18,7 @@ from omnibase_infra.docker.catalog.enum_depends_on_condition import (
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class PortMapping:
     """Explicit external/internal port pair."""
 
@@ -26,7 +26,7 @@ class PortMapping:
     internal: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class HealthCheck:
     """Healthcheck with full timing parameters (matches compose healthcheck).
 
@@ -43,7 +43,7 @@ class HealthCheck:
     start_period_s: int = 10
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class DependsOnEntry:
     """A dependency on another catalog entry with an explicit condition."""
 
@@ -51,7 +51,7 @@ class DependsOnEntry:
     condition: EnumDependsOnCondition = EnumDependsOnCondition.SERVICE_STARTED
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class ResourceLimits:
     """Container resource constraints."""
 
@@ -61,7 +61,7 @@ class ResourceLimits:
     memory_reservation: str = "128M"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class ULimit:
     """Container ulimit soft/hard pair for docker compose."""
 
@@ -69,7 +69,7 @@ class ULimit:
     hard: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: docker-catalog-internal
 class CatalogManifest:
     """Declaration of a single deployable catalog entry.
 
@@ -109,7 +109,7 @@ class CatalogManifest:
             object.__setattr__(self, "layer", EnumInfraLayer(self.layer))
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: docker-catalog-internal
 class Bundle:
     """A named group of catalog entries that are deployed together."""
 

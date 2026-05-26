@@ -24,7 +24,7 @@ from omnibase_infra.docker.catalog.manifest_schema import (
 )
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: docker-catalog-internal
 class ResolvedStack:
     """Result of resolving bundles into a concrete set of catalog entries."""
 
@@ -114,7 +114,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
     )
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: docker-catalog-internal
 class CatalogResolver:
     """Loads catalog manifests and bundles, resolves selected bundles."""
 

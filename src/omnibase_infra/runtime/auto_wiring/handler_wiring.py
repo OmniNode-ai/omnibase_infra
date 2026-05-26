@@ -225,7 +225,7 @@ class ProtocolHandleable(Protocol):
     ) -> ModelDispatchResult | None: ...
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds non-serializable dispatcher callables and runtime wiring state
 class PreparedWiring:
     """Data needed to register one contract entry with the dispatch engine.
 
@@ -267,7 +267,7 @@ class PreparedWiring:
         return self.quarantine_reason is not None
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds non-serializable dispatcher callables and runtime wiring state
 class PreparedContractWiring:
     """All validated wiring data for one contract — no side effects yet.
 

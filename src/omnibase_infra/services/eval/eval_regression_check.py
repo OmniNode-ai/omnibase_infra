@@ -16,10 +16,10 @@ Related:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from onex_change_control.enums.enum_eval_verdict import EnumEvalVerdict
 from onex_change_control.models.model_eval_report import ModelEvalReport
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_REGRESSION_THRESHOLD = 0.30
 
 
-@dataclass(frozen=True)
-class EvalRegressionResult:
+class EvalRegressionResult(BaseModel):
     """Result of an eval regression check.
 
     Attributes:
@@ -40,6 +39,8 @@ class EvalRegressionResult:
         report_id: The eval report that was checked.
         suite_id: The eval suite that was evaluated.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     is_regression: bool
     worse_count: int

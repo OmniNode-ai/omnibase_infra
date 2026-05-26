@@ -59,7 +59,9 @@ def _error_result(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal broker payload helper
 class TerminalPayload:
     payload: object
     topic: str

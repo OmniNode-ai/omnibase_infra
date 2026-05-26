@@ -20,15 +20,16 @@ Related:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.models.model_handshake_check_result import (
     ModelHandshakeCheckResult,
 )
 
+__all__ = ["ModelHandshakeResult"]
 
-@dataclass
-class ModelHandshakeResult:
+
+class ModelHandshakeResult(BaseModel):
     """Result of plugin handshake validation.
 
     Aggregates results from all validation checks run during the
@@ -59,9 +60,11 @@ class ModelHandshakeResult:
         ```
     """
 
+    model_config = ConfigDict(frozen=False)
+
     plugin_id: str
     passed: bool
-    checks: list[ModelHandshakeCheckResult] = field(default_factory=list)
+    checks: list[ModelHandshakeCheckResult] = Field(default_factory=list)
     error_message: str | None = None
 
     def __bool__(self) -> bool:
@@ -69,7 +72,7 @@ class ModelHandshakeResult:
 
         Warning:
             **Non-standard __bool__ behavior**: Returns ``True`` only when
-            ``passed`` is True. Differs from typical dataclass behavior where
+            ``passed`` is True. Differs from typical Pydantic behavior where
             ``bool(instance)`` always returns ``True``.
         """
         return self.passed
@@ -80,15 +83,7 @@ class ModelHandshakeResult:
         plugin_id: str,
         checks: list[ModelHandshakeCheckResult] | None = None,
     ) -> ModelHandshakeResult:
-        """Create a result indicating all checks passed.
-
-        Args:
-            plugin_id: Identifier of the plugin.
-            checks: Optional list of individual check results.
-
-        Returns:
-            ModelHandshakeResult with passed=True.
-        """
+        """Create a result indicating all checks passed."""
         return cls(
             plugin_id=plugin_id,
             passed=True,
@@ -102,16 +97,7 @@ class ModelHandshakeResult:
         error_message: str,
         checks: list[ModelHandshakeCheckResult] | None = None,
     ) -> ModelHandshakeResult:
-        """Create a result indicating validation failure.
-
-        Args:
-            plugin_id: Identifier of the plugin.
-            error_message: Description of the failure.
-            checks: Optional list of individual check results.
-
-        Returns:
-            ModelHandshakeResult with passed=False.
-        """
+        """Create a result indicating validation failure."""
         return cls(
             plugin_id=plugin_id,
             passed=False,
@@ -121,24 +107,9 @@ class ModelHandshakeResult:
 
     @classmethod
     def default_pass(cls, plugin_id: str) -> ModelHandshakeResult:
-        """Create a default-pass result for plugins without validation.
-
-        Used when a plugin does not implement validate_handshake().
-        The plugin passes by default since it has no checks to run.
-
-        Args:
-            plugin_id: Identifier of the plugin.
-
-        Returns:
-            ModelHandshakeResult with passed=True and no checks.
-        """
+        """Create a default-pass result for plugins without validation."""
         return cls(
             plugin_id=plugin_id,
             passed=True,
             checks=[],
         )
-
-
-__all__ = [
-    "ModelHandshakeResult",
-]

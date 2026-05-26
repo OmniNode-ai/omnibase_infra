@@ -35,7 +35,9 @@ _REQUESTER = "delegate_skill"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal routing helper
 class ModelSelectedDelegationRoute:
     alias: str
     route: RuntimeLocalIngressRoute

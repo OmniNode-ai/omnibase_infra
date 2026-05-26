@@ -15,14 +15,14 @@ Related:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class MetricEvent:
+class MetricEvent(BaseModel):
     """A single metric event captured from the Kafka bus.
 
     Attributes:
@@ -34,12 +34,14 @@ class MetricEvent:
         metadata: Additional event metadata.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     topic: str
     correlation_id: str
     timestamp: datetime
     metric_name: str
     metric_value: float
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class MetricCollector:
@@ -111,15 +113,7 @@ class MetricCollector:
         return sum(values) / len(values)
 
     def get_summary(self) -> dict[str, float | int | str]:
-        """Get a summary of all collected metrics.
-
-        Returns a dict with:
-            - correlation_id: The run's correlation ID
-            - event_count: Total events collected
-            - window_start: ISO timestamp of collection start
-            - window_end: ISO timestamp of collection end (or 'active')
-            - Per-metric averages as metric_name_avg keys
-        """
+        """Get a summary of all collected metrics."""
         summary: dict[str, float | int | str] = {
             "correlation_id": self._correlation_id,
             "event_count": len(self._events),

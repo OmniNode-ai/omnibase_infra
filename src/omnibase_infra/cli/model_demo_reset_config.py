@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
 from typing import Final
+
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__: list[str] = [
     "ModelDemoResetConfig",
@@ -37,16 +38,12 @@ _DEFAULT_TOPIC_PREFIXES: Final[tuple[str, ...]] = (
 )
 
 
-@dataclass(frozen=True)
-class ModelDemoResetConfig:
+class ModelDemoResetConfig(BaseModel):
     """Configuration for the demo reset engine.
 
     Note:
-        ``consumer_group_pattern`` is typed as ``re.Pattern`` which is
-        technically a mutable object (compiled regex patterns have mutable
-        internal caching).  In practice ``re.Pattern`` is effectively
-        immutable -- its public API is read-only -- so ``frozen=True``
-        is safe here despite the dataclass not performing a deep-freeze.
+        ``consumer_group_pattern`` is typed as ``re.Pattern`` which Pydantic
+        handles natively via its ``Pattern`` validator.
 
     Attributes:
         postgres_dsn: PostgreSQL connection string.
@@ -57,11 +54,15 @@ class ModelDemoResetConfig:
         demo_topic_prefixes: Topic prefixes considered demo-scoped.
     """
 
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     postgres_dsn: str = ""
     kafka_bootstrap_servers: str = ""
     purge_topics: bool = False
     projection_table: str = _DEFAULT_PROJECTION_TABLE
-    consumer_group_pattern: re.Pattern[str] = _DEFAULT_CONSUMER_GROUP_PATTERN
+    consumer_group_pattern: re.Pattern[str] = Field(
+        default=_DEFAULT_CONSUMER_GROUP_PATTERN
+    )
     demo_topic_prefixes: tuple[str, ...] = _DEFAULT_TOPIC_PREFIXES
 
     @classmethod

@@ -10,7 +10,7 @@ topics).
 Design Notes:
     ModelSnapshotTopicConfig cannot be reused here because its validator
     rejects non-compact cleanup policies. ModelTopicSpec is a lightweight
-    dataclass that supports any cleanup policy and optional config overrides.
+    model that supports any cleanup policy and optional config overrides.
 
 Related:
     - platform_topic_suffixes.py: Registry of all platform topic specs
@@ -23,8 +23,9 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from types import MappingProxyType
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Canonical defaults for platform topic creation.
 # These live here (not in service_topic_manager) to avoid a circular import:
@@ -34,8 +35,7 @@ DEFAULT_EVENT_TOPIC_PARTITIONS: int = 6
 DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR: int = 1
 
 
-@dataclass(frozen=True)
-class ModelTopicSpec:
+class ModelTopicSpec(BaseModel):
     """Per-topic creation spec: suffix + partitions + optional Kafka config overrides.
 
     Attributes:
@@ -46,18 +46,23 @@ class ModelTopicSpec:
         provisioning_priority: Lower values are provisioned first.
     """
 
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     suffix: str
     partitions: int = DEFAULT_EVENT_TOPIC_PARTITIONS
     replication_factor: int = DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
-    kafka_config: Mapping[str, str] | None = field(default=None)
+    kafka_config: Mapping[str, str] | None = Field(default=None)
     provisioning_priority: int = 100
 
-    def __post_init__(self) -> None:
-        """Freeze mutable kafka_config dict passed at construction time."""
-        if isinstance(self.kafka_config, dict):
-            object.__setattr__(
-                self, "kafka_config", MappingProxyType(self.kafka_config)
-            )
+    @field_validator("kafka_config", mode="before")
+    @classmethod
+    def freeze_kafka_config(
+        cls, v: Mapping[str, str] | None
+    ) -> Mapping[str, str] | None:
+        """Freeze mutable dict passed at construction time."""
+        if isinstance(v, dict):
+            return MappingProxyType(v)
+        return v
 
 
 __all__: list[str] = [

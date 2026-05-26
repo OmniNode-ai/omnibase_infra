@@ -34,7 +34,7 @@ from omnibase_infra.nodes.node_kafka_replay_compute.protocols import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: handler-internal bounds model
 class ModelReplayBounds:
     start_offsets: Mapping[TopicPartition, int]
     end_offsets: Mapping[TopicPartition, int]

@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: script-internal verify result
 class ContainerVerifyResult:
     """Result of container manifest verification."""
 

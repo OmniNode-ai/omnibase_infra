@@ -21,6 +21,7 @@ Tests cover:
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
     ModelPluginDiscoveryEntry,
@@ -127,7 +128,7 @@ class TestModelPluginDiscoveryEntryConstruction:
             status="accepted",
         )
 
-        with pytest.raises(AttributeError):
+        with pytest.raises((AttributeError, ValidationError)):
             entry.status = "import_error"  # type: ignore[misc]
 
 
@@ -197,7 +198,7 @@ class TestModelPluginDiscoveryReportConstruction:
             discovered_count=0,
         )
 
-        with pytest.raises(AttributeError):
+        with pytest.raises((AttributeError, ValidationError)):
             report.group = "new_group"  # type: ignore[misc]
 
 

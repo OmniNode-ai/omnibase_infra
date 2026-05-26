@@ -11,12 +11,11 @@ import logging
 import os
 import stat
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.types import JsonType
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
@@ -45,9 +44,10 @@ def _preferred_request_name(raw: object) -> str:
     return "unknown"
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeLocalIngressRoute:
+class RuntimeLocalIngressRoute(BaseModel):
     """Resolved route for a node exposed through the local runtime ingress."""
+
+    model_config = ConfigDict(frozen=True)
 
     node_name: str
     contract_name: str
@@ -419,11 +419,13 @@ def _extract_handler_operation_routes(
         if route is not None:
             event_type = _handler_event_type(handler, route.event_type)
             input_model_module, input_model_name = _extract_input_model_ref(handler)
-            route = replace(
-                route,
-                event_type=event_type,
-                input_model_module=input_model_module or route.input_model_module,
-                input_model_name=input_model_name or route.input_model_name,
+            route = route.model_copy(
+                update={
+                    "event_type": event_type,
+                    "input_model_module": input_model_module
+                    or route.input_model_module,
+                    "input_model_name": input_model_name or route.input_model_name,
+                }
             )
         aliases.append(
             (

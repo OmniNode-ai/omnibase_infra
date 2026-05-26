@@ -11,11 +11,14 @@ Related:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
+
+__all__ = [
+    "ModelHandshakeCheckResult",
+]
 
 
-@dataclass
-class ModelHandshakeCheckResult:
+class ModelHandshakeCheckResult(BaseModel):
     """Result of a single handshake validation check.
 
     Attributes:
@@ -24,11 +27,8 @@ class ModelHandshakeCheckResult:
         message: Human-readable description of the check outcome.
     """
 
+    model_config = ConfigDict(frozen=False)
+
     check_name: str
     passed: bool
     message: str = ""
-
-
-__all__ = [
-    "ModelHandshakeCheckResult",
-]
