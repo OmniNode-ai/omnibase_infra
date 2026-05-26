@@ -204,40 +204,67 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-memory>=0.9.0,<2.0.0" \
     "omninode-intelligence>=0.15.0,<2.0.0"
 
-# Install omnibase_compat before omnimarket — omnimarket declares it as a
-# required dependency but we use --no-deps for the source install, so it must
-# be present first. The GitHub archive source avoids recursive submodule
-# checkout from the repository while PyPI publishing is automated.
+# ============================================================================
+# Sibling-repo install: workspace vs release mode
+#
+# workspace: installs from staged local trees under workspace/sibling-repos/
+#            (staged by docker/runtime_build/stage_workspace.sh before build)
+# release:   installs from pinned GitHub archive / git SHA sources
+#
+# The COPY of workspace/ is guarded so it only materialises when the directory
+# exists in the build context (i.e. after stage_workspace.sh has run).
+# In release mode the directory is absent and the COPY is never reached.
+# ============================================================================
+
+# workspace mode: copy staged sibling repos into the build image
+# (stage_workspace.sh must be run before `docker compose build` for workspace mode)
+COPY --if-present workspace/sibling-repos/ /workspace/sibling-repos/
+
+# Copy provenance helper (always present — used in workspace mode, no-op otherwise)
+COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_workspace_provenance.py
+
+# workspace mode installs omnibase_compat, onex_change_control, omnimarket from
+# the staged local trees.  release mode installs from pinned remote sources.
+#
+# The shell conditional on BUILD_SOURCE is evaluated at build time so only one
+# branch ever runs; the other branch's install artifacts never enter the image.
 ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"
-
-# Install onex_change_control before omnimarket — omnimarket's node_overseer_verifier
-# imports it at module level but omnimarket is installed --no-deps, so it must
-# be present first. Pinned to git main until PyPI publishing is automated.
 # OMN-10728: ONEX_CHANGE_CONTROL_REF must be the full commit SHA so that the
 # install URL itself changes when main advances — this busts the uv cache mount
 # (keyed on URL, not on resolved HEAD) and forces a fresh fetch.
 ARG ONEX_CHANGE_CONTROL_REF=main
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"
-
-# Install omnimarket from git dev until PyPI releases are automated (OMN-7980).
-# Pinned to dev (omnimarket's default branch) so every image rebuild picks up
-# the latest merged nodes. Switch back to PyPI range pin once the auto-tag-on-merge
-# release pipeline is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
-# OMN-10728: OMNIMARKET_REF must be the full commit SHA so that the install URL
-# itself changes when dev advances — this busts the uv cache mount (keyed on
-# URL, not on resolved HEAD) and forces a fresh fetch.
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
+
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"
+    set -eu; \
+    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
+        for repo in omnibase_compat onex_change_control omnimarket; do \
+            p="/workspace/sibling-repos/${repo}"; \
+            if [ ! -d "${p}" ]; then \
+                echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
+            fi; \
+        done; \
+        uv pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
+        uv pip install --no-deps /workspace/sibling-repos/onex_change_control; \
+        uv pip install --no-deps /workspace/sibling-repos/omnimarket; \
+    else \
+        uv pip install --no-deps \
+            "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
+        uv pip install --no-deps \
+            "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"; \
+        uv pip install --no-deps \
+            "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"; \
+    fi
+
+# workspace mode: compute per-repo digest and embed provenance manifest.
+# Fails the build if any sibling install does not match the workspace tree.
+RUN set -eu; \
+    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
+        /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
+    fi
 
 # The runtime image still installs legacy packages for import compatibility while
 # market migrations finish, but their ONEX discovery metadata must not advertise
@@ -348,7 +375,8 @@ LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
       org.opencontainers.image.version="${RUNTIME_VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      com.omninode.build_source="${BUILD_SOURCE}"
+      com.omninode.build_source="${BUILD_SOURCE}" \
+      com.omninode.workspace_provenance_manifest="/app/build-provenance.json"
 
 # Runtime environment configuration
 ENV PYTHONUNBUFFERED=1 \
@@ -436,6 +464,10 @@ COPY --chown=omniinfra:omniinfra src/omnibase_infra/nodes/ /app/contracts/nodes/
 COPY --from=builder --chown=omniinfra:omniinfra \
     /app/.venv/lib/python*/site-packages/omnibase_core/contracts/runtime_data/ \
     /app/contracts/runtime/
+
+# Copy workspace provenance manifest (present only in workspace mode builds).
+# In release mode the file does not exist in the builder and --if-present skips it.
+COPY --from=builder --chown=omniinfra:omniinfra --if-present /app/build-provenance.json /app/build-provenance.json
 
 # Copy entrypoint script that stamps schema fingerprint before kernel start
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
