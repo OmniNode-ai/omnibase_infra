@@ -19,7 +19,7 @@ Related:
     - OMN-758: INFRA-017: Version compatibility matrix check
     - OMN-3203: Automate version_compatibility.py matrix updates
     - pyproject.toml: Declarative dependency constraints (single source of truth)
-    - service_runtime_host_process.py: Runtime startup integration
+    - runtime_host_process.py: Runtime startup integration
     - scripts/update_version_matrix.py: Standalone BUMP-phase update script
 
 .. versionadded:: 0.11.0
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _TRACKED_PACKAGES: tuple[str, ...] = ("omnibase_core", "omnibase_spi")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: module-internal version check helper
 class VersionConstraint:
     """A version constraint for a dependency package.
 
@@ -175,13 +175,13 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.41.0",
-        max_version="0.42.0",
+        min_version="0.42.0",
+        max_version="0.43.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.21.0",
-        max_version="0.22.0",
+        min_version="0.22.0",
+        max_version="0.23.0",
     ),
 ]
 

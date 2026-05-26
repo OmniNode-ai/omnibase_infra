@@ -143,6 +143,8 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "bin",
         "deploy",
         "observability",
+        # Docker workspace staging: stage_workspace.sh rsync target (OMN-9470)
+        "workspace",
         # Pre-commit hook scripts directory
         ".pre-commit-hooks",
         # Hidden directories (generally allowed)

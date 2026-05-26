@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 DbQueryFn = Callable[[str], list[dict[str, str]]]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: verification-internal config
 class VerificationConfig:
     """Configuration for the verification orchestrator.
 

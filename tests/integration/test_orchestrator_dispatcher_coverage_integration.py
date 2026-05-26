@@ -26,7 +26,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from tests.helpers.path_utils import find_project_root
 
 START_TOPIC = "onex.cmd.omnimarket.pr-lifecycle-orchestrator-start.v1"

@@ -30,8 +30,8 @@ from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_polle
 )
 from omnibase_infra.runtime.auto_wiring import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 
 _INPUT_TOPIC = "onex.intent.platform.runtime-tick.v1"
 _OUTPUT_TOPIC = "onex.evt.github.pr-status.v1"

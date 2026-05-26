@@ -54,7 +54,7 @@ _ALLOW_RE = re.compile(
 DEFAULT_BUDGET = 74
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  # internal-dataclass-ok: validator-internal finding
 class TypeIgnoreFinding:
     path: Path
     line: int

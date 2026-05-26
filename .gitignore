@@ -294,3 +294,8 @@ docker/docker-compose.generated.yml
 .onex/
 .onex_state/
 .fastembed_cache/
+
+# Workspace sibling repos staged by stage_workspace.sh — never commit actual repo content
+workspace/sibling-repos/*/
+workspace/sibling-repos/*
+!workspace/sibling-repos/.gitkeep

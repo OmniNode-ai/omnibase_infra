@@ -80,14 +80,13 @@ from omnibase_infra.runtime.handler_registry import (
     get_event_bus_registry,
     get_handler_class,
     get_handler_registry,
-    register_handlers_from_config,
 )
 
 from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.service_kernel import load_runtime_config
 from omnibase_infra.runtime.service_kernel import main as kernel_main
 from omnibase_infra.runtime.service_kernel import validate_kafka_broker_allowlist
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models import (
     ModelContractLoadResult,
     ModelProjectorNotificationConfig,
@@ -115,7 +114,7 @@ from omnibase_infra.runtime.registry import (
     ProtocolMessageTypeRegistry,
     RegistryMessageType,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 from omnibase_infra.runtime.util_wiring import (
     get_known_event_bus_kinds,
@@ -363,7 +362,6 @@ __all__: list[str] = [
     "load_runtime_config",
     "validate_kafka_broker_allowlist",
     "propagate_chain_context",
-    "register_handlers_from_config",
     "validate_dispatch_chain",
     "validate_envelope",
     "wire_custom_event_bus",

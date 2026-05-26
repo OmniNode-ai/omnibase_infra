@@ -54,7 +54,7 @@ try:
     from omnibase_infra.runtime.protocol_lifecycle_executor import (
         ProtocolLifecycleExecutor,
     )
-    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
     _RUNTIME_HOST_IMPLEMENTED = True
 except ImportError:
@@ -1886,7 +1886,7 @@ class TestRuntimeHostProcessDeterministic:
 class TestRuntimeHostProcessLogWarnings:
     """Test log warning assertions (following OMN-252 patterns)."""
 
-    RUNTIME_MODULE = "omnibase_infra.runtime.service_runtime_host_process"
+    RUNTIME_MODULE = "omnibase_infra.runtime.runtime_host_process"
 
     @pytest.mark.asyncio
     async def test_no_unexpected_warnings_during_normal_operation(

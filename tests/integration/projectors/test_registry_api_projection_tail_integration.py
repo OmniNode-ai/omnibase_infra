@@ -28,7 +28,9 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.runtime import ProjectorShell
-from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+from omnibase_infra.services.registry_api.registry_discovery import (
+    ServiceRegistryDiscovery,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.projectors import ProjectionReaderRegistration

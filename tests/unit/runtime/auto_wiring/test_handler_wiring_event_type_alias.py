@@ -149,7 +149,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         """Alias whitespace is stripped before indexing.
 
         The dispatch engine normalizes envelope ``event_type`` via ``.strip()``
-        before lookup (service_message_dispatch_engine.py). If a contract accidentally
+        before lookup (message_dispatch_engine.py). If a contract accidentally
         carries surrounding whitespace in ``event_type``, registering the alias
         verbatim produces a key mismatch and routes every command to DLQ.
         Normalize on registration to keep both sides symmetric.

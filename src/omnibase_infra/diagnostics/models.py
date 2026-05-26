@@ -28,7 +28,9 @@ from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: diagnostics-internal aggregate stat counter
 class EnvelopeStats:
     """JSON parse and envelope field statistics for sampled messages.
 
@@ -66,7 +68,9 @@ class EnvelopeStats:
         return self.json_parse_fail / self.parseable_count
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: diagnostics-internal schema validation stat counter
 class DomainValidationResult:
     """Schema validation outcome for a single topic.
 
@@ -85,7 +89,9 @@ class DomainValidationResult:
     errors: tuple[str, ...] = field(default_factory=tuple)
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: diagnostics-internal per-topic health snapshot
 class TopicHealth:
     """Per-topic health snapshot from the bus audit.
 
@@ -112,7 +118,9 @@ class TopicHealth:
     issues: tuple[str, ...] = field(default_factory=tuple)
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: diagnostics-internal audit report aggregate
 class AuditReport:
     """Aggregate bus health audit report.
 

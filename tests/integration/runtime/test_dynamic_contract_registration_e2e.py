@@ -28,7 +28,7 @@ from omnibase_infra.runtime.enums.enum_materialization_status import (
     EnumMaterializationStatus,
 )
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
-from omnibase_infra.runtime.service_message_dispatch_engine import (
+from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
 

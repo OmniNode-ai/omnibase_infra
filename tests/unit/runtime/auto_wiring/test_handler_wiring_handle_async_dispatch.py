@@ -79,6 +79,12 @@ class _HandlerAsyncHandleOnly:
         return {"from": "async-handle-only"}
 
 
+class _HandlerWithoutHandle:
+    """Handler that has only a domain-specific method name."""
+
+    def execute(self, payload: object) -> object:
+        return {"from": "execute"}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -299,3 +305,17 @@ class TestHandleFallback:
             await callback(envelope)  # type: ignore[arg-type]
 
         assert handler.handle_called is True
+
+    @pytest.mark.asyncio
+    async def test_missing_handle_fails_at_dispatch_not_wiring(self) -> None:
+        """Missing legacy handle does not fail startup-time callback construction."""
+        from omnibase_core.models.errors import ModelOnexError
+
+        handler = _HandlerWithoutHandle()
+        callback = _make_dispatch_callback(
+            handler,  # type: ignore[arg-type]
+            event_model=None,
+        )
+
+        with pytest.raises(ModelOnexError, match="does not expose a callable"):
+            await callback(_make_envelope({}))  # type: ignore[arg-type]

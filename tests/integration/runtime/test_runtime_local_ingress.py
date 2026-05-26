@@ -16,11 +16,11 @@ import pytest
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_local_ingress import (
-    RuntimeLocalIngressRoute,
+    ModelRuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config
 
 pytestmark = pytest.mark.integration
@@ -40,7 +40,7 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
     broker = AsyncMock()
     broker.dispatch_request = AsyncMock(
         return_value=(
-            RuntimeLocalIngressRoute(
+            ModelRuntimeLocalIngressRoute(
                 node_name="node_session_orchestrator",
                 contract_name="session_orchestrator",
                 command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
@@ -59,7 +59,7 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
     )
     process._is_running = True
     process._local_ingress_routes = {
-        "session_orchestrator": RuntimeLocalIngressRoute(
+        "session_orchestrator": ModelRuntimeLocalIngressRoute(
             node_name="node_session_orchestrator",
             contract_name="session_orchestrator",
             command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",

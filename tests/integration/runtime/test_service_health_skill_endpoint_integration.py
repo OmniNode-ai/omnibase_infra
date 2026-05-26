@@ -22,8 +22,8 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
 from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
     ModelLocalRuntimeIngressResponse,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.services.health_checker import ServiceHealth
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 pytestmark = pytest.mark.integration

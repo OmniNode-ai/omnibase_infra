@@ -43,7 +43,7 @@ _WILDCARD_TRANSITIONS: dict[str, str] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: reducer-internal output model
 class ModelReducerOutput:
     """Output of a reduce() call: new state + optional intents."""
 

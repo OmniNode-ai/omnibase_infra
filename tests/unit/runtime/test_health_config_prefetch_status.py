@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config
 
 # Lazy-import patch targets (same as test_prefetch_contract_isolation.py)
@@ -26,9 +26,7 @@ _PREFETCHER_PATH = (
     "omnibase_infra.runtime.config_discovery.config_prefetcher.ConfigPrefetcher"
 )
 _HANDLER_PATH = "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
-_LOAD_ENV_PATH = (
-    "omnibase_infra.runtime.service_runtime_host_process._load_omnibase_env_file"
-)
+_LOAD_ENV_PATH = "omnibase_infra.runtime.runtime_host_process._load_omnibase_env_file"
 
 
 def _make_process(**kwargs: object) -> RuntimeHostProcess:

@@ -28,7 +28,7 @@ LIFECYCLE_TERMS = frozenset(
 COMPUTE_PLUGIN_BASE = "PluginComputeBase"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  # internal-dataclass-ok: validator-internal finding
 class LifecycleClassFinding:
     """A banned Plugin* lifecycle class found in source."""
 

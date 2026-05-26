@@ -65,6 +65,9 @@ def test_compose_build_passes_build_source_args(
         return _ok()
 
     monkeypatch.setattr("deploy_agent.executor._run", fake_run)
+    monkeypatch.setattr(
+        DeployExecutor, "_stage_workspace", staticmethod(lambda *_: None)
+    )
 
     executor._compose_build(
         Scope.RUNTIME,

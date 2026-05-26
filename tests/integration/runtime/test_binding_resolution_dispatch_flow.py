@@ -32,7 +32,7 @@ from omnibase_infra.models.bindings import (
     ModelParsedBinding,
 )
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 # =============================================================================
 # Mock Payload Models (Prefix with "Mock" to avoid pytest collection)

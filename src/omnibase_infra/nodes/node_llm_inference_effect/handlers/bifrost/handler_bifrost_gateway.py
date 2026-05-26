@@ -172,7 +172,7 @@ class ProtocolShadowPolicy(Protocol):
 ShadowDecisionCallback = Callable[[ModelShadowDecisionLog], Awaitable[None]]
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal mutable circuit breaker state
 class CircuitBreakerState:
     """Per-backend circuit breaker state.
 

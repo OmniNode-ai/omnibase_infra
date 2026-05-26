@@ -588,7 +588,7 @@ class RegistryDispatcher:
         # Accepts the canonical EnumMessageCategory instance (pass-through), a valid
         # string value, or a foreign enum instance whose .value matches a valid member.
         # coerce_message_category() lives in _enum_coercion (OMN-4087) to avoid the
-        # circular import chain: registry_dispatcher → service_message_dispatch_engine
+        # circular import chain: registry_dispatcher → message_dispatch_engine
         # → dispatch_context_enforcer → registry_dispatcher.
         try:
             _canonical_category = coerce_message_category(

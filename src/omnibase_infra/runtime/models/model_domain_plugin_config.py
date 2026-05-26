@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime import MessageDispatchEngine
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: holds runtime infrastructure objects (container, event_bus, dispatch_engine) not suitable for Pydantic serialization
 class ModelDomainPluginConfig:
     """Configuration passed to domain plugins during lifecycle hooks.
 

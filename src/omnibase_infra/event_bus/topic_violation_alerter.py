@@ -31,7 +31,7 @@ _DEFAULT_DEBOUNCE_SECONDS = 900  # 15 minutes
 _SLACK_POST_URL = "https://slack.com/api/chat.postMessage"
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: event-bus-internal debounce state
 class DebounceEntry:
     """Tracks debounce state for a single topic."""
 

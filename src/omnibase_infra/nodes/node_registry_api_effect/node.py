@@ -31,7 +31,7 @@ settings at construction time, replacing the former module-level constants:
 Ticket: OMN-1441
 Related:
     - contract.yaml: Node contract with config, I/O, and routing definitions
-    - services/registry_api/service.py: imports load_registry_api_config()
+    - services/registry_api/registry_discovery.py: imports load_registry_api_config()
 """
 
 from __future__ import annotations

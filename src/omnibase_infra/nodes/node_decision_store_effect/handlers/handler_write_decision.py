@@ -190,7 +190,7 @@ UPDATE decision_store SET status = 'PROPOSED' WHERE decision_id = $1;
 # =============================================================================
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal DB row model
 class ActiveDecisionRow:
     """Lightweight row container for decisions fetched in Stage 2."""
 
@@ -202,7 +202,7 @@ class ActiveDecisionRow:
     superseded_by: UUID | None
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal pipeline stage result
 class Stage1Result:
     """Result of the Stage 1 upsert."""
 
@@ -211,7 +211,7 @@ class Stage1Result:
     old_status: str | None = None
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal pipeline stage result
 class ConflictWritten:
     """A single conflict pair written in Stage 2."""
 
@@ -222,7 +222,7 @@ class ConflictWritten:
     was_new: bool  # False when ON CONFLICT DO NOTHING skipped the row
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal pipeline stage result
 class Stage2Result:
     """Aggregate result of Stage 2 conflict detection."""
 
@@ -230,7 +230,7 @@ class Stage2Result:
     new_decision_demoted: bool = False  # True if ACTIVE invariant forced PROPOSED
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: handler-internal scope key
 class DecisionScopeKey:
     """Scope fields used by structural_confidence().
 

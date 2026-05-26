@@ -41,7 +41,7 @@ _ALLOW_RE = re.compile(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  # internal-dataclass-ok: validator-internal finding
 class AnySignatureFinding:
     path: Path
     line: int

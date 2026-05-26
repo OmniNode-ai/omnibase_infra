@@ -291,7 +291,7 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  Qwen3.6-35B-A3B:
+  qwen3.6-35b-a3b:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
@@ -306,11 +306,11 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  Qwen3.6-27B-MTP-IQ4_XS.gguf:
+  qwen3.6-27b-mtp-iq4xs:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: '2026-05-25'
-    note: Local model on .201:8001 (vLLM, Qwen3.6-27B-MTP-IQ4_XS.gguf, 98304 ctx) - zero API cost
+    note: Local model on .201:8001 (llamacpp, Qwen3.6-27B-MTP-IQ4_XS.gguf, 98304 ctx) - zero API cost
     confidence: LOW_CONFIDENCE
     source: LOCAL_ZERO_API_COST_POLICY
     sample_count: 0

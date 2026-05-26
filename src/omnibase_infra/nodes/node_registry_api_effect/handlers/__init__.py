@@ -8,7 +8,7 @@ Stub handlers for all 10 operations declared in ``contract.yaml``.
 Each handler satisfies HandlerPluginLoader (class exists, correct type properties)
 and raises NotImplementedError until full implementation is added.
 
-Full business logic lives in ``services/registry_api/service.py`` and is
+Full business logic lives in ``services/registry_api/registry_discovery.py`` and is
 invoked via the FastAPI route layer.
 
 Ticket: OMN-1441 (node), OMN-2909 (stubs)

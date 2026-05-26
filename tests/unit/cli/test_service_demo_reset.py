@@ -185,11 +185,21 @@ class TestModelDemoResetReport:
         """Report counts actions by type correctly."""
         report = ModelDemoResetReport(
             actions=[
-                ModelResetActionResult("a", EnumResetAction.RESET, "done"),
-                ModelResetActionResult("b", EnumResetAction.RESET, "done"),
-                ModelResetActionResult("c", EnumResetAction.PRESERVED, "kept"),
-                ModelResetActionResult("d", EnumResetAction.SKIPPED, "na"),
-                ModelResetActionResult("e", EnumResetAction.ERROR, "fail"),
+                ModelResetActionResult(
+                    resource="a", action=EnumResetAction.RESET, detail="done"
+                ),
+                ModelResetActionResult(
+                    resource="b", action=EnumResetAction.RESET, detail="done"
+                ),
+                ModelResetActionResult(
+                    resource="c", action=EnumResetAction.PRESERVED, detail="kept"
+                ),
+                ModelResetActionResult(
+                    resource="d", action=EnumResetAction.SKIPPED, detail="na"
+                ),
+                ModelResetActionResult(
+                    resource="e", action=EnumResetAction.ERROR, detail="fail"
+                ),
             ]
         )
         assert report.reset_count == 2
@@ -214,9 +224,9 @@ class TestModelDemoResetReport:
         report = ModelDemoResetReport(
             actions=[
                 ModelResetActionResult(
-                    "Projector state",
-                    EnumResetAction.RESET,
-                    "Deleted 5 rows",
+                    resource="Projector state",
+                    action=EnumResetAction.RESET,
+                    detail="Deleted 5 rows",
                 ),
             ]
         )

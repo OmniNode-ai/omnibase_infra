@@ -20,7 +20,7 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
 from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
     ModelLocalRuntimeIngressResponse,
 )
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 _CORR_ID = UUID("12345678-1234-5678-1234-567812345678")
 
@@ -77,13 +77,13 @@ class TestServiceHealthSkillEndpoint:
         server = ServiceHealth(runtime=mock_runtime, port=0)
 
         with patch(
-            "omnibase_infra.services.service_health.web.Application"
+            "omnibase_infra.services.health_checker.web.Application"
         ) as mock_app_cls:
             with patch(
-                "omnibase_infra.services.service_health.web.AppRunner"
+                "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner_cls:
                 with patch(
-                    "omnibase_infra.services.service_health.web.TCPSite"
+                    "omnibase_infra.services.health_checker.web.TCPSite"
                 ) as mock_site_cls:
                     app_instance = MagicMock()
                     routes: list[tuple[str, str, object]] = []

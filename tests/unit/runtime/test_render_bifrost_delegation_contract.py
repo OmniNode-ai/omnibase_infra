@@ -4,14 +4,17 @@
 
 from __future__ import annotations
 
+import importlib.resources
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
+    _resolve_default_source_path,
     render_bifrost_delegation_contract,
 )
 
@@ -275,3 +278,79 @@ def test_optional_endpoint_probe_failure_leaves_backend_unpopulated(
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
     assert loaded["backends"][1]["endpoint_url"] == ""
+
+
+@pytest.mark.unit
+def test_resolve_default_source_path_uses_omnimarket_when_available(
+    tmp_path: Path,
+) -> None:
+    """_resolve_default_source_path prefers omnimarket package when present."""
+    fake_yaml = tmp_path / "bifrost_delegation.yaml"
+    fake_yaml.write_text("backends: []\n", encoding="utf-8")
+
+    fake_traversable = mock.MagicMock()
+    fake_traversable.__str__ = mock.Mock(return_value=str(fake_yaml))
+
+    with mock.patch("importlib.resources.files") as mock_files:
+        mock_files.return_value.joinpath.return_value = fake_traversable
+        result = _resolve_default_source_path()
+
+    assert result == fake_yaml
+
+
+@pytest.mark.unit
+def test_resolve_default_source_path_falls_back_when_omnimarket_absent() -> None:
+    """_resolve_default_source_path falls back to legacy path when omnimarket missing."""
+    from omnibase_infra.runtime.render_bifrost_delegation_contract import (
+        _LEGACY_SOURCE_PATH,
+    )
+
+    with mock.patch("importlib.resources.files", side_effect=ModuleNotFoundError):
+        result = _resolve_default_source_path()
+
+    assert result == _LEGACY_SOURCE_PATH
+
+
+@pytest.mark.unit
+def test_empty_target_renders_from_omnimarket_source(tmp_path: Path) -> None:
+    """First-boot: 0-byte target is replaced using a source resolved from omnimarket."""
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text("", encoding="utf-8")
+
+    with mock.patch(
+        "omnibase_infra.runtime.render_bifrost_delegation_contract._DEFAULT_SOURCE_PATH",
+        source,
+    ):
+        rendered = render_bifrost_delegation_contract(
+            target_path=target,
+            environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+        )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+@pytest.mark.unit
+def test_empty_bifrost_source_env_uses_resolved_default(tmp_path: Path) -> None:
+    """Empty BIFROST_SOURCE_CONTRACT_PATH env var falls through to _DEFAULT_SOURCE_PATH."""
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered.yaml"
+
+    with mock.patch(
+        "omnibase_infra.runtime.render_bifrost_delegation_contract._DEFAULT_SOURCE_PATH",
+        source,
+    ):
+        rendered = render_bifrost_delegation_contract(
+            target_path=target,
+            environ={
+                "BIFROST_SOURCE_CONTRACT_PATH": "",
+                "LLM_CODER_URL": _http_url("coder.local:8000"),
+            },
+        )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")

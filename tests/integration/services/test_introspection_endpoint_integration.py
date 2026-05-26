@@ -30,7 +30,7 @@ from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
     ModelDiscoveredContract,
 )
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 pytestmark = pytest.mark.integration
 

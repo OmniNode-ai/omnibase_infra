@@ -12,7 +12,7 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
 )
-from omnibase_infra.services.service_health import ServiceHealth
+from omnibase_infra.services.health_checker import ServiceHealth
 
 
 def _make_manifest(contract_count: int = 2) -> ModelAutoWiringManifest:

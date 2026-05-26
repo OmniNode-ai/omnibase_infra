@@ -23,6 +23,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
@@ -64,6 +65,73 @@ def validate_no_duplicates(files: list[Path]) -> None:
 
 def file_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def parse_connect_directive(sql: str) -> tuple[str | None, str]:
+    """Return an optional target database from a leading psql ``\\connect`` line.
+
+    The migration runner executes SQL through asyncpg, not psql, so psql
+    meta-commands are not valid SQL. A leading ``\\connect <database>`` is
+    treated as migration metadata and removed from the SQL sent to Postgres.
+    """
+
+    remaining: list[str] = []
+    target_database: str | None = None
+
+    for line in sql.splitlines(keepends=True):
+        stripped = line.strip()
+        if target_database is None and not stripped:
+            remaining.append(line)
+            continue
+        if target_database is None and stripped.startswith("--"):
+            remaining.append(line)
+            continue
+        if target_database is None and stripped.startswith("\\connect"):
+            parts = stripped.split()
+            if len(parts) != 2:
+                raise ValueError(f"unsupported psql connect directive: {stripped!r}")
+            target_database = parts[1]
+            validate_database_identifier(target_database)
+            continue
+        if stripped.startswith("\\"):
+            raise ValueError(
+                f"unsupported psql meta-command in migration: {stripped!r}"
+            )
+        remaining.append(line)
+
+    return target_database, "".join(remaining)
+
+
+def validate_database_identifier(database: str) -> None:
+    if len(database) > 63 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", database):
+        raise ValueError(f"invalid database name in connect directive: {database!r}")
+
+
+def database_url_for_database(db_url: str, database: str) -> str:
+    validate_database_identifier(database)
+    parsed = urlsplit(db_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError("database URL must include scheme and network location")
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, f"/{database}", parsed.query, parsed.fragment)
+    )
+
+
+async def ensure_database_exists(conn: asyncpg.Connection, database: str) -> None:
+    validate_database_identifier(database)
+    if await database_exists(conn, database):
+        return
+    await conn.execute(f'CREATE DATABASE "{database}"')
+
+
+async def database_exists(conn: asyncpg.Connection, database: str) -> bool:
+    validate_database_identifier(database)
+    return bool(
+        await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            database,
+        )
+    )
 
 
 def split_sql_statements(sql: str) -> list[str]:
@@ -187,7 +255,7 @@ async def apply_migration(
     dry_run: bool,
 ) -> None:
     mid = migration_id(source_set, path.name)
-    sql = path.read_text()
+    _, sql = parse_connect_directive(path.read_text())
     checksum = file_checksum(path)
 
     if dry_run:
@@ -225,12 +293,31 @@ async def apply_migration(
 
 async def run(db_url: str, dry_run: bool, target: int | None) -> int:
     """Apply all pending migrations. Returns count of migrations applied."""
-    conn = await asyncpg.connect(db_url)
-    try:
-        await ensure_schema_migrations_table(conn)
-        applied = await get_applied_ids(conn)
+    base_conn = await asyncpg.connect(db_url)
+    conns: dict[str, asyncpg.Connection] = {"": base_conn}
+    applied_by_database: dict[str, set[str]] = {}
 
-        pending: list[tuple[int, str, Path]] = []
+    async def _conn_for_database(database: str | None) -> asyncpg.Connection:
+        key = database or ""
+        if key in conns:
+            return conns[key]
+        await ensure_database_exists(base_conn, key)
+        conns[key] = await asyncpg.connect(database_url_for_database(db_url, key))
+        return conns[key]
+
+    async def _applied_ids_for_database(database: str | None) -> set[str]:
+        key = database or ""
+        if key not in applied_by_database:
+            if dry_run and database and not await database_exists(base_conn, database):
+                applied_by_database[key] = set()
+                return applied_by_database[key]
+            conn = await _conn_for_database(database)
+            await ensure_schema_migrations_table(conn)
+            applied_by_database[key] = await get_applied_ids(conn)
+        return applied_by_database[key]
+
+    try:
+        pending: list[tuple[int, str, Path, str | None]] = []
         for source_set, migration_dir in MIGRATION_SETS:
             if not migration_dir.exists():
                 print(f"  warning: migration directory not found: {migration_dir}")
@@ -242,12 +329,14 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
             validate_no_duplicates(files)
             for f in files:
                 mid = migration_id(source_set, f.name)
+                target_database, _ = parse_connect_directive(f.read_text())
+                applied = await _applied_ids_for_database(target_database)
                 if mid in applied:
                     continue
                 seq = extract_sequence_number(f.name)
                 if target is not None and seq > target:
                     continue
-                pending.append((seq, source_set, f))
+                pending.append((seq, source_set, f, target_database))
 
         pending.sort(key=lambda t: (t[0], t[1]))
 
@@ -256,12 +345,14 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
             return 0
 
         print(f"Applying {len(pending)} pending migration(s)...")
-        for _, source_set, path in pending:
+        for _, source_set, path, target_database in pending:
+            conn = base_conn if dry_run else await _conn_for_database(target_database)
             await apply_migration(conn, source_set, path, dry_run)
 
         return len(pending)
     finally:
-        await conn.close()
+        for conn in reversed(list(conns.values())):
+            await conn.close()
 
 
 def restamp_fingerprint(db_url: str) -> None:

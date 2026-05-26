@@ -157,7 +157,7 @@ class TestDynamicMaterializationTopicProvisioning:
         contracts_dir = tmp_path / "contracts"
         contracts_dir.mkdir()
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -213,7 +213,7 @@ class TestDynamicMaterializationTopicProvisioning:
         contracts_dir = tmp_path / "contracts"
         contracts_dir.mkdir()
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -257,7 +257,7 @@ class TestDynamicMaterializationTopicProvisioning:
         contracts_dir = tmp_path / "contracts"
         contracts_dir.mkdir()
 
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -304,7 +304,7 @@ class TestDynamicMaterializationTopicProvisioning:
     ) -> None:
         """Provisioning is skipped when event bus is not Kafka (e.g. inmemory)."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 
@@ -336,7 +336,7 @@ class TestDynamicMaterializationTopicProvisioning:
         tmp_path: Path,
     ) -> None:
         """No provisioning attempt when _event_bus_wiring is None."""
-        from omnibase_infra.runtime.service_runtime_host_process import (
+        from omnibase_infra.runtime.runtime_host_process import (
             RuntimeHostProcess,
         )
 

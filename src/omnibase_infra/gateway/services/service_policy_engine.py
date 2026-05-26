@@ -68,7 +68,9 @@ class EnumPolicyDecision(str, Enum):
     DENY = "deny"
 
 
-@dataclass(frozen=True)
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: gateway-internal policy decision result
 class PolicyDecision:
     """Result of policy evaluation.
 

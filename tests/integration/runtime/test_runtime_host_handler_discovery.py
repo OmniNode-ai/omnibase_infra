@@ -42,7 +42,7 @@ from omnibase_infra.runtime.handler_registry import (
     RegistryProtocolBinding,
     get_handler_registry,
 )
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 # =============================================================================
 # Constants for Handler Contract Templates

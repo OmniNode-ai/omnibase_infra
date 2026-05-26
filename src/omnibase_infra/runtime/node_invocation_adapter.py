@@ -93,7 +93,7 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
 from omnibase_infra.runtime.models.model_local_state_store import ModelLocalStateStore
-from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 logger = logging.getLogger(__name__)
@@ -129,12 +129,12 @@ class NodeInvocationAdapter:
         event_bus: ProtocolPatternBBrokerTransport | None = None,
         *,
         backend: EnumRuntimeBackend = EnumRuntimeBackend.AUTO,
-        routes: Mapping[str, RuntimeLocalIngressRoute] | None = None,
+        routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
         health_probe_timeout: float = _HEALTH_PROBE_TIMEOUT_SECONDS,
     ) -> None:
         self._event_bus = event_bus
         self._backend = backend
-        self._routes: dict[str, RuntimeLocalIngressRoute] | None = (
+        self._routes: dict[str, ModelRuntimeLocalIngressRoute] | None = (
             dict(routes) if routes is not None else None
         )
         self._health_probe_timeout = health_probe_timeout
@@ -302,7 +302,7 @@ class NodeInvocationAdapter:
             )
 
         # Build a synthetic route so RuntimePatternBBroker can be reused.
-        synthetic_route = RuntimeLocalIngressRoute(
+        synthetic_route = ModelRuntimeLocalIngressRoute(
             node_name=command_name,
             contract_name=command_name,
             command_topic=command_topic,
@@ -312,7 +312,7 @@ class NodeInvocationAdapter:
             contract_path="",
             package_name="deployed",
         )
-        routes: dict[str, RuntimeLocalIngressRoute] = (
+        routes: dict[str, ModelRuntimeLocalIngressRoute] = (
             dict(self._routes)
             if self._routes is not None
             else {command_name: synthetic_route}
