@@ -1337,10 +1337,7 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
-    if (
-        "dispatch_port" in constructor_params
-        and requires_delegation_port
-    ):
+    if "dispatch_port" in constructor_params and requires_delegation_port:
         # When container is available, inject ContainerBackedDelegationDispatchPort
         # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
         # PluginDelegation at start_consumers() time. This avoids the asyncio stall

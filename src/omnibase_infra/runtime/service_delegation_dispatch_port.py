@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
 from uuid import UUID
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
@@ -18,6 +17,9 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
 )
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
+)
+from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
+    ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressRoute,
@@ -211,22 +213,6 @@ class RuntimeDelegationDispatchPort:
         )
 
 
-class _ProtocolDispatchPort(Protocol):
-    async def dispatch(
-        self,
-        *,
-        prompt: str,
-        task_type: str,
-        correlation_id: UUID,
-        max_tokens: int,
-        source_file_path: str | None,
-        source_session_id: str | None,
-        wait: bool,
-        quality_contract_mode: str,
-        acceptance_criteria: tuple[str, ...],
-    ) -> dict[str, object]: ...
-
-
 class ContainerBackedDelegationDispatchPort:
     """Delegation dispatch port that lazy-resolves a bridge-backed port from the container.
 
@@ -247,21 +233,25 @@ class ContainerBackedDelegationDispatchPort:
     ) -> None:
         self._container = container
         self._fallback_event_bus = fallback_event_bus
-        self._resolved: _ProtocolDispatchPort | None = None
+        self._resolved: ProtocolDelegationDispatchPort | None = None
 
-    async def _resolve(self) -> _ProtocolDispatchPort:
+    async def _resolve(self) -> ProtocolDelegationDispatchPort:
         if self._resolved is not None:
             return self._resolved
         registry = getattr(self._container, "service_registry", None)
         if registry is not None:
             try:
-                port = await registry.resolve_service(self._BRIDGE_PORT_KEY)
+                port: ProtocolDelegationDispatchPort = await registry.resolve_service(
+                    self._BRIDGE_PORT_KEY
+                )
                 self._resolved = port
                 return port
             except Exception:  # noqa: BLE001 — fallback-ok: bridge not yet registered, use Kafka port
                 pass
         if self._fallback_event_bus is not None:
-            fallback = RuntimeDelegationDispatchPort(self._fallback_event_bus)
+            fallback: ProtocolDelegationDispatchPort = RuntimeDelegationDispatchPort(
+                self._fallback_event_bus
+            )
             self._resolved = fallback
             return fallback
         raise RuntimeError(
@@ -284,7 +274,7 @@ class ContainerBackedDelegationDispatchPort:
         acceptance_criteria: tuple[str, ...] = (),
     ) -> dict[str, object]:
         port = await self._resolve()
-        return await port.dispatch(  # type: ignore[union-attr]
+        return await port.dispatch(
             prompt=prompt,
             task_type=task_type,
             correlation_id=correlation_id,
@@ -297,4 +287,8 @@ class ContainerBackedDelegationDispatchPort:
         )
 
 
-__all__ = ["ContainerBackedDelegationDispatchPort", "RuntimeDelegationDispatchPort"]
+__all__ = [
+    "ContainerBackedDelegationDispatchPort",
+    "ProtocolDelegationDispatchPort",
+    "RuntimeDelegationDispatchPort",
+]
