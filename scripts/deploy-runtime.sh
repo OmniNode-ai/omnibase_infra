@@ -1185,7 +1185,7 @@ build_images() {
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     local omni_home="${OMNI_HOME:-}"
     local compat_ref="main"
-    local omnimarket_ref="main"
+    local omnimarket_ref="dev"
     local occ_ref="main"
     if [[ -n "${omni_home}" ]]; then
         compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
@@ -1370,7 +1370,7 @@ print_compose_commands() {
     log_info "    --build-arg RUNTIME_SOURCE_HASH=${git_sha} \\"
     log_info "    --build-arg COMPOSE_PROJECT=${compose_project} \\"
     log_info "    --build-arg OMNIBASE_COMPAT_REF=\${OMNIBASE_COMPAT_REF:-main} \\"
-    log_info "    --build-arg OMNIMARKET_REF=\${OMNIMARKET_REF:-main} \\"
+    log_info "    --build-arg OMNIMARKET_REF=\${OMNIMARKET_REF:-dev} \\"
     log_info "    --build-arg ONEX_CHANGE_CONTROL_REF=\${ONEX_CHANGE_CONTROL_REF:-main}"
     log_info ""
     log_info "Restart runtime services:"
