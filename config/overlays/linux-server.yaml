@@ -1,0 +1,51 @@
+# linux-server machine-class overlay profile (OMN-8904 — Wave B)
+#
+# Applied by `onex init --profile linux-server` on the .201 Linux AI server (192.168.86.201).
+# Contains Docker-internal service DNS and container-side addressing for the production
+# infra runtime lane. Services communicate via Docker bridge network, not host-side ports.
+#
+# Semantics: see config/overlays/mac-dev.yaml header for full field descriptions.
+#
+# Infisical project: "linux-server" (see config/infisical_projects.yaml for project IDs)
+#
+# version: 1.0 (OMN-8904)
+version: "1.0"
+machine_class: linux-server
+description: >
+  .201 Linux AI server (Ubuntu, Docker). ONEX runtime containers communicate via Docker bridge network using internal service DNS. The host-side environment provides only bootstrap vars; all secrets are resolved from Infisical. Docker Compose reads from /run/omnibase/runtime.env (ephemeral file written by `onex init` at startup).
+
+infisical_path: /machine-class/linux-server/
+overrides:
+  # Database — Docker-internal service DNS (prod lane Postgres on port 5432)
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  # Kafka — Docker-internal Redpanda broker (containers use the internal service name)
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  # Valkey — Docker-internal
+  VALKEY_HOST: "valkey"
+  VALKEY_PORT: "6379"
+  # Qdrant — Docker-internal
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6333"
+  # Logging — info level for server runtime
+  LOG_LEVEL: "INFO"
+  # Runtime health endpoints — prod lane
+  ONEX_RUNTIME_URL: "http://localhost:28085"
+  ONEX_EFFECTS_URL: "http://localhost:28086"
+
+# Config materialization note:
+#   `onex init --profile linux-server` writes a runtime compose env file to
+#   /run/omnibase/runtime.env (ephemeral tmpfs). Docker Compose references this
+#   via env_file: in the generated compose config. This is the only mechanism
+#   by which Infisical-sourced vars reach containers on .201 — shell-session env
+#   alone does not propagate to compose-launched containers (OMN-7350).
+#
+# bootstrap_only vars (always from ~/.omnibase/.env, not seeded into Infisical):
+#   POSTGRES_PASSWORD
+#   KAFKA_BOOTSTRAP_SERVERS  (also in overrides above for reference)
+#   INFISICAL_ADDR
+#   INFISICAL_CLIENT_ID
+#   INFISICAL_CLIENT_SECRET
+#   INFISICAL_PROJECT_ID
+#   INFISICAL_ENCRYPTION_KEY  (.201-only — Infisical server secret)
+#   INFISICAL_AUTH_SECRET     (.201-only — Infisical server secret)

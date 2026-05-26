@@ -14,6 +14,7 @@ with the expected keys. It is designed to be safe by default:
     - ``--overwrite-existing`` (default: false) -- overwrites existing values
     - ``--import-env FILE`` -- import values from a .env file
     - ``--export`` -- export current Infisical values to stdout
+    - ``--machine-class CLASS`` -- seed machine-class overlay (mac-dev, linux-server, cloud-k8s)
 
 Usage:
     # Dry run (default) -- show what would happen
@@ -32,6 +33,15 @@ Usage:
         --contracts-dir src/omnibase_infra/nodes \\
         --import-env .env \\
         --set-values \\
+        --execute
+
+    # Seed machine-class overlay (OMN-8904)
+    uv run python scripts/seed-infisical.py \\
+        --machine-class mac-dev \\
+        --dry-run
+
+    uv run python scripts/seed-infisical.py \\
+        --machine-class linux-server \\
         --execute
 
 Note:
@@ -491,6 +501,157 @@ def _do_export(*, reveal: bool = False) -> bool:
         adapter.shutdown()
 
 
+_MACHINE_CLASSES = ("mac-dev", "linux-server", "cloud-k8s")
+_CONFIG_DIR = _PROJECT_ROOT / "config"
+_OVERLAYS_DIR = _CONFIG_DIR / "overlays"
+
+
+def _load_machine_class_overlay(machine_class: str) -> dict[str, str]:
+    """Load the overlay YAML for a machine class and return its overrides dict.
+
+    Args:
+        machine_class: One of 'mac-dev', 'linux-server', 'cloud-k8s'.
+
+    Returns:
+        Dict mapping key name to value string from the overlay's ``overrides`` section.
+
+    Raises:
+        SystemExit: If the overlay file is missing or malformed.
+    """
+    try:
+        import yaml
+    except ImportError:
+        logger.exception(
+            "PyYAML is required for machine-class seeding: pip install pyyaml"
+        )
+        raise SystemExit(1) from None
+
+    overlay_path = _OVERLAYS_DIR / f"{machine_class}.yaml"
+    if not overlay_path.exists():
+        logger.error(
+            "Machine-class overlay not found: %s. Expected path: %s",
+            machine_class,
+            overlay_path,
+        )
+        raise SystemExit(1)
+
+    with overlay_path.open(encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+
+    if not isinstance(data, dict):
+        logger.error("Overlay file %s is not a valid YAML mapping", overlay_path)
+        raise SystemExit(1)
+
+    overrides = data.get("overrides")
+    if not isinstance(overrides, dict):
+        logger.error(
+            "Overlay file %s is missing or has invalid 'overrides' section",
+            overlay_path,
+        )
+        raise SystemExit(1)
+
+    return {str(k): str(v) for k, v in overrides.items()}
+
+
+def _seed_machine_class(
+    machine_class: str,
+    *,
+    create_missing: bool,
+    overwrite_existing: bool,
+    dry_run: bool,
+) -> int:
+    """Seed machine-class overlay values into Infisical.
+
+    Reads ``config/overlays/<machine-class>.yaml``, extracts the ``overrides``
+    section, and seeds each key under ``/machine-class/<class>/`` in Infisical.
+    Only non-secret config values (addresses, ports, log levels) should appear
+    in overlays — secrets belong in ``/shared/<transport>/``.
+
+    Args:
+        machine_class: Target class — 'mac-dev', 'linux-server', or 'cloud-k8s'.
+        create_missing: Create keys absent from Infisical.
+        overwrite_existing: Overwrite keys that already exist.
+        dry_run: If True, print diff without writing.
+
+    Returns:
+        Exit code: 0 on success, 1 on any error.
+    """
+    if machine_class not in _MACHINE_CLASSES:
+        logger.error(
+            "Unknown machine class '%s'. Valid classes: %s",
+            machine_class,
+            ", ".join(_MACHINE_CLASSES),
+        )
+        return 1
+
+    try:
+        overrides = _load_machine_class_overlay(machine_class)
+    except SystemExit:
+        return 1
+
+    infisical_folder = f"/machine-class/{machine_class}/"
+    requirements = [
+        {
+            "key": key,
+            "transport_type": "machine-class",
+            "folder": infisical_folder,
+            "source": f"overlays/{machine_class}.yaml",
+        }
+        for key in overrides
+    ]
+
+    logger.info(
+        "Machine-class overlay '%s': %d keys to seed at %s",
+        machine_class,
+        len(requirements),
+        infisical_folder,
+    )
+
+    _print_diff_summary(
+        requirements,
+        overrides,
+        create_missing=create_missing,
+        set_values=True,
+        overwrite_existing=overwrite_existing,
+    )
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to write to Infisical.")
+        return 0
+
+    try:
+        created, updated, skipped, error_count = _do_seed(
+            requirements,
+            overrides,
+            create_missing=create_missing,
+            set_values=True,
+            overwrite_existing=overwrite_existing,
+        )
+    except Exception as exc:
+        try:
+            from omnibase_infra.utils.util_error_sanitization import (
+                sanitize_error_message,
+            )
+
+            _msg = sanitize_error_message(exc)
+        except ImportError:
+            _msg = type(exc).__name__
+        logger.exception("Machine-class seed failed with unhandled error: %s", _msg)
+        return 1
+
+    logger.info(
+        "Machine-class seed complete: %d created, %d updated, %d skipped, %d errors",
+        created,
+        updated,
+        skipped,
+        error_count,
+    )
+    if error_count > 0:
+        logger.error("%d secret(s) failed to process", error_count)
+        return 1
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -584,8 +745,28 @@ def main() -> int:
         default=False,
         help="Show actual secret values in --export output (use with caution)",
     )
+    parser.add_argument(
+        "--machine-class",
+        choices=list(_MACHINE_CLASSES),
+        default=None,
+        help=(
+            "Seed machine-class overlay values into Infisical (OMN-8904). "
+            "Reads config/overlays/<class>.yaml and seeds each override key "
+            "under /machine-class/<class>/ in Infisical. "
+            "Valid classes: " + ", ".join(_MACHINE_CLASSES)
+        ),
+    )
 
     args = parser.parse_args()
+
+    # Handle machine-class overlay seeding (OMN-8904 — Wave B)
+    if args.machine_class is not None:
+        return _seed_machine_class(
+            args.machine_class,
+            create_missing=args.create_missing_keys,
+            overwrite_existing=args.overwrite_existing,
+            dry_run=args.dry_run and not args.execute,
+        )
 
     # Handle export mode
     if args.export:
