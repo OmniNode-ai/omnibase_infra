@@ -1,0 +1,51 @@
+# mac-dev machine-class overlay profile (OMN-8904 — Wave B)
+#
+# Applied by `onex init --profile mac-dev` on developer Macs (Mac Studio, MacBook).
+# Contains host-side service addresses for local development.
+#
+# Semantics:
+#   machine_class  — canonical identifier used as the Infisical /machine-class/<class>/ path prefix
+#   description    — human-readable description of the machine class
+#   infisical_path — Infisical path prefix where machine-class-specific secrets are stored
+#   overrides      — non-secret config values that differ from the platform-wide shared defaults
+#                    (e.g. host-side addresses vs Docker-internal service DNS)
+#
+# These are NOT secret values. Secrets (passwords, API keys) remain in Infisical /shared/<transport>/.
+# This overlay provides address/port/logging overrides so `onex init` can configure the shell session
+# correctly for the local machine class without requiring per-machine .env edits.
+#
+# Infisical project: "mac-dev" (see config/infisical_projects.yaml for project IDs)
+#
+# version: 1.0 (OMN-8904)
+version: "1.0"
+machine_class: mac-dev
+description: >
+  Developer Mac (Mac Studio M2 Ultra or MacBook). Services run as Docker containers on the local machine. Host-side addressing is used (localhost / 127.0.0.1). Debug logging enabled. Kafka bootstrap is the host-exposed port (not Docker-internal redpanda:9092).
+
+infisical_path: /machine-class/mac-dev/
+overrides:
+  # Database — host-side exposed port (5436 for dev lane, 5432 fallback if running standalone)
+  POSTGRES_HOST: "localhost"
+  POSTGRES_PORT: "5436"
+  # Kafka — host-side exposed port (19092 for dev lane; containers use redpanda:9092 internally)
+  KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
+  # Valkey — host-side exposed port (16379 for dev lane)
+  VALKEY_HOST: "localhost"
+  VALKEY_PORT: "16379"
+  # Qdrant — host-side
+  QDRANT_HOST: "localhost"
+  QDRANT_PORT: "6333"
+  # Logging — debug level for local development
+  LOG_LEVEL: "DEBUG"
+  # Runtime health endpoints — dev lane
+  ONEX_RUNTIME_URL: "http://localhost:8085"
+  ONEX_EFFECTS_URL: "http://localhost:8086"
+
+# bootstrap_only vars that must always come from ~/.omnibase/.env on this class
+# (never seeded into Infisical — circular bootstrap dep):
+#   POSTGRES_PASSWORD
+#   KAFKA_BOOTSTRAP_SERVERS  (also in overrides above for reference, but sourced from bootstrap file at init)
+#   INFISICAL_ADDR
+#   INFISICAL_CLIENT_ID
+#   INFISICAL_CLIENT_SECRET
+#   INFISICAL_PROJECT_ID
