@@ -7,10 +7,10 @@ node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  Pure computation: calculates RSD 5-factor priority scores. Factors: dependency distance (40%), failure surface (25%), time decay (15%), agent utility (10%), user weighting (10%). No I/O - all data provided as input.
+  Pure computation: calculates RSD 5-factor priority scores. Factors: dependency distance (40%), failure surface (25%), time decay (15%), agent utility (10%), user weighting (10%). Time decay normalizes naive created_at timestamps to UTC before age arithmetic. No I/O - all data provided as input.
 
 input_model:
   name: "ModelRsdScoreInput"
