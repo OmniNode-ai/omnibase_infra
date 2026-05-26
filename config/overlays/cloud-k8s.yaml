@@ -1,0 +1,50 @@
+# cloud-k8s machine-class overlay profile (OMN-8904 — Wave B)
+#
+# Reference implementation for the Kubernetes / onex-dev cluster.
+# k8s is the reference implementation for the target state of the bootstrap plan —
+# it already uses the Infisical operator (`secrets.infisical.com/v1alpha1` CRDs)
+# with NO host-side .env file. This overlay documents the pattern.
+#
+# Unlike mac-dev and linux-server, this overlay is NOT applied by `onex init`.
+# Secrets are injected via InfisicalSecret CRDs (see k8s/infisical/ manifests).
+# The overlay exists here for:
+#   1. Documentation — shows the k8s address/port conventions for reference
+#   2. Infisical machine-class project structure — seed-infisical.py can seed
+#      machine-class-specific secrets to /machine-class/cloud-k8s/ so k8s
+#      InfisicalSecret CRDs can reference them
+#
+# Semantics: see config/overlays/mac-dev.yaml header for full field descriptions.
+#
+# Infisical project: "cloud-k8s" (see config/infisical_projects.yaml for project IDs)
+#
+# version: 1.0 (OMN-8904)
+version: "1.0"
+machine_class: cloud-k8s
+description: >
+  Kubernetes cluster (onex-dev). Secrets are injected by the Infisical operator via InfisicalSecret CRDs — no host-side bootstrap file required. This overlay documents the k8s service DNS conventions and serves as the seed target for the /machine-class/cloud-k8s/ Infisical path.
+
+infisical_path: /machine-class/cloud-k8s/
+overrides:
+  # Database — k8s service DNS (postgres service in the same namespace)
+  POSTGRES_HOST: "postgres.default.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  # Kafka — k8s service DNS for Redpanda
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda.default.svc.cluster.local:9092"
+  # Valkey — k8s service DNS
+  VALKEY_HOST: "valkey.default.svc.cluster.local"
+  VALKEY_PORT: "6379"
+  # Qdrant — k8s service DNS
+  QDRANT_HOST: "qdrant.default.svc.cluster.local"
+  QDRANT_PORT: "6333"
+  # Logging — info level for cluster runtime
+  LOG_LEVEL: "INFO"
+  # Runtime health endpoints — k8s ingress / internal service
+  ONEX_RUNTIME_URL: "http://omninode-runtime.default.svc.cluster.local:8085"
+  ONEX_EFFECTS_URL: "http://runtime-effects.default.svc.cluster.local:8086"
+
+# k8s bootstrap pattern (reference):
+#   The Infisical operator reads INFISICAL_PROJECT_ID and credentials from a
+#   Kubernetes Secret (not a host .env file). InfisicalSecret CRDs are defined
+#   at k8s/infisical/onex-runtime-infisical-secret.yaml.
+#   No per-pod host-side env file is needed — this is the target state for all
+#   machine classes (Wave D for mac-dev and linux-server).

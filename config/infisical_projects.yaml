@@ -1,0 +1,59 @@
+# infisical_projects.yaml — Infisical project registry (OMN-8904 — Wave B)
+#
+# Authoritative list of Infisical project names and their purposes.
+# Project UUIDs are populated after the projects are created in the live
+# Infisical instance on 192.168.86.201:8880.
+#
+# To create the projects and fill in the IDs:
+#   1. Ensure Infisical is reachable: curl -fsS http://192.168.86.201:8880/api/status
+#   2. Run: uv run python scripts/seed-infisical.py --machine-class mac-dev --dry-run
+#      (lists what would be seeded; use --execute to actually seed)
+#   3. After creation, populate the project_id fields below with the UUIDs
+#      returned by `infisical projects list` or the Infisical API.
+#
+# version: 1.0 (OMN-8904)
+# Reload required: increment minor when adding projects, major on schema changes.
+version: "1.0"
+# Shared platform project — all secrets in /shared/<transport>/ live here.
+# This is the project referenced by INFISICAL_PROJECT_ID in bootstrap .env files
+# on all machine classes. It is the source of truth for platform-wide secrets.
+shared:
+  name: onex-platform
+  description: >
+    Shared platform secrets. All keys in shared_key_registry.yaml are seeded here under /shared/<transport>/. This project is the default for all services.
+
+  # project_id: FILL_IN_AFTER_INFISICAL_CREATION
+  # To retrieve: infisical projects list | grep onex-platform
+# Machine-class projects — machine-class-specific config overrides.
+# Secrets here are NOT the same as shared secrets. They contain addressing and
+# logging overrides that differ per machine class (see config/overlays/).
+machine_classes:
+  - name: mac-dev
+    description: >
+      Developer Macs (Mac Studio, MacBook). Host-side port addressing, debug logging, host-exposed Kafka/Postgres/Valkey ports. See config/overlays/mac-dev.yaml.
+
+    infisical_path_prefix: /machine-class/mac-dev/
+    overlay_file: config/overlays/mac-dev.yaml
+    # project_id: FILL_IN_AFTER_INFISICAL_CREATION
+  - name: linux-server
+    description: >
+      .201 Linux AI server. Docker-internal service DNS, container-side Kafka/Postgres/Valkey addresses. Ephemeral /run/omnibase/runtime.env written by `onex init`. See config/overlays/linux-server.yaml.
+
+    infisical_path_prefix: /machine-class/linux-server/
+    overlay_file: config/overlays/linux-server.yaml
+    # project_id: FILL_IN_AFTER_INFISICAL_CREATION
+  - name: cloud-k8s
+    description: >
+      Kubernetes cluster (onex-dev). k8s service DNS. Secrets injected via InfisicalSecret CRDs — no host-side bootstrap file. Reference implementation for target state. See config/overlays/cloud-k8s.yaml.
+
+    infisical_path_prefix: /machine-class/cloud-k8s/
+    overlay_file: config/overlays/cloud-k8s.yaml
+    # project_id: FILL_IN_AFTER_INFISICAL_CREATION
+
+# Note on project scoping:
+#   Shared secrets (/shared/<transport>/) are visible to ALL machine classes.
+#   Machine-class secrets (/machine-class/<class>/) are scoped to that class only.
+#   At runtime, config resolution priority is (highest to lowest):
+#     1. /services/<repo>/<transport>/ — per-service override
+#     2. /machine-class/<class>/       — machine-class override
+#     3. /shared/<transport>/          — platform-wide default
