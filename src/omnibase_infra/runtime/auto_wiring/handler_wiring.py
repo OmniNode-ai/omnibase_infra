@@ -1449,6 +1449,56 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
+def _message_type_keys_from_topic(topic: str) -> tuple[str, ...]:
+    """Return dispatch message-type keys accepted for a contract topic."""
+    keys: list[str] = []
+    alias = _derive_event_type_alias_from_topic(topic)
+    if alias is not None:
+        keys.append(alias)
+    if topic.startswith("onex."):
+        keys.append(topic)
+    return tuple(dict.fromkeys(keys))
+
+
+def _topics_for_handler_entry(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> tuple[str, ...]:
+    """Return subscribe topics that can be deterministically assigned to entry."""
+    if contract.event_bus is None:
+        return ()
+
+    topics = contract.event_bus.subscribe_topics
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        matched = tuple(
+            topic
+            for topic in topics
+            if topic == event_type_alias
+            or _derive_event_type_alias_from_topic(topic) == event_type_alias
+        )
+        return matched
+
+    if entry.event_model is None:
+        return topics
+
+    if len(topics) == 1:
+        return topics
+
+    return ()
+
+
+def _message_type_keys_for_handler_entry(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> tuple[str, ...]:
+    """Return topic-derived dispatcher keys scoped to one handler entry."""
+    keys: list[str] = []
+    for topic in _topics_for_handler_entry(contract, entry):
+        keys.extend(_message_type_keys_from_topic(topic))
+    return tuple(dict.fromkeys(keys))
+
+
 def _strict_dispatcher_coverage_enabled() -> bool:
     """Return True when strict orchestrator dispatcher coverage is enabled."""
     return os.environ.get(_STRICT_DISPATCHER_COVERAGE_ENV, "").lower() in (
@@ -2373,14 +2423,9 @@ def _prepare_handler_wiring(
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
-    elif contract.event_bus:
-        topic_aliases = {
-            alias
-            for topic in contract.event_bus.subscribe_topics
-            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
-        }
-        if topic_aliases:
-            message_types = (message_types or set()).union(topic_aliases)
+    topic_message_types = set(_message_type_keys_for_handler_entry(contract, entry))
+    if topic_message_types:
+        message_types = (message_types or set()).union(topic_message_types)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
@@ -2540,7 +2585,7 @@ def _prepare_handler_wiring(
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
-        for topic in contract.event_bus.subscribe_topics:
+        for topic in _topics_for_handler_entry(contract, entry):
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
