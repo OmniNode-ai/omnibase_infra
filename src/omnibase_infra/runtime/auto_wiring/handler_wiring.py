@@ -1449,6 +1449,17 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
+def _message_type_keys_from_topic(topic: str) -> tuple[str, ...]:
+    """Return dispatch message-type keys accepted for a contract topic."""
+    keys: list[str] = []
+    alias = _derive_event_type_alias_from_topic(topic)
+    if alias is not None:
+        keys.append(alias)
+    if topic.startswith("onex."):
+        keys.append(topic)
+    return tuple(dict.fromkeys(keys))
+
+
 def _strict_dispatcher_coverage_enabled() -> bool:
     """Return True when strict orchestrator dispatcher coverage is enabled."""
     return os.environ.get(_STRICT_DISPATCHER_COVERAGE_ENV, "").lower() in (
@@ -2373,14 +2384,14 @@ def _prepare_handler_wiring(
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
-    elif contract.event_bus:
-        topic_aliases = {
-            alias
+    if contract.event_bus:
+        topic_message_types = {
+            message_type
             for topic in contract.event_bus.subscribe_topics
-            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+            for message_type in _message_type_keys_from_topic(topic)
         }
-        if topic_aliases:
-            message_types = (message_types or set()).union(topic_aliases)
+        if topic_message_types:
+            message_types = (message_types or set()).union(topic_message_types)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 

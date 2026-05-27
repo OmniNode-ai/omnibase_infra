@@ -106,7 +106,11 @@ def test_registration_emits_alias_matching_dispatch_engine_normalization() -> No
             container=None,
         )
 
-    assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}, (
+    assert prepared.message_types == {
+        "ModelFooCommand",
+        "platform.foo-start",
+        "onex.cmd.platform.foo-start.v1",
+    }, (
         "Registration must emit the stripped alias so the dispatch engine's "
         ".strip()-normalized wire event_type matches. Drift here reintroduces "
         "the OMN-9215 DLQ-everything bug."
@@ -163,4 +167,8 @@ def test_alias_absent_falls_back_to_class_name_and_topic_derived_alias() -> None
             container=None,
         )
 
-    assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+    assert prepared.message_types == {
+        "ModelFooCommand",
+        "platform.foo-start",
+        "onex.cmd.platform.foo-start.v1",
+    }

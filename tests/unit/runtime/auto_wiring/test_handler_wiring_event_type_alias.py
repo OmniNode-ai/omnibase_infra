@@ -51,6 +51,7 @@ def _make_contract_with_event_type_alias(
     event_type_alias: str | None,
     message_category: str | None = None,
     node_name: str = "node_local",
+    subscribe_topic: str = "onex.cmd.platform.foo-start.v1",
 ) -> ModelDiscoveredContract:
     event_model = ModelHandlerRef(name=event_model_name, module="fake.models")
     entry_kwargs: dict[str, object] = {
@@ -71,7 +72,7 @@ def _make_contract_with_event_type_alias(
         entry_point_name=node_name,
         package_name="test-pkg",
         event_bus=ModelEventBusWiring(
-            subscribe_topics=("onex.cmd.platform.foo-start.v1",),
+            subscribe_topics=(subscribe_topic,),
             publish_topics=(),
         ),
         handler_routing=ModelHandlerRouting(
@@ -142,7 +143,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_types_strips_whitespace_from_event_type_alias(self) -> None:
@@ -177,7 +182,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_types_omits_alias_when_only_whitespace(self) -> None:
@@ -213,7 +222,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_category_overrides_contract_first_topic_category(self) -> None:
@@ -268,6 +281,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             event_type_alias="platform.node-heartbeat",
             message_category="EVENT",
             node_name="node_registration_orchestrator",
+            subscribe_topic="onex.evt.platform.node-heartbeat.v1",
         )
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
         handler_cls = _make_zero_arg_handler_cls()
@@ -295,6 +309,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {
             "ModelNodeHeartbeatEvent",
             "platform.node-heartbeat",
+            "onex.evt.platform.node-heartbeat.v1",
         }
         assert (
             prepared.resolution_outcome
@@ -335,7 +350,53 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
+
+    @pytest.mark.unit
+    def test_message_types_include_full_onex_topic_for_canonical_envelopes(
+        self,
+    ) -> None:
+        """Canonical envelopes preserve the full topic in ``event_type``.
+
+        Projection consumers receive ``ModelEventEnvelope.event_type`` as
+        ``onex.evt.<producer>.<event>.v1`` when publishers emit canonical
+        envelopes. Dispatcher registration must include that exact wire key in
+        addition to the older dot-path alias.
+        """
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelTaskDelegatedEvent",
+            event_type_alias=None,
+            subscribe_topic="onex.evt.omniclaude.task-delegated.v1",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        handler_cls = _make_zero_arg_handler_cls()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        assert prepared.message_types == {
+            "ModelTaskDelegatedEvent",
+            "omniclaude.task-delegated",
+            "onex.evt.omniclaude.task-delegated.v1",
+        }
 
 
 class TestContractDiscoveryParsesEventType:
