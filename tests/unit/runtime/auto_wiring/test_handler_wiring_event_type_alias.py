@@ -398,6 +398,81 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             "onex.evt.omniclaude.task-delegated.v1",
         }
 
+    @pytest.mark.unit
+    def test_topic_derived_keys_are_scoped_to_matching_handler_entry(self) -> None:
+        """Multi-handler contracts must not register every handler for every topic."""
+        heartbeat_entry = ModelHandlerRoutingEntry(
+            handler=ModelHandlerRef(name="HandlerNodeHeartbeat", module="fake.module"),
+            event_model=ModelHandlerRef(
+                name="ModelNodeHeartbeatEvent",
+                module="fake.models",
+            ),
+            event_type="platform.node-heartbeat",
+        )
+        introspection_entry = ModelHandlerRoutingEntry(
+            handler=ModelHandlerRef(
+                name="HandlerNodeIntrospected",
+                module="fake.module",
+            ),
+            event_model=ModelHandlerRef(
+                name="ModelNodeIntrospectionEvent",
+                module="fake.models",
+            ),
+            event_type="platform.node-introspection",
+        )
+        contract = ModelDiscoveredContract(
+            name="node_registration_orchestrator",
+            node_type="ORCHESTRATOR_GENERIC",
+            contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+            contract_path=Path("/fake/contract.yaml"),
+            entry_point_name="node_registration_orchestrator",
+            package_name="test-pkg",
+            event_bus=ModelEventBusWiring(
+                subscribe_topics=(
+                    "onex.evt.platform.node-introspection.v1",
+                    "onex.evt.platform.node-heartbeat.v1",
+                ),
+                publish_topics=(),
+            ),
+            handler_routing=ModelHandlerRouting(
+                routing_strategy="payload_type_match",
+                handlers=(introspection_entry, heartbeat_entry),
+            ),
+        )
+        handler_cls = _make_zero_arg_handler_cls()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=heartbeat_entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        assert prepared.message_types == {
+            "ModelNodeHeartbeatEvent",
+            "platform.node-heartbeat",
+            "onex.evt.platform.node-heartbeat.v1",
+        }
+        assert "platform.node-introspection" not in prepared.message_types
+        assert "onex.evt.platform.node-introspection.v1" not in prepared.message_types
+        assert prepared.route_ids == [
+            (
+                "route.auto.node_registration_orchestrator."
+                "HandlerNodeHeartbeat.onex_evt_platform_node_heartbeat_v1"
+            )
+        ]
+
 
 class TestContractDiscoveryParsesEventType:
     """End-to-end check: YAML `event_type:` survives parsing onto the model."""
