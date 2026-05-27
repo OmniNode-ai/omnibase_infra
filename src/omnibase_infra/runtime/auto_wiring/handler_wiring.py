@@ -729,6 +729,10 @@ def _extract_projection_topic(envelope: object) -> str:
         value = _materialized_dispatch_trace_value(envelope, "topic")
     else:
         value = getattr(envelope, "topic", None)
+        if not value:
+            event_type = getattr(envelope, "event_type", None)
+            if isinstance(event_type, str) and event_type.startswith("onex."):
+                value = event_type
     return str(value).strip() if value else ""
 
 
