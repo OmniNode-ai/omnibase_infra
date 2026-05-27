@@ -118,6 +118,122 @@ def test_projection_callback_injects_db_and_event_type() -> None:
 
 
 @pytest.mark.unit
+def test_projection_callback_runs_sync_handler_outside_active_loop() -> None:
+    """Sync projection handlers may legitimately own their own event loop."""
+
+    class LoopOwningHandler:
+        def handle(self, input_data: dict) -> dict:
+            async def _project() -> dict:
+                return {"event_type": input_data["_event_type"]}
+
+            return asyncio.run(_project())
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    callback = _make_projection_dispatch_callback(
+        LoopOwningHandler(),
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"correlation_id": "corr-1", "task_type": "release-proof"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            result = asyncio.run(callback(envelope))
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_projection_callback_connects_runner_db_before_handle() -> None:
+    """BaseProjectionRunner-style handlers need their async DB pool initialized."""
+
+    class FakeRunnerDb:
+        def __init__(self) -> None:
+            self._pool = None
+            self.connected = False
+
+        async def connect(self) -> None:
+            await asyncio.sleep(0)
+            self._pool = object()
+            self.connected = True
+
+    class DelegationProjectionRunner:
+        def __init__(self) -> None:
+            self.db = FakeRunnerDb()
+            self.handled = False
+
+        def handle(self, input_data: dict) -> dict:
+            assert self.db.connected is True
+            self.handled = True
+            return {"projected": True}
+
+    handler = DelegationProjectionRunner()
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"correlation_id": "corr-1", "task_type": "release-proof"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            result = asyncio.run(callback(envelope))
+
+    assert result is None
+    assert handler.handled is True
+    assert handler.db.connected is True
+
+
+@pytest.mark.unit
+def test_projection_callback_skips_standalone_projection_runner() -> None:
+    """Standalone Kafka runners are not safe as direct DB-injection callbacks."""
+
+    class DelegationProjectionRunner:
+        topics = ["onex.evt.omniclaude.task-delegated.v1"]
+
+        def __init__(self) -> None:
+            self.db = object()
+            self.called = False
+
+        async def project_event(self) -> None:
+            self.called = True
+
+        def handle(self, input_data: dict) -> dict:
+            self.called = True
+            return {"projected": True}
+
+    handler = DelegationProjectionRunner()
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    callback = _make_projection_dispatch_callback(
+        handler,
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"correlation_id": "corr-1", "task_type": "release-proof"}
+
+    result = asyncio.run(callback(envelope))
+
+    assert result is None
+    assert handler.called is False
+
+
+@pytest.mark.unit
 def test_projection_callback_maps_introspection_event_type() -> None:
     """node-introspection topic maps to _event_type='introspection'."""
     received: list[dict] = []
@@ -281,6 +397,35 @@ def test_sync_db_adapter_accepts_multi_column_conflict_key() -> None:
         '"model_local", "model_cloud_baseline") DO UPDATE SET'
     ) in sql
     assert '"savings_usd" = EXCLUDED."savings_usd"' in sql
+
+
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_list_values() -> None:
+    """JSONB list fields must not be sent to Postgres as text arrays."""
+    import psycopg2.extras
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "delegation_events",
+            "correlation_id",
+            {
+                "correlation_id": "corr-1",
+                "quality_gates_checked": 1,
+                "quality_gates_checked_jsonb": ["delegate-skill-terminal"],
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    assert isinstance(params["quality_gates_checked_jsonb"], psycopg2.extras.Json)
 
 
 # ---------------------------------------------------------------------------
