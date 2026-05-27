@@ -850,7 +850,15 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             adapted_row = {
-                key: psycopg2.extras.Json(value) if isinstance(value, dict) else value
+                key: (
+                    psycopg2.extras.Json(value)
+                    if isinstance(value, dict)
+                    or (
+                        isinstance(value, list)
+                        and str(key).endswith(("_json", "_jsonb"))
+                    )
+                    else value
+                )
                 for key, value in row.items()
             }
             # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
@@ -889,6 +897,29 @@ def _build_sync_db_adapter(db_url: str) -> object:
     return SyncPsycopg2Adapter(db_url)
 
 
+def _connect_projection_runner_db_if_needed(handler_instance: object) -> None:
+    """Connect BaseProjectionRunner-style DB adapters before direct dispatch."""
+    db = getattr(handler_instance, "db", None)
+    if db is None or getattr(db, "_pool", None) is not None:
+        return
+    connect = getattr(db, "connect", None)
+    if not callable(connect):
+        return
+    result = connect()
+    if asyncio.iscoroutine(result):
+        asyncio.run(result)
+
+
+def _is_projection_runner_handler(handler_instance: object) -> bool:
+    """Detect standalone Kafka projection runners exposed in handler_routing."""
+    return (
+        type(handler_instance).__name__.endswith("ProjectionRunner")
+        and hasattr(handler_instance, "project_event")
+        and hasattr(handler_instance, "topics")
+        and hasattr(handler_instance, "db")
+    )
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     db_tables: list[dict[str, str]],
@@ -920,6 +951,13 @@ def _make_projection_dispatch_callback(
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
+        if _is_projection_runner_handler(handler_instance):
+            logger.debug(
+                "Projection runner skipped by DB-injection auto-wiring: handler=%s topic=%s",
+                type(handler_instance).__name__,
+                _extract_projection_topic(envelope) or "unknown",
+            )
+            return None
         db_url = os.environ.get(db_url_env, "")
         if not db_url:
             log_level = (
@@ -952,8 +990,13 @@ def _make_projection_dispatch_callback(
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
-            # Why: Control flow narrows this union at runtime before the attribute access.
-            result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
+
+            def _invoke_projection_handler() -> object:
+                _connect_projection_runner_db_if_needed(handler_instance)
+                # Why: Control flow narrows this union at runtime before the attribute access.
+                return handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
+
+            result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
             projected = True
