@@ -241,8 +241,8 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
         self,
         task_id: UUID,
         *,
-        correlation_id: "UUID | None" = None,  # noqa: UP037
-    ) -> "list[dict[str, ModelSchemaValue]] | None":  # noqa: UP037
+        correlation_id: UUID | None = None,
+    ) -> list[dict[str, ModelSchemaValue]] | None:
         row = await self._run_checked(
             correlation_id=correlation_id or uuid4(),
             op_name="get_last_emitted_artifact_payload",
@@ -261,7 +261,7 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
         task_id: UUID,
         payload: list[dict[str, ModelSchemaValue]],
         *,
-        correlation_id: "UUID | None" = None,  # noqa: UP037
+        correlation_id: UUID | None = None,
     ) -> None:
         op_correlation_id = correlation_id or uuid4()
 
