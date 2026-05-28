@@ -44,7 +44,6 @@ from omnibase_infra.services.registry_api.models import (
     ModelPaginationInfo,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
-    ModelRegistryInstanceView,
     ModelRegistryNodeDetailView,
     ModelRegistryNodeView,
     ModelRegistrySummary,
@@ -469,48 +468,13 @@ class ServiceRegistryDiscovery:
             )
             return None, warnings
 
-    async def list_instances(
-        self,
-        service_name: str | None = None,
-        include_unhealthy: bool = False,
-        correlation_id: UUID | None = None,
-    ) -> tuple[list[ModelRegistryInstanceView], list[ModelWarning]]:
-        """List live Consul service instances.
-
-        Args:
-            service_name: Optional service name filter. If not provided,
-                queries all services from the Consul catalog.
-            include_unhealthy: Whether to include unhealthy instances.
-            correlation_id: Optional correlation ID for tracing.
-
-        Returns:
-            Tuple of (instances, warnings).
-        """
-        correlation_id = correlation_id or uuid4()
-        warnings: list[ModelWarning] = []
-        instances: list[ModelRegistryInstanceView] = []
-
-        # Consul removed (OMN-3540): instance discovery is not available.
-        warnings.append(
-            ModelWarning(
-                source="consul",
-                message="Service discovery not available (Consul removed)",
-                code="NO_CONSUL_HANDLER",
-                timestamp=datetime.now(UTC),
-            )
-        )
-        return instances, warnings
-
     async def get_discovery(
         self,
         limit: int = 100,
         offset: int = 0,
         correlation_id: UUID | None = None,
     ) -> ModelRegistryDiscoveryResponse:
-        """Get full dashboard payload with nodes, instances, and summary.
-
-        This is the primary endpoint for dashboard consumption, providing
-        all needed data in a single request.
+        """Get projection-based discovery payload for dashboard consumption.
 
         Args:
             limit: Maximum number of nodes to return.
@@ -518,36 +482,16 @@ class ServiceRegistryDiscovery:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Complete discovery response with all data and any warnings.
+            Discovery response with nodes, summary, and any warnings.
         """
         correlation_id = correlation_id or uuid4()
-        all_warnings: list[ModelWarning] = []
 
-        # Fetch nodes
-        nodes, pagination, node_warnings = await self.list_nodes(
+        nodes, pagination, warnings = await self.list_nodes(
             limit=limit,
             offset=offset,
             correlation_id=correlation_id,
         )
-        all_warnings.extend(node_warnings)
 
-        # Fetch instances
-        instances, instance_warnings = await self.list_instances(
-            include_unhealthy=True,
-            correlation_id=correlation_id,
-        )
-        all_warnings.extend(instance_warnings)
-
-        instance_discovery_status = "available"
-        instance_discovery_message: str | None = None
-        if any(w.code == "NO_CONSUL_HANDLER" for w in instance_warnings):
-            instance_discovery_status = "unavailable"
-            instance_discovery_message = next(
-                (w.message for w in instance_warnings if w.code == "NO_CONSUL_HANDLER"),
-                None,
-            )
-
-        # Build summary
         by_node_type: dict[str, int] = {}
         by_state: dict[str, int] = {}
         active_count = 0
@@ -558,27 +502,18 @@ class ServiceRegistryDiscovery:
             if node.state == "active":
                 active_count += 1
 
-        healthy_count = sum(1 for i in instances if i.health_status == "passing")
-        unhealthy_count = len(instances) - healthy_count
-
         summary = ModelRegistrySummary(
             total_nodes=pagination.total,
             active_nodes=active_count,
-            healthy_instances=healthy_count,
-            unhealthy_instances=unhealthy_count,
             by_node_type=by_node_type,
             by_state=by_state,
         )
 
         return ModelRegistryDiscoveryResponse(
             timestamp=datetime.now(UTC),
-            warnings=all_warnings,
+            warnings=warnings,
             summary=summary,
             nodes=nodes,
-            # Why: Runtime wiring validates and narrows this payload shape before use.
-            instance_discovery_status=instance_discovery_status,  # type: ignore[arg-type]
-            instance_discovery_message=instance_discovery_message,
-            live_instances=instances,
             pagination=pagination,
         )
 
