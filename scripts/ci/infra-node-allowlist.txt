@@ -144,7 +144,6 @@ src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_get_topic.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_get_widget_mapping.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_contracts.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
-src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_instances.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_nodes.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_topics.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
