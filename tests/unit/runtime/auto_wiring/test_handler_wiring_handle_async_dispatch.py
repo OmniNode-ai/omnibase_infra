@@ -85,6 +85,7 @@ class _HandlerWithoutHandle:
     def execute(self, payload: object) -> object:
         return {"from": "execute"}
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
