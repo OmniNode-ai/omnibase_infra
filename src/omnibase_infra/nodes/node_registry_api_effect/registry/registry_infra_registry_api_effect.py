@@ -110,7 +110,6 @@ class RegistryInfraRegistryApiEffect:
         return [
             "registry.discovery",
             "registry.nodes",
-            "registry.instances",
             "registry.contracts",
             "registry.topics",
             "registry.widget_mapping",
@@ -127,7 +126,6 @@ class RegistryInfraRegistryApiEffect:
         return [
             "list_nodes",
             "get_node",
-            "list_instances",
             "get_widget_mapping",
             "get_discovery",
             "get_health",

@@ -34,11 +34,6 @@ HANDLER_CASES = [
         "get_node",
     ),
     (
-        "handler_registry_api_list_instances",
-        "HandlerRegistryApiListInstances",
-        "list_instances",
-    ),
-    (
         "handler_registry_api_get_widget_mapping",
         "HandlerRegistryApiGetWidgetMapping",
         "get_widget_mapping",
@@ -88,7 +83,6 @@ _SERVICE_REQUIRED = {
 # Operational handlers implemented in OMN-4482 (no longer stubs).
 # GetDiscovery requires callable dependencies injected via constructor.
 _OPERATIONAL_IMPLEMENTED = {
-    "HandlerRegistryApiListInstances",
     "HandlerRegistryApiGetWidgetMapping",
     "HandlerRegistryApiGetHealth",
     "HandlerRegistryApiGetDiscovery",
@@ -103,10 +97,9 @@ def _instantiate(cls, class_name: str) -> object:
     if class_name in _SERVICE_REQUIRED:
         return cls(service=MagicMock())
     if class_name == "HandlerRegistryApiGetDiscovery":
-        # Requires three callable dependencies injected at construction time (OMN-4482).
+        # Requires two callable dependencies injected at construction time (OMN-4482, OMN-9545).
         return cls(
             list_nodes=MagicMock(),
-            list_instances=MagicMock(),
             get_widget_mapping=MagicMock(),
         )
     return cls()

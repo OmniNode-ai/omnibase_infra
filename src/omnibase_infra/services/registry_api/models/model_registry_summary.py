@@ -19,8 +19,6 @@ class ModelRegistrySummary(BaseModel):
     Attributes:
         total_nodes: Total number of registered nodes
         active_nodes: Number of nodes in ACTIVE state
-        healthy_instances: Compatibility count for passing legacy service instances
-        unhealthy_instances: Compatibility count for failing legacy service instances
         by_node_type: Count of nodes by type
         by_state: Count of nodes by registration state
     """
@@ -36,16 +34,6 @@ class ModelRegistrySummary(BaseModel):
         ...,
         ge=0,
         description="Number of nodes in ACTIVE state",
-    )
-    healthy_instances: int = Field(
-        ...,
-        ge=0,
-        description="Compatibility count for passing legacy service instances",
-    )
-    unhealthy_instances: int = Field(
-        ...,
-        ge=0,
-        description="Compatibility count for failing legacy service instances",
     )
     by_node_type: dict[str, int] = Field(
         default_factory=dict,
