@@ -1403,25 +1403,12 @@ def _materialize_known_handler_dependencies(
         if value is not None
     }
     if "dispatch_port" in constructor_params and requires_delegation_port:
-        # When container is available, inject ContainerBackedDelegationDispatchPort
-        # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
-        # PluginDelegation at start_consumers() time. This avoids the asyncio stall
-        # that occurs when the Kafka-backed RuntimeDelegationDispatchPort subscribes
-        # to delegation-completed and awaits while the delegation orchestrator runs
-        # in the same event loop.
-        if container is not None:
-            from omnibase_infra.runtime.service_delegation_dispatch_port import (
-                ContainerBackedDelegationDispatchPort,
-                RuntimeDelegationDispatchPort,
-            )
-
-            available["dispatch_port"] = ContainerBackedDelegationDispatchPort(
-                container=container,
-                fallback_event_bus=cast(
-                    "ProtocolPatternBBrokerTransport | None", event_bus
-                ),
-            )
-        elif event_bus is not None:
+        # Pure Kafka delegation chain (OMN-12294): the delegate-skill handler
+        # dispatches via the Kafka-backed RuntimeDelegationDispatchPort. The
+        # delegation orchestrator consumes the command on its own bus
+        # subscription and emits the terminal event the broker awaits — there is
+        # no in-process bridge.
+        if event_bus is not None:
             from omnibase_infra.runtime.service_delegation_dispatch_port import (
                 RuntimeDelegationDispatchPort,
             )
