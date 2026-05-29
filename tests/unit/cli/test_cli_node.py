@@ -13,7 +13,9 @@ Covers the 5 CLI migration branches:
 
 from __future__ import annotations
 
+import importlib.util
 from importlib.machinery import ModuleSpec
+from importlib.metadata import entry_points
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +25,28 @@ from click.testing import CliRunner
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract, run_node_by_name
 
 pytestmark = pytest.mark.unit
+
+
+def _first_resolvable_packaged_node_name() -> str | None:
+    for ep in entry_points(group="onex.nodes"):
+        module_path = ep.value.split(":", 1)[0].strip()
+        try:
+            spec = importlib.util.find_spec(module_path)
+        except ModuleNotFoundError:
+            continue
+        if spec is None:
+            continue
+
+        if spec.submodule_search_locations:
+            module_dir = Path(next(iter(spec.submodule_search_locations))).resolve()
+        elif spec.origin is not None:
+            module_dir = Path(spec.origin).resolve().parent
+        else:
+            continue
+
+        if (module_dir / "contract.yaml").exists():
+            return ep.name
+    return None
 
 
 def test_unknown_node_name_reports_known_names() -> None:
@@ -39,12 +63,10 @@ def test_valid_node_name_resolves_packaged_contract() -> None:
 
     Skipped if no onex.nodes entry points are registered in the test env.
     """
-    from importlib.metadata import entry_points
-
-    available = [ep.name for ep in entry_points(group="onex.nodes")]
-    if not available:
-        pytest.skip("No onex.nodes entry points registered in this env")
-    contract = _resolve_packaged_contract(available[0])
+    node_name = _first_resolvable_packaged_node_name()
+    if node_name is None:
+        pytest.skip("No resolvable onex.nodes packaged contract registered in this env")
+    contract = _resolve_packaged_contract(node_name)
     assert contract.name == "contract.yaml"
     assert contract.exists()
 
@@ -58,11 +80,9 @@ def test_contract_override_wins_over_packaged(tmp_path: Path) -> None:
     attempts to resolve that bogus handler, fails, and exits non-zero.
     A FAILED exit with the handler-not-found log confirms override wins.
     """
-    from importlib.metadata import entry_points
-
-    available = [ep.name for ep in entry_points(group="onex.nodes")]
-    if not available:
-        pytest.skip("No onex.nodes entry points registered in this env")
+    node_name = _first_resolvable_packaged_node_name()
+    if node_name is None:
+        pytest.skip("No resolvable onex.nodes packaged contract registered in this env")
 
     override = tmp_path / "custom_contract.yaml"
     override.write_text(
@@ -78,7 +98,7 @@ def test_contract_override_wins_over_packaged(tmp_path: Path) -> None:
     result = runner.invoke(
         run_node_by_name,
         [
-            available[0],
+            node_name,
             "--contract",
             str(override),
             "--state-root",
