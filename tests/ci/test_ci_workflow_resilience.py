@@ -19,6 +19,8 @@ ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 OMNI_STANDARDS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "omni-standards-compliance.yml"
 )
+SECURITY_SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security-scan.yml"
+CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
@@ -332,3 +334,21 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         == "${{ secrets.CROSS_REPO_PAT || github.token }}"
     )
     assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
+
+
+def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
+    """OMN-12432: CodeQL must not upload malformed .github directory results."""
+    workflow = _load_yaml(SECURITY_SCAN_WORKFLOW)
+    config = _load_yaml(CODEQL_CONFIG)
+
+    init_step = next(
+        step
+        for step in workflow["jobs"]["codeql"]["steps"]
+        if step.get("name") == "Initialize CodeQL"
+    )
+    assert init_step["uses"] == "github/codeql-action/init@v4"
+    assert init_step["with"]["languages"] == "python"
+    assert init_step["with"]["queries"] == "security-and-quality"
+    assert init_step["with"]["config-file"] == "./.github/codeql/codeql-config.yml"
+
+    assert ".github/**" in config["paths-ignore"]
