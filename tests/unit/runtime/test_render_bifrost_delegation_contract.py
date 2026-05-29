@@ -354,3 +354,18 @@ def test_empty_bifrost_source_env_uses_resolved_default(tmp_path: Path) -> None:
     assert rendered == target
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+@pytest.mark.unit
+def test_empty_bifrost_contract_path_disables_render(tmp_path: Path) -> None:
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        environ={
+            "BIFROST_CONTRACT_PATH": "",
+            "BIFROST_VERIFY_ENDPOINTS": "1",
+        },
+        endpoint_probe=lambda _url, _model, _timeout: "should not run",
+    )
+
+    assert rendered is None
