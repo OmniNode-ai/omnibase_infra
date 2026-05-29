@@ -205,6 +205,21 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     assert docker_cache_step["uses"] == "actions/cache/restore@v5"
 
 
+def test_topic_drift_uses_retrying_uv_install() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    steps = ci_workflow["jobs"]["topic-drift-check"]["steps"]
+    setup_step = next(
+        step
+        for step in steps
+        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
+    )
+
+    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"]["working-directory"] == "omnibase_infra"
+    assert setup_step["with"].get("skip-install") != "true"
+    assert not any(step.get("run") == "uv sync --no-cache" for step in steps)
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
