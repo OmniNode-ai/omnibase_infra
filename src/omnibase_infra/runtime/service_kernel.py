@@ -2028,6 +2028,53 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+            # OMN-12409: the delegation chain's worker nodes (routing reducer,
+            # quality-gate reducer, LLM call effect) are auto-wired bus consumers
+            # whose handlers RETURN a result model. Without a result_applier the
+            # auto-wiring callback drops that return (no publish), so the chain
+            # stalls after each worker — on the EFFECTS instance the call effect's
+            # inference-response never reached the orchestrator. Wire an applier
+            # per contract that publishes the returned model to the contract's
+            # own published_events topics (topics read from the contract, never
+            # hardcoded). Instance-independent so hops 2/4/6 publish on both main
+            # and effects.
+            from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                load_published_events_map,
+            )
+
+            _contracts_dir = _get_contracts_dir()
+            for _deleg_contract in (
+                "node_delegation_routing_reducer",
+                "node_delegation_quality_gate_reducer",
+                "node_llm_delegation_call_effect",
+            ):
+                _pe_map = load_published_events_map(
+                    _contracts_dir / "nodes" / _deleg_contract / "contract.yaml",
+                    logger,
+                )
+                if not _pe_map:
+                    logger.warning(
+                        "Delegation result applier NOT registered for %s: contract "
+                        "declares no published_events (correlation_id=%s)",
+                        _deleg_contract,
+                        correlation_id,
+                    )
+                    continue
+                _topics = list(_pe_map.values())
+                auto_wiring_result_appliers[_deleg_contract] = DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=_topics[0],
+                    output_topic_map=_pe_map,
+                    allowed_output_topics=_topics,
+                )
+                logger.info(
+                    "Delegation worker result applier registered "
+                    "(contract=%s, topics=%s, correlation_id=%s)",
+                    _deleg_contract,
+                    _topics,
+                    correlation_id,
+                )
+
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
         if event_bus is not None and build_loop_dsn:
             from omnibase_infra.handlers.handler_db import HandlerDb
