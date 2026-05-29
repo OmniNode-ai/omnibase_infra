@@ -242,8 +242,8 @@ ARG ONEX_CHANGE_CONTROL_REF=main
 ARG OMNIMARKET_REF=dev
 #
 # OMN-12424: uv keys its git source cache on the *resolved commit* for a moving
-# ref (`@dev` / `@main`), so a plain rebuild — even `docker build --no-cache`,
-# which busts Docker layer cache but NOT the `type=cache` BuildKit mount below —
+# ref (`@dev` / `@main`), so a plain rebuild - even `docker build --no-cache`,
+# which busts Docker layer cache but NOT the `type=cache` BuildKit mount below -
 # can reinstall a stale wheel from a previous commit of dev/main. (OMN-10728's
 # SHA-pin theory was wrong: the install URL `@dev` does not change when dev
 # advances, so the cache is never invalidated.) Pinning to a fixed SHA would fix

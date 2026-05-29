@@ -7,9 +7,9 @@ and omnimarket from *moving* git refs (`@main` / `@dev`) under a persistent
 BuildKit uv cache mount (`--mount=type=cache,target=/root/.cache/uv`).
 
 uv keys its git source cache on the resolved commit for the URL, and the URL
-itself does not change when the moving branch advances. Therefore a rebuild —
+itself does not change when the moving branch advances. Therefore a rebuild -
 even `docker build --no-cache`, which busts Docker layer cache but not the
-BuildKit cache mount — can reinstall a stale wheel from a previous commit of
+BuildKit cache mount - can reinstall a stale wheel from a previous commit of
 dev/main. This silently shipped pre-#988 omnimarket code during the OMN-12420
 redeploy.
 
