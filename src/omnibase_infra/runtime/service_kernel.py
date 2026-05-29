@@ -2028,52 +2028,10 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
-            # OMN-12409: the delegation chain's worker nodes (routing reducer,
-            # quality-gate reducer, LLM call effect) are auto-wired bus consumers
-            # whose handlers RETURN a result model. Without a result_applier the
-            # auto-wiring callback drops that return (no publish), so the chain
-            # stalls after each worker — on the EFFECTS instance the call effect's
-            # inference-response never reached the orchestrator. Wire an applier
-            # per contract that publishes the returned model to the contract's
-            # own published_events topics (topics read from the contract, never
-            # hardcoded). Instance-independent so hops 2/4/6 publish on both main
-            # and effects.
-            from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-                load_published_events_map,
-            )
-
-            _contracts_dir = _get_contracts_dir()
-            for _deleg_contract in (
-                "node_delegation_routing_reducer",
-                "node_delegation_quality_gate_reducer",
-                "node_llm_delegation_call_effect",
-            ):
-                _pe_map = load_published_events_map(
-                    _contracts_dir / "nodes" / _deleg_contract / "contract.yaml",
-                    logger,
-                )
-                if not _pe_map:
-                    logger.warning(
-                        "Delegation result applier NOT registered for %s: contract "
-                        "declares no published_events (correlation_id=%s)",
-                        _deleg_contract,
-                        correlation_id,
-                    )
-                    continue
-                _topics = list(_pe_map.values())
-                auto_wiring_result_appliers[_deleg_contract] = DispatchResultApplier(
-                    event_bus=event_bus,
-                    output_topic=_topics[0],
-                    output_topic_map=_pe_map,
-                    allowed_output_topics=_topics,
-                )
-                logger.info(
-                    "Delegation worker result applier registered "
-                    "(contract=%s, topics=%s, correlation_id=%s)",
-                    _deleg_contract,
-                    _topics,
-                    correlation_id,
-                )
+            # OMN-12409: the delegation chain's worker-node result appliers are
+            # wired below, AFTER contract discovery, using each contract's actual
+            # discovered contract_path (see the manifest block) — the contract
+            # source lives in the installed package, not _get_contracts_dir().
 
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
         if event_bus is not None and build_loop_dsn:
@@ -2413,6 +2371,65 @@ async def bootstrap() -> int:
                             ),
                         },
                     )
+
+                # OMN-12409: wire result appliers for the delegation chain's
+                # worker nodes (routing reducer, quality-gate reducer, LLM call
+                # effect). Their handlers RETURN a result model; without an
+                # applier the auto-wiring callback drops that return (no publish),
+                # so the chain stalls after each worker — on the EFFECTS instance
+                # the call effect's inference-response never reached the
+                # orchestrator. Build each applier from the contract's OWN
+                # discovered contract_path published_events (topics read from the
+                # contract, never hardcoded). Uses the discovered manifest's
+                # contract_path so it resolves the package-installed contract, not
+                # a guessed _get_contracts_dir() path. Instance-independent so
+                # hops 2/4/6 publish on both main and effects.
+                if event_bus is not None:
+                    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                        load_published_events_map,
+                    )
+                    from omnibase_infra.runtime.service_dispatch_result_applier import (
+                        DispatchResultApplier,
+                    )
+
+                    _delegation_worker_contracts = {
+                        "node_delegation_routing_reducer",
+                        "node_delegation_quality_gate_reducer",
+                        "node_llm_delegation_call_effect",
+                    }
+                    for _contract in manifest.contracts:
+                        if _contract.name not in _delegation_worker_contracts:
+                            continue
+                        _pe_map = load_published_events_map(
+                            Path(_contract.contract_path),
+                            logger,
+                        )
+                        if not _pe_map:
+                            logger.warning(
+                                "Delegation result applier NOT registered for %s: "
+                                "contract at %s declares no published_events "
+                                "(correlation_id=%s)",
+                                _contract.name,
+                                _contract.contract_path,
+                                correlation_id,
+                            )
+                            continue
+                        _topics = list(_pe_map.values())
+                        auto_wiring_result_appliers[_contract.name] = (
+                            DispatchResultApplier(
+                                event_bus=event_bus,
+                                output_topic=_topics[0],
+                                output_topic_map=_pe_map,
+                                allowed_output_topics=_topics,
+                            )
+                        )
+                        logger.info(
+                            "Delegation worker result applier registered "
+                            "(contract=%s, topics=%s, correlation_id=%s)",
+                            _contract.name,
+                            _topics,
+                            correlation_id,
+                        )
 
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
