@@ -32,7 +32,7 @@ def _first_resolvable_packaged_node_name() -> str | None:
         module_path = ep.value.split(":", 1)[0].strip()
         try:
             spec = importlib.util.find_spec(module_path)
-        except ModuleNotFoundError:
+        except (ModuleNotFoundError, ValueError):
             continue
         if spec is None:
             continue
