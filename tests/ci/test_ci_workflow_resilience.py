@@ -185,6 +185,16 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert setup_step["with"]["cache-enabled"] == "false"
 
+    sibling_workflow = _load_yaml(
+        REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
+    )
+    setup_step = next(
+        step
+        for step in sibling_workflow["jobs"]["sibling-compat"]["steps"]
+        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
+    )
+    assert setup_step["with"]["cache-enabled"] == "false"
+
     docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     docker_cache_step = next(
         step
