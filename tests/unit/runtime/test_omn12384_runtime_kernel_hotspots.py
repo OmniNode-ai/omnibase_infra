@@ -70,14 +70,14 @@ class TestValidateKafkaBrokerAllowlist:
     def test_no_allowlist_env_var_always_passes(self) -> None:
         """Without KAFKA_BROKER_ALLOWLIST set, any broker is accepted."""
         env = {"KAFKA_BROKER_ALLOWLIST": ""}
-        with patch.dict("os.environ", env, clear=False):
+        with patch.dict("os.environ", env, clear=True):
             # Should not raise
             validate_kafka_broker_allowlist("kafka.prod:9092")
 
     def test_broker_matching_allowlist_prefix_passes(self) -> None:
         """Broker whose prefix appears in the allowlist is accepted."""
         with patch.dict(
-            "os.environ", {"KAFKA_BROKER_ALLOWLIST": "kafka.dev:9092"}, clear=False
+            "os.environ", {"KAFKA_BROKER_ALLOWLIST": "kafka.dev:9092"}, clear=True
         ):
             # Must not raise
             validate_kafka_broker_allowlist("kafka.dev:9092")
@@ -87,7 +87,7 @@ class TestValidateKafkaBrokerAllowlist:
         with patch.dict(
             "os.environ",
             {"KAFKA_BROKER_ALLOWLIST": "kafka.dev:9092"},
-            clear=False,
+            clear=True,
         ):
             with pytest.raises(ProtocolConfigurationError):
                 validate_kafka_broker_allowlist("evil.host:9092")
@@ -256,21 +256,24 @@ class TestHandlerPluginLoaderErrors:
     def test_module_not_found_raises_infra_connection_error(
         self, tmp_path: Path
     ) -> None:
-        """Nonexistent module raises InfraConnectionError (MODULE_NOT_FOUND)."""
+        """Nonexistent module raises InfraConnectionError (MODULE_NOT_FOUND).
+
+        The handler_class field encodes both module and class as a dotted path
+        (module.ClassName). A nonexistent module triggers MODULE_NOT_FOUND which
+        the loader surfaces as InfraConnectionError, not ProtocolConfigurationError.
+        """
         contract = tmp_path / "module_missing.yaml"
         contract.write_text(
             yaml.dump(
                 {
-                    "handler_type": "EFFECT_GENERIC",
-                    "handler_module": "omnibase_infra.nonexistent.xyz.module",
-                    "handler_class": "SomeHandler",
-                    "contract_version": {"major": 1, "minor": 0, "patch": 0},
-                    "name": "SomeHandler",
+                    "name": "handler-missing-module",
+                    "handler_class": "omnibase_infra.nonexistent.xyz.module.SomeHandler",
+                    "handler_type": "effect",
                 }
             )
         )
         loader = HandlerPluginLoader()
-        with pytest.raises((InfraConnectionError, ProtocolConfigurationError)):
+        with pytest.raises(InfraConnectionError):
             loader.load_from_contract(contract)
 
 
