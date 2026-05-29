@@ -63,6 +63,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
           cache-key-prefix: uv-sibling-compat
           lock-file-path: 'omnibase_infra/**/uv.lock'
           skip-install: 'true'

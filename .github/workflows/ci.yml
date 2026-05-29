@@ -431,11 +431,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-topic-drift
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
-
-      - name: Install omnibase_infra dependencies
-        working-directory: omnibase_infra
-        run: uv sync --no-cache
+          working-directory: omnibase_infra
 
       - name: Check topic drift (cross-repo)
         working-directory: omnibase_infra
@@ -504,11 +500,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
-
-      - name: Install omnibase_infra dev dependencies
-        working-directory: omnibase_infra
-        run: uv sync --no-cache
+          working-directory: omnibase_infra
 
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra

@@ -774,6 +774,9 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omnimarket-projection-api
       RUNTIME_PROFILE: projection-api
+      # Projection API serves materialized read models and has no runtime data
+      # volume for the rendered Bifrost delegation contract.
+      BIFROST_CONTRACT_PATH: ""
     ports:
       - "${PROJECTION_API_PORT:-3002}:3002"
     healthcheck:
