@@ -47,6 +47,7 @@ def dockerfile_text() -> str:
     return re.sub(r"\\\n\s*", " ", raw)
 
 
+@pytest.mark.unit
 def test_dockerfile_runtime_exists() -> None:
     assert _DOCKERFILE.is_file()
 
@@ -55,6 +56,7 @@ def test_dockerfile_runtime_exists() -> None:
     ("repo_slug", "refresh_name"),
     sorted(_MOVING_REF_GIT_PACKAGES.items()),
 )
+@pytest.mark.unit
 def test_moving_ref_git_install_uses_refresh_package(
     dockerfile_text: str, repo_slug: str, refresh_name: str
 ) -> None:
@@ -76,6 +78,7 @@ def test_moving_ref_git_install_uses_refresh_package(
     )
 
 
+@pytest.mark.unit
 def test_no_moving_ref_git_install_without_refresh(dockerfile_text: str) -> None:
     """No release-mode git+ install of a tracked moving-ref package may omit refresh.
 
