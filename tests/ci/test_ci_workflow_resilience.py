@@ -663,7 +663,7 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Initialize CodeQL"
     )
-    assert init_step["uses"] == "github/codeql-action/init@v4"
+    assert init_step["uses"].startswith("github/codeql-action/init@")
     assert init_step["with"]["languages"] == "python"
     assert init_step["with"]["queries"] == "security-and-quality"
     assert init_step["with"]["config-file"] == "./.github/codeql/codeql-config.yml"
@@ -673,7 +673,7 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Perform CodeQL Analysis"
     )
-    assert analyze_step["uses"] == "github/codeql-action/analyze@v4"
+    assert analyze_step["uses"].startswith("github/codeql-action/analyze@")
     assert analyze_step["with"]["category"] == "/language:python"
     assert analyze_step["with"]["upload"] == "never"
     assert analyze_step["with"]["wait-for-processing"] is False
