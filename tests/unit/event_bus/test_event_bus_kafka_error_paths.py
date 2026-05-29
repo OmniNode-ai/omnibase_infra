@@ -36,7 +36,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models import ModelNodeIdentity
 
