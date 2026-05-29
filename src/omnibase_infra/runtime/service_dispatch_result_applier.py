@@ -454,15 +454,42 @@ class DispatchResultApplier:
                 result.dispatcher_id,
             )
 
-        if result.status != EnumDispatchStatus.SUCCESS:
+        # Per-handler result application (OMN-12416): a multi-handler contract
+        # aggregates every matched handler into one ModelDispatchResult, so a
+        # single sibling handler's failure marks the aggregate status as
+        # HANDLER_ERROR even when another handler on the same contract succeeded
+        # and produced output. Gating purely on ``status == SUCCESS`` would then
+        # drop the successful handler's output — letting one handler's outcome
+        # suppress another's. Instead, apply whenever the result carries output
+        # produced by the handlers that DID succeed (output_events / intents /
+        # projections); only a result with no usable output is skipped. A
+        # genuine single-handler failure produces no output and is still skipped
+        # here, surfacing loudly via the engine's logged HANDLER_ERROR.
+        has_applicable_output = bool(
+            result.output_events or result.output_intents or result.projection_intents
+        )
+        if result.status != EnumDispatchStatus.SUCCESS and not has_applicable_output:
             logger.debug(
-                "Skipping result apply for non-success status=%s "
+                "Skipping result apply for non-success status=%s with no output "
                 "dispatcher_id=%s correlation_id=%s",
                 result.status.value if result.status else "unknown",
                 result.dispatcher_id,
                 str(effective_correlation_id),
             )
             return
+        if result.status != EnumDispatchStatus.SUCCESS and has_applicable_output:
+            logger.info(
+                "Applying partial-success dispatch output despite status=%s — "
+                "a sibling handler failed but %d event(s)/%d intent(s)/%d "
+                "projection(s) from succeeding handler(s) are published "
+                "(dispatcher_id=%s correlation_id=%s)",
+                result.status.value if result.status else "unknown",
+                len(result.output_events),
+                len(result.output_intents),
+                len(result.projection_intents),
+                result.dispatcher_id,
+                str(effective_correlation_id),
+            )
 
         # Phase 0: Execute projection synchronously (OMN-2510).
         # Projection MUST complete before any Kafka publish.  If the projection

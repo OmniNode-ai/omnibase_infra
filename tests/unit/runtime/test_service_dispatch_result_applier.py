@@ -588,3 +588,83 @@ class TestEventTypeDerivedFromTopic:
 
         published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
         assert published_envelope.event_type == "omnimarket.swarm-dispatch-completed"
+
+
+# ---------------------------------------------------------------------------
+# Per-handler result application (OMN-12416)
+# ---------------------------------------------------------------------------
+
+
+class TestPartialSuccessApplication:
+    """A sibling handler's failure must not suppress a successful handler's output.
+
+    A multi-handler contract aggregates every matched handler into one
+    ModelDispatchResult, so one sibling's failure marks the aggregate
+    HANDLER_ERROR even when another handler succeeded and produced output.
+    The applier must still publish the output produced by the succeeding
+    handler(s) instead of dropping the whole result.
+    """
+
+    @pytest.mark.asyncio
+    async def test_handler_error_with_output_events_still_publishes(self) -> None:
+        """HANDLER_ERROR aggregate carrying output_events publishes those events."""
+        bus = AsyncMock()
+        event = _StubEvent(value="from-succeeding-handler")
+        result = _make_result(
+            status=EnumDispatchStatus.HANDLER_ERROR,
+            output_events=[event],
+        )
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+        )
+        await applier.apply(result)
+
+        bus.publish_envelope.assert_awaited_once()
+        published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
+        assert published_envelope.payload is event
+
+    @pytest.mark.asyncio
+    async def test_handler_error_with_intents_still_executes_them(self) -> None:
+        """HANDLER_ERROR aggregate carrying intents still delegates them."""
+        bus = AsyncMock()
+        executor = AsyncMock()
+        intent = _make_intent()
+        result = _make_result(
+            status=EnumDispatchStatus.HANDLER_ERROR,
+            output_intents=(intent,),
+        )
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+            intent_executor=executor,
+        )
+        await applier.apply(result)
+
+        executor.execute_all.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_handler_error_with_no_output_is_still_skipped(self) -> None:
+        """A genuine single-handler failure (no output) is still skipped.
+
+        The failure surfaces via the engine's logged HANDLER_ERROR; the applier
+        does not invent output to publish.
+        """
+        bus = AsyncMock()
+        executor = AsyncMock()
+        result = _make_result(
+            status=EnumDispatchStatus.HANDLER_ERROR,
+            output_events=[],
+        )
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+            intent_executor=executor,
+        )
+        await applier.apply(result)
+
+        bus.publish_envelope.assert_not_called()
+        executor.execute_all.assert_not_called()
