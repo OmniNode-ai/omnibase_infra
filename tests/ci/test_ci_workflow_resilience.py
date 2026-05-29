@@ -16,6 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
+OMNI_STANDARDS_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "omni-standards-compliance.yml"
+)
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
@@ -254,3 +257,78 @@ def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
         'echo "UV_CONCURRENT_DOWNLOADS=${UV_CONCURRENT_DOWNLOADS:-<unset>}"'
         in run_script
     )
+
+
+def test_setup_python_uv_authenticates_git_fetches() -> None:
+    """OMN-12432: uv's git+https dependency fetches must be authenticated.
+
+    Anonymous github.com fetches from the self-hosted runners hit the 60/hr
+    anonymous rate limit and fail with "Empty reply from server" when many
+    parallel --no-cache uv syncs run from one egress IP. The action configures
+    a process-scoped insteadOf rewrite (via GIT_CONFIG_* env vars, never a
+    persisted gitconfig) using a github token so uv's internal `git fetch`
+    authenticates and gets the 5000/hr limit.
+    """
+    action = _load_yaml(SETUP_PYTHON_UV_ACTION)
+
+    token_input = action["inputs"]["github-token"]
+    assert token_input["default"] == "${{ github.token }}"
+
+    install_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Install dependencies"
+    )
+    assert install_step["env"]["GIT_FETCH_TOKEN"] == "${{ inputs.github-token }}"
+
+    run_script = install_step["run"]
+    assert 'if [ -n "${GIT_FETCH_TOKEN}" ]; then' in run_script
+    assert "export GIT_CONFIG_COUNT=1" in run_script
+    assert (
+        'export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"'
+        in run_script
+    )
+    assert 'export GIT_CONFIG_VALUE_0="https://github.com/"' in run_script
+    # Token must never be written to a persistent global gitconfig on the runner.
+    assert "git config --global url." not in run_script
+
+
+def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
+    """OMN-12432: the uv-sync jobs that block #1781/#1782 must authenticate.
+
+    type-safety and type-union-check previously inlined an unauthenticated
+    `uv sync --no-cache --all-extras`. They now route through setup-python-uv
+    with an explicit token so the git fetches are authenticated and retried.
+    """
+    workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
+
+    for job_name in ("type-safety", "type-union-check"):
+        steps = workflow["jobs"][job_name]["steps"]
+        setup_step = next(
+            step
+            for step in steps
+            if step.get("uses") == "./.github/actions/setup-python-uv"
+        )
+        assert setup_step["with"]["install-args"] == "--all-extras"
+        assert setup_step["with"]["cache-enabled"] == "false"
+        assert (
+            setup_step["with"]["github-token"]
+            == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+        )
+        # No raw unauthenticated uv sync left behind.
+        assert not any(
+            step.get("run") == "uv sync --no-cache --all-extras" for step in steps
+        )
+
+    # The pinned onex_change_control git+https install must also authenticate.
+    occ_steps = workflow["jobs"]["handler-contract-compliance"]["steps"]
+    install_step = next(
+        step
+        for step in occ_steps
+        if step.get("name") == "Install onex_change_control (pinned)"
+    )
+    assert (
+        install_step["env"]["GIT_FETCH_TOKEN"]
+        == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+    )
+    assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
