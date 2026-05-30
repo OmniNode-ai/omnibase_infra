@@ -250,6 +250,64 @@ class TestMaterializeHandlerLive:
         assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
+    async def test_materialize_accepts_omnimarket_namespace(self) -> None:
+        """Handler from the omnimarket. namespace passes the trusted-namespace gate.
+
+        Asserts the live materializer uses the shared
+        TRUSTED_HANDLER_NAMESPACE_PREFIXES policy (which includes "omnimarket.")
+        rather than the previous infra/core-only hardcoded tuple. A market
+        handler_class must clear Step 4 (namespace validation) and reach
+        instantiation/registration (OMN-12449).
+        """
+        from omnibase_infra.runtime.constants_security import (
+            TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+        )
+
+        # Precondition: the shared policy is the one that grants omnimarket trust.
+        assert "omnimarket." in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+        runtime = _make_runtime()
+        descriptor = _make_descriptor(
+            handler_class="omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.NodeAislopSweep"
+        )
+        correlation_id = uuid4()
+
+        mock_handler_instance = MagicMock()
+        mock_handler_instance.initialize = AsyncMock()
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
+        mock_container = MagicMock()
+        mock_registry = MagicMock()
+
+        with (
+            patch.object(
+                runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
+            ),
+            patch(
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
+            ) as mock_import,
+        ):
+            mock_module = MagicMock()
+            mock_module.NodeAislopSweep = mock_handler_cls
+            mock_import.return_value = mock_module
+
+            result = await runtime._materialize_handler_live(
+                node_name="node_aislop_sweep",
+                descriptor=descriptor,
+                correlation_id=correlation_id,
+            )
+
+        # Passed the namespace gate and materialized — proving omnimarket is trusted.
+        assert result is True
+        assert "effect_test" in runtime._handlers
+        mock_registry.register.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_materialize_handles_import_error(self) -> None:
         """Bad module path returns False, does not crash."""
         runtime = _make_runtime()

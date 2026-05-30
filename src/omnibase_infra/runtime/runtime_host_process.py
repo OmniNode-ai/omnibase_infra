@@ -103,6 +103,9 @@ from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
 from omnibase_infra.runtime.batch_response_publisher import BatchResponsePublisher
+from omnibase_infra.runtime.constants_security import (
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
@@ -3390,8 +3393,12 @@ class RuntimeHostProcess:
                 return True
 
             # Step 4: Namespace validation (security boundary)
+            # Use the shared trusted-namespace policy (constants_security) so the
+            # live materializer matches the already-approved allowlist that the
+            # caching gate enforces. This includes "omnimarket." so first-party
+            # market nodes can hot-load via contract on the bus.
             handler_class_path = descriptor.handler_class
-            allowed_namespaces = ("omnibase_infra.", "omnibase_core.")
+            allowed_namespaces = TRUSTED_HANDLER_NAMESPACE_PREFIXES
             if not handler_class_path.startswith(allowed_namespaces):
                 logger.warning(
                     "Rejected live materialization: handler_class outside "
