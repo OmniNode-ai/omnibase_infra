@@ -234,11 +234,17 @@ class TestMaterializeHandlerLive:
         assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
-    async def test_materialize_rejects_untrusted_namespace(self) -> None:
-        """Handler from untrusted namespace is rejected."""
+    async def test_materialize_rejects_untrusted_namespace(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Handler from untrusted namespace is rejected without logging its path."""
         runtime = _make_runtime()
-        descriptor = _make_descriptor(handler_class="evil_package.malicious.Handler")
+        handler_class = "evil_package.malicious.SecretHandler"
+        descriptor = _make_descriptor(handler_class=handler_class)
         correlation_id = uuid4()
+        caplog.set_level(
+            "WARNING", logger="omnibase_infra.runtime.runtime_host_process"
+        )
 
         result = await runtime._materialize_handler_live(
             node_name="test-node",
@@ -248,6 +254,15 @@ class TestMaterializeHandlerLive:
 
         assert result is False
         assert "effect_test" not in runtime._handlers
+        rejection_records = [
+            record
+            for record in caplog.records
+            if "handler_class outside allowed namespaces" in record.getMessage()
+        ]
+        assert len(rejection_records) == 1
+        assert rejection_records[0].handler_class_redacted is True
+        assert not hasattr(rejection_records[0], "handler_class")
+        assert handler_class not in caplog.text
 
     @pytest.mark.asyncio
     async def test_materialize_accepts_omnimarket_namespace(self) -> None:

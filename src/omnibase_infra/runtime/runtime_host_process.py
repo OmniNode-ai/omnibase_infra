@@ -3405,8 +3405,8 @@ class RuntimeHostProcess:
                     "allowed namespaces",
                     extra={
                         "node_name": node_name,
-                        "handler_class": handler_class_path,
                         "allowed_namespaces": list(allowed_namespaces),
+                        "handler_class_redacted": True,
                         "correlation_id": str(correlation_id),
                     },
                 )
