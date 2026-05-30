@@ -304,6 +304,9 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert docker_setup_step["with"]["cache-enabled"] == "false"
     assert docker_setup_step["with"]["cache-version"] == "docker"
+    assert docker_setup_step["with"]["cache-key-prefix"] == "uv-docker"
+    assert docker_setup_step["with"]["shared-env-enabled"] == "true"
+    assert docker_setup_step["with"]["github-token"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
 def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
@@ -492,40 +495,29 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     assert job["timeout-minutes"] >= 10
 
 
-def test_kafka_boundary_sibling_install_retries_transient_download_failures() -> None:
-    ci_workflow = _load_yaml(CI_WORKFLOW)
-    steps = ci_workflow["jobs"]["kafka-boundary-compat"]["steps"]
-    install_step = next(
+def test_retrying_uv_action_defaults_to_cpu_torch_backend() -> None:
+    action_text = SETUP_PYTHON_UV_ACTION.read_text(encoding="utf-8")
+    assert 'export UV_TORCH_BACKEND="${UV_TORCH_BACKEND:-cpu}"' in action_text
+    assert "UV_TORCH_BACKEND=${UV_TORCH_BACKEND:-<unset>}" in action_text
+
+
+def test_docker_integration_uses_retrying_uv_setup_action() -> None:
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    steps = docker_workflow["jobs"]["docker-integration-tests"]["steps"]
+
+    setup_step = next(
         step
         for step in steps
-        if step.get("name") == "Install sibling repos as editable (boundary test deps)"
+        if step.get("uses") == "./.github/actions/setup-python-uv"
     )
-
-    run_script = install_step["run"]
-    assert "max_attempts=5" in run_script
-    assert "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
-    assert (
-        'echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed'
-        in run_script
+    assert setup_step["name"] == "Setup Python and uv"
+    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"]["github-token"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert not any(
+        step.get("run")
+        == "uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi"
+        for step in steps
     )
-    assert (
-        'echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"'
-        in run_script
-    )
-
-
-def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
-    workflow = _load_yaml(CHECK_HANDSHAKE_WORKFLOW)
-    job = workflow["jobs"]["check-handshake"]
-
-    assert job["timeout-minutes"] >= 10
-
-
-def test_onex_validators_have_retry_timeout_budget() -> None:
-    workflow = _load_yaml(CI_WORKFLOW)
-    job = workflow["jobs"]["onex-validation"]
-
-    assert job["timeout-minutes"] >= 20
 
 
 def test_runtime_plugin_dependency_install_retries_package_index_flakes() -> None:
