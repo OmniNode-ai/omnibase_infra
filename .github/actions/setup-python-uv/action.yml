@@ -41,7 +41,7 @@ inputs:
   sync-attempts:
     description: 'Maximum uv sync attempts before failing'
     required: false
-    default: '3'
+    default: '5'
   sync-retry-delay-seconds:
     description: 'Base delay in seconds between uv sync retries'
     required: false
@@ -83,6 +83,8 @@ runs:
         GIT_FETCH_TOKEN: ${{ inputs.github-token }}
       run: |
         export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+        export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"
+        export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"
         git config --global http.version HTTP/1.1
         # Authenticate uv's internal git+https fetches. Anonymous github.com
         # requests are rate-limited (60/hr); many parallel --no-cache syncs from

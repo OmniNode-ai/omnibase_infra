@@ -229,7 +229,7 @@ def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
-    assert action["inputs"]["sync-attempts"]["default"] == "3"
+    assert action["inputs"]["sync-attempts"]["default"] == "5"
     assert action["inputs"]["sync-retry-delay-seconds"]["default"] == "10"
 
     install_step = next(
@@ -245,6 +245,8 @@ def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
 
     run_script = install_step["run"]
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
+    assert 'export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"' in run_script
+    assert 'export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"' in run_script
     assert "git config --global http.version HTTP/1.1" in run_script
     assert "sync_cmd=(uv sync)" in run_script
     assert "sync_cmd+=(--no-cache)" in run_script
