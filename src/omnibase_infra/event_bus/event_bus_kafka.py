@@ -2344,18 +2344,45 @@ class EventBusKafka(
                         self._pending_consumer_keys.add(consumer_key)
                         topics_to_start.append((topic, group_id))
 
-        # Start all consumers concurrently — wall-clock time becomes the
-        # slowest single consumer rather than the sum of all N consumers.
-        # return_exceptions=True lets every consumer attempt to start; we
-        # collect failures and re-raise the first one after all have settled
-        # so a single bad topic does not starve the rest.
+        # Start consumers concurrently but bounded (OMN-12448). An unbounded
+        # gather over hundreds of group-joins stampedes the broker group
+        # coordinator on cold start; tail latency then blows the per-consumer
+        # start timeout. A single failure aborting the whole boot crash-loops
+        # the runtime — and each failed boot leaves half-formed groups that make
+        # the next boot slower. So: cap in-flight starts at
+        # consumer_start_concurrency and retry a transiently-failing start up to
+        # consumer_start_max_retries times before letting it fail the boot.
         if topics_to_start:
+            semaphore = asyncio.Semaphore(self._config.consumer_start_concurrency)
+            max_retries = self._config.consumer_start_max_retries
+
+            async def _start_bounded(topic: str, group_id: str) -> BaseException | None:
+                async with semaphore:
+                    last_error: BaseException | None = None
+                    for attempt in range(max_retries + 1):
+                        try:
+                            await self._start_consumer_for_topic_unlocked(
+                                topic, group_id
+                            )
+                            return None
+                        except BaseException as exc:  # noqa: BLE001 — boundary: collected, re-raised after retries exhausted
+                            last_error = exc
+                            if attempt >= max_retries:
+                                break
+                            # Every failure path discards the pending-key
+                            # reservation; re-reserve it before retrying so the
+                            # next attempt is not treated as a duplicate.
+                            self._pending_consumer_keys.add((topic, group_id))
+                            # Yield so other in-flight starts make progress and
+                            # the coordinator settles before we retry.
+                            await asyncio.sleep(0)
+                    return last_error
+
             results = await asyncio.gather(
                 *[
-                    self._start_consumer_for_topic_unlocked(topic, group_id)
+                    _start_bounded(topic, group_id)
                     for topic, group_id in topics_to_start
-                ],
-                return_exceptions=True,
+                ]
             )
             errors = [r for r in results if isinstance(r, BaseException)]
             if errors:
