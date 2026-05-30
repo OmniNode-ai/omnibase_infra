@@ -154,11 +154,18 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert (
             environment["ONEX_INFRA_HOST"]
-            == "${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}"
+            == "${ONEX_INFRA_HOST:-${INFRA_HOST:?INFRA_HOST required for stability session health probes}}"
         )
         assert (
             environment["ONEX_INFRA_USER"]
-            == "${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}"
+            == "${ONEX_INFRA_USER:-${USER:?USER required for stability session health probes}}"
+        )
+        assert (
+            environment["OMNI_HOME"]
+            == "${OMNI_HOME:?OMNI_HOME required for stability session health probes}"
+        )
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == (
+            "${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
         )
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
@@ -304,6 +311,37 @@ def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> N
         assert "../contracts:/app/contracts:ro" not in volumes
         assert all(":/app/contracts" not in volume for volume in volumes)
         assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+
+
+@pytest.mark.unit
+def test_stability_lane_runtime_services_define_session_health_contract() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    for service_name in RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        volumes = services[service_name]["volumes"]
+
+        assert (
+            "INFRA_HOST required for stability session health probes"
+            in environment["ONEX_INFRA_HOST"]
+        )
+        assert (
+            "USER required for stability session health probes"
+            in environment["ONEX_INFRA_USER"]
+        )
+        assert (
+            "OMNI_HOME required for stability session health probes"
+            in environment["OMNI_HOME"]
+        )
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == (
+            "${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+        )
+        assert (
+            "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:"
+            "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
+            in volumes
+        )
 
 
 @pytest.mark.unit
