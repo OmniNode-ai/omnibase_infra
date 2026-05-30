@@ -14,6 +14,7 @@ on:
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
+  UV_HTTP_TIMEOUT: "600"
   REPO_NAME: "omnibase_infra"
   UV_HTTP_TIMEOUT: "600"
   # OMN-12564 canary: trusted self-hosted CI uses the same immutable
@@ -51,6 +52,8 @@ jobs:
           cache-key-prefix: uv-type-safety
           install-args: --all-extras
           github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          sync-attempts: "3"
+          sync-retry-delay-seconds: "10"
 
       - name: Run MyPy type checking
         run: |
@@ -83,6 +86,8 @@ jobs:
           cache-key-prefix: uv-type-union
           install-args: --all-extras
           github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+          sync-attempts: "3"
+          sync-retry-delay-seconds: "10"
 
       - name: Check for Optional/Union usage (PEP 604)
         run: uv run ruff check src/ --select UP007,UP006
