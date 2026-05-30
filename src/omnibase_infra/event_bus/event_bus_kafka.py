@@ -2365,7 +2365,11 @@ class EventBusKafka(
                                 topic, group_id
                             )
                             return None
-                        except Exception as exc:  # noqa: BLE001 — boundary: collected, re-raised after retries exhausted
+                        except (
+                            InfraConnectionError,
+                            InfraTimeoutError,
+                            InfraUnavailableError,
+                        ) as exc:
                             last_error = exc
                             if attempt >= max_retries:
                                 break

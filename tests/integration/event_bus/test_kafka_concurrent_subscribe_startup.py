@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -223,7 +224,7 @@ async def test_start_consuming_retries_transient_failure_without_aborting_boot()
         if topic == flaky and attempts[topic] == 1:
             # Mirror the real failure path: pending key discarded before raising.
             bus._pending_consumer_keys.discard((topic, group_id))
-            raise RuntimeError("transient group-join timeout")
+            raise InfraConnectionError("transient group-join timeout")
         bus._group_consumers[(topic, group_id)] = AsyncMock()
         bus._pending_consumer_keys.discard((topic, group_id))
 
@@ -258,7 +259,7 @@ async def test_start_consuming_raises_after_retries_exhausted() -> None:
         attempts[topic] = attempts.get(topic, 0) + 1
         if topic == broken:
             bus._pending_consumer_keys.discard((topic, group_id))
-            raise RuntimeError("permanent group-join failure")
+            raise InfraConnectionError("permanent group-join failure")
         bus._group_consumers[(topic, group_id)] = AsyncMock()
         bus._pending_consumer_keys.discard((topic, group_id))
 
@@ -272,7 +273,7 @@ async def test_start_consuming_raises_after_retries_exhausted() -> None:
             ("service", "sub-ok", _handler),
         ]
 
-    with pytest.raises(RuntimeError, match="permanent group-join failure"):
+    with pytest.raises(InfraConnectionError, match="permanent group-join failure"):
         await bus.start_consuming()
 
     # Initial attempt + max_retries retries.
