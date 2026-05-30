@@ -243,14 +243,26 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
         assert (
             "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
         )
-        assert (
-            'echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed'
-            in run_script
-        )
-        assert (
-            'echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"'
-            in run_script
-        )
+        assert "sibling deps attempt" in run_script
+        assert "sibling deps failed after" in run_script
+
+
+def test_schema_handshake_uses_cpu_torch_for_sibling_install() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    job = ci_workflow["jobs"]["schema-handshake"]
+    steps = job["steps"]
+
+    assert job["timeout-minutes"] >= 45
+
+    torch_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Preinstall CPU-only torch for sibling deps"
+    )
+    torch_script = torch_step["run"]
+    assert "https://download.pytorch.org/whl/cpu" in torch_script
+    assert "schema-handshake torch CPU wheel attempt" in torch_script
+    assert "schema-handshake torch CPU wheel failed after" in torch_script
 
 
 def test_topic_enum_drift_has_install_retry_budget() -> None:

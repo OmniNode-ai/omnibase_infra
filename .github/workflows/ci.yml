@@ -502,6 +502,25 @@ jobs:
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
 
+      - name: Preinstall CPU-only torch for sibling deps
+        working-directory: omnibase_infra
+        run: |
+          set -eu
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=5
+          until uv pip install "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install schema-handshake torch CPU wheel failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install schema-handshake torch CPU wheel attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
+
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
         # Use --overrides to install siblings with their full transitive deps while
@@ -512,20 +531,23 @@ jobs:
         # Prior approach (--no-deps) skipped transitive deps entirely, causing
         # ModuleNotFoundError for packages like adaptive_classifier at collection time.
         run: |
+          set -eu
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
           echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
           until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
-              echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"
+              echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
               exit "${status}"
             fi
-            echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in 10s"
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install schema-handshake sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
             attempt=$((attempt + 1))
-            sleep 10
+            sleep "${delay}"
           done
 
       - name: Run schema handshake validation (changed-only)
