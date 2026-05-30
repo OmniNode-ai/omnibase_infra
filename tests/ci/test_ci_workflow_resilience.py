@@ -226,6 +226,21 @@ def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
         assert not any(step.get("run") == "uv sync --no-cache" for step in steps)
 
 
+def test_topic_enum_drift_has_install_retry_budget() -> None:
+    """OMN-12432: topic enum drift must survive one uv git fetch retry."""
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    job = ci_workflow["jobs"]["topic-enum-drift"]
+
+    assert job["timeout-minutes"] >= 15
+    setup_step = next(
+        step
+        for step in job["steps"]
+        if step.get("uses") == "./.github/actions/setup-python-uv"
+    )
+    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"].get("skip-install") != "true"
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
