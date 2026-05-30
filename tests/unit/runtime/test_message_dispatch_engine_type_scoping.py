@@ -143,6 +143,48 @@ class TestTypeScopedRouting:
         assert result.status == EnumDispatchStatus.SUCCESS
 
     @pytest.mark.asyncio
+    async def test_dict_envelope_uses_payload_for_type_scoping(self) -> None:
+        """A dict envelope must route by its payload, not by the envelope dict."""
+        engine = MessageDispatchEngine()
+        invoked: list[str] = []
+
+        async def handler_a(envelope: object) -> None:
+            invoked.append("a")
+
+        async def handler_b(envelope: object) -> None:
+            invoked.append("b")
+
+        engine.register_dispatcher(
+            dispatcher_id="dispatcher-a",
+            dispatcher=handler_a,
+            category=EnumMessageCategory.COMMAND,
+            message_types={"_PayloadA", _EVENT_TYPE_ALIAS},
+            payload_type_matcher=lambda p: isinstance(p, _PayloadA),
+        )
+        engine.register_dispatcher(
+            dispatcher_id="dispatcher-b",
+            dispatcher=handler_b,
+            category=EnumMessageCategory.COMMAND,
+            message_types={"_PayloadB", _EVENT_TYPE_ALIAS},
+            payload_type_matcher=lambda p: isinstance(p, _PayloadB),
+        )
+        _register_shared_topic_route(engine, "dispatcher-a")
+        _register_shared_topic_route(engine, "dispatcher-b")
+        engine.freeze()
+
+        result = await engine.dispatch(
+            _TOPIC,
+            {
+                "payload": _PayloadA(),
+                "event_type": _EVENT_TYPE_ALIAS,
+                "correlation_id": str(uuid4()),
+            },
+        )
+
+        assert invoked == ["a"]
+        assert result.status == EnumDispatchStatus.SUCCESS
+
+    @pytest.mark.asyncio
     async def test_failing_sibling_handler_never_receives_nonmatching_payload(
         self,
     ) -> None:

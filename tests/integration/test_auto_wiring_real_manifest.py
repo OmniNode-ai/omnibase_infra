@@ -9,7 +9,7 @@ None exercised the actual project tree.
 
 This file does two things:
 1. Calls discover_contracts() against the real installed onex.nodes entry points
-   and asserts total_errors == 0 (discovery phase is clean).
+   and asserts there are no actionable discovery errors.
 2. Calls wire_from_manifest() against that manifest with a mock dispatch engine
    (no Kafka, no DB) and asserts total_failed == 0 (wiring phase is clean).
 

@@ -33,6 +33,8 @@ CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
+CHECKOUT_V6_SHA = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -658,22 +660,37 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
     workflow = _load_yaml(SECURITY_SCAN_WORKFLOW)
     config = _load_yaml(CODEQL_CONFIG)
 
+    checkout_step = next(
+        step
+        for step in workflow["jobs"]["codeql"]["steps"]
+        if step.get("name") == "Checkout repository"
+    )
+    assert checkout_step["uses"] == f"actions/checkout@{CHECKOUT_V6_SHA}"
+    assert checkout_step["with"]["persist-credentials"] is False
+
     init_step = next(
         step
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Initialize CodeQL"
     )
-    assert init_step["uses"].startswith("github/codeql-action/init@")
+    assert init_step["uses"] == f"github/codeql-action/init@{CODEQL_V4_SHA}"
     assert init_step["with"]["languages"] == "python"
     assert init_step["with"]["queries"] == "security-and-quality"
     assert init_step["with"]["config-file"] == "./.github/codeql/codeql-config.yml"
+
+    autobuild_step = next(
+        step
+        for step in workflow["jobs"]["codeql"]["steps"]
+        if step.get("name") == "Autobuild"
+    )
+    assert autobuild_step["uses"] == f"github/codeql-action/autobuild@{CODEQL_V4_SHA}"
 
     analyze_step = next(
         step
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Perform CodeQL Analysis"
     )
-    assert analyze_step["uses"].startswith("github/codeql-action/analyze@")
+    assert analyze_step["uses"] == f"github/codeql-action/analyze@{CODEQL_V4_SHA}"
     assert analyze_step["with"]["category"] == "/language:python"
     assert analyze_step["with"]["upload"] == "never"
     assert analyze_step["with"]["wait-for-processing"] is False

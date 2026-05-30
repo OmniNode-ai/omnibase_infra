@@ -460,24 +460,25 @@ class DispatchResultApplier:
         # HANDLER_ERROR even when another handler on the same contract succeeded
         # and produced output. Gating purely on ``status == SUCCESS`` would then
         # drop the successful handler's output — letting one handler's outcome
-        # suppress another's. Instead, apply whenever the result carries output
-        # produced by the handlers that DID succeed (output_events / intents /
-        # projections); only a result with no usable output is skipped. A
-        # genuine single-handler failure produces no output and is still skipped
-        # here, surfacing loudly via the engine's logged HANDLER_ERROR.
+        # suppress another's. Only HANDLER_ERROR represents that partial-success
+        # shape; cancellation/timeouts and other non-success statuses must not
+        # publish side effects even if they happen to carry output fields.
         has_applicable_output = bool(
             result.output_events or result.output_intents or result.projection_intents
         )
-        if result.status != EnumDispatchStatus.SUCCESS and not has_applicable_output:
+        is_partial_handler_failure = result.status == EnumDispatchStatus.HANDLER_ERROR
+        if result.status != EnumDispatchStatus.SUCCESS and (
+            not is_partial_handler_failure or not has_applicable_output
+        ):
             logger.debug(
-                "Skipping result apply for non-success status=%s with no output "
+                "Skipping result apply for non-success status=%s "
                 "dispatcher_id=%s correlation_id=%s",
                 result.status.value if result.status else "unknown",
                 result.dispatcher_id,
                 str(effective_correlation_id),
             )
             return
-        if result.status != EnumDispatchStatus.SUCCESS and has_applicable_output:
+        if is_partial_handler_failure and has_applicable_output:
             logger.info(
                 "Applying partial-success dispatch output despite status=%s — "
                 "a sibling handler failed but %d event(s)/%d intent(s)/%d "

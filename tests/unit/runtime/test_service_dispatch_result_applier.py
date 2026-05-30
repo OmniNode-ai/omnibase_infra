@@ -668,3 +668,24 @@ class TestPartialSuccessApplication:
 
         bus.publish_envelope.assert_not_called()
         executor.execute_all.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_handler_error_with_output_is_skipped(self) -> None:
+        """Only HANDLER_ERROR can represent a sibling partial-success result."""
+        bus = AsyncMock()
+        executor = AsyncMock()
+        event = _StubEvent(value="should-not-publish")
+        result = _make_result(
+            status=EnumDispatchStatus.TIMEOUT,
+            output_events=[event],
+        )
+
+        applier = DispatchResultApplier(
+            event_bus=bus,
+            output_topic="out.topic",
+            intent_executor=executor,
+        )
+        await applier.apply(result)
+
+        bus.publish_envelope.assert_not_called()
+        executor.execute_all.assert_not_called()

@@ -1132,8 +1132,14 @@ class MessageDispatchEngine:
 
         # Extract correlation/trace IDs for logging (kept as UUID, converted to string at serialization)
         # Per ONEX guidelines: auto-generate correlation_id if not provided (uuid4())
-        correlation_id = envelope.correlation_id or uuid4()
-        trace_id = envelope.trace_id
+        if isinstance(envelope, dict):
+            correlation_id = envelope.get("correlation_id") or uuid4()
+            trace_id = envelope.get("trace_id")
+            span_id = envelope.get("span_id")
+        else:
+            correlation_id = envelope.correlation_id or uuid4()
+            trace_id = envelope.trace_id
+            span_id = envelope.span_id
 
         # Step 1: Parse topic to get category
         topic_category = EnumMessageCategory.from_topic(topic)
@@ -1220,20 +1226,23 @@ class MessageDispatchEngine:
         # Related: OMN-2037
         if isinstance(envelope, dict):
             envelope_event_type = envelope.get("event_type")
+            envelope_payload = envelope.get("payload", envelope)
         elif (
             hasattr(type(envelope), "model_fields")
             and "event_type" in type(envelope).model_fields
         ):
             envelope_event_type = getattr(envelope, "event_type", None)
+            envelope_payload = envelope.payload
         else:
             envelope_event_type = getattr(envelope, "event_type", None)
+            envelope_payload = envelope.payload
         normalized_event_type = (
             str(envelope_event_type).strip() if envelope_event_type is not None else ""
         )
         if normalized_event_type:
             message_type = normalized_event_type
         else:
-            message_type = type(envelope.payload).__name__
+            message_type = type(envelope_payload).__name__
 
         # Step 4: Find matching dispatchers. The payload is passed so type-scoped
         # dispatchers (those registered with a payload_type_matcher) are selected
@@ -1244,7 +1253,7 @@ class MessageDispatchEngine:
             topic=topic,
             category=topic_category,
             message_type=message_type,
-            payload=envelope.payload,
+            payload=envelope_payload,
         )
 
         # Log routing decision at DEBUG level
@@ -1647,7 +1656,7 @@ class MessageDispatchEngine:
                 else None,
                 correlation_id=correlation_id,
                 trace_id=trace_id,
-                span_id=envelope.span_id,
+                span_id=span_id,
             )
         except ValidationError as result_validation_error:
             # Pydantic validation failed during result construction
