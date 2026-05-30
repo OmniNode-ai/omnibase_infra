@@ -20,6 +20,7 @@ OMNI_STANDARDS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "omni-standards-compliance.yml"
 )
 SECURITY_SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security-scan.yml"
+CHECK_HANDSHAKE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "check-handshake.yml"
 CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
@@ -272,6 +273,13 @@ def test_onex_validators_have_retry_timeout_budget() -> None:
     job = ci_workflow["jobs"]["onex-validation"]
 
     assert job["timeout-minutes"] >= 20
+
+
+def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
+    workflow = _load_yaml(CHECK_HANDSHAKE_WORKFLOW)
+    job = workflow["jobs"]["check-handshake"]
+
+    assert job["timeout-minutes"] >= 10
 
 
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
