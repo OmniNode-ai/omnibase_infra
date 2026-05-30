@@ -538,6 +538,17 @@ def test_runtime_plugin_dependency_install_retries_package_index_flakes() -> Non
     assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
 
 
+def test_runtime_dockerfile_retries_builder_uv_sync_transport_flakes() -> None:
+    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "git config --global http.version HTTP/1.1" in dockerfile
+    assert "UV_HTTP_TIMEOUT=600" in dockerfile
+    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
+    assert "uv-with-retry sync --no-dev --no-install-project" in dockerfile
+    assert "uv-with-retry sync --no-dev" in dockerfile
+    assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
