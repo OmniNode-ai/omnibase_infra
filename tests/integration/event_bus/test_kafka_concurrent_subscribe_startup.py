@@ -277,3 +277,28 @@ async def test_start_consuming_raises_after_retries_exhausted() -> None:
 
     # Initial attempt + max_retries retries.
     assert attempts[broken] == max_retries + 1
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_does_not_retry_cancellation() -> None:
+    """Cancellation must propagate instead of being treated as a Kafka start retry."""
+    bus = _make_bus_tuned(concurrency=4, max_retries=2)
+    bus._started = True
+
+    cancelled = "onex.evt.omnibase-infra.cancelled.v1"
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        bus._pending_consumer_keys.discard((topic, group_id))
+        raise asyncio.CancelledError
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    async with bus._lock:
+        bus._subscribers[cancelled] = [("service", "sub-cancelled", _handler)]
+
+    with pytest.raises(asyncio.CancelledError):
+        await bus.start_consuming()
+
+    assert bus._start_consumer_for_topic_unlocked.await_count == 1

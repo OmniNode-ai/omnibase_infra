@@ -2356,16 +2356,16 @@ class EventBusKafka(
             semaphore = asyncio.Semaphore(self._config.consumer_start_concurrency)
             max_retries = self._config.consumer_start_max_retries
 
-            async def _start_bounded(topic: str, group_id: str) -> BaseException | None:
+            async def _start_bounded(topic: str, group_id: str) -> Exception | None:
                 async with semaphore:
-                    last_error: BaseException | None = None
+                    last_error: Exception | None = None
                     for attempt in range(max_retries + 1):
                         try:
                             await self._start_consumer_for_topic_unlocked(
                                 topic, group_id
                             )
                             return None
-                        except BaseException as exc:  # noqa: BLE001 — boundary: collected, re-raised after retries exhausted
+                        except Exception as exc:  # noqa: BLE001 — boundary: collected, re-raised after retries exhausted
                             last_error = exc
                             if attempt >= max_retries:
                                 break
@@ -2384,7 +2384,7 @@ class EventBusKafka(
                     for topic, group_id in topics_to_start
                 ]
             )
-            errors = [r for r in results if isinstance(r, BaseException)]
+            errors = [r for r in results if isinstance(r, Exception)]
             if errors:
                 raise errors[0]
 
