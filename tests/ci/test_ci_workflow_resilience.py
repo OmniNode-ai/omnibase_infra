@@ -245,7 +245,9 @@ def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
 
     run_script = install_step["run"]
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
-    assert 'export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"' in run_script
+    assert (
+        'export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"' in run_script
+    )
     assert 'export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"' in run_script
     assert "git config --global http.version HTTP/1.1" in run_script
     assert "sync_cmd=(uv sync)" in run_script
