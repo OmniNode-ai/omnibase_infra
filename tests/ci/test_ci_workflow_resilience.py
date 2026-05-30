@@ -226,6 +226,32 @@ def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
         assert not any(step.get("run") == "uv sync --no-cache" for step in steps)
 
 
+def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    for job_name in ("schema-handshake", "kafka-boundary-compat"):
+        job = ci_workflow["jobs"][job_name]
+        assert job["timeout-minutes"] >= 45
+
+        install_step = next(
+            step
+            for step in job["steps"]
+            if str(step.get("name", "")).startswith("Install sibling repos as editable")
+        )
+        run_script = install_step["run"]
+        assert "max_attempts=5" in run_script
+        assert (
+            "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
+        )
+        assert (
+            'echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed'
+            in run_script
+        )
+        assert (
+            'echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"'
+            in run_script
+        )
+
+
 def test_topic_enum_drift_has_install_retry_budget() -> None:
     """OMN-12432: topic enum drift must survive one uv git fetch retry."""
     ci_workflow = _load_yaml(CI_WORKFLOW)
