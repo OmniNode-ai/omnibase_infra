@@ -358,6 +358,7 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
     )
     assert analyze_step["uses"] == "github/codeql-action/analyze@v4"
     assert analyze_step["with"]["category"] == "/language:python"
+    assert analyze_step["with"]["upload"] == "never"
     assert analyze_step["with"]["wait-for-processing"] is False
 
     assert config["paths"] == ["src", "scripts", "tests"]
