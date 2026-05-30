@@ -16,6 +16,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "artifact-reconciliation-webhook.yml"
@@ -518,6 +519,23 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     job = workflow["jobs"]["check-handshake"]
 
     assert job["timeout-minutes"] >= 10
+
+
+def test_onex_validators_have_retry_timeout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["onex-validation"]
+
+    assert job["timeout-minutes"] >= 20
+
+
+def test_runtime_plugin_dependency_install_retries_package_index_flakes() -> None:
+    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "UV_HTTP_TIMEOUT=600" in dockerfile
+    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
+    assert "cat > /usr/local/bin/uv-with-retry" in dockerfile
+    assert "uv-with-retry pip install \\" in dockerfile
+    assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
 
 
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
