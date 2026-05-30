@@ -513,6 +513,13 @@ def test_kafka_boundary_sibling_install_retries_transient_download_failures() ->
     )
 
 
+def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
+    workflow = _load_yaml(CHECK_HANDSHAKE_WORKFLOW)
+    job = workflow["jobs"]["check-handshake"]
+
+    assert job["timeout-minutes"] >= 10
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
