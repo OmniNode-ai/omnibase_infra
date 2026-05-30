@@ -491,6 +491,28 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     assert job["timeout-minutes"] >= 10
 
 
+def test_kafka_boundary_sibling_install_retries_transient_download_failures() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    steps = ci_workflow["jobs"]["kafka-boundary-compat"]["steps"]
+    install_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Install sibling repos as editable (boundary test deps)"
+    )
+
+    run_script = install_step["run"]
+    assert "max_attempts=5" in run_script
+    assert "until uv pip install --overrides /tmp/sibling-overrides.txt" in run_script
+    assert (
+        'echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed'
+        in run_script
+    )
+    assert (
+        'echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"'
+        in run_script
+    )
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
