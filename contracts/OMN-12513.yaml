@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-12513"
+title: "Add stability runtime session orchestrator probe toolchain"
+summary: >-
+  Ensure the deployed runtime image contains the workspace root and probe binaries required for session_orchestrator dry-run health, repo-sync, and golden-chain checks inside the stability runtime.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Runtime image dependency and stability lane regression tests pass"
+    command: >-
+      env -u PYTHONPATH uv run pytest tests/unit/docker/test_runtime_dependency_pins.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - kind: "ci"
+    description: "Touched files pass ruff and whitespace checks"
+    command: >-
+      env -u PYTHONPATH uv run ruff format --check tests/unit/docker/test_runtime_dependency_pins.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py && git diff --check
+  - kind: "manual"
+    description: "Post-merge stability runtime dogfood reaches session_orchestrator without missing ssh, git, uv, or OMNI_HOME"
+    command: >-
+      deploy .201 stability runtime from the merged image, then run session_orchestrator dry-run against runtime://omninode-pc/stability-test/main and verify the terminal health report no longer includes missing ssh, git, uv, or OMNI_HOME
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-targeted-tests"
+    description: "Runtime image dependency and stability lane regression tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env -u PYTHONPATH uv run pytest tests/unit/docker/test_runtime_dependency_pins.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - id: "dod-ruff-check"
+    description: "Touched Python tests pass ruff checks"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          env -u PYTHONPATH uv run ruff format --check tests/unit/docker/test_runtime_dependency_pins.py tests/unit/infra/test_stability_test_runtime_lane.py tests/integration/infra/test_stability_test_runtime_compose_render.py
+  - id: "dod-stability-dogfood"
+    description: "Post-merge stability runtime dogfood proves the probe toolchain is present"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy .201 stability runtime from the merged image, then run session_orchestrator dry-run against runtime://omninode-pc/stability-test/main and verify the terminal health report does not include missing ssh, git, uv, or OMNI_HOME

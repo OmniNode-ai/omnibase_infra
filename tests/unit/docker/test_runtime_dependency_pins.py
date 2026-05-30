@@ -50,3 +50,18 @@ def test_omnibase_compat_pin_includes_delegation_wire_contracts(
         "If this is a forward pin, add the new SHA to _DELEGATION_WIRE_VERIFIED_COMMITS "
         "in this test after confirming the commit contains delegation wire contracts."
     )
+
+
+def test_runtime_image_includes_session_orchestrator_probe_toolchain(
+    dockerfile_path: Path,
+) -> None:
+    """The deployed runtime owns dry-run health and repo probes."""
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "OMNI_HOME=/app" in dockerfile
+    assert "COPY --from=uv-bin /uv /uvx /usr/local/bin/" in dockerfile
+    assert re.search(r"^\s+git \\\s*$", dockerfile, flags=re.MULTILINE) is not None
+    assert (
+        re.search(r"^\s+openssh-client \\\s*$", dockerfile, flags=re.MULTILINE)
+        is not None
+    )

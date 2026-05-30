@@ -443,6 +443,8 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     # Python path for module resolution
     PYTHONPATH=/app/src \
+    # Workspace root used by ONEX probe and repo-sync nodes inside the runtime
+    OMNI_HOME=/app \
     # Runtime profile selection (all | minimal | kafka | secrets)
     RUNTIME_PROFILE=all \
     # Contract configuration directory
@@ -475,6 +477,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     # GitHub CLI for runtime-owned PR lifecycle inventory and merge gates
     gh \
+    # Git and SSH client for ONEX runtime-owned repo and host probes
+    git \
+    openssh-client \
     # CA certificates for HTTPS connections
     ca-certificates \
     # Tini - minimal init system for proper signal handling as PID 1
@@ -498,6 +503,10 @@ RUN groupadd --gid 1000 omniinfra && \
     useradd --uid 1000 --gid omniinfra --shell /bin/bash --create-home omniinfra
 
 WORKDIR /app
+
+# Install uv in the final runtime image for ONEX runtime-owned validators and
+# golden-chain probes that shell out through the same pinned uv binary as builds.
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 # Copy virtual environment from builder stage with runtime ownership.
 # This contains all installed Python packages

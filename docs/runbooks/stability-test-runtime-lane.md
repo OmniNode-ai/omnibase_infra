@@ -26,6 +26,9 @@ the two-phase runtime build plan into a concrete runtime lane:
   event-bus consumers can append a lane-specific instance discriminator.
 - Runtime state is mounted on stability-test volumes and uses
   `/app/data/.onex_state_stability_test`.
+- The runtime image exports `OMNI_HOME=/app` and includes the `ssh`, `git`, and
+  `uv` probe toolchain required by ONEX runtime-owned health, repo-sync, and
+  golden-chain dry-run checks.
 - The overlay does not expose inherited production host ports in the rendered
   stability-test config.
 - The overlay does not render inherited out-of-lane runtime services such as
