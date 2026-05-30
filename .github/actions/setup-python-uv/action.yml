@@ -41,7 +41,7 @@ inputs:
   sync-attempts:
     description: 'Maximum uv sync attempts before failing'
     required: false
-    default: '3'
+    default: '5'
   sync-retry-delay-seconds:
     description: 'Base delay in seconds between uv sync retries'
     required: false
@@ -50,7 +50,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install uv
