@@ -16,6 +16,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
 # Project root: tests/unit/docker/ -> tests/unit/ -> tests/ -> project_root
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _CATALOG_DIR = _PROJECT_ROOT / "docker" / "catalog"
@@ -103,6 +106,42 @@ class TestInfisicalInCoreBundle:
             assert var in required, (
                 f"{var} must be in core bundle's inject_required_env"
             )
+
+    def test_infisical_catalog_requires_authenticated_redis_url(
+        self, service_manifests: dict[str, dict[str, object]]
+    ) -> None:
+        """Infisical must not be generated with an unauthenticated Valkey URL."""
+        infisical = service_manifests["infisical"]
+        required_env = set(infisical.get("required_env", []))
+        hardcoded_env = infisical.get("hardcoded_env", {})
+
+        assert "INFISICAL_REDIS_URL" in required_env
+        assert hardcoded_env.get("REDIS_URL") == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
+        assert hardcoded_env.get("REDIS_URL") != "redis://valkey:6379"
+
+    def test_generated_core_compose_uses_infisical_redis_url_source(self) -> None:
+        """Generated compose must map Infisical REDIS_URL from INFISICAL_REDIS_URL."""
+        resolver = CatalogResolver(catalog_dir=str(_CATALOG_DIR))
+        compose = generate_compose(resolver.resolve(["core"]))
+
+        services = compose["services"]
+        assert isinstance(services, dict)
+        infisical = services["infisical"]
+        assert isinstance(infisical, dict)
+        environment = infisical["environment"]
+        assert isinstance(environment, dict)
+
+        assert environment["REDIS_URL"] == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
+        assert environment["INFISICAL_REDIS_URL"] == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
 
 
 class TestNoDbUrlInRequiredEnv:

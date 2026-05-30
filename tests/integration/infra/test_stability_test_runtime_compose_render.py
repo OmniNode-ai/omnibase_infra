@@ -109,7 +109,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
-    "INFISICAL_REDIS_URL": "redis://valkey:6379",
+    "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
     "GITHUB_TOKEN": "render-only-github-token",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
