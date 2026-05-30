@@ -549,6 +549,21 @@ def test_runtime_dockerfile_retries_builder_uv_sync_transport_flakes() -> None:
     assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
 
 
+def test_runtime_dockerfile_retries_torch_cpu_index_transport_flakes() -> None:
+    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "https://download.pytorch.org/whl/cpu" in dockerfile
+    assert (
+        "uv-with-retry pip install torch --index-url https://download.pytorch.org/whl/cpu"
+        in dockerfile
+    )
+    assert (
+        'uv-with-retry pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu'
+        in dockerfile
+    )
+    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
