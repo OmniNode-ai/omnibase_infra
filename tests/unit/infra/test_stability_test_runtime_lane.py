@@ -150,6 +150,14 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
+        assert (
+            environment["ONEX_INFRA_HOST"]
+            == "${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}"
+        )
+        assert (
+            environment["ONEX_INFRA_USER"]
+            == "${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}"
+        )
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
 
