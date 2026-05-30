@@ -267,6 +267,13 @@ def test_topic_enum_drift_has_install_retry_budget() -> None:
     assert setup_step["with"].get("skip-install") != "true"
 
 
+def test_onex_validators_have_retry_timeout_budget() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    job = ci_workflow["jobs"]["onex-validation"]
+
+    assert job["timeout-minutes"] >= 20
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
