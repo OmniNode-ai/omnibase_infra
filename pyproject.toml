@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.37.2"
+version = "0.37.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -194,7 +194,7 @@ line-ending = "auto"
 # Matches omnibase_core settings for consistency across ONEX ecosystem
 select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 # Custom pre-commit hook codes — registered so ruff doesn't warn about unknown noqa directives
-external = ["model-dump-bare", "ONEX-PATTERN-PARAMS", "arch-topic-naming"]
+external = ["model-dump-bare", "ONEX-PATTERN-PARAMS", "arch-topic-naming", "onex-pattern-validation", "topic-naming-lint"]
 ignore = [
     # UP007 (Union[X, Y] -> X | Y) is NOT ignored — PEP 604 syntax enforced
     "S101",      # Allow assert statements in tests

@@ -4,7 +4,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Handlers package for NodeRegistryApiEffect.
 
-Stub handlers for all 10 operations declared in ``contract.yaml``.
+Stub handlers for all 9 operations declared in ``contract.yaml``.
 Each handler satisfies HandlerPluginLoader (class exists, correct type properties)
 and raises NotImplementedError until full implementation is added.
 
@@ -37,9 +37,6 @@ from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api
 from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_contracts import (
     HandlerRegistryApiListContracts,
 )
-from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_instances import (
-    HandlerRegistryApiListInstances,
-)
 from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_nodes import (
     HandlerRegistryApiListNodes,
 )
@@ -55,7 +52,6 @@ __all__: list[str] = [
     "HandlerRegistryApiGetTopic",
     "HandlerRegistryApiGetWidgetMapping",
     "HandlerRegistryApiListContracts",
-    "HandlerRegistryApiListInstances",
     "HandlerRegistryApiListNodes",
     "HandlerRegistryApiListTopics",
 ]

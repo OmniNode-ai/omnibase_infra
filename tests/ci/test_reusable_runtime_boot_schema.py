@@ -235,6 +235,14 @@ def test_boot_has_uv_setup_step(workflow: Workflow) -> None:
     )
 
 
+def test_boot_disables_uv_cache_cleanup(workflow: Workflow) -> None:
+    steps = _boot_steps(workflow)
+    setup_step = next(
+        s for s in steps if "astral-sh/setup-uv" in str(s.get("uses", ""))
+    )
+    assert setup_step["with"]["enable-cache"] is False
+
+
 def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
     steps = _boot_steps(workflow)
     matched = [

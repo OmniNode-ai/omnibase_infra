@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.37.2"
+version = "0.37.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -2159,7 +2159,7 @@ dependencies = [
 [[package]]
 name = "onex-change-control"
 version = "0.5.0"
-source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#308a4d09c88b9a328ae5ec24042c336604fe8d0c" }
+source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#2741a4096e2eaa48ce516a374b9765beda908073" }
 dependencies = [
     { name = "colorama" },
     { name = "omnibase-core" },

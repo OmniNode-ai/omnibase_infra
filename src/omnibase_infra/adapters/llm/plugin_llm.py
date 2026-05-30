@@ -183,53 +183,19 @@ class PluginLlm:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Register LLM adapter and DelegationIntentBridge in the container."""
+        """Register the LLM model router in the container.
+
+        The delegation chain runs as a pure Kafka chain (OMN-12294): the LLM
+        call effect consumes inference intents directly off the bus, so there is
+        no in-process bridge or LLM caller to register here.
+        """
         from omnibase_infra.runtime.models import ModelDomainPluginResult
-
-        services: list[str] = ["AdapterModelRouter"]
-
-        event_bus = getattr(config, "event_bus", None)
-        if event_bus is not None and config.container is not None:
-            from omnimarket.adapters.llm.adapter_llm_caller_delegation import (
-                LlmCallerDelegation,
-            )
-            from omnimarket.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
-                DelegationIntentBridge,
-            )
-
-            from omnibase_core.enums import EnumInjectionScope
-
-            bridge = DelegationIntentBridge(
-                event_bus=event_bus,
-                llm_caller=LlmCallerDelegation(),
-            )
-            if config.container.service_registry is not None:
-                await config.container.service_registry.register_instance(
-                    interface=DelegationIntentBridge,
-                    instance=bridge,
-                    scope=EnumInjectionScope.GLOBAL,
-                    metadata={
-                        "description": "Delegation intent bridge with local-model LLM caller",
-                    },
-                )
-            services.append("DelegationIntentBridge")
-            logger.info(
-                "PluginLlm: DelegationIntentBridge registered with LlmCallerDelegation "
-                "(correlation_id=%s)",
-                config.correlation_id,
-            )
-        else:
-            logger.debug(
-                "PluginLlm: skipping DelegationIntentBridge registration — "
-                "no event_bus or container (correlation_id=%s)",
-                config.correlation_id,
-            )
 
         return ModelDomainPluginResult(
             plugin_id=self.plugin_id,
             success=True,
             message="LLM handlers wired",
-            services_registered=services,
+            services_registered=["AdapterModelRouter"],
         )
 
     async def wire_dispatchers(

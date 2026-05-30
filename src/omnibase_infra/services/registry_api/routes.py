@@ -6,10 +6,9 @@ FastAPI route handlers for the Registry API. Routes are defined as an
 APIRouter for easy mounting into the main FastAPI application.
 
 Endpoint Summary:
-    GET /registry/discovery           - Full dashboard payload
+    GET /registry/discovery           - Full dashboard payload (projection-based)
     GET /registry/nodes               - Node list with pagination
     GET /registry/nodes/{id}          - Single node detail
-    GET /registry/instances           - Live Consul instances
     GET /registry/widgets/mapping     - Widget mapping configuration
     GET /registry/health              - Service health check
     GET /registry/contracts           - Contract list with pagination
@@ -39,7 +38,6 @@ from omnibase_infra.services.registry_api.models import (
     ModelRegistryNodeDetailView,
     ModelRegistryNodeView,
     ModelResponseListContracts,
-    ModelResponseListInstances,
     ModelResponseListNodes,
     ModelResponseListTopics,
     ModelTopicView,
@@ -129,14 +127,14 @@ def get_service(request: Request) -> ServiceRegistryDiscovery:
     response_model=ModelRegistryDiscoveryResponse,
     summary="Full Dashboard Payload",
     description=(
-        "Returns the complete dashboard payload including nodes, live instances, "
+        "Returns the projection-based dashboard payload including nodes "
         "and summary statistics. This is the primary endpoint for dashboard "
         "consumption, providing all needed data in a single request."
     ),
     responses={
         400: {"description": "Bad request (e.g., invalid correlation ID format)"},
         200: {
-            "description": "Successful response with full discovery data",
+            "description": "Successful response with discovery data",
             "content": {
                 "application/json": {
                     "example": {
@@ -145,13 +143,10 @@ def get_service(request: Request) -> ServiceRegistryDiscovery:
                         "summary": {
                             "total_nodes": 10,
                             "active_nodes": 8,
-                            "healthy_instances": 5,
-                            "unhealthy_instances": 2,
                             "by_node_type": {"EFFECT": 5, "COMPUTE": 3, "REDUCER": 2},
                             "by_state": {"active": 8, "pending_registration": 2},
                         },
                         "nodes": [],
-                        "live_instances": [],
                         "pagination": {
                             "total": 10,
                             "limit": 100,
@@ -288,44 +283,6 @@ async def get_node(
         )
 
     return node
-
-
-@router.get(
-    "/instances",
-    response_model=ModelResponseListInstances,
-    summary="List Live Consul Instances",
-    description=(
-        "Returns a list of live service instances from Consul. "
-        "Includes health status and metadata for each instance."
-    ),
-    responses={
-        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
-        200: {"description": "Successful response with instance list"},
-    },
-)
-async def list_instances(
-    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
-    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
-    service_name: Annotated[
-        str | None,
-        Query(description="Filter by service name"),
-    ] = None,
-    include_unhealthy: Annotated[
-        bool,
-        Query(description="Include unhealthy instances in results"),
-    ] = False,
-) -> ModelResponseListInstances:
-    """List live Consul service instances."""
-    instances, warnings = await service.list_instances(
-        service_name=service_name,
-        include_unhealthy=include_unhealthy,
-        correlation_id=correlation_id,
-    )
-
-    return ModelResponseListInstances(
-        instances=instances,
-        warnings=warnings,
-    )
 
 
 @router.get(

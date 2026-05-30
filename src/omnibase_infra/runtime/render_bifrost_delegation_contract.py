@@ -324,6 +324,22 @@ def _populate_backend_endpoints(
     return populated
 
 
+def _resolve_target_path(
+    *,
+    target_path: Path | None,
+    env: Mapping[str, str],
+) -> Path | None:
+    if target_path is not None:
+        return target_path
+    configured_path = env.get("BIFROST_CONTRACT_PATH")
+    if configured_path is None:
+        return _DEFAULT_TARGET_PATH
+    stripped_path = configured_path.strip()
+    if not stripped_path:
+        return None
+    return Path(stripped_path)
+
+
 def render_bifrost_delegation_contract(
     *,
     source_path: Path | None = None,
@@ -331,7 +347,7 @@ def render_bifrost_delegation_contract(
     environ: Mapping[str, str] | None = None,
     verify_endpoints: bool | None = None,
     endpoint_probe: EndpointProbe | None = None,
-) -> Path:
+) -> Path | None:
     """Render the deployed Bifrost delegation contract and return its path."""
     env = environ if environ is not None else os.environ
     should_verify = (
@@ -342,9 +358,9 @@ def render_bifrost_delegation_contract(
     probe = endpoint_probe or _probe_openai_model_endpoint
     _source_env = env.get("BIFROST_SOURCE_CONTRACT_PATH", "").strip()
     source = source_path or (Path(_source_env) if _source_env else _DEFAULT_SOURCE_PATH)
-    target = target_path or Path(
-        env.get("BIFROST_CONTRACT_PATH", str(_DEFAULT_TARGET_PATH))
-    )
+    target = _resolve_target_path(target_path=target_path, env=env)
+    if target is None:
+        return None
 
     if not should_verify and _has_populated_endpoint(target):
         _strip_render_hint_fields(target)
@@ -391,6 +407,12 @@ def render_bifrost_delegation_contract(
 
 def main() -> int:
     rendered = render_bifrost_delegation_contract()
+    if rendered is None:
+        sys.stdout.write(
+            "[entrypoint] Bifrost delegation contract rendering disabled: "
+            "BIFROST_CONTRACT_PATH is empty\n"
+        )
+        return 0
     sys.stdout.write(f"[entrypoint] Bifrost delegation contract ready: {rendered}\n")
     return 0
 
