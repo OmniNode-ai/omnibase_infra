@@ -73,10 +73,16 @@ def _load_workspace_repos(omni_home: Path) -> list[dict[str, Any]]:
             continue
         if line and not line.startswith(" ") and not stripped.startswith("- "):
             break
-        if stripped.startswith("- path:"):
+        # Any "- " list item starts a new repo record (order-tolerant).
+        if stripped.startswith("- "):
             if current is not None:
                 repos.append(current)
-            current = {"path": _strip_yaml_scalar(stripped.removeprefix("- path:"))}
+            current = {}
+            # The first key may be inline with the list marker (e.g. "- path: foo").
+            rest = stripped[2:].strip()
+            if rest and ":" in rest:
+                key, value = rest.split(":", 1)
+                current[key.strip()] = _strip_yaml_scalar(value)
             continue
         if current is None or ":" not in stripped:
             continue
@@ -85,7 +91,8 @@ def _load_workspace_repos(omni_home: Path) -> list[dict[str, Any]]:
 
     if current is not None:
         repos.append(current)
-    return repos
+    # Discard entries that lack a path field (malformed YAML blocks).
+    return [r for r in repos if r.get("path") is not None]
 
 
 def _age_days(indexed_at: str | None, now: datetime) -> float | None:
@@ -130,12 +137,17 @@ def emit(omni_home: Path, out_path: Path | None = None) -> dict[str, Any]:
         index_age_days = _age_days(indexed_at, now)
         no_index = indexed_at is None
         stale = bool(head_sha and index_head_sha and head_sha != index_head_sha)
+        # A repo that exists and was indexed but has an unreadable HEAD is an
+        # unknown state — flag it explicitly rather than letting it appear fresh.
+        head_unreadable = exists and not no_index and head_sha is None
 
         failure = None
         if not exists:
             failure = "repo directory not found"
         elif no_index:
             failure = "never indexed by Repowise"
+        elif head_unreadable:
+            failure = "repo exists but git HEAD is unreadable (not a git repo?)"
         elif index_age_days is None:
             failure = f"unparseable indexed_at: {indexed_at}"
         elif stale:

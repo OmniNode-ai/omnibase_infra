@@ -65,3 +65,69 @@ def test_emit_repowise_freshness_receipt_reports_stale_and_no_index(
     assert saved["repos"][1]["docs_mode"] == "skipped"
     assert saved["repos"][1]["no_index"] is True
     assert (tmp_path / "latest-freshness.json").is_symlink()
+
+
+def test_order_tolerant_yaml_parsing(tmp_path, monkeypatch):
+    """Parser must handle list items where path is not the first key."""
+    module = _load_module()
+
+    (tmp_path / "repo_c").mkdir()
+    # alias comes before path — order should not matter.
+    (tmp_path / ".repowise-workspace.yaml").write_text(
+        "\n".join(
+            [
+                "repos:",
+                "  - alias: gamma",
+                "    path: repo_c",
+                "    indexed_at: '2026-05-30T00:00:00+00:00'",
+                "    last_commit_at_index: abc123",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "_git_branch", lambda repo_dir: "main")
+    monkeypatch.setattr(module, "_git_head", lambda repo_dir: "abc123")
+
+    out_path = tmp_path / "freshness.json"
+    receipt = module.emit(tmp_path, out_path)
+
+    assert receipt["summary"]["total"] == 1
+    assert receipt["repos"][0]["alias"] == "gamma"
+    assert receipt["repos"][0]["path"] == "repo_c"
+    # Same SHA → not stale.
+    assert receipt["repos"][0]["stale"] is False
+    assert receipt["repos"][0]["failure"] is None
+
+
+def test_head_unreadable_flagged_as_failure(tmp_path, monkeypatch):
+    """A repo that exists and is indexed but has an unreadable HEAD is a failure."""
+    module = _load_module()
+
+    (tmp_path / "repo_d").mkdir()
+    (tmp_path / ".repowise-workspace.yaml").write_text(
+        "\n".join(
+            [
+                "repos:",
+                "  - path: repo_d",
+                "    alias: delta",
+                "    indexed_at: '2026-05-30T00:00:00+00:00'",
+                "    last_commit_at_index: abc123",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "_git_branch", lambda repo_dir: None)
+    monkeypatch.setattr(module, "_git_head", lambda repo_dir: None)
+
+    out_path = tmp_path / "freshness.json"
+    receipt = module.emit(tmp_path, out_path)
+
+    assert receipt["summary"]["failures"] == 1
+    repo = receipt["repos"][0]
+    assert repo["failure"] is not None
+    assert "unreadable" in repo["failure"]
+    assert repo["stale"] is False  # can't determine staleness without HEAD

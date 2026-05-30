@@ -66,7 +66,7 @@ python3 "$OMNI_HOME/omnibase_infra/scripts/emit_repowise_freshness_receipt.py" \
 
 ### File location
 
-```
+```text
 $OMNI_HOME/.onex_state/repowise-sync/freshness-<ISO8601-timestamp>.json
 ```
 

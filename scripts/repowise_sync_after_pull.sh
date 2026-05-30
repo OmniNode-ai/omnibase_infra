@@ -48,7 +48,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-omni_home="${OMNI_HOME:-$(pwd)}"
+omni_home="${OMNI_HOME:-}"
+if [[ -z "$omni_home" ]]; then
+  # Fall back to the directory two levels above this script
+  # (scripts/ → omnibase_infra/ → omni_home/).
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  omni_home="$(cd "$script_dir/../.." && pwd)"
+fi
 workspace_config="$omni_home/.repowise-workspace.yaml"
 state_root="$omni_home/.onex_state/repowise-sync"
 run_id="repowise-sync-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -70,12 +76,23 @@ if ! command -v repowise >/dev/null 2>&1; then
   exit 1
 fi
 
+pull_all_script="$omni_home/omnibase_infra/scripts/pull-all.sh"
+freshness_script="$omni_home/omnibase_infra/scripts/emit_repowise_freshness_receipt.py"
+
+for _required_script in "$pull_all_script" "$freshness_script"; do
+  if [[ ! -f "$_required_script" ]]; then
+    echo "ERROR: required script not found: $_required_script" >&2
+    echo "  Set OMNI_HOME to the omni_home root (parent of omnibase_infra/)." >&2
+    exit 1
+  fi
+done
+
 if [[ "$skip_pull" == false ]]; then
   if [[ "${#repos[@]}" -gt 0 ]]; then
-    OMNI_HOME="$omni_home" bash "$omni_home/omnibase_infra/scripts/pull-all.sh" "${repos[@]}" \
+    OMNI_HOME="$omni_home" bash "$pull_all_script" "${repos[@]}" \
       > "$run_dir/pull-all.log" 2>&1
   else
-    OMNI_HOME="$omni_home" bash "$omni_home/omnibase_infra/scripts/pull-all.sh" \
+    OMNI_HOME="$omni_home" bash "$pull_all_script" \
       > "$run_dir/pull-all.log" 2>&1
   fi
 else
@@ -93,7 +110,7 @@ fi
 repowise status --workspace "$omni_home" > "$run_dir/repowise-status.txt" 2>&1 || true
 repowise doctor --workspace "$omni_home" > "$run_dir/repowise-doctor.txt" 2>&1 || true
 
-python3 "$omni_home/omnibase_infra/scripts/emit_repowise_freshness_receipt.py" \
+python3 "$freshness_script" \
   --omni-home "$omni_home" \
   --out "$freshness_receipt_file" \
   > "$run_dir/freshness-receipt.log" 2>&1
