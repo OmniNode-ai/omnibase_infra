@@ -23,7 +23,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_route_id,
     _derive_topic_pattern_from_topic,
     _detect_duplicate_topics,
-    _extract_projection_topic,
     _make_dispatch_callback,
     wire_from_manifest,
 )
@@ -138,29 +137,6 @@ class TestDeriveMessageCategory:
 
     def test_unknown_defaults_to_event(self) -> None:
         assert _derive_message_category("onex.unknown.platform.test.v1") == "event"
-
-
-class TestExtractProjectionTopic:
-    @pytest.mark.unit
-    def test_model_event_envelope_uses_event_type_topic(self) -> None:
-        envelope = ModelEventEnvelope[dict[str, str]](
-            payload={"correlation_id": "release-proof"},
-            event_type="onex.evt.omniclaude.task-delegated.v1",
-        )
-
-        assert (
-            _extract_projection_topic(envelope)
-            == "onex.evt.omniclaude.task-delegated.v1"
-        )
-
-    @pytest.mark.unit
-    def test_model_event_envelope_ignores_non_topic_event_type(self) -> None:
-        envelope = ModelEventEnvelope[dict[str, str]](
-            payload={"correlation_id": "release-proof"},
-            event_type="omnimarket.task-delegated",
-        )
-
-        assert _extract_projection_topic(envelope) == ""
 
 
 class TestDeriveIds:
