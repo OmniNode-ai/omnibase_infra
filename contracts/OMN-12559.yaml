@@ -3,15 +3,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-12559
 title: "Auto-discover omnimarket node migrations into the infra forward set"
 summary: >
-  Vendors omnimarket projection node migrations into a namespaced location
-  (docker/migrations/forward/nodes/<node>/) and extends run-forward-migrations.sh
-  to auto-discover and apply them under namespaced migration ids
-  (node:<node>:<file>). This reproduces the OMN-12489 delegation dashboard views
-  and savings projection view on a clean clone with NO manual copy and NO manual
-  renumber, eliminating the savings 076 -> 084 renumber-as-operational-pattern.
-  Adds scripts/sync-node-migrations.sh (vendor + drift --check), wires the drift
-  check as a pre-commit hook, and excludes the namespaced subtree from the flat
-  migration-sequence validator so node 076 never collides with infra flat 076.
+  Vendors omnimarket projection node migrations into a namespaced location (docker/migrations/forward/nodes/<node>/) and extends run-forward-migrations.sh to auto-discover and apply them under namespaced migration ids (node:<node>:<file>). This reproduces the OMN-12489 delegation dashboard views and savings projection view on a clean clone with NO manual copy and NO manual renumber, eliminating the savings 076 -> 084 renumber-as-operational-pattern. Adds scripts/sync-node-migrations.sh (vendor + drift --check), wires the drift check as a pre-commit hook, and excludes the namespaced subtree from the flat migration-sequence validator so node 076 never collides with infra flat 076.
 
 is_seam_ticket: false
 interface_change: false
@@ -20,7 +12,7 @@ evidence_requirements:
   - kind: tests
     description: "Discovery applies node-owned migrations and creates the views without manual copy; namespaced ids do not collide with the flat sequence."
     command: "uv run pytest tests/unit/migrations/ tests/integration/migrations/ tests/ci/test_validate_migration_sequence.py -q"
-  - kind: validation
+  - kind: ci
     description: "Vendored node migrations stay in sync with omnimarket source (drift guard)."
     command: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
   - kind: manual
