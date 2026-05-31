@@ -131,3 +131,41 @@ def test_head_unreadable_flagged_as_failure(tmp_path, monkeypatch):
     assert repo["failure"] is not None
     assert "unreadable" in repo["failure"]
     assert repo["stale"] is False  # can't determine staleness without HEAD
+
+
+def test_latest_freshness_falls_back_to_copy_when_symlink_unavailable(
+    tmp_path, monkeypatch
+):
+    module = _load_module()
+
+    (tmp_path / "repo_e").mkdir()
+    (tmp_path / ".repowise-workspace.yaml").write_text(
+        "\n".join(
+            [
+                "repos:",
+                "  - path: repo_e",
+                "    alias: epsilon",
+                "    indexed_at: '2026-05-30T00:00:00+00:00'",
+                "    last_commit_at_index: abc123",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "_git_branch", lambda repo_dir: "main")
+    monkeypatch.setattr(module, "_git_head", lambda repo_dir: "abc123")
+
+    def reject_symlink(self, target):
+        raise OSError("symlinks unavailable")
+
+    monkeypatch.setattr(module.Path, "symlink_to", reject_symlink)
+
+    out_path = tmp_path / "freshness.json"
+    module.emit(tmp_path, out_path)
+
+    latest_path = tmp_path / "latest-freshness.json"
+    assert not latest_path.is_symlink()
+    assert json.loads(latest_path.read_text(encoding="utf-8")) == json.loads(
+        out_path.read_text(encoding="utf-8")
+    )
