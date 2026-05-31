@@ -22,6 +22,9 @@ OMNI_STANDARDS_WORKFLOW = (
 SECURITY_SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security-scan.yml"
 CHECK_HANDSHAKE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "check-handshake.yml"
 CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
+CHECK_SIBLING_COMPAT_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
+)
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
@@ -191,9 +194,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert setup_step["with"]["cache-enabled"] == "false"
 
-    sibling_workflow = _load_yaml(
-        REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
-    )
+    sibling_workflow = _load_yaml(CHECK_SIBLING_COMPAT_WORKFLOW)
     setup_step = next(
         step
         for step in sibling_workflow["jobs"]["sibling-compat"]["steps"]
@@ -292,6 +293,54 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     job = workflow["jobs"]["check-handshake"]
 
     assert job["timeout-minutes"] >= 10
+
+
+def test_sibling_compat_routes_uv_sync_through_retrying_setup_action() -> None:
+    workflow = _load_yaml(CHECK_SIBLING_COMPAT_WORKFLOW)
+    assert workflow["env"]["UV_HTTP_TIMEOUT"] == "600"
+    assert workflow["env"]["UV_TORCH_BACKEND"] == "cpu"
+
+    steps = workflow["jobs"]["sibling-compat"]["steps"]
+    setup_step = next(
+        step
+        for step in steps
+        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
+    )
+
+    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"]["working-directory"] == "omnibase_infra"
+    assert setup_step["with"]["install-args"] == ""
+    assert setup_step["with"].get("skip-install") != "true"
+    assert not any(
+        step.get("name") == "Install omnibase_infra dev dependencies" for step in steps
+    )
+    assert not any(step.get("run") == "uv sync" for step in steps)
+
+
+def test_sibling_compat_dry_run_retries_transient_download_failures() -> None:
+    workflow = _load_yaml(CHECK_SIBLING_COMPAT_WORKFLOW)
+    steps = workflow["jobs"]["sibling-compat"]["steps"]
+    install_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Validate sibling repo compatibility (OMN-4315)"
+    )
+
+    run_script = install_step["run"]
+    assert "max_attempts=5" in run_script
+    assert (
+        "until uv pip install --torch-backend cpu --overrides "
+        "/tmp/sibling-overrides.txt" in run_script
+    )
+    assert "--dry-run; do" in run_script
+    assert (
+        'echo "::warning::uv pip install sibling dry-run attempt '
+        "${attempt}/${max_attempts} failed" in run_script
+    )
+    assert (
+        'echo "::error::uv pip install sibling dry-run failed after '
+        '${attempt} attempt(s)"' in run_script
+    )
 
 
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
