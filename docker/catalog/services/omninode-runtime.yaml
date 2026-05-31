@@ -58,6 +58,8 @@ volumes:
   - runtime_logs:/app/logs
   - runtime_data:/app/data
   - ../contracts:/app/contracts:ro
+tmpfs:
+  - /run/onex-runtime:uid=1000,gid=1000,mode=0770
 depends_on:
   - service: migration-gate
     condition: service_healthy

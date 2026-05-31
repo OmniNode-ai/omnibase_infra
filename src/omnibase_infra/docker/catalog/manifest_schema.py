@@ -87,6 +87,7 @@ class CatalogManifest:
     ports: PortMapping | None
     healthcheck: HealthCheck | None
     volumes: list[str]
+    tmpfs: list[str]
     depends_on: list[DependsOnEntry]
     # Optional fields with sane defaults
     container_name: str | None = None

@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-12536"
+title: "Preserve runtime tmpfs in catalog-generated compose"
+summary: "Catalog-driven runtime compose renders the runtime-owned local ingress tmpfs so generated deploys do not crash when binding /run/onex-runtime."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused catalog and runtime socket checks prove tmpfs is loaded and rendered."
+    command: "uv run pytest tests/integration/test_catalog_roundtrip.py::test_catalog_runtime_renders_local_ingress_tmpfs tests/integration/test_catalog_extra_networks.py::test_generate_compose_default_network_not_overwritten_as_external tests/unit/docker/test_docker_security.py::TestDockerComposeSecurity::test_runtime_socket_uses_owned_tmpfs -q"
+  - kind: "manual"
+    description: ".201 dev runtime proof after hotpatch: runtime main is healthy and Pattern-B broker is stable with zero lag."
+    command: "deploy: docker inspect omninode-runtime --format '{{json .HostConfig.Tmpfs}}' && curl -sf http://127.0.0.1:8085/health && docker exec omnibase-infra-redpanda rpk group describe pattern-b-broker-onex-cmd-omnimarket-pattern-b-dispatch-v1.__t.onex.cmd.omnimarket.pattern-b-dispatch.v1 --brokers redpanda:9092"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-focused-tests"
+    description: "Focused catalog and runtime socket checks pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_catalog_roundtrip.py::test_catalog_runtime_renders_local_ingress_tmpfs tests/integration/test_catalog_extra_networks.py::test_generate_compose_default_network_not_overwritten_as_external tests/unit/docker/test_docker_security.py::TestDockerComposeSecurity::test_runtime_socket_uses_owned_tmpfs -q"
+  - id: "dod-expanded-nondocker-tests"
+    description: "Expanded non-Docker catalog checks pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_catalog_roundtrip.py::test_catalog_runtime_memgraph_bundle_injects_env tests/integration/test_catalog_roundtrip.py::test_catalog_runtime_without_memgraph_excludes_memory_env tests/integration/test_catalog_roundtrip.py::test_catalog_runtime_renders_local_ingress_tmpfs tests/integration/test_catalog_roundtrip.py::test_catalog_tracing_bundle_injects_otel_env tests/integration/test_catalog_extra_networks.py tests/unit/docker/test_docker_security.py::TestDockerComposeSecurity::test_runtime_socket_uses_owned_tmpfs -q"
+  - id: "dod-runtime-hotpatch-proof"
+    description: ".201 dev runtime restored the runtime-owned socket tmpfs and Pattern-B broker membership."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker inspect omninode-runtime --format '{{json .HostConfig.Tmpfs}}' includes /run/onex-runtime; /health reports status=healthy, runtime_attached=true, local_ingress.running=true; rpk group describe pattern-b-broker-onex-cmd-omnimarket-pattern-b-dispatch-v1.__t.onex.cmd.omnimarket.pattern-b-dispatch.v1 reports Stable, MEMBERS=1, TOTAL-LAG=0"
