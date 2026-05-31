@@ -11,8 +11,8 @@ on-wire ``event_type`` and every command routed to DLQ.
 
 This test proves:
   1. ``ModelHandlerRoutingEntry`` accepts an optional ``event_type`` alias.
-  2. ``_prepare_handler_wiring`` includes both the class name AND the
-     ``event_type`` alias in ``PreparedWiring.message_types``.
+  2. ``_prepare_handler_wiring`` includes the class name, the ``event_type``
+     alias, and literal subscribe topics in ``PreparedWiring.message_types``.
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         """When event_type alias is declared, BOTH keys index the dispatcher.
 
         Before OMN-9215 dispatcher-key fix: message_types == {"ModelFooCommand"}.
-        After: message_types == {"ModelFooCommand", "platform.foo-start"}.
+        After: message_types includes class, semantic alias, and wire topic.
         This lets a publisher's wire-level event_type resolve to the registered
         handler (primary lookup path) AND keeps the class-name fallback working.
         """
@@ -142,7 +142,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_types_strips_whitespace_from_event_type_alias(self) -> None:
@@ -177,7 +181,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_types_omits_alias_when_only_whitespace(self) -> None:
@@ -213,7 +221,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
     @pytest.mark.unit
     def test_message_category_overrides_contract_first_topic_category(self) -> None:
@@ -295,6 +307,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {
             "ModelNodeHeartbeatEvent",
             "platform.node-heartbeat",
+            "onex.cmd.platform.foo-start.v1",
         }
         assert (
             prepared.resolution_outcome
@@ -335,7 +348,11 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+        assert prepared.message_types == {
+            "ModelFooCommand",
+            "platform.foo-start",
+            "onex.cmd.platform.foo-start.v1",
+        }
 
 
 class TestContractDiscoveryParsesEventType:
