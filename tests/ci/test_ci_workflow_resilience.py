@@ -202,13 +202,13 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     assert setup_step["with"]["cache-enabled"] == "false"
 
     docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
-    docker_cache_step = next(
+    docker_setup_step = next(
         step
         for step in docker_workflow["jobs"]["docker-integration-tests"]["steps"]
-        if step.get("name") == "Load cached uv"
+        if step.get("uses") == "./.github/actions/setup-python-uv"
     )
-    assert docker_cache_step["if"] == "${{ false }}"
-    assert docker_cache_step["uses"] == "actions/cache/restore@v5"
+    assert docker_setup_step["with"]["cache-enabled"] == "false"
+    assert docker_setup_step["with"]["cache-version"] == "docker"
 
 
 def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
@@ -322,7 +322,10 @@ def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
         'export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"' in run_script
     )
     assert 'export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"' in run_script
+    assert 'export UV_CONCURRENT_INSTALLS="${UV_CONCURRENT_INSTALLS:-1}"' in run_script
     assert "git config --global http.version HTTP/1.1" in run_script
+    assert "git config --global http.lowSpeedLimit 0" in run_script
+    assert "git config --global http.lowSpeedTime 999999" in run_script
     assert "sync_cmd=(uv sync)" in run_script
     assert "sync_cmd+=(--no-cache)" in run_script
     assert 'until "${sync_cmd[@]}"; do' in run_script

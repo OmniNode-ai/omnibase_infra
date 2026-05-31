@@ -113,8 +113,11 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_HTTP_TIMEOUT=600 \
-    UV_RETRY_ATTEMPTS=5 \
+    UV_RETRY_ATTEMPTS=8 \
     UV_RETRY_DELAY_SECONDS=10 \
+    UV_CONCURRENT_DOWNLOADS=4 \
+    UV_CONCURRENT_BUILDS=1 \
+    UV_CONCURRENT_INSTALLS=1 \
     # uv configuration: create venv inside project directory
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
@@ -142,7 +145,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Version pinned via UV_VERSION build arg for reproducible builds
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
-RUN git config --global http.version HTTP/1.1
+RUN git config --global http.version HTTP/1.1 \
+    && git config --global http.lowSpeedLimit 0 \
+    && git config --global http.lowSpeedTime 999999
 
 RUN cat > /usr/local/bin/uv-with-retry <<'EOF'
 #!/bin/sh
