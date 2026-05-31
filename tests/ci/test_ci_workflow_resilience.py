@@ -41,6 +41,15 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _runs_on_expression(job: dict[str, Any]) -> str:
+    runs_on = job.get("runs-on")
+    if runs_on is None:
+        return ""
+    if isinstance(runs_on, str):
+        return runs_on
+    return str(runs_on)
+
+
 def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-freeze"]
@@ -400,6 +409,29 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     assert "max_attempts=3" in run_script
     assert "until uv sync --no-cache --all-extras" in run_script
     assert "uv sync onex_change_control failed after" in run_script
+
+
+def test_merge_group_and_docker_workflows_have_runner_pool_overrides() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    for job_name, job in ci_workflow["jobs"].items():
+        expression = _runs_on_expression(job)
+        if "self-hosted" not in expression:
+            continue
+
+        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_REQUIRED_CI_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
+        assert "github.event_name == 'merge_group'" in expression, job_name
+
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    for job_name, job in docker_workflow["jobs"].items():
+        expression = _runs_on_expression(job)
+        if "self-hosted" not in expression:
+            continue
+
+        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_DOCKER_CI_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
 
 
 def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
