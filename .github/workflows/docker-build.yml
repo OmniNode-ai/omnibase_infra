@@ -276,7 +276,6 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Load cached uv
-        if: ${{ false }}
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/uv

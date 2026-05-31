@@ -82,7 +82,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check ruff formatting
         run: uv run ruff format --check src/ tests/
@@ -140,7 +140,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Run architecture layer check
         run: |
@@ -238,7 +238,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check schema fingerprint (CI twin for B2)
         run: uv run python scripts/check_schema_fingerprint.py verify
@@ -270,7 +270,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Run demo loop assertion gate
         run: |
@@ -326,7 +326,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check topic enum drift
         run: |
@@ -359,7 +359,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Lint topic names
         run: |
@@ -428,7 +428,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           cache-key-prefix: uv-topic-drift
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
@@ -497,7 +497,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
@@ -584,7 +584,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check for raw topic literals in production code
         run: |
@@ -616,7 +616,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Plugin ENV->Service Completeness Check
         run: |
@@ -648,7 +648,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check compose :? env var fixture coverage
         run: |
@@ -772,7 +772,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Compute changed files
         id: diff
@@ -855,7 +855,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
@@ -943,7 +943,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Check version pin compliance
         run: |
@@ -993,10 +993,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
 
       - name: Install dependencies
-        run: uv sync --no-cache
+        run: uv sync
 
       - name: Check if onex compliance command exists
         id: check-command
@@ -1110,7 +1110,7 @@ jobs:
 
       - name: Install onex_change_control
         working-directory: onex_change_control
-        run: uv sync --no-cache --all-extras
+        run: uv sync --all-extras
 
       - name: Validate contract YAML files
         working-directory: onex_change_control
@@ -1284,7 +1284,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           cache-key-prefix: uv-boundary
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
@@ -1343,7 +1343,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
       - name: Check writer-migration coupling
@@ -1386,7 +1386,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
       - name: Verify Python Postgres client

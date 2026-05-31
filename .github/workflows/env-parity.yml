@@ -61,7 +61,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
+          cache-enabled: "true"
           working-directory: omnibase_infra
 
       - name: Run env parity test

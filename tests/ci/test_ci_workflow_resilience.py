@@ -160,7 +160,7 @@ def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     assert "docker-compose-linux-x86_64" in compose_step["run"]
 
 
-def test_short_gates_can_disable_uv_cache_cleanup() -> None:
+def test_required_ci_jobs_use_uv_cache_by_default() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
     assert action["inputs"]["cache-enabled"]["default"] == "true"
     cache_step = next(
@@ -169,6 +169,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     assert cache_step["if"] == "inputs.cache-enabled != 'false'"
 
     ci_workflow = _load_yaml(CI_WORKFLOW)
+    setup_jobs: list[str] = []
     for job_name, job in ci_workflow["jobs"].items():
         setup_steps = [
             step
@@ -179,9 +180,12 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         if not setup_steps:
             continue
 
+        setup_jobs.append(job_name)
         assert len(setup_steps) == 1
         setup_step = setup_steps[0]
-        assert setup_step["with"]["cache-enabled"] == "false"
+        assert setup_step["with"].get("cache-enabled") != "false"
+
+    assert setup_jobs
 
     env_parity_workflow = _load_yaml(ENV_PARITY_WORKFLOW)
     setup_step = next(
@@ -189,7 +193,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         for step in env_parity_workflow["jobs"]["env-parity"]["steps"]
         if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
     )
-    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"].get("cache-enabled") != "false"
 
     sibling_workflow = _load_yaml(
         REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
@@ -199,7 +203,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         for step in sibling_workflow["jobs"]["sibling-compat"]["steps"]
         if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
     )
-    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"].get("cache-enabled") != "false"
 
     docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     docker_cache_step = next(
@@ -207,7 +211,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         for step in docker_workflow["jobs"]["docker-integration-tests"]["steps"]
         if step.get("name") == "Load cached uv"
     )
-    assert docker_cache_step["if"] == "${{ false }}"
+    assert docker_cache_step.get("if") != "${{ false }}"
     assert docker_cache_step["uses"] == "actions/cache/restore@v5"
 
 
@@ -221,7 +225,7 @@ def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
             if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
         )
 
-        assert setup_step["with"]["cache-enabled"] == "false"
+        assert setup_step["with"].get("cache-enabled") != "false"
         assert setup_step["with"]["working-directory"] == "omnibase_infra"
         assert setup_step["with"].get("skip-install") != "true"
         assert not any(step.get("run") == "uv sync --no-cache" for step in steps)
