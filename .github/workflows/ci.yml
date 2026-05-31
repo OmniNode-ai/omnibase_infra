@@ -326,7 +326,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "true"
+          cache-enabled: "false"
 
       - name: Check topic enum drift
         run: |

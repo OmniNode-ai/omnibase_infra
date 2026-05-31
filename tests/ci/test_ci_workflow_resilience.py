@@ -168,6 +168,13 @@ def test_required_ci_jobs_use_uv_cache_by_default() -> None:
     )
     assert cache_step["if"] == "inputs.cache-enabled != 'false'"
 
+    # Jobs deliberately kept cache-disabled because they run authenticated
+    # cross-repo git+https uv fetches on the self-hosted runners, where a stale
+    # cache restore reintroduces the anonymous-rate-limit "Empty reply from
+    # server" flake (OMN-12432). These have dedicated assertions below
+    # (test_topic_enum_drift_has_install_retry_budget) and must stay "false".
+    cache_disabled_jobs = {"topic-enum-drift"}
+
     ci_workflow = _load_yaml(CI_WORKFLOW)
     setup_jobs: list[str] = []
     for job_name, job in ci_workflow["jobs"].items():
@@ -183,7 +190,10 @@ def test_required_ci_jobs_use_uv_cache_by_default() -> None:
         setup_jobs.append(job_name)
         assert len(setup_steps) == 1
         setup_step = setup_steps[0]
-        assert setup_step["with"].get("cache-enabled") != "false"
+        if job_name in cache_disabled_jobs:
+            assert setup_step["with"].get("cache-enabled") == "false"
+        else:
+            assert setup_step["with"].get("cache-enabled") != "false"
 
     assert setup_jobs
 
