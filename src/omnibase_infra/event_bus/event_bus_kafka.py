@@ -203,6 +203,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
 from aiokafka.errors import (
     InvalidPartitionsError,
+    KafkaConnectionError,
     KafkaError,
     UnknownTopicOrPartitionError,
 )
@@ -488,6 +489,98 @@ class EventBusKafka(
         # Gated by ENABLE_CONSUMER_HEALTH_EMITTER env var
         self._health_emitter: ConsumerHealthEmitter | None = None
 
+    def _build_producer(self) -> AIOKafkaProducer:
+        """Build a producer from the current immutable config snapshot."""
+        return AIOKafkaProducer(
+            bootstrap_servers=self._bootstrap_servers,
+            acks=self._config.acks_aiokafka,
+            enable_idempotence=self._config.enable_idempotence,
+            max_request_size=self._config.max_request_size,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._build_auth_kwargs(),
+        )
+
+    def _build_consumer(
+        self,
+        topic: str,
+        *,
+        effective_group_id: str,
+        resolved_group_instance_id: str | None,
+    ) -> AIOKafkaConsumer:
+        """Build a consumer from the current immutable config snapshot."""
+        return AIOKafkaConsumer(
+            topic,
+            bootstrap_servers=self._bootstrap_servers,
+            group_id=effective_group_id,
+            group_instance_id=resolved_group_instance_id,
+            auto_offset_reset=self._config.auto_offset_reset,
+            enable_auto_commit=self._config.enable_auto_commit,
+            session_timeout_ms=self._config.session_timeout_ms,
+            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+            max_poll_interval_ms=self._config.max_poll_interval_ms,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._build_auth_kwargs(),
+        )
+
+    async def _stop_producer_quietly(
+        self, producer: AIOKafkaProducer | None, *, reason: str
+    ) -> None:
+        if producer is None:
+            return
+        try:
+            await producer.stop()
+        except Exception as cleanup_err:  # noqa: BLE001 — boundary cleanup only
+            logger.warning(
+                "Cleanup failed for Kafka producer stop during %s: %s",
+                reason,
+                cleanup_err,
+                exc_info=True,
+            )
+
+    async def _start_producer_with_retry(self, correlation_id: UUID) -> None:
+        """Start the producer, retrying transient cold-bootstrap failures.
+
+        Redpanda can accept TCP while a metadata bootstrap request times out or
+        returns ``KafkaConnectionError`` under topic/group pressure. Startup now
+        uses the same bus-level retry budget as publish operations instead of
+        failing the whole runtime on the first cold-bootstrap miss.
+        """
+        attempts = self._max_retry_attempts + 1
+        backoff = max(0.001, self._retry_backoff_base)
+        last_error: BaseException | None = None
+
+        for attempt in range(1, attempts + 1):
+            producer = self._build_producer()
+            self._producer = producer
+            try:
+                await asyncio.wait_for(
+                    producer.start(),
+                    timeout=self._timeout_seconds,
+                )
+                return
+            except (TimeoutError, KafkaConnectionError) as exc:
+                last_error = exc
+                self._producer = None
+                await self._stop_producer_quietly(producer, reason="bootstrap retry")
+                if attempt >= attempts:
+                    raise
+                logger.warning(
+                    "Kafka producer bootstrap failed on attempt %d/%d; retrying in %.3fs",
+                    attempt,
+                    attempts,
+                    backoff,
+                    extra={
+                        "environment": self._environment,
+                        "correlation_id": str(correlation_id),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 10.0)
+
+        if last_error is not None:
+            raise last_error
+
     # =========================================================================
     # Factory Methods
     # =========================================================================
@@ -668,20 +761,7 @@ class EventBusKafka(
                 )
 
             try:
-                # Apply producer configuration from config model
-                self._producer = AIOKafkaProducer(
-                    bootstrap_servers=self._bootstrap_servers,
-                    acks=self._config.acks_aiokafka,
-                    enable_idempotence=self._config.enable_idempotence,
-                    max_request_size=self._config.max_request_size,
-                    retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    **self._build_auth_kwargs(),
-                )
-
-                await asyncio.wait_for(
-                    self._producer.start(),
-                    timeout=self._timeout_seconds,
-                )
+                await self._start_producer_with_retry(correlation_id)
 
                 self._started = True
                 self._shutdown = False
@@ -1736,19 +1816,10 @@ class EventBusKafka(
         )
         resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
 
-        # Apply consumer configuration from config model
-        consumer = AIOKafkaConsumer(
+        consumer = self._build_consumer(
             topic,
-            bootstrap_servers=self._bootstrap_servers,
-            group_id=effective_group_id,
-            group_instance_id=resolved_group_instance_id,
-            auto_offset_reset=self._config.auto_offset_reset,
-            enable_auto_commit=self._config.enable_auto_commit,
-            session_timeout_ms=self._config.session_timeout_ms,
-            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-            max_poll_interval_ms=self._config.max_poll_interval_ms,
-            retry_backoff_ms=self._config.reconnect_backoff_ms,
-            **self._build_auth_kwargs(),
+            effective_group_id=effective_group_id,
+            resolved_group_instance_id=resolved_group_instance_id,
         )
 
         # Redpanda (and Kafka) can return UnknownTopicOrPartitionError or
@@ -1771,6 +1842,8 @@ class EventBusKafka(
             asyncio.get_event_loop().time() + self._timeout_seconds
         )
         metadata_retry_backoff = 2.0  # seconds; doubles each attempt, capped at 10s
+        bootstrap_attempt = 0
+        bootstrap_retry_backoff = max(0.001, self._retry_backoff_base)
 
         while True:
             try:
@@ -1856,22 +1929,71 @@ class EventBusKafka(
 
                 # Recreate consumer for the next attempt — a consumer that failed
                 # start() cannot be restarted.
-                consumer = AIOKafkaConsumer(
+                consumer = self._build_consumer(
                     topic,
-                    bootstrap_servers=self._bootstrap_servers,
-                    group_id=effective_group_id,
-                    group_instance_id=resolved_group_instance_id,
-                    auto_offset_reset=self._config.auto_offset_reset,
-                    enable_auto_commit=self._config.enable_auto_commit,
-                    session_timeout_ms=self._config.session_timeout_ms,
-                    heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-                    max_poll_interval_ms=self._config.max_poll_interval_ms,
-                    retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    **self._build_auth_kwargs(),
+                    effective_group_id=effective_group_id,
+                    resolved_group_instance_id=resolved_group_instance_id,
+                )
+
+            except KafkaConnectionError as e:
+                bootstrap_attempt += 1
+                try:
+                    await consumer.stop()
+                except Exception as cleanup_err:  # noqa: BLE001
+                    logger.debug(
+                        "Cleanup after KafkaConnectionError (topic=%s): %s",
+                        topic,
+                        cleanup_err,
+                    )
+
+                if bootstrap_attempt > self._max_retry_attempts:
+                    self._pending_consumer_keys.discard(consumer_key)
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="start_consumer",
+                        target_name=f"kafka.{topic}",
+                    )
+                    logger.exception(
+                        f"Failed to start consumer for topic {topic}: {e}",
+                        extra={
+                            "topic": topic,
+                            "group_id": group_id,
+                            "correlation_id": str(correlation_id),
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "servers": sanitized_servers,
+                        },
+                    )
+                    raise InfraConnectionError(
+                        f"Failed to start consumer for topic {topic}: {e}",
+                        context=context,
+                        topic=topic,
+                        servers=sanitized_servers,
+                    ) from e
+
+                logger.warning(
+                    "Kafka consumer bootstrap failed for %s on attempt %d/%d; "
+                    "retrying in %.3fs",
+                    topic,
+                    bootstrap_attempt,
+                    self._max_retry_attempts + 1,
+                    bootstrap_retry_backoff,
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                await asyncio.sleep(bootstrap_retry_backoff)
+                bootstrap_retry_backoff = min(bootstrap_retry_backoff * 2, 10.0)
+                consumer = self._build_consumer(
+                    topic,
+                    effective_group_id=effective_group_id,
+                    resolved_group_instance_id=resolved_group_instance_id,
                 )
 
             except TimeoutError as e:
-                self._pending_consumer_keys.discard(consumer_key)
                 # Clean up consumer on failure to prevent resource leak
                 try:
                     await consumer.stop()
@@ -1883,6 +2005,31 @@ class EventBusKafka(
                         exc_info=True,
                     )
 
+                bootstrap_attempt += 1
+                if bootstrap_attempt <= self._max_retry_attempts:
+                    logger.warning(
+                        "Kafka consumer bootstrap timed out for %s on attempt %d/%d; "
+                        "retrying in %.3fs",
+                        topic,
+                        bootstrap_attempt,
+                        self._max_retry_attempts + 1,
+                        bootstrap_retry_backoff,
+                        extra={
+                            "topic": topic,
+                            "group_id": group_id,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    await asyncio.sleep(bootstrap_retry_backoff)
+                    bootstrap_retry_backoff = min(bootstrap_retry_backoff * 2, 10.0)
+                    consumer = self._build_consumer(
+                        topic,
+                        effective_group_id=effective_group_id,
+                        resolved_group_instance_id=resolved_group_instance_id,
+                    )
+                    continue
+
+                self._pending_consumer_keys.discard(consumer_key)
                 # Propagate timeout error to surface startup failures (differentiate from connection errors)
                 timeout_ctx = ModelTimeoutErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
