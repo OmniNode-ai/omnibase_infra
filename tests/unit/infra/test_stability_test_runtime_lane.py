@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -73,6 +74,7 @@ def _construct_compose_value(
         return loader.construct_mapping(node)
     if isinstance(node, yaml.SequenceNode):
         return loader.construct_sequence(node)
+    assert isinstance(node, yaml.ScalarNode)
     return loader.construct_scalar(node)
 
 
@@ -83,7 +85,7 @@ class _TestSafeLoader(yaml.SafeLoader):
 _TestSafeLoader.add_constructor("!override", _construct_compose_value)
 
 
-def _load_overlay() -> dict:
+def _load_overlay() -> dict[str, Any]:
     overlay_text = OVERLAY_FILE.read_text(encoding="utf-8")
     overlay = yaml.load(overlay_text, Loader=_TestSafeLoader)  # noqa: S506
     assert isinstance(overlay, dict)
@@ -100,7 +102,7 @@ def _load_runtime_policy_env() -> dict[str, str]:
     return env
 
 
-def _load_base_compose() -> dict:
+def _load_base_compose() -> dict[str, Any]:
     base_text = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
     base = yaml.load(base_text, Loader=yaml.SafeLoader)
     assert isinstance(base, dict)

@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -181,7 +182,7 @@ def _run_compose_config(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _compose_config_json() -> dict:
+def _compose_config_json() -> dict[str, Any]:
     result = _run_compose_config("--format", "json")
 
     rendered_config = json.loads(result.stdout)
@@ -189,11 +190,11 @@ def _compose_config_json() -> dict:
     return rendered_config
 
 
-def _published_ports(service_config: dict) -> set[str]:
+def _published_ports(service_config: dict[str, Any]) -> set[str]:
     return {str(port["published"]) for port in service_config.get("ports", [])}
 
 
-def _label_value(service_config: dict, key: str) -> str | None:
+def _label_value(service_config: dict[str, Any], key: str) -> str | None:
     labels = service_config.get("labels", {})
     if isinstance(labels, dict):
         value = labels.get(key)
