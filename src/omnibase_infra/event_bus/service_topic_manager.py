@@ -414,9 +414,10 @@ class TopicProvisioner:
                     topic_configs=config.to_kafka_config(),
                 )
             else:
+                default_spec = ModelTopicSpec(suffix=topic_name)
                 new_topic = NewTopic(
                     name=topic_name,
-                    num_partitions=DEFAULT_EVENT_TOPIC_PARTITIONS,
+                    num_partitions=self._creation_partitions(default_spec),
                     replication_factor=DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR,
                 )
 
