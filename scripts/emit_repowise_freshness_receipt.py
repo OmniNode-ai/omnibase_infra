@@ -201,6 +201,7 @@ def emit(omni_home: Path, out_path: Path | None = None) -> dict[str, Any]:
     try:
         latest_path.symlink_to(out_path.name)
     except OSError:
+        # Some filesystems disallow symlinks; the timestamped receipt remains durable.
         pass
     return receipt
 
