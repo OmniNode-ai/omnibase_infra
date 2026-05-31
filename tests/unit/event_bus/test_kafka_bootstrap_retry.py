@@ -13,9 +13,19 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
+@pytest.mark.unit
+def test_kafka_api_version_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAFKA_API_VERSION", "2.8.0")
+
+    config = ModelKafkaEventBusConfig.default()
+
+    assert config.api_version == "2.8.0"
+
+
 def _retry_config() -> ModelKafkaEventBusConfig:
     return ModelKafkaEventBusConfig(
         bootstrap_servers="localhost:19092",
+        api_version="2.8.0",
         timeout_seconds=1,
         max_retry_attempts=1,
         retry_backoff_base=0.001,
@@ -45,6 +55,7 @@ async def test_producer_start_retries_kafka_connection_error() -> None:
         await bus.start()
 
     assert producer_cls.call_count == 2
+    assert producer_cls.call_args_list[0].kwargs["api_version"] == "2.8.0"
     first_producer.stop.assert_awaited_once()
     second_producer.start.assert_awaited_once()
     assert bus._producer is second_producer
@@ -89,6 +100,7 @@ async def test_consumer_start_retries_kafka_connection_error() -> None:
         )
 
     assert consumer_cls.call_count == 2
+    assert consumer_cls.call_args_list[0].kwargs["api_version"] == "2.8.0"
     first_consumer.stop.assert_awaited_once()
     second_consumer.start.assert_awaited_once()
 
@@ -132,6 +144,7 @@ async def test_consumer_start_retries_timeout_error() -> None:
         )
 
     assert consumer_cls.call_count == 2
+    assert consumer_cls.call_args_list[0].kwargs["api_version"] == "2.8.0"
     first_consumer.stop.assert_awaited_once()
     second_consumer.start.assert_awaited_once()
 

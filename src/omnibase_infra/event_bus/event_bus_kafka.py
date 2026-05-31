@@ -493,6 +493,7 @@ class EventBusKafka(
         """Build a producer from the current immutable config snapshot."""
         return AIOKafkaProducer(
             bootstrap_servers=self._bootstrap_servers,
+            api_version=self._config.api_version,
             acks=self._config.acks_aiokafka,
             enable_idempotence=self._config.enable_idempotence,
             max_request_size=self._config.max_request_size,
@@ -511,6 +512,7 @@ class EventBusKafka(
         return AIOKafkaConsumer(
             topic,
             bootstrap_servers=self._bootstrap_servers,
+            api_version=self._config.api_version,
             group_id=effective_group_id,
             group_instance_id=resolved_group_instance_id,
             auto_offset_reset=self._config.auto_offset_reset,

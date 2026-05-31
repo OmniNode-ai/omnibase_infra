@@ -178,6 +178,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     Attributes:
         bootstrap_servers: Kafka bootstrap servers (host:port format)
+        api_version: Kafka broker API version for aiokafka ("auto" or x.y[.z])
         environment: Environment identifier for consumer groups and logging
         timeout_seconds: Timeout for Kafka operations in seconds
         max_retry_attempts: Maximum retry attempts for publish operations
@@ -230,6 +231,16 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Timeout for Kafka operations in seconds",
         ge=1,
         le=300,
+    )
+    api_version: str = Field(
+        default="auto",
+        description=(
+            "Kafka broker API version passed to aiokafka. Use 'auto' for "
+            "aiokafka version probing, or pin a broker-compatible version "
+            "such as '2.8.0' to skip the all-topic MetadataRequest used by "
+            "auto-detection on large clusters."
+        ),
+        pattern=r"^(auto|\d+\.\d+(?:\.\d+)?)$",
     )
 
     # Retry configuration
@@ -821,6 +832,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         Environment variables are mapped as follows:
             - KAFKA_BOOTSTRAP_SERVERS -> bootstrap_servers
+            - KAFKA_API_VERSION -> api_version
             - KAFKA_TIMEOUT_SECONDS -> timeout_seconds
             - KAFKA_ENVIRONMENT -> environment
             - KAFKA_MAX_RETRY_ATTEMPTS -> max_retry_attempts
@@ -843,6 +855,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         env_mappings: dict[str, str] = {
             "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
+            "KAFKA_API_VERSION": "api_version",
             "KAFKA_TIMEOUT_SECONDS": "timeout_seconds",
             "KAFKA_ENVIRONMENT": "environment",
             "KAFKA_MAX_RETRY_ATTEMPTS": "max_retry_attempts",
@@ -974,7 +987,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         if overrides:
             # Exclude computed field to avoid validation error
-            current_data = self.model_dump(exclude={"acks_aiokafka"})  # noqa: model-dump-bare
+            current_data = self.model_dump(exclude={"acks_aiokafka"})
             current_data.update(overrides)
             return ModelKafkaEventBusConfig(**current_data)
 
@@ -992,6 +1005,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         """
         base_config = cls(
             bootstrap_servers="localhost:19092",  # fallback-ok: local-dev default factory
+            api_version="auto",
             environment="local",
             timeout_seconds=30,
             max_retry_attempts=3,
