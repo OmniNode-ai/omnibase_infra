@@ -327,6 +327,17 @@ def test_stability_lane_runtime_socket_uses_owned_tmpfs() -> None:
 
 
 @pytest.mark.integration
+def test_stability_projection_api_has_separate_infra_and_analytics_dsns() -> None:
+    rendered_config = _compose_config_json()
+    environment = rendered_config["services"]["projection-api"]["environment"]
+
+    assert environment["ONEX_ENVIRONMENT"] == "stability-test"
+    assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
+    assert environment["OMNIBASE_INFRA_DB_URL"].endswith("/omnibase_infra")
+    assert environment["OMNIDASH_ANALYTICS_DB_URL"].endswith("/omnidash_analytics")
+
+
+@pytest.mark.integration
 def test_stability_lane_render_inherits_failing_runtime_healthcheck() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
