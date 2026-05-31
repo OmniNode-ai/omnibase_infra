@@ -10,6 +10,7 @@ profiles:
     compose_project: omnibase-infra
     main_port: 8085
     effects_port: 8086
+    topic_provisioner_max_partitions: 0
     services:
       main:
         runtime_id: dev-main
@@ -48,6 +49,7 @@ profiles:
     compose_project: omnibase-infra-stability-test
     main_port: 18085
     effects_port: 18086
+    topic_provisioner_max_partitions: 1
     services:
       main:
         runtime_id: stability-test-main
@@ -86,6 +88,7 @@ profiles:
     compose_project: omnibase-infra-prod
     main_port: 28085
     effects_port: 28086
+    topic_provisioner_max_partitions: 0
     services:
       main:
         runtime_id: prod-main

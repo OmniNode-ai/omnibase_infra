@@ -98,6 +98,7 @@ services:
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
+      ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS}
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
@@ -131,6 +132,7 @@ services:
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
+      ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS}
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
@@ -176,6 +178,7 @@ services:
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
+      ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS}
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
