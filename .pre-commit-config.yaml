@@ -132,6 +132,15 @@ repos:
         pass_filenames: false
         always_run: false
         stages: [pre-commit]
+      # OMN-12559: vendored omnimarket node migrations must stay in sync with
+      # source. Skips silently when omnimarket source is not checked out.
+      - id: onex-check-node-migration-sync
+        name: ONEX Node Migration Vendor Sync Check
+        entry: bash scripts/sync-node-migrations.sh --check
+        language: system
+        pass_filenames: false
+        files: ^(docker/migrations/forward/nodes/|scripts/sync-node-migrations\.sh)
+        stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
       # .env_local, .env_production, .env-secret, etc. (dot-separated, underscore-separated, and
