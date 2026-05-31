@@ -1103,14 +1103,14 @@ jobs:
           repository: OmniNode-ai/onex_change_control
           path: onex_change_control
 
-      - uses: astral-sh/setup-uv@v7
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
-          enable-cache: true
-          cache-dependency-glob: 'onex_change_control/uv.lock'
-
-      - name: Install onex_change_control
-        working-directory: onex_change_control
-        run: uv sync --no-cache --all-extras
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: "false"
+          working-directory: onex_change_control
+          install-args: "--all-extras"
 
       - name: Validate contract YAML files
         working-directory: onex_change_control
