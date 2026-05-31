@@ -261,7 +261,9 @@ class TestMaterializeHandlerLive:
         ]
         assert len(rejection_records) == 1
         assert rejection_records[0].handler_class_redacted is True
+        assert rejection_records[0].allowed_namespace_count > 0
         assert not hasattr(rejection_records[0], "handler_class")
+        assert not hasattr(rejection_records[0], "allowed_namespaces")
         assert handler_class not in caplog.text
 
     @pytest.mark.asyncio
