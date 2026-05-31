@@ -188,6 +188,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 import random
@@ -639,6 +640,20 @@ class EventBusKafka(
 
         return kwargs
 
+    def _build_client_version_kwargs(
+        self, client_cls: type[object]
+    ) -> dict[str, object]:
+        """Build optional aiokafka client-version kwargs."""
+        if self._config.api_version is None:
+            return {}
+        try:
+            parameters = inspect.signature(client_cls.__init__).parameters
+        except (TypeError, ValueError):
+            return {}
+        if "api_version" not in parameters:
+            return {}
+        return {"api_version": self._config.api_version}
+
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -676,6 +691,7 @@ class EventBusKafka(
                     enable_idempotence=self._config.enable_idempotence,
                     max_request_size=self._config.max_request_size,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._build_client_version_kwargs(AIOKafkaProducer),
                     **self._build_auth_kwargs(),
                 )
 
@@ -1012,6 +1028,7 @@ class EventBusKafka(
                 enable_idempotence=self._config.enable_idempotence,
                 max_request_size=self._config.max_request_size,
                 retry_backoff_ms=self._config.reconnect_backoff_ms,
+                **self._build_client_version_kwargs(AIOKafkaProducer),
                 **self._build_auth_kwargs(),
             )
 
@@ -1749,6 +1766,7 @@ class EventBusKafka(
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
 
@@ -1875,6 +1893,7 @@ class EventBusKafka(
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                     max_poll_interval_ms=self._config.max_poll_interval_ms,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )
 
