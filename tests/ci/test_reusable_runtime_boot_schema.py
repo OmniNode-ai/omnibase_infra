@@ -243,6 +243,29 @@ def test_boot_disables_uv_cache_cleanup(workflow: Workflow) -> None:
     assert setup_step["with"]["enable-cache"] is False
 
 
+def test_compose_mode_installs_docker_compose_plugin(workflow: Workflow) -> None:
+    job = _boot_job(workflow)
+    assert job["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
+
+    steps = _boot_steps(workflow)
+    install_steps = [
+        s for s in steps if "install docker compose plugin" in _step_text(s)
+    ]
+    assert install_steps, "Docker Compose plugin install step missing"
+    install_step = install_steps[0]
+    assert str(install_step.get("if", "")) == "inputs.mode == 'compose'"
+    install_text = _step_text(install_step)
+    assert "docker compose version" in install_text
+    assert "docker_compose_version" in install_text
+    assert "docker-compose-linux-x86_64" in install_text
+
+    compose_steps = [
+        s for s in steps if "bring up compose stack" in _step_text(s)
+    ]
+    assert compose_steps, "compose bring-up step missing"
+    assert steps.index(install_step) < steps.index(compose_steps[0])
+
+
 def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
     steps = _boot_steps(workflow)
     matched = [
