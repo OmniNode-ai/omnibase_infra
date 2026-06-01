@@ -14,11 +14,13 @@ Covers the four OMN-12566 acceptance criteria:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
+import omnibase_infra.observability.runner_health.janitor_docker_network as janitor_module
 from omnibase_infra.observability.runner_health.enum_network_disposition import (
     EnumNetworkDisposition,
 )
@@ -243,6 +245,92 @@ async def test_janitor_never_issues_blanket_prune_command(
     for cmd in captured_commands:
         assert "network prune" not in cmd, f"blanket prune found in: {cmd}"
     assert any("docker network rm" in cmd for cmd in captured_commands)
+
+
+@pytest.mark.unit
+async def test_fetch_networks_timeout_kills_process_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    killed = False
+    waited = False
+
+    class _HangingProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            await asyncio.sleep(10)
+            return b"", b""
+
+        def kill(self) -> None:
+            nonlocal killed
+            killed = True
+
+        async def wait(self) -> int:
+            nonlocal waited
+            waited = True
+            return 0
+
+    async def _fake_exec(*_args: str, **_kwargs: object) -> _HangingProc:
+        return _HangingProc()
+
+    monkeypatch.setattr(
+        janitor_module.asyncio,
+        "create_subprocess_exec",
+        _fake_exec,
+    )
+    monkeypatch.setattr(janitor_module, "_SSH_FETCH_TIMEOUT_SECONDS", 0.01)
+
+    janitor = JanitorDockerNetwork(runner_host="testhost")
+    networks = await janitor._fetch_networks()
+
+    assert networks == []
+    assert killed is True
+    assert waited is True
+    assert "Docker network fetch timed out" in caplog.text
+
+
+@pytest.mark.unit
+async def test_remove_networks_timeout_marks_all_candidates_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    killed = False
+    waited = False
+
+    class _HangingProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            await asyncio.sleep(10)
+            return b"", b""
+
+        def kill(self) -> None:
+            nonlocal killed
+            killed = True
+
+        async def wait(self) -> int:
+            nonlocal waited
+            waited = True
+            return 0
+
+    async def _fake_exec(*_args: str, **_kwargs: object) -> _HangingProc:
+        return _HangingProc()
+
+    monkeypatch.setattr(
+        janitor_module.asyncio,
+        "create_subprocess_exec",
+        _fake_exec,
+    )
+    monkeypatch.setattr(janitor_module, "_SSH_REMOVE_TIMEOUT_SECONDS", 0.01)
+
+    janitor = JanitorDockerNetwork(runner_host="testhost")
+    failures = await janitor._remove_networks(["net-a", "net-b"])
+
+    assert failures == ["rm_failed:net-a", "rm_failed:net-b"]
+    assert killed is True
+    assert waited is True
+    assert "Docker network removal timed out" in caplog.text
 
 
 # --------------------------------------------------------------------------- #

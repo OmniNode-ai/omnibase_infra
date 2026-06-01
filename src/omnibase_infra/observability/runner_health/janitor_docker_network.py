@@ -18,6 +18,7 @@ with attached containers) is never touched.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
@@ -38,6 +39,10 @@ from omnibase_infra.observability.runner_health.model_network_ownership_rule imp
     DEFAULT_OWNERSHIP_RULES,
     ModelNetworkOwnershipRule,
 )
+
+logger = logging.getLogger(__name__)
+_SSH_FETCH_TIMEOUT_SECONDS = 30.0
+_SSH_REMOVE_TIMEOUT_SECONDS = 60.0
 
 
 def classify_network(
@@ -167,8 +172,28 @@ class JanitorDockerNetwork:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=_SSH_FETCH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.exception(
+                "Docker network fetch timed out | host=%s timeout_seconds=%s command=%s",
+                self._runner_host,
+                _SSH_FETCH_TIMEOUT_SECONDS,
+                cmd,
+            )
+            return []
         if proc.returncode != 0:
+            logger.error(
+                "Docker network fetch failed | host=%s returncode=%s stderr=%s",
+                self._runner_host,
+                proc.returncode,
+                stderr.decode(errors="replace").strip(),
+            )
             return []
         return [
             info
@@ -200,12 +225,40 @@ class JanitorDockerNetwork:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
-        return [
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=_SSH_REMOVE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.exception(
+                "Docker network removal timed out | host=%s timeout_seconds=%s network_ids=%s command=%s",
+                self._runner_host,
+                _SSH_REMOVE_TIMEOUT_SECONDS,
+                tuple(network_ids),
+                cmd,
+            )
+            return [f"rm_failed:{nid}" for nid in network_ids]
+        failures = [
             line.strip()
             for line in stdout.decode().splitlines()
             if line.startswith("rm_failed:")
         ]
+        if proc.returncode != 0:
+            logger.error(
+                "Docker network removal failed | host=%s returncode=%s stderr=%s network_ids=%s",
+                self._runner_host,
+                proc.returncode,
+                stderr.decode(errors="replace").strip(),
+                tuple(network_ids),
+            )
+            failed_ids = {line.removeprefix("rm_failed:") for line in failures}
+            failures.extend(
+                f"rm_failed:{nid}" for nid in network_ids if nid not in failed_ids
+            )
+        return failures
 
     async def run(
         self,
