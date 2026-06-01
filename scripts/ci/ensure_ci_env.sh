@@ -10,7 +10,7 @@ env_root="${OMNI_CI_ENV_ROOT:-/home/runner/.cache/omni/ci-envs}"
 repo_name="${OMNI_CI_REPO:-omnibase_infra}"
 python_version="${PYTHON_VERSION:-3.12}"
 uv_version="${UV_VERSION:-0.6.14}"
-install_args="${OMNI_CI_ENV_INSTALL_ARGS:---frozen --all-extras --no-install-project}"
+install_args="${OMNI_CI_ENV_INSTALL_ARGS:---frozen --all-extras --all-groups --no-install-project}"
 digest_extra="${OMNI_CI_ENV_DIGEST_EXTRA:-}"
 
 if [[ -n "${pythonLocation:-}" && -x "${pythonLocation}/bin/python" ]]; then

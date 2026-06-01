@@ -187,7 +187,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert (
         action["inputs"]["shared-env-install-args"]["default"]
-        == "--frozen --all-extras --no-install-project"
+        == "--frozen --all-extras --all-groups --no-install-project"
     )
 
     shared_mode_step = next(

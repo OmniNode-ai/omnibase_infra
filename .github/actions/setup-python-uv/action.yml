@@ -64,7 +64,7 @@ inputs:
   shared-env-install-args:
     description: Arguments used when building the immutable shared CI env.
     required: false
-    default: '--frozen --all-extras --no-install-project'
+    default: '--frozen --all-extras --all-groups --no-install-project'
 runs:
   using: 'composite'
   steps:

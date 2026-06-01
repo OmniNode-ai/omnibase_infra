@@ -41,6 +41,8 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
 - Do not run `uv sync` into an existing shared env from ordinary CI jobs.
 - Do not install the checked-out project into the shared env; use
   `--no-install-project` so PR source cannot be stale.
+- Include dependency groups in the canary env (`--all-groups`) so CI tools such
+  as `mypy`, `ruff`, and `pytest` are present without per-job resolution.
 - Bump the environment by changing lockfile/tool inputs, not by mutating an
   existing digest path.
 - Keep old digest directories until active PRs using them have drained.
