@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,22 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
+
+
+def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["migration-freeze"]
+    steps = job["steps"]
+
+    checkout_step = next(
+        step for step in steps if step.get("uses") == "actions/checkout@v6"
+    )
+    assert checkout_step["with"]["fetch-depth"] == 2
+
+    freeze_step = next(
+        step for step in steps if step.get("name") == "Check migration freeze"
+    )
+    assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
 
 
 def test_migration_integration_resolves_reachable_postgres_host() -> None:
@@ -194,12 +211,16 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     sibling_workflow = _load_yaml(
         REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
     )
-    setup_step = next(
-        step
-        for step in sibling_workflow["jobs"]["sibling-compat"]["steps"]
-        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
-    )
-    assert setup_step["with"]["cache-enabled"] == "false"
+    sibling_steps = sibling_workflow["jobs"]["sibling-compat"]["steps"]
+    assert all("setup-python-uv" not in step.get("uses", "") for step in sibling_steps)
+    run_lines = [
+        line.strip()
+        for step in sibling_steps
+        for line in step.get("run", "").splitlines()
+    ]
+    assert not any(re.search(r"\buv\s+sync\b", line) for line in run_lines)
+    assert not any(re.search(r"\buv\s+pip\s+install\b", line) for line in run_lines)
+    assert any("OMN-12563" in step.get("run", "") for step in sibling_steps)
 
     docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     docker_cache_step = next(
@@ -411,6 +432,10 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         == "${{ secrets.CROSS_REPO_PAT || github.token }}"
     )
     assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
+    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]
+    assert "max_attempts=3" in install_step["run"]
+    assert "until uv pip install" in install_step["run"]
+    assert "uv pip install onex_change_control failed after" in install_step["run"]
 
 
 def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
