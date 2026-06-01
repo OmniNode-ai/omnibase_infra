@@ -201,6 +201,7 @@ def emit(omni_home: Path, out_path: Path | None = None) -> dict[str, Any]:
     try:
         latest_path.symlink_to(out_path.name)
     except OSError:
+        # Some CI/workspace filesystems disallow symlinks; keep latest durable.
         latest_path.write_text(out_path.read_text(encoding="utf-8"), encoding="utf-8")
     return receipt
 
