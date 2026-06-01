@@ -318,6 +318,14 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert 'echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"' in ensure_source
     assert 'echo "PATH=${wrapper_dir}:${workspace_venv}/bin:${PATH}"' in ensure_source
     assert "uv sync" in ensure_source
+    assert 'sync_attempts="${OMNI_CI_ENV_SYNC_ATTEMPTS:-5}"' in ensure_source
+    assert (
+        'retry_delay_seconds="${OMNI_CI_ENV_SYNC_RETRY_DELAY_SECONDS:-10}"'
+        in ensure_source
+    )
+    assert 'until uv sync "${install_argv[@]}"; do' in ensure_source
+    assert "shared CI env uv sync attempt" in ensure_source
+    assert "shared CI env uv sync failed after" in ensure_source
     assert "chmod -R a-w" in ensure_source
     assert "UV_NO_SYNC=1" in ensure_source
     assert "PYTHONPATH=${repo_root}/src" in ensure_source

@@ -47,6 +47,8 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
   `shared-env-enabled: "false"` and use an isolated writable environment.
 - Do not install the checked-out project into the shared env; use
   `--no-install-project` so PR source cannot be stale.
+- Build the shared env with bounded retries because a single transient git or
+  wheel fetch failure would otherwise poison every job waiting on the digest.
 - Do not replace a real workspace `.venv`; the canary only manages the checkout
   `.venv` when it is absent or already a symlink to a shared env.
 - Keep the `uv` wrapper narrow: only plain `uv run <tool> ...` is redirected to

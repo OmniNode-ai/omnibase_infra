@@ -12,6 +12,8 @@ python_version="${PYTHON_VERSION:-3.12}"
 uv_version="${UV_VERSION:-0.6.14}"
 install_args="${OMNI_CI_ENV_INSTALL_ARGS:---frozen --all-extras --all-groups --no-install-project}"
 digest_extra="${OMNI_CI_ENV_DIGEST_EXTRA:-}"
+sync_attempts="${OMNI_CI_ENV_SYNC_ATTEMPTS:-5}"
+retry_delay_seconds="${OMNI_CI_ENV_SYNC_RETRY_DELAY_SECONDS:-10}"
 
 if [[ -n "${pythonLocation:-}" && -x "${pythonLocation}/bin/python" ]]; then
   python_bin="${pythonLocation}/bin/python"
@@ -138,10 +140,33 @@ if ! ready; then
     fi
 
     read -r -a install_argv <<< "${install_args}"
+    if ! [[ "${sync_attempts}" =~ ^[1-9][0-9]*$ ]]; then
+      echo "::error::OMNI_CI_ENV_SYNC_ATTEMPTS must be a positive integer (got: ${sync_attempts})"
+      exit 2
+    fi
+    if ! [[ "${retry_delay_seconds}" =~ ^[0-9]+$ ]]; then
+      echo "::error::OMNI_CI_ENV_SYNC_RETRY_DELAY_SECONDS must be a non-negative integer (got: ${retry_delay_seconds})"
+      exit 2
+    fi
+
     echo "Building shared CI env ${env_dir}"
     echo "uv version: $(uv --version)"
     echo "install args: ${install_args}"
-    uv sync "${install_argv[@]}"
+    echo "uv sync attempts: ${sync_attempts}"
+    echo "uv sync retry delay seconds: ${retry_delay_seconds}"
+    attempt=1
+    until uv sync "${install_argv[@]}"; do
+      status=$?
+      if [[ "${attempt}" -ge "${sync_attempts}" ]]; then
+        echo "::error::shared CI env uv sync failed after ${attempt} attempt(s)"
+        exit "${status}"
+      fi
+
+      sleep_seconds=$((retry_delay_seconds * attempt))
+      echo "::warning::shared CI env uv sync attempt ${attempt}/${sync_attempts} failed with exit ${status}; retrying in ${sleep_seconds}s"
+      sleep "${sleep_seconds}"
+      attempt=$((attempt + 1))
+    done
 
     cat > "${manifest_path}" <<EOF
 {
