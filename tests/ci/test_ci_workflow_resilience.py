@@ -34,6 +34,22 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["migration-freeze"]
+    steps = job["steps"]
+
+    checkout_step = next(
+        step for step in steps if step.get("uses") == "actions/checkout@v6"
+    )
+    assert checkout_step["with"]["fetch-depth"] == 2
+
+    freeze_step = next(
+        step for step in steps if step.get("name") == "Check migration freeze"
+    )
+    assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
+
+
 def test_migration_integration_resolves_reachable_postgres_host() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-integration"]
