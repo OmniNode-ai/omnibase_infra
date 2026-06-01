@@ -160,6 +160,10 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     assert "compose service endpoints reachable by docker dns" in compose_text
     assert "compose service endpoints reachable by host-published ports" in compose_text
     assert "unreachable from the runner by docker dns or localhost" in compose_text
+    assert "capture_compose_infra_diagnostics" in compose_text
+    assert "redpanda logs tail" in compose_text
+    assert "rpk topic list --brokers redpanda:9092" in compose_text
+    assert "compose services not healthy after 150s" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
     assert "kafka_bootstrap_servers=localhost:${kafka_port}" in compose_text
     assert "postgres:5432" in compose_text
@@ -471,7 +475,9 @@ def test_boot_uploads_smoke_result_artifact(workflow: Workflow) -> None:
     assert matched, "smoke-result.json artifact output missing"
     # OMN-9458: artifact payload must include effects_health so downstream
     # tooling can discriminate runtime vs runtime-effects startup regressions.
-    assert "effects_health" in WORKFLOW_PATH.read_text()
+    raw = WORKFLOW_PATH.read_text()
+    assert "effects_health" in raw
+    assert "compose_infra_diagnostics" in raw
 
 
 def test_boot_has_nine_steps_minimum(workflow: Workflow) -> None:
