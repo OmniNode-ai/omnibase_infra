@@ -25,9 +25,14 @@ class EnumQuarantineReason(str, Enum):
       container-resolved dependency, which is incompatible with runtime-managed
       async boot. Follow-up: convert the handler or its dependency to async-safe
       construction.
+    - ``PROTOCOL_HANDLER_DECLARATION``: contract handler routing points at a
+      ``typing.Protocol`` interface rather than a concrete handler class.
+      Follow-up: change the contract to reference the concrete handler and keep
+      Protocols in dependency/interface declarations.
     """
 
     ASYNC_INCOMPATIBLE = "async_incompatible"
+    PROTOCOL_HANDLER_DECLARATION = "protocol_handler_declaration"
 
 
 __all__ = ["EnumQuarantineReason"]

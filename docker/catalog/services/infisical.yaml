@@ -5,11 +5,12 @@ layer: infrastructure
 container_name: omnibase-infra-infisical
 required_env:
   - POSTGRES_PASSWORD
+  - INFISICAL_REDIS_URL
   - INFISICAL_ENCRYPTION_KEY
   - INFISICAL_AUTH_SECRET
 hardcoded_env:
   DB_CONNECTION_URI: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/infisical?sslmode=disable'
-  REDIS_URL: 'redis://valkey:6379'
+  REDIS_URL: '${INFISICAL_REDIS_URL:?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}'
   ENCRYPTION_KEY: '${INFISICAL_ENCRYPTION_KEY}'
   AUTH_SECRET: '${INFISICAL_AUTH_SECRET}'
   TELEMETRY_ENABLED: 'false'

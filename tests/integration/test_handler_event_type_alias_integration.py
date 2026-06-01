@@ -13,6 +13,10 @@ command missed the dispatcher lookup and fell through to DLQ.
 This integration test asserts the two-sided symmetry between registration
 and dispatch as a single contract — if either side drifts, this fails.
 
+The registration surface also includes each literal subscribed topic as a
+compatibility key for envelopes that already carry the ONEX topic in
+``event_type``.
+
 Unit coverage for the individual sides lives at:
     tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py
 
@@ -106,10 +110,15 @@ def test_registration_emits_alias_matching_dispatch_engine_normalization() -> No
             container=None,
         )
 
-    assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}, (
+    assert prepared.message_types == {
+        "ModelFooCommand",
+        "platform.foo-start",
+        "onex.cmd.platform.foo-start.v1",
+    }, (
         "Registration must emit the stripped alias so the dispatch engine's "
-        ".strip()-normalized wire event_type matches. Drift here reintroduces "
-        "the OMN-9215 DLQ-everything bug."
+        ".strip()-normalized wire event_type matches, while retaining the literal "
+        "subscribed topic compatibility key. Drift here reintroduces the OMN-9215 "
+        "DLQ-everything bug."
     )
 
     # Symmetry check: dispatch-engine normalization of the wire value.
@@ -163,4 +172,8 @@ def test_alias_absent_falls_back_to_class_name_and_topic_derived_alias() -> None
             container=None,
         )
 
-    assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+    assert prepared.message_types == {
+        "ModelFooCommand",
+        "platform.foo-start",
+        "onex.cmd.platform.foo-start.v1",
+    }

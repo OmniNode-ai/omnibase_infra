@@ -12,9 +12,13 @@ Validates that:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
+
+from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.resolver import CatalogResolver
 
 # Project root: tests/unit/docker/ -> tests/unit/ -> tests/ -> project_root
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -39,27 +43,29 @@ _DOCKER_INTERNAL_HOST = "postgres:5432"
 
 
 @pytest.fixture(scope="module")
-def bundles() -> dict[str, object]:
+def bundles() -> dict[str, Any]:
     """Load bundle definitions."""
     with open(_BUNDLES_PATH) as f:
-        return yaml.safe_load(f)
+        return cast("dict[str, Any]", yaml.safe_load(f))
 
 
 @pytest.fixture(scope="module")
-def service_manifests() -> dict[str, dict[str, object]]:
+def service_manifests() -> dict[str, dict[str, Any]]:
     """Load all service catalog YAMLs."""
-    manifests: dict[str, dict[str, object]] = {}
+    manifests: dict[str, dict[str, Any]] = {}
     for yaml_file in _SERVICES_DIR.glob("*.yaml"):
         with open(yaml_file) as f:
-            data = yaml.safe_load(f)
-        manifests[data["name"]] = data
+            data = cast("dict[str, Any]", yaml.safe_load(f))
+        name = data["name"]
+        assert isinstance(name, str)
+        manifests[name] = data
     return manifests
 
 
 class TestInfisicalInCoreBundle:
     """Verify Infisical is part of the core bundle."""
 
-    def test_infisical_in_core_services(self, bundles: dict[str, object]) -> None:
+    def test_infisical_in_core_services(self, bundles: dict[str, Any]) -> None:
         """Infisical must be listed in the core bundle's services."""
         core = bundles["core"]
         assert isinstance(core, dict)
@@ -69,7 +75,7 @@ class TestInfisicalInCoreBundle:
             "It was moved from the secrets bundle in OMN-5831."
         )
 
-    def test_valkey_in_core_services(self, bundles: dict[str, object]) -> None:
+    def test_valkey_in_core_services(self, bundles: dict[str, Any]) -> None:
         """Valkey must be in core because Infisical depends on it."""
         core = bundles["core"]
         assert isinstance(core, dict)
@@ -78,7 +84,7 @@ class TestInfisicalInCoreBundle:
             "Valkey must be in the core bundle because Infisical depends on it."
         )
 
-    def test_core_injects_infisical_env(self, bundles: dict[str, object]) -> None:
+    def test_core_injects_infisical_env(self, bundles: dict[str, Any]) -> None:
         """Core bundle must inject INFISICAL_ADDR for runtime services."""
         core = bundles["core"]
         assert isinstance(core, dict)
@@ -89,7 +95,7 @@ class TestInfisicalInCoreBundle:
         )
 
     def test_core_requires_infisical_bootstrap_vars(
-        self, bundles: dict[str, object]
+        self, bundles: dict[str, Any]
     ) -> None:
         """Core bundle must require Infisical bootstrap credentials."""
         core = bundles["core"]
@@ -104,12 +110,48 @@ class TestInfisicalInCoreBundle:
                 f"{var} must be in core bundle's inject_required_env"
             )
 
+    def test_infisical_catalog_requires_authenticated_redis_url(
+        self, service_manifests: dict[str, dict[str, Any]]
+    ) -> None:
+        """Infisical must not be generated with an unauthenticated Valkey URL."""
+        infisical = service_manifests["infisical"]
+        required_env = set(infisical.get("required_env", []))
+        hardcoded_env = infisical.get("hardcoded_env", {})
+
+        assert "INFISICAL_REDIS_URL" in required_env
+        assert hardcoded_env.get("REDIS_URL") == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
+        assert hardcoded_env.get("REDIS_URL") != "redis://valkey:6379"
+
+    def test_generated_core_compose_uses_infisical_redis_url_source(self) -> None:
+        """Generated compose must map Infisical REDIS_URL from INFISICAL_REDIS_URL."""
+        resolver = CatalogResolver(catalog_dir=str(_CATALOG_DIR))
+        compose = generate_compose(resolver.resolve(["core"]))
+
+        services = compose["services"]
+        assert isinstance(services, dict)
+        infisical = services["infisical"]
+        assert isinstance(infisical, dict)
+        environment = infisical["environment"]
+        assert isinstance(environment, dict)
+
+        assert environment["REDIS_URL"] == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
+        assert environment["INFISICAL_REDIS_URL"] == (
+            "${INFISICAL_REDIS_URL:"
+            "?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}"
+        )
+
 
 class TestNoDbUrlInRequiredEnv:
     """Verify no runtime service has DB URL/DSN vars in required_env."""
 
     def test_no_db_url_in_required_env(
-        self, service_manifests: dict[str, dict[str, object]]
+        self, service_manifests: dict[str, dict[str, Any]]
     ) -> None:
         """DB URL vars must be in hardcoded_env, not required_env."""
         violations: list[str] = []
@@ -132,7 +174,7 @@ class TestDbUrlsUseDockerInternal:
     """Verify hardcoded DB URLs use Docker-internal addresses."""
 
     def test_hardcoded_db_urls_use_internal_host(
-        self, service_manifests: dict[str, dict[str, object]]
+        self, service_manifests: dict[str, dict[str, Any]]
     ) -> None:
         """All hardcoded DB URL values must reference postgres:5432."""
         violations: list[str] = []
