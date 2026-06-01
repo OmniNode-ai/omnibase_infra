@@ -54,6 +54,9 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
   PR's `pyproject.toml` without polluting clean-root checks.
 - Build the shared env with bounded retries because a single transient git or
   wheel fetch failure would otherwise poison every job waiting on the digest.
+- Do not enable `setup-uv` cache save for direct jobs that intentionally run
+  `uv sync --no-cache`; the post-job cache upload can outlive the actual check
+  and cancel merge-group CI while adding no useful reuse.
 - Do not replace a real workspace `.venv`; the canary only manages the checkout
   `.venv` when it is absent or already a symlink to a shared env.
 - Keep the `uv` wrapper narrow: only plain `uv run <tool> ...` is redirected to

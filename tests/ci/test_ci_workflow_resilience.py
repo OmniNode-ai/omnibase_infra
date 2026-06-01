@@ -370,6 +370,12 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
         checkout_occ["with"]["token"] == "${{ secrets.CROSS_REPO_PAT || github.token }}"
     )
 
+    setup_uv = next(
+        step for step in steps if step.get("uses") == "astral-sh/setup-uv@v7"
+    )
+    assert setup_uv["with"]["enable-cache"] is False
+    assert "cache-dependency-glob" not in setup_uv["with"]
+
     install_step = next(
         step for step in steps if step.get("name") == "Install onex_change_control"
     )
