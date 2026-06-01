@@ -390,3 +390,23 @@ def test_no_hardcoded_user_paths(workflow: Workflow) -> None:
     raw = WORKFLOW_PATH.read_text()
     assert "/Users/" not in raw, "no /Users/ absolute paths in workflow YAML"
     assert "/Volumes/" not in raw, "no /Volumes/ absolute paths in workflow YAML"
+
+
+def test_boot_teardown_is_unconditional_and_removes_network(
+    workflow: Workflow,
+) -> None:
+    """OMN-12566: the compose teardown must run on success AND failure, and
+    must explicitly remove the per-run network so it never leaks into the
+    runner's address pool — `compose down` alone is insufficient when the
+    network survives partial bring-up."""
+    steps = _boot_steps(workflow)
+    teardown = [s for s in steps if "tear down compose network" in _step_text(s)]
+    assert teardown, "missing unconditional compose-network teardown step"
+    step = teardown[0]
+    # always() so it fires even when an earlier hard gate failed.
+    assert "always()" in str(step.get("if", "")), "teardown must use always()"
+    text = str(step.get("run", ""))
+    assert "down -v --remove-orphans" in text, "teardown must run compose down -v"
+    # Bounded explicit removal fallback — never a blanket prune.
+    assert "docker network rm" in text, "teardown must explicitly remove the network"
+    assert "network prune" not in text, "teardown must NOT blanket-prune networks"

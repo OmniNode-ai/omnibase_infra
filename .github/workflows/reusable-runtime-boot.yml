@@ -686,13 +686,40 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Stop background runtime (compose mode)
+      - name: Stop background runtime + tear down compose network (compose mode)
         if: always() && inputs.mode == 'compose'
         run: |
+          # Unconditional teardown (OMN-12566): runs on success AND failure so
+          # a per-run compose network never leaks into the runner's address
+          # pool. `compose down` only removes networks compose still tracks;
+          # if the runner was manually `network connect`-ed, or the up step
+          # died mid-way, the network can survive `down`. We therefore also
+          # explicitly `docker network rm` the named per-run network as a
+          # guaranteed fallback. This is bounded: it targets ONLY the network
+          # this job created, never a blanket prune.
           if [[ -n "${RUNTIME_PID:-}" ]]; then
             kill "${RUNTIME_PID}" 2>/dev/null || true
           fi
           if [[ -n "${RUNTIME_EFFECTS_PID:-}" ]]; then
             kill "${RUNTIME_EFFECTS_PID}" 2>/dev/null || true
           fi
-          docker compose -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
+
+          project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}"
+          docker compose -p "${project}" -f docker/docker-compose.e2e.yml \
+            down -v --remove-orphans || true
+
+          # Fallback: disconnect any leftover endpoints and remove the named
+          # network. Both the explicit OMNIBASE_INFRA_NETWORK var and the
+          # compose-derived `<project>_default` name are handled.
+          for net in "${OMNIBASE_INFRA_NETWORK:-}" "${project}_default"; do
+            [[ -z "${net}" ]] && continue
+            if docker network inspect "${net}" >/dev/null 2>&1; then
+              for cid in $(docker network inspect "${net}" \
+                --format '{{range $k,$v := .Containers}}{{$k}} {{end}}' 2>/dev/null); do
+                docker network disconnect -f "${net}" "${cid}" 2>/dev/null || true
+              done
+              docker network rm "${net}" 2>/dev/null \
+                && echo "teardown: removed leftover network ${net}" \
+                || echo "teardown: network ${net} already gone or busy"
+            fi
+          done
