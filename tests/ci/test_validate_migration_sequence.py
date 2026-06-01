@@ -222,6 +222,7 @@ class TestValidateMigrationSequence:
 
     # ── node-namespaced subtree exclusion (OMN-12559) ─────────────────────────
 
+    @pytest.mark.unit
     def test_node_subtree_file_does_not_collide_with_flat_sequence(
         self, tmp_path: Path
     ) -> None:
@@ -246,6 +247,7 @@ class TestValidateMigrationSequence:
         assert result.is_valid
         assert not result.has_staged_migrations
 
+    @pytest.mark.unit
     def test_node_subtree_excluded_even_when_flat_migration_staged(
         self, tmp_path: Path
     ) -> None:

@@ -49,6 +49,32 @@ NODES_DIR = FORWARD_DIR / "nodes"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 SAVINGS_BASE = FORWARD_DIR / "074_create_savings_estimates.sql"
 INFRA_FLAT_076 = FORWARD_DIR / "076_add_savings_estimate_provenance.sql"
+OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
+
+
+def _read_omnibase_env() -> dict[str, str]:
+    env: dict[str, str] = {}
+    if not OMNIBASE_ENV.exists():
+        return env
+    for raw_line in OMNIBASE_ENV.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, _, value = line.partition("=")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        env[key.strip()] = value
+    return env
+
+
+def _merged_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    env = {**os.environ, **_read_omnibase_env()}
+    if overrides:
+        env.update(overrides)
+    return env
 
 
 def _require_psql() -> str:
@@ -59,6 +85,7 @@ def _require_psql() -> str:
 
 
 def _require_db() -> PostgresConfig:
+    os.environ.update(_read_omnibase_env())
     if os.environ.get(OPT_IN_ENV) != "1":
         pytest.skip(
             f"node-migration discovery test is opt-in (mutates DB); "
@@ -86,10 +113,12 @@ def _require_db() -> PostgresConfig:
             "-tAc",
             "SELECT 1",
         ],
-        env={
-            "PGPASSWORD": config.password or "",
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-        },
+        env=_merged_env(
+            {
+                "PGPASSWORD": config.password or "",
+                "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=15,
@@ -103,14 +132,16 @@ def _require_db() -> PostgresConfig:
 
 
 def _psql_env(config: PostgresConfig) -> dict[str, str]:
-    return {
-        "POSTGRES_HOST": config.host or "127.0.0.1",
-        "POSTGRES_PORT": str(config.port),
-        "POSTGRES_USER": config.user,
-        "POSTGRES_PASSWORD": config.password or "",
-        "POSTGRES_DB": config.database,
-        "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-    }
+    return _merged_env(
+        {
+            "POSTGRES_HOST": config.host or "127.0.0.1",
+            "POSTGRES_PORT": str(config.port),
+            "POSTGRES_USER": config.user,
+            "POSTGRES_PASSWORD": config.password or "",
+            "POSTGRES_DB": config.database,
+            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+        }
+    )
 
 
 def _query(psql: str, config: PostgresConfig, sql: str) -> str:
@@ -128,10 +159,12 @@ def _query(psql: str, config: PostgresConfig, sql: str) -> str:
             "-tAc",
             sql,
         ],
-        env={
-            "PGPASSWORD": config.password or "",
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-        },
+        env=_merged_env(
+            {
+                "PGPASSWORD": config.password or "",
+                "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=30,
