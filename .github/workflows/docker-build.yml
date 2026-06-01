@@ -442,11 +442,18 @@ jobs:
           echo "## Results:" >> $GITHUB_STEP_SUMMARY
           echo "- Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Source Hash Attestation: ${{ needs.attest-source-hash.result }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Check overall status
         run: |
-          if [ "${{ needs.docker-build.result }}" != "success" ]; then
+          if [ "${{ needs.docker-build.result }}" != "success" ] && \
+             [ "${{ needs.docker-build.result }}" != "skipped" ]; then
             echo "Docker build failed"
+            exit 1
+          fi
+          if [ "${{ needs.attest-source-hash.result }}" != "success" ] && \
+             [ "${{ needs.attest-source-hash.result }}" != "skipped" ]; then
+            echo "Source hash attestation failed"
             exit 1
           fi
           if [ "${{ needs.docker-integration-tests.result }}" != "success" ] && \
