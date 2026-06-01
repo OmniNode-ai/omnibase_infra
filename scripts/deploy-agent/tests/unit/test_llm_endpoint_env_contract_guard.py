@@ -12,7 +12,7 @@ import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
 from deploy_agent.agent import DeployAgent
-from deploy_agent.events import ModelRebuildRequested, Scope
+from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.job_state import JobStore
 
@@ -140,6 +140,7 @@ async def test_runtime_deploy_validates_llm_env_before_rebuild(
         correlation_id=uuid4(),
         requested_by="test",
         scope=Scope.RUNTIME,
+        runtime_lane=EnumRuntimeLane.DEV,
     )
     store = JobStore(tmp_path)
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
@@ -172,6 +173,7 @@ async def test_core_deploy_does_not_validate_runtime_llm_env(
         correlation_id=uuid4(),
         requested_by="test",
         scope=Scope.CORE,
+        runtime_lane=EnumRuntimeLane.DEV,
     )
     store = JobStore(tmp_path)
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
@@ -199,6 +201,7 @@ async def test_full_deploy_validates_llm_env_before_rebuild(
         correlation_id=uuid4(),
         requested_by="test",
         scope=Scope.FULL,
+        runtime_lane=EnumRuntimeLane.DEV,
     )
     store = JobStore(tmp_path)
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))

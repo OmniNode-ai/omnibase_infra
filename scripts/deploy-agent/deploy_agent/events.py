@@ -26,6 +26,19 @@ class Scope(StrEnum):
     CORE = "core"
 
 
+class EnumRuntimeLane(StrEnum):
+    """Runtime deployment lane.
+
+    Each lane maps to its own compose overlay, compose project, and runtime
+    health ports (see ``deploy_agent.executor.lane_config_for``). ``prod``
+    deploys a stability-proven image digest rather than rebuilding from a ref.
+    """
+
+    DEV = "dev"
+    STABILITY_TEST = "stability-test"
+    PROD = "prod"
+
+
 class BuildSource(StrEnum):
     WORKSPACE = "workspace"
     RELEASE = "release"
@@ -87,9 +100,15 @@ class ModelRebuildRequested(BaseModel):
     correlation_id: UUID
     requested_by: str
     scope: Scope
+    runtime_lane: EnumRuntimeLane
     build_source: BuildSource = BuildSource.RELEASE
     services: list[str] = Field(default_factory=list)
     git_ref: str = "origin/main"
+    # Carry both ref and digest; the digest is the authority. dev/stability-test
+    # may build from a ref and leave the digest unresolved up front; prod must
+    # pin the stability-proven digest (enforced below).
+    image_ref: str | None = None
+    image_digest: str | None = None
 
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
@@ -99,6 +118,16 @@ class ModelRebuildRequested(BaseModel):
             if invalid:
                 msg = f"Services {invalid} not in scope '{self.scope}'. Allowed: {allowed}"
                 raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_prod_requires_digest(self) -> ModelRebuildRequested:
+        if self.runtime_lane == EnumRuntimeLane.PROD and not self.image_digest:
+            msg = (
+                "prod runtime_lane requires image_digest: production deploys the "
+                "exact stability-proven digest and never rebuilds from a ref"
+            )
+            raise ValueError(msg)
         return self
 
 
@@ -111,6 +140,9 @@ class ModelRebuildCompleted(BaseModel):
     completed_at: datetime
     duration_seconds: float
     scope: Scope
+    runtime_lane: EnumRuntimeLane
+    image_ref: str | None = None
+    image_digest: str | None = None
     services_restarted: list[str] = Field(default_factory=list)
     phase_results: dict[Phase, PhaseStatus]
     errors: list[str] = Field(default_factory=list)
