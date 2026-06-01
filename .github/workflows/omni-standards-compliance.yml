@@ -15,6 +15,16 @@ env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
   REPO_NAME: "omnibase_infra"
+  # OMN-12564 canary: trusted self-hosted CI uses the same immutable
+  # host-local dependency environment contract as the main CI workflow.
+  OMNI_CI_SHARED_ENV_ENABLED: >-
+    ${{
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+      && 'false'
+      || 'true'
+    }}
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
 
 jobs:
   type-safety:
@@ -31,19 +41,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install dependencies
-        run: uv sync --no-cache --all-extras
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: "false"
+          cache-key-prefix: uv-type-safety
+          install-args: --all-extras
+          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Run MyPy type checking
         run: |
@@ -67,19 +73,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install dependencies
-        run: uv sync --no-cache --all-extras
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: "false"
+          cache-key-prefix: uv-type-union
+          install-args: --all-extras
+          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Check for Optional/Union usage (PEP 604)
         run: uv run ruff check src/ --select UP007,UP006
@@ -108,10 +110,34 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Install onex_change_control (pinned)
+        env:
+          GIT_FETCH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
         run: |
+          set -euo pipefail
+          # Authenticate the git+https fetch so it isn't anonymous-rate-limited
+          # on the self-hosted runner ("Empty reply from server"). Process-scoped
+          # insteadOf rewrite; never writes the token to disk. (OMN-12432)
+          if [ -n "${GIT_FETCH_TOKEN}" ]; then
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"
+            export GIT_CONFIG_VALUE_0="https://github.com/"
+          fi
           uv venv .venv --python "${pythonLocation}/bin/python"
           . .venv/bin/activate
-          uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=3
+          delay=10
+          until uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"; do
+            status=$?
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "::error::uv pip install onex_change_control failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+            echo "::warning::uv pip install onex_change_control attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Run handler contract compliance check
         run: |

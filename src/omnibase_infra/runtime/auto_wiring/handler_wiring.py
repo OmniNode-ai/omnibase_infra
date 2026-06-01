@@ -185,6 +185,11 @@ def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
     return False
 
 
+def _is_protocol_handler_class(handler_cls: type) -> bool:
+    """Return True when a handler routing entry points at a Protocol class."""
+    return bool(getattr(handler_cls, "_is_protocol", False))
+
+
 async def _async_resolve_from_container(
     container: object,
     handler_cls: type,
@@ -1407,25 +1412,12 @@ def _materialize_known_handler_dependencies(
         if value is not None
     }
     if "dispatch_port" in constructor_params and requires_delegation_port:
-        # When container is available, inject ContainerBackedDelegationDispatchPort
-        # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
-        # PluginDelegation at start_consumers() time. This avoids the asyncio stall
-        # that occurs when the Kafka-backed RuntimeDelegationDispatchPort subscribes
-        # to delegation-completed and awaits while the delegation orchestrator runs
-        # in the same event loop.
-        if container is not None:
-            from omnibase_infra.runtime.service_delegation_dispatch_port import (
-                ContainerBackedDelegationDispatchPort,
-                RuntimeDelegationDispatchPort,
-            )
-
-            available["dispatch_port"] = ContainerBackedDelegationDispatchPort(
-                container=container,
-                fallback_event_bus=cast(
-                    "ProtocolPatternBBrokerTransport | None", event_bus
-                ),
-            )
-        elif event_bus is not None:
+        # Pure Kafka delegation chain (OMN-12294): the delegate-skill handler
+        # dispatches via the Kafka-backed RuntimeDelegationDispatchPort. The
+        # delegation orchestrator consumes the command on its own bus
+        # subscription and emits the terminal event the broker awaits — there is
+        # no in-process bridge.
+        if event_bus is not None:
             from omnibase_infra.runtime.service_delegation_dispatch_port import (
                 RuntimeDelegationDispatchPort,
             )
@@ -1492,54 +1484,11 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
-def _message_type_keys_from_topic(topic: str) -> tuple[str, ...]:
-    """Return dispatch message-type keys accepted for a contract topic."""
-    keys: list[str] = []
-    alias = _derive_event_type_alias_from_topic(topic)
-    if alias is not None:
-        keys.append(alias)
-    if topic.startswith("onex."):
-        keys.append(topic)
-    return tuple(dict.fromkeys(keys))
-
-
-def _topics_for_handler_entry(
-    contract: ModelDiscoveredContract,
-    entry: ModelHandlerRoutingEntry,
-) -> tuple[str, ...]:
-    """Return subscribe topics that can be deterministically assigned to entry."""
-    if contract.event_bus is None:
-        return ()
-
-    topics = contract.event_bus.subscribe_topics
-    event_type_alias = entry.event_type.strip() if entry.event_type else ""
-    if event_type_alias:
-        matched = tuple(
-            topic
-            for topic in topics
-            if topic == event_type_alias
-            or _derive_event_type_alias_from_topic(topic) == event_type_alias
-        )
-        return matched
-
-    if entry.event_model is None:
-        return topics
-
-    if len(topics) == 1:
-        return topics
-
-    return ()
-
-
-def _message_type_keys_for_handler_entry(
-    contract: ModelDiscoveredContract,
-    entry: ModelHandlerRoutingEntry,
-) -> tuple[str, ...]:
-    """Return topic-derived dispatcher keys scoped to one handler entry."""
-    keys: list[str] = []
-    for topic in _topics_for_handler_entry(contract, entry):
-        keys.extend(_message_type_keys_from_topic(topic))
-    return tuple(dict.fromkeys(keys))
+def _literal_event_type_aliases_from_topics(
+    subscribe_topics: tuple[str, ...],
+) -> set[str]:
+    """Return literal wire-topic aliases accepted as envelope event_type keys."""
+    return {topic.strip() for topic in subscribe_topics if topic.strip()}
 
 
 def _strict_dispatcher_coverage_enabled() -> bool:
@@ -2464,11 +2413,20 @@ def _prepare_handler_wiring(
     # Strip surrounding whitespace so registration matches the dispatch-engine
     # normalization (message_dispatch_engine.py normalizes via .strip()).
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    subscribe_topics = contract.event_bus.subscribe_topics if contract.event_bus else ()
+    literal_topic_aliases = _literal_event_type_aliases_from_topics(subscribe_topics)
+    if literal_topic_aliases:
+        message_types = (message_types or set()).union(literal_topic_aliases)
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
-    topic_message_types = set(_message_type_keys_for_handler_entry(contract, entry))
-    if topic_message_types:
-        message_types = (message_types or set()).union(topic_message_types)
+    elif contract.event_bus:
+        topic_aliases = {
+            alias
+            for topic in subscribe_topics
+            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+        }
+        if topic_aliases:
+            message_types = (message_types or set()).union(topic_aliases)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
@@ -2496,25 +2454,27 @@ def _prepare_handler_wiring(
         ownership_query=ownership_query,
     )
 
-    def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
-        """Return a containment-only PreparedWiring for an async-incompat handler.
+    def _quarantine_prepared(
+        *,
+        reason: EnumQuarantineReason,
+        detail: str,
+    ) -> PreparedWiring:
+        """Return a containment-only PreparedWiring for a known bad handler.
 
-        OMN-9457: the handler's constructor raised ``RuntimeError: asyncio.run()
-        cannot be called from a running event loop``. We deterministically
-        contain it — no dispatcher / route registration — and surface it on the
-        wiring report so follow-up migration is visible rather than
-        partially-broken runtime state.
+        Known containment-worthy declaration/construction failures are
+        surfaced in the wiring report instead of partially registering a broken
+        dispatcher. Resolver Step-6 constructor exhaustion TypeError remains
+        boot-fatal outside these explicit reasons.
         """
-        detail = _sanitize_exc(exc)
         logger.warning(
-            "Auto-wiring: quarantining async-incompatible handler %s.%s "
-            "(contract=%s, package=%s): %s. Runtime-effects boot will "
-            "continue; convert the handler to async-safe construction to "
-            "re-enable it.",
+            "Auto-wiring: quarantining handler %s.%s "
+            "(contract=%s, package=%s, reason=%s): %s. Runtime-effects boot "
+            "will continue; follow-up migration required.",
             handler_ref.module,
             handler_ref.name,
             contract.name,
             contract.package_name,
+            reason.value,
             detail,
         )
         return PreparedWiring(
@@ -2525,8 +2485,8 @@ def _prepare_handler_wiring(
             handler_name=handler_ref.name,
             handler_module=handler_ref.module,
             resolution_outcome=EnumHandlerResolutionOutcome.UNRESOLVABLE,
-            skip_reason=f"quarantined:{EnumQuarantineReason.ASYNC_INCOMPATIBLE.value}",
-            quarantine_reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+            skip_reason=f"quarantined:{reason.value}",
+            quarantine_reason=reason,
             quarantine_detail=detail,
         )
 
@@ -2558,12 +2518,26 @@ def _prepare_handler_wiring(
         )
         try:
             resolution = resolver.resolve(ctx)
+        except TypeError as exc:
+            # OMN-12501: Protocol interfaces are non-instantiable by design.
+            # They are invalid as handler_routing targets, but should be
+            # reported as contract migration work rather than crashing
+            # runtime-effects boot under the generic resolver TypeError path.
+            if _is_protocol_handler_class(handler_cls):
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION,
+                    detail=_sanitize_exc(exc),
+                )
+            raise
         except RuntimeError as exc:
             # OMN-9457: deterministic containment for handlers whose
             # construction path calls asyncio.run() inside runtime-managed
             # async boot. Any other RuntimeError propagates unchanged.
             if _is_async_incompat_runtime_error(exc):
-                return _quarantine_prepared(exc)
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+                    detail=_sanitize_exc(exc),
+                )
             raise
 
     # _early_category was computed up-front so the quarantine sentinel could
@@ -2628,7 +2602,7 @@ def _prepare_handler_wiring(
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
-        for topic in _topics_for_handler_entry(contract, entry):
+        for topic in contract.event_bus.subscribe_topics:
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 

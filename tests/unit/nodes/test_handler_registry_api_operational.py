@@ -7,8 +7,7 @@
 Tests:
     - test_get_health_returns_component_status_fields
     - test_get_widget_mapping_parses_yaml
-    - test_list_instances_returns_empty
-    - test_get_discovery_aggregates_three_handlers
+    - test_get_discovery_aggregates_two_handlers
 
 Ticket: OMN-4482
 """
@@ -30,9 +29,6 @@ from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api
 )
 from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_widget_mapping import (
     HandlerRegistryApiGetWidgetMapping,
-)
-from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_instances import (
-    HandlerRegistryApiListInstances,
 )
 from omnibase_infra.nodes.node_registry_api_effect.models import (
     ModelRegistryApiResponse,
@@ -118,40 +114,16 @@ class TestHandlerRegistryApiGetWidgetMapping:
 
 
 @pytest.mark.unit
-class TestHandlerRegistryApiListInstances:
-    """Tests for HandlerRegistryApiListInstances."""
-
-    @pytest.mark.asyncio
-    async def test_list_instances_returns_empty(self) -> None:
-        """list_instances must return empty list (Consul decommissioned, OMN-4857)."""
-        handler = HandlerRegistryApiListInstances()
-        correlation_id = uuid4()
-
-        result = await handler.handle(request=object(), correlation_id=correlation_id)
-
-        assert isinstance(result, ModelRegistryApiResponse)
-        assert result.operation == "list_instances"
-        assert result.success is True
-        assert result.data["instances"] == []
-        assert result.data["total"] == 0
-
-
-@pytest.mark.unit
 class TestHandlerRegistryApiGetDiscovery:
     """Tests for HandlerRegistryApiGetDiscovery."""
 
     @pytest.mark.asyncio
-    async def test_get_discovery_aggregates_three_handlers(self) -> None:
-        """get_discovery must call list_nodes, list_instances, and get_widget_mapping."""
+    async def test_get_discovery_aggregates_two_handlers(self) -> None:
+        """get_discovery must call list_nodes and get_widget_mapping (OMN-9545)."""
         nodes_response = ModelRegistryApiResponse(
             operation="list_nodes",
             success=True,
             data={"nodes": ["node-a"], "total": 1},
-        )
-        instances_response = ModelRegistryApiResponse(
-            operation="list_instances",
-            success=True,
-            data={"instances": ["inst-1"], "total": 1},
         )
         mapping_response = ModelRegistryApiResponse(
             operation="get_widget_mapping",
@@ -162,27 +134,22 @@ class TestHandlerRegistryApiGetDiscovery:
         mock_list_nodes = MagicMock()
         mock_list_nodes.handle = AsyncMock(return_value=nodes_response)
 
-        mock_list_instances = MagicMock()
-        mock_list_instances.handle = AsyncMock(return_value=instances_response)
-
         mock_get_widget_mapping = MagicMock()
         mock_get_widget_mapping.handle = AsyncMock(return_value=mapping_response)
 
         handler = HandlerRegistryApiGetDiscovery(
             list_nodes=mock_list_nodes,
-            list_instances=mock_list_instances,
             get_widget_mapping=mock_get_widget_mapping,
         )
         correlation_id = uuid4()
         result = await handler.handle(request=object(), correlation_id=correlation_id)
 
         mock_list_nodes.handle.assert_awaited_once()
-        mock_list_instances.handle.assert_awaited_once()
         mock_get_widget_mapping.handle.assert_awaited_once()
 
         assert isinstance(result, ModelRegistryApiResponse)
         assert result.operation == "get_discovery"
         assert result.success is True
         assert result.data["nodes"] == ["node-a"]
-        assert result.data["instances"] == ["inst-1"]
+        assert "instances" not in result.data
         assert result.data["widget_mapping"] == {"foo": "bar"}

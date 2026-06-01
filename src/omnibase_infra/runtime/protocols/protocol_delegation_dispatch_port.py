@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Protocol interface for delegation dispatch ports.
 
-Defines the structural interface that both RuntimeDelegationDispatchPort and
-ContainerBackedDelegationDispatchPort conform to, enabling handler_wiring to
-inject either implementation without a concrete dependency.
+Defines the structural interface that RuntimeDelegationDispatchPort conforms to,
+enabling handler_wiring to inject the dispatch port without a concrete dependency.
 """
 
 from __future__ import annotations

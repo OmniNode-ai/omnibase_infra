@@ -117,7 +117,7 @@ jobs:
         with:
           version: "0.6.14"
           python-version: "3.12"
-          enable-cache: true
+          enable-cache: false
 
       - name: Install CLI dependencies (jq, curl)
         if: inputs.mode == 'compose'
@@ -148,8 +148,26 @@ jobs:
           # omnibase-infra-redpanda container, so a host-level rpk install is
           # unnecessary in compose mode.
 
-      - name: Bring up compose stack (postgres + redpanda)
+      - name: Resolve Docker Compose command
         if: inputs.mode == 'compose'
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then
+            compose_cmd="docker compose"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            compose_cmd="docker-compose"
+          else
+            skip_reason="Docker Compose not available on runner; compose runtime boot smoke skipped (OMN-12563)"
+            echo "::warning::${skip_reason}"
+            echo "RUNTIME_BOOT_SKIP_REASON=${skip_reason}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "DOCKER_COMPOSE_CMD=${compose_cmd}" >> "$GITHUB_ENV"
+          read -r -a compose_cmd_parts <<< "$compose_cmd"
+          "${compose_cmd_parts[@]}" version
+
+      - name: Bring up compose stack (postgres + redpanda)
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -192,6 +210,7 @@ jobs:
           export REDPANDA_ADMIN_PORT="$(pick_free_port)"
           export REDPANDA_SCHEMA_REGISTRY_PORT="$(pick_free_port)"
           export REDPANDA_PANDAPROXY_PORT="$(pick_free_port)"
+          read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD}"
           {
             echo "POSTGRES_PORT=${POSTGRES_PORT}"
             echo "PG_PORT=${POSTGRES_PORT}"
@@ -206,7 +225,7 @@ jobs:
           REDPANDA_ADMIN_PORT="${REDPANDA_ADMIN_PORT}" \
           REDPANDA_SCHEMA_REGISTRY_PORT="${REDPANDA_SCHEMA_REGISTRY_PORT}" \
           REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
-            docker compose -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
+            "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
 
           # Self-hosted CI runners run inside Docker containers that share the
           # host Docker daemon via /var/run/docker.sock. Port bindings on the
@@ -297,7 +316,7 @@ jobs:
           fi
 
       - name: Run database migrations (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -307,7 +326,7 @@ jobs:
           uv run python scripts/run-migrations.py
 
       - name: Pre-warm Redpanda metadata (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           # Fresh Redpanda brokers need time for their metadata subsystem to
@@ -321,7 +340,7 @@ jobs:
           echo "Redpanda pre-warm complete"
 
       - name: Stage contracts outside /home (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -334,7 +353,7 @@ jobs:
           echo "ONEX_CONTRACTS_DIR=/tmp/onex-contracts" >> "$GITHUB_ENV"
 
       - name: Launch runtime (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         env:
           # Fresh Redpanda brokers exhibit metadata propagation lag — topics are
@@ -356,7 +375,7 @@ jobs:
           echo "RUNTIME_PID=$!" >> "$GITHUB_ENV"
 
       - name: Launch runtime-effects (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         env:
           KAFKA_TIMEOUT_SECONDS: "120"
@@ -374,6 +393,7 @@ jobs:
           echo "RUNTIME_EFFECTS_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for runtime and runtime-effects health (hard gate)
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: health_wait
         run: |
           set -euo pipefail
@@ -442,6 +462,7 @@ jobs:
           fi
 
       - name: Hold 60s — runtime and runtime-effects stability
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           runtime_url="http://${RUNTIME_HOST}:8085/health"
@@ -504,6 +525,7 @@ jobs:
           fi
 
       - name: Fail on startup auto-wiring or registration errors
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           # OMN-9458: hard-fail on startup log regressions seen during the
@@ -535,6 +557,7 @@ jobs:
           fi
 
       - name: Query registration_projections for active/fresh rows
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: pg_liveness
         env:
           REAL_PG_PASSWORD: ${{ secrets.RUNTIME_PG_PASSWORD }}
@@ -564,6 +587,7 @@ jobs:
           fi
 
       - name: Assert runtime consumer groups are active
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: rpk_groups
         run: |
           set -euo pipefail
@@ -650,6 +674,7 @@ jobs:
             --arg mode "${{ inputs.mode }}" \
             --arg runtime_host "${RUNTIME_HOST}" \
             --arg pg_port "${PG_PORT}" \
+            --arg skip_reason "${RUNTIME_BOOT_SKIP_REASON:-}" \
             --slurpfile health health_initial.json \
             --slurpfile effects_health effects_health_initial.json \
             --arg active_fresh "${active_fresh_raw}" \
@@ -659,6 +684,8 @@ jobs:
               mode: $mode,
               runtime_host: $runtime_host,
               pg_port: $pg_port,
+              skipped: ($skip_reason != ""),
+              skip_reason: $skip_reason,
               health: $health[0],
               effects_health: $effects_health[0],
               active_fresh_registrations: ($active_fresh | tonumber),
@@ -676,7 +703,7 @@ jobs:
           retention-days: 14
 
       - name: Upload runtime startup logs
-        if: always() && inputs.mode == 'compose'
+        if: always() && inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         uses: actions/upload-artifact@v7
         with:
           name: runtime-startup-logs-${{ inputs.mode }}
@@ -703,14 +730,20 @@ jobs:
           if [[ -n "${RUNTIME_EFFECTS_PID:-}" ]]; then
             kill "${RUNTIME_EFFECTS_PID}" 2>/dev/null || true
           fi
-
-          project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}"
-          docker compose -p "${project}" -f docker/docker-compose.e2e.yml \
-            down -v --remove-orphans || true
+          # Prefer the resolved compose command if the bring-up step exported
+          # one; otherwise fall back to `docker compose` so teardown still runs
+          # even when DOCKER_COMPOSE_CMD was never set (the leak window).
+          if [[ -n "${DOCKER_COMPOSE_CMD:-}" ]]; then
+            read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD}"
+          else
+            compose_cmd=(docker compose)
+          fi
+          "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
 
           # Fallback: disconnect any leftover endpoints and remove the named
           # network. Both the explicit OMNIBASE_INFRA_NETWORK var and the
           # compose-derived `<project>_default` name are handled.
+          project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}"
           for net in "${OMNIBASE_INFRA_NETWORK:-}" "${project}_default"; do
             [[ -z "${net}" ]] && continue
             if docker network inspect "${net}" >/dev/null 2>&1; then

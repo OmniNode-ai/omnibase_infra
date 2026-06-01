@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Tests for post-Consul registry discovery semantics."""
+"""Tests for projection-based registry discovery semantics (post-Consul, OMN-9545)."""
 
 from __future__ import annotations
 
@@ -47,11 +47,11 @@ def _make_service() -> tuple[ServiceRegistryDiscovery, AsyncMock]:
 
 @pytest.mark.unit
 class TestRegistryDiscoverySemantics:
-    """Verify discovery payload explicitly degrades legacy instance discovery."""
+    """Verify projection-based discovery payload (post-Consul)."""
 
     @pytest.mark.asyncio
-    async def test_get_discovery_marks_instance_discovery_unavailable(self) -> None:
-        """Discovery response should surface post-Consul instance unavailability."""
+    async def test_get_discovery_returns_nodes_and_summary(self) -> None:
+        """Discovery response contains nodes and summary with no instance fields."""
         projection = _make_projection()
         service, reader = _make_service()
 
@@ -64,11 +64,11 @@ class TestRegistryDiscoverySemantics:
 
         response = await service.get_discovery(limit=10, offset=0)
 
-        assert response.instance_discovery_status == "unavailable"
-        assert response.instance_discovery_message == (
-            "Service discovery not available (Consul removed)"
-        )
-        assert response.live_instances == []
-        assert response.summary.healthy_instances == 0
-        assert response.summary.unhealthy_instances == 0
-        assert any(w.code == "NO_CONSUL_HANDLER" for w in response.warnings)
+        assert len(response.nodes) == 1
+        assert response.summary.total_nodes == 1
+        assert response.summary.active_nodes == 1
+        assert not hasattr(response.summary, "healthy_instances")
+        assert not hasattr(response.summary, "unhealthy_instances")
+        assert not hasattr(response, "live_instances")
+        assert not hasattr(response, "instance_discovery_status")
+        assert not any(w.code == "NO_CONSUL_HANDLER" for w in response.warnings)

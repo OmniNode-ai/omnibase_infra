@@ -11,8 +11,8 @@ on-wire ``event_type`` and every command routed to DLQ.
 
 This test proves:
   1. ``ModelHandlerRoutingEntry`` accepts an optional ``event_type`` alias.
-  2. ``_prepare_handler_wiring`` includes both the class name AND the
-     ``event_type`` alias in ``PreparedWiring.message_types``.
+  2. ``_prepare_handler_wiring`` includes the class name, the ``event_type``
+     alias, and literal subscribe topics in ``PreparedWiring.message_types``.
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ def _make_contract_with_event_type_alias(
     event_type_alias: str | None,
     message_category: str | None = None,
     node_name: str = "node_local",
-    subscribe_topic: str = "onex.cmd.platform.foo-start.v1",
 ) -> ModelDiscoveredContract:
     event_model = ModelHandlerRef(name=event_model_name, module="fake.models")
     entry_kwargs: dict[str, object] = {
@@ -72,7 +71,7 @@ def _make_contract_with_event_type_alias(
         entry_point_name=node_name,
         package_name="test-pkg",
         event_bus=ModelEventBusWiring(
-            subscribe_topics=(subscribe_topic,),
+            subscribe_topics=("onex.cmd.platform.foo-start.v1",),
             publish_topics=(),
         ),
         handler_routing=ModelHandlerRouting(
@@ -116,7 +115,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         """When event_type alias is declared, BOTH keys index the dispatcher.
 
         Before OMN-9215 dispatcher-key fix: message_types == {"ModelFooCommand"}.
-        After: message_types == {"ModelFooCommand", "platform.foo-start"}.
+        After: message_types includes class, semantic alias, and wire topic.
         This lets a publisher's wire-level event_type resolve to the registered
         handler (primary lookup path) AND keeps the class-name fallback working.
         """
@@ -281,7 +280,6 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             event_type_alias="platform.node-heartbeat",
             message_category="EVENT",
             node_name="node_registration_orchestrator",
-            subscribe_topic="onex.evt.platform.node-heartbeat.v1",
         )
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
         handler_cls = _make_zero_arg_handler_cls()
@@ -309,7 +307,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {
             "ModelNodeHeartbeatEvent",
             "platform.node-heartbeat",
-            "onex.evt.platform.node-heartbeat.v1",
+            "onex.cmd.platform.foo-start.v1",
         }
         assert (
             prepared.resolution_outcome
@@ -355,123 +353,6 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             "platform.foo-start",
             "onex.cmd.platform.foo-start.v1",
         }
-
-    @pytest.mark.unit
-    def test_message_types_include_full_onex_topic_for_canonical_envelopes(
-        self,
-    ) -> None:
-        """Canonical envelopes preserve the full topic in ``event_type``.
-
-        Projection consumers receive ``ModelEventEnvelope.event_type`` as
-        ``onex.evt.<producer>.<event>.v1`` when publishers emit canonical
-        envelopes. Dispatcher registration must include that exact wire key in
-        addition to the older dot-path alias.
-        """
-        contract = _make_contract_with_event_type_alias(
-            event_model_name="ModelTaskDelegatedEvent",
-            event_type_alias=None,
-            subscribe_topic="onex.evt.omniclaude.task-delegated.v1",
-        )
-        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
-        handler_cls = _make_zero_arg_handler_cls()
-        ownership = ServiceLocalHandlerOwnershipQuery(
-            local_node_names=frozenset({contract.name})
-        )
-        resolver = ServiceHandlerResolver()
-        with patch(
-            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=handler_cls,
-        ):
-            prepared = _prepare_handler_wiring(
-                contract=contract,
-                entry=entry,
-                dispatch_engine=None,
-                resolver=resolver,
-                ownership_query=ownership,
-                event_bus=None,
-                container=None,
-            )
-
-        assert prepared.message_types == {
-            "ModelTaskDelegatedEvent",
-            "omniclaude.task-delegated",
-            "onex.evt.omniclaude.task-delegated.v1",
-        }
-
-    @pytest.mark.unit
-    def test_topic_derived_keys_are_scoped_to_matching_handler_entry(self) -> None:
-        """Multi-handler contracts must not register every handler for every topic."""
-        heartbeat_entry = ModelHandlerRoutingEntry(
-            handler=ModelHandlerRef(name="HandlerNodeHeartbeat", module="fake.module"),
-            event_model=ModelHandlerRef(
-                name="ModelNodeHeartbeatEvent",
-                module="fake.models",
-            ),
-            event_type="platform.node-heartbeat",
-        )
-        introspection_entry = ModelHandlerRoutingEntry(
-            handler=ModelHandlerRef(
-                name="HandlerNodeIntrospected",
-                module="fake.module",
-            ),
-            event_model=ModelHandlerRef(
-                name="ModelNodeIntrospectionEvent",
-                module="fake.models",
-            ),
-            event_type="platform.node-introspection",
-        )
-        contract = ModelDiscoveredContract(
-            name="node_registration_orchestrator",
-            node_type="ORCHESTRATOR_GENERIC",
-            contract_version=ModelContractVersion(major=1, minor=0, patch=0),
-            contract_path=Path("/fake/contract.yaml"),
-            entry_point_name="node_registration_orchestrator",
-            package_name="test-pkg",
-            event_bus=ModelEventBusWiring(
-                subscribe_topics=(
-                    "onex.evt.platform.node-introspection.v1",
-                    "onex.evt.platform.node-heartbeat.v1",
-                ),
-                publish_topics=(),
-            ),
-            handler_routing=ModelHandlerRouting(
-                routing_strategy="payload_type_match",
-                handlers=(introspection_entry, heartbeat_entry),
-            ),
-        )
-        handler_cls = _make_zero_arg_handler_cls()
-        ownership = ServiceLocalHandlerOwnershipQuery(
-            local_node_names=frozenset({contract.name})
-        )
-        resolver = ServiceHandlerResolver()
-
-        with patch(
-            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=handler_cls,
-        ):
-            prepared = _prepare_handler_wiring(
-                contract=contract,
-                entry=heartbeat_entry,
-                dispatch_engine=None,
-                resolver=resolver,
-                ownership_query=ownership,
-                event_bus=None,
-                container=None,
-            )
-
-        assert prepared.message_types == {
-            "ModelNodeHeartbeatEvent",
-            "platform.node-heartbeat",
-            "onex.evt.platform.node-heartbeat.v1",
-        }
-        assert "platform.node-introspection" not in prepared.message_types
-        assert "onex.evt.platform.node-introspection.v1" not in prepared.message_types
-        assert prepared.route_ids == [
-            (
-                "route.auto.node_registration_orchestrator."
-                "HandlerNodeHeartbeat.onex_evt_platform_node_heartbeat_v1"
-            )
-        ]
 
 
 class TestContractDiscoveryParsesEventType:

@@ -21,7 +21,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations and live service instances for dashboard consumption. Combines data from PostgreSQL projections and Consul service discovery with partial-success semantics. All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.
+  EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations for dashboard consumption. Discovery is projection-based (PostgreSQL); Consul instance discovery was removed (OMN-9545). All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.
 
 # ---------------------------------------------------------------------------
 # Strongly typed I/O models
@@ -85,13 +85,6 @@ io_operations:
       - correlation_id
     output_fields:
       - node
-      - warnings
-  - operation: "list_instances"
-    description: "List live service instances from Consul."
-    input_fields:
-      - correlation_id
-    output_fields:
-      - instances
       - warnings
   - operation: "get_widget_mapping"
     description: "Return capability-to-widget mapping configuration."
@@ -165,10 +158,6 @@ handler_routing:
       handler:
         name: "HandlerRegistryApiGetNode"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node"
-    - operation: "list_instances"
-      handler:
-        name: "HandlerRegistryApiListInstances"
-        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_instances"
     - operation: "get_widget_mapping"
       handler:
         name: "HandlerRegistryApiGetWidgetMapping"
@@ -206,8 +195,6 @@ capabilities:
     description: "Provide unified discovery payload for dashboard consumption."
   - name: "registry.nodes"
     description: "Query registered node records from PostgreSQL projections."
-  - name: "registry.instances"
-    description: "Query live service instances from Consul."
   - name: "registry.contracts"
     description: "Query contract registrations from the contract registry."
   - name: "registry.topics"

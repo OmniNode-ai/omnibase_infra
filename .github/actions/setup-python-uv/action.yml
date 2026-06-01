@@ -41,16 +41,35 @@ inputs:
   sync-attempts:
     description: 'Maximum uv sync attempts before failing'
     required: false
-    default: '3'
+    default: '5'
   sync-retry-delay-seconds:
     description: 'Base delay in seconds between uv sync retries'
     required: false
     default: '10'
+  github-token:
+    description: >-
+      Token used to authenticate uv git+https dependency fetches against github.com. Defaults to the workflow GITHUB_TOKEN, which authenticates same-org public-repo fetches and lifts them above the anonymous rate limit. Override with `secrets.CROSS_REPO_PAT` for private cross-repo deps.
+    required: false
+    default: ${{ github.token }}
+  shared-env-enabled:
+    description: >-
+      Use the host-local immutable CI environment cache. "auto" enables it only
+      when OMNI_CI_SHARED_ENV_ENABLED=true in the workflow environment.
+    required: false
+    default: 'auto'
+  shared-env-root:
+    description: Host-local root for immutable CI environments.
+    required: false
+    default: '/home/runner/.cache/omni/ci-envs'
+  shared-env-install-args:
+    description: Arguments used when building the immutable shared CI env.
+    required: false
+    default: '--frozen --all-extras --all-groups --no-install-project'
 runs:
   using: 'composite'
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install uv
@@ -58,8 +77,48 @@ runs:
       with:
         version: ${{ inputs.uv-version }}
         enable-cache: ${{ inputs.cache-enabled != 'false' }}
+    - name: Resolve shared CI env mode
+      id: shared_env_mode
+      shell: bash
+      env:
+        SHARED_ENV_ENABLED: ${{ inputs.shared-env-enabled }}
+      run: |
+        case "${SHARED_ENV_ENABLED}" in
+          true)
+            enabled=true
+            ;;
+          false)
+            enabled=false
+            ;;
+          auto)
+            if [ "${OMNI_CI_SHARED_ENV_ENABLED:-false}" = "true" ]; then
+              enabled=true
+            else
+              enabled=false
+            fi
+            ;;
+          *)
+            echo "::error::shared-env-enabled must be true, false, or auto"
+            exit 2
+            ;;
+        esac
+        echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
+        echo "shared CI env enabled: ${enabled}"
+    - name: Prepare shared CI env
+      if: steps.shared_env_mode.outputs.enabled == 'true' && inputs.skip-install != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OMNI_CI_ENV_ROOT: ${{ inputs.shared-env-root }}
+        OMNI_CI_REPO: omnibase_infra
+        OMNI_CI_ENV_INSTALL_ARGS: ${{ inputs.shared-env-install-args }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        UV_VERSION: ${{ inputs.uv-version }}
+        GIT_FETCH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        "${GITHUB_ACTION_PATH}/../../../scripts/ci/ensure_ci_env.sh"
     - name: Load cached uv
-      if: inputs.cache-enabled != 'false'
+      if: steps.shared_env_mode.outputs.enabled != 'true' && inputs.cache-enabled != 'false'
       uses: actions/cache@v4
       with:
         path: ~/.cache/uv
@@ -67,7 +126,7 @@ runs:
         restore-keys: |
           ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ inputs.cache-version }}-
     - name: Install dependencies
-      if: inputs.skip-install != 'true'
+      if: steps.shared_env_mode.outputs.enabled != 'true' && inputs.skip-install != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -75,9 +134,27 @@ runs:
         INSTALL_ARGS: ${{ inputs.install-args }}
         UV_SYNC_ATTEMPTS: ${{ inputs.sync-attempts }}
         UV_SYNC_RETRY_DELAY_SECONDS: ${{ inputs.sync-retry-delay-seconds }}
+        GIT_FETCH_TOKEN: ${{ inputs.github-token }}
       run: |
         export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+        export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"
+        export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"
         git config --global http.version HTTP/1.1
+        # Authenticate uv's internal git+https fetches. Anonymous github.com
+        # requests are rate-limited (60/hr); many parallel --no-cache syncs from
+        # one runner egress IP trip "Empty reply from server". Authenticated
+        # requests get 5000/hr. uv shells out to `git fetch`, which inherits the
+        # GIT_CONFIG_* env vars below — a process-scoped insteadOf rewrite that
+        # never writes the token to a persistent gitconfig on the self-hosted
+        # runner. (OMN-12432)
+        if [ -n "${GIT_FETCH_TOKEN}" ]; then
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/"
+          echo "git github.com fetches: authenticated (x-access-token)"
+        else
+          echo "::warning::github-token not provided; uv git fetches stay anonymous and may be rate-limited"
+        fi
         read -r -a install_args <<< "$INSTALL_ARGS"
         sync_attempts="${UV_SYNC_ATTEMPTS}"
         retry_delay_seconds="${UV_SYNC_RETRY_DELAY_SECONDS}"

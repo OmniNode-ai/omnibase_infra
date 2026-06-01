@@ -3,11 +3,10 @@
 """Registry API Service Module.
 
 Provides a FastAPI-based HTTP API for registry discovery operations,
-exposing node registrations and live Consul instances for dashboard
-consumption.
+exposing node registrations for dashboard consumption.
 
-This module bridges the existing ProjectionReaderRegistration and
-HandlerServiceDiscoveryConsul services with a REST API layer.
+This module bridges the existing ProjectionReaderRegistration service
+with a REST API layer. Consul instance discovery was removed (OMN-9545).
 
 Related Tickets:
     - OMN-1278: Contract-Driven Dashboard - Registry Discovery
@@ -18,7 +17,6 @@ from omnibase_infra.services.registry_api.models import (
     ModelPaginationInfo,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
-    ModelRegistryInstanceView,
     ModelRegistryNodeView,
     ModelRegistrySummary,
     ModelWarning,
@@ -33,7 +31,6 @@ __all__ = [
     "ModelPaginationInfo",
     "ModelRegistryDiscoveryResponse",
     "ModelRegistryHealthResponse",
-    "ModelRegistryInstanceView",
     "ModelRegistryNodeView",
     "ModelRegistrySummary",
     "ModelWarning",

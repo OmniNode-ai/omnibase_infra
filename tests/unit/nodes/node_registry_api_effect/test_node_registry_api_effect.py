@@ -144,12 +144,11 @@ class TestRegistryInfraRegistryApiEffect:
         assert "registry.discovery" in caps
 
     def test_get_supported_operations_complete(self) -> None:
-        """All 10 operations declared in contract.yaml must be listed."""
+        """All 9 operations declared in contract.yaml must be listed (OMN-9545 removed list_instances)."""
         ops = RegistryInfraRegistryApiEffect.get_supported_operations()
         expected = {
             "list_nodes",
             "get_node",
-            "list_instances",
             "get_widget_mapping",
             "get_discovery",
             "get_health",
