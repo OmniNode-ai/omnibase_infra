@@ -133,6 +133,7 @@ def test_canary_bundle_required_env_subset_of_core_baseline() -> None:
             "INFISICAL_PROJECT_ID",
             "INFISICAL_ENCRYPTION_KEY",
             "INFISICAL_AUTH_SECRET",
+            "INFISICAL_REDIS_URL",
         }
     )
     unexpected = resolved.required_env - _EXPECTED_CANARY_ENV
