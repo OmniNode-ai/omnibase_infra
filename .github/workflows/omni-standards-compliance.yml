@@ -129,10 +129,32 @@ jobs:
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          python - <<'PY' > /tmp/onex-change-control-overrides.txt
+          import tomllib
+          from pathlib import Path
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          source = (
+              pyproject.get("tool", {})
+              .get("uv", {})
+              .get("sources", {})
+              .get("omnibase-core")
+          )
+          if isinstance(source, dict) and source.get("git"):
+              ref = source.get("rev") or source.get("tag") or source.get("branch")
+              if ref:
+                  print(f"omnibase-core @ git+{source['git']}@{ref}")
+          PY
+          install_args=(
+            "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
+          )
+          if [ -s /tmp/onex-change-control-overrides.txt ]; then
+            install_args=(--overrides /tmp/onex-change-control-overrides.txt "${install_args[@]}")
+          fi
           attempt=1
           max_attempts=3
           delay=10
-          until uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"; do
+          until uv pip install "${install_args[@]}"; do
             status=$?
             if [[ "$attempt" -ge "$max_attempts" ]]; then
               echo "::error::uv pip install onex_change_control failed after ${attempt} attempt(s)"
