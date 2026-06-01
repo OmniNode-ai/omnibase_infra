@@ -126,16 +126,25 @@ async def test_strict_coverage_accepts_contract_event_type_alias(
         ),
     )
 
+    engine = MessageDispatchEngine()
     with patch(
         "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
         return_value=FakeHandler,
     ):
-        report = await wire_from_manifest(manifest, MessageDispatchEngine())
+        report = await wire_from_manifest(manifest, engine)
 
     assert report.total_wired == 1
     assert report.results[0].dispatchers_registered == (
         "dispatcher.auto.pr_lifecycle_orchestrator.HandlerPrLifecycleOrchestrator",
     )
+    dispatcher = engine._dispatchers[
+        "dispatcher.auto.pr_lifecycle_orchestrator.HandlerPrLifecycleOrchestrator"
+    ]
+    assert dispatcher.message_types == {
+        "ModelPrLifecycleStartCommand",
+        START_ALIAS,
+        START_TOPIC,
+    }
 
 
 @pytest.mark.asyncio
