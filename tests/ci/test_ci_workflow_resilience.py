@@ -416,6 +416,10 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
         == "${{ secrets.CROSS_REPO_PAT || github.token }}"
     )
     assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
+    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]
+    assert "max_attempts=3" in install_step["run"]
+    assert "until uv pip install" in install_step["run"]
+    assert "uv pip install onex_change_control failed after" in install_step["run"]
 
 
 def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
