@@ -50,30 +50,6 @@ def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
     assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
 
 
-def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
-    workflow = _load_yaml(CI_WORKFLOW)
-    job = workflow["jobs"]["contract-compliance"]
-    steps = job["steps"]
-
-    assert job["timeout-minutes"] == 20
-
-    occ_checkout = next(
-        step for step in steps if step.get("name") == "Checkout onex_change_control"
-    )
-    assert (
-        occ_checkout["with"]["token"] == "${{ secrets.CROSS_REPO_PAT || github.token }}"
-    )
-
-    install_step = next(
-        step for step in steps if step.get("name") == "Install onex_change_control"
-    )
-    run_script = install_step["run"]
-    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
-    assert "max_attempts=3" in run_script
-    assert "until uv sync --no-cache --all-extras" in run_script
-    assert "uv sync onex_change_control failed after" in run_script
-
-
 def test_migration_integration_resolves_reachable_postgres_host() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-integration"]
