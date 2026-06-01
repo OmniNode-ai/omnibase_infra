@@ -512,6 +512,7 @@ jobs:
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
+          shared-env-enabled: "false"
 
       - name: Preinstall CPU-only torch for sibling deps
         working-directory: omnibase_infra
@@ -1005,6 +1006,7 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
+          shared-env-enabled: "false"
 
       - name: Install dependencies
         run: uv sync --no-cache
@@ -1316,6 +1318,7 @@ jobs:
           cache-key-prefix: uv-boundary
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
+          shared-env-enabled: "false"
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra

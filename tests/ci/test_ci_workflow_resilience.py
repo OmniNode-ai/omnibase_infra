@@ -309,7 +309,8 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert 'UV_PROJECT_ENVIRONMENT="${venv_dir}"' in ensure_source
     assert 'cat > "${manifest_path}"' in ensure_source
     assert 'workspace_venv="${repo_root}/.venv"' in ensure_source
-    assert 'wrapper_dir="${repo_root}/.omni-ci-bin"' in ensure_source
+    assert 'wrapper_parent="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"' in ensure_source
+    assert 'wrapper_dir="${wrapper_parent%/}/omni-ci-bin-${digest}"' in ensure_source
     assert 'ln -sfn "${venv_dir}" "${workspace_venv}"' in ensure_source
     assert "OMNI_CI_SHARED_UV_RUN_DIRECT=1" in ensure_source
     assert 'if [[ "\\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1"' in ensure_source
@@ -320,6 +321,25 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert "chmod -R a-w" in ensure_source
     assert "UV_NO_SYNC=1" in ensure_source
     assert "PYTHONPATH=${repo_root}/src" in ensure_source
+
+
+def test_ci_jobs_that_mutate_python_env_disable_shared_env() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+
+    compliance_setup = next(
+        step
+        for step in ci_workflow["jobs"]["compliance"]["steps"]
+        if step.get("uses") == "./.github/actions/setup-python-uv"
+    )
+    assert compliance_setup["with"]["shared-env-enabled"] == "false"
+
+    for job_name in ("schema-handshake", "kafka-boundary-compat"):
+        setup_step = next(
+            step
+            for step in ci_workflow["jobs"][job_name]["steps"]
+            if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
+        )
+        assert setup_step["with"]["shared-env-enabled"] == "false"
 
 
 def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:

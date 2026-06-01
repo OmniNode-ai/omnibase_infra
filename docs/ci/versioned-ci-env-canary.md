@@ -32,7 +32,7 @@ The digest includes:
 The environment is built at its final digest path under `flock`, marked ready
 by writing `manifest.json` only after install succeeds, and made read-only.
 Each checkout gets a local `.venv` symlink to the published env and a
-checkout-local `uv` wrapper that turns ordinary `uv run <tool> ...` calls into
+runner-temp `uv` wrapper that turns ordinary `uv run <tool> ...` calls into
 direct execution from `.venv/bin`. Commands with extra uv-run options still
 delegate to the real uv binary. Jobs set `UV_PROJECT_ENVIRONMENT=<checkout>/.venv`,
 `UV_NO_SYNC=1`, and `PYTHONPATH=<checkout>/src`. The dependency environment is
@@ -43,12 +43,16 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
 ## Operating Rules
 
 - Do not run `uv sync` into an existing shared env from ordinary CI jobs.
+- Jobs that intentionally run `uv sync` or `uv pip install` after setup must set
+  `shared-env-enabled: "false"` and use an isolated writable environment.
 - Do not install the checked-out project into the shared env; use
   `--no-install-project` so PR source cannot be stale.
 - Do not replace a real workspace `.venv`; the canary only manages the checkout
   `.venv` when it is absent or already a symlink to a shared env.
 - Keep the `uv` wrapper narrow: only plain `uv run <tool> ...` is redirected to
-  `.venv/bin`; other uv operations continue to use the real uv binary.
+  `.venv/bin`; other uv operations continue to use the real uv binary. Keep the
+  wrapper under runner temp space so clean-root checks do not see generated
+  checkout files.
 - Include dependency groups in the canary env (`--all-groups`) so CI tools such
   as `mypy`, `ruff`, and `pytest` are present without per-job resolution.
 - Bump the environment by changing lockfile/tool inputs, not by mutating an
