@@ -35,8 +35,11 @@ Each checkout gets a local `.venv` symlink to the published env and a
 runner-temp `uv` wrapper that turns ordinary `uv run <tool> ...` calls into
 direct execution from `.venv/bin`. Commands with extra uv-run options still
 delegate to the real uv binary. Jobs set `UV_PROJECT_ENVIRONMENT=<checkout>/.venv`,
-`UV_NO_SYNC=1`, and `PYTHONPATH=<checkout>/src`. The dependency environment is
-shared, but the authoritative source under test remains the current checkout.
+`UV_NO_SYNC=1`, and `PYTHONPATH=<runner-temp metadata>:<checkout>/src`. The
+runner-temp metadata is generated from the checkout `pyproject.toml` so
+entry-point discovery sees the current PR without installing it into the shared
+env. The dependency environment is shared, but the authoritative source under
+test remains the current checkout.
 
 Public fork PRs do not use the host-local environment and keep isolated setup.
 
@@ -47,6 +50,8 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
   `shared-env-enabled: "false"` and use an isolated writable environment.
 - Do not install the checked-out project into the shared env; use
   `--no-install-project` so PR source cannot be stale.
+- Generate checkout metadata outside the repo so entry-point discovery sees the
+  PR's `pyproject.toml` without polluting clean-root checks.
 - Build the shared env with bounded retries because a single transient git or
   wheel fetch failure would otherwise poison every job waiting on the digest.
 - Do not replace a real workspace `.venv`; the canary only manages the checkout

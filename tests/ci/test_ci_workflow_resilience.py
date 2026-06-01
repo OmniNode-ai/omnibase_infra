@@ -311,12 +311,20 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert 'workspace_venv="${repo_root}/.venv"' in ensure_source
     assert 'wrapper_parent="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"' in ensure_source
     assert 'wrapper_dir="${wrapper_parent%/}/omni-ci-bin-${digest}"' in ensure_source
+    assert (
+        'metadata_root="${wrapper_parent%/}/omni-ci-metadata-${digest}"'
+        in ensure_source
+    )
     assert 'ln -sfn "${venv_dir}" "${workspace_venv}"' in ensure_source
     assert "OMNI_CI_SHARED_UV_RUN_DIRECT=1" in ensure_source
     assert 'if [[ "\\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1"' in ensure_source
     assert 'exec "\\${workspace_venv}/bin/\\${cmd}" "\\$@"' in ensure_source
     assert 'echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"' in ensure_source
     assert 'echo "PATH=${wrapper_dir}:${workspace_venv}/bin:${PATH}"' in ensure_source
+    assert 'echo "PYTHONPATH=${metadata_root}:${repo_root}/src' in ensure_source
+    assert "write_project_metadata" in ensure_source
+    assert "entry_points.txt" in ensure_source
+    assert 'project.get("entry-points", {})' in ensure_source
     assert "uv sync" in ensure_source
     assert 'sync_attempts="${OMNI_CI_ENV_SYNC_ATTEMPTS:-5}"' in ensure_source
     assert (
@@ -328,7 +336,6 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert "shared CI env uv sync failed after" in ensure_source
     assert "chmod -R a-w" in ensure_source
     assert "UV_NO_SYNC=1" in ensure_source
-    assert "PYTHONPATH=${repo_root}/src" in ensure_source
 
 
 def test_ci_jobs_that_mutate_python_env_disable_shared_env() -> None:

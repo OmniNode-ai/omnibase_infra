@@ -36,6 +36,7 @@ venv_dir="${env_dir}/.venv"
 workspace_venv="${repo_root}/.venv"
 wrapper_parent="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 wrapper_dir="${wrapper_parent%/}/omni-ci-bin-${digest}"
+metadata_root="${wrapper_parent%/}/omni-ci-metadata-${digest}"
 real_uv="$(command -v uv)"
 manifest_path="${env_dir}/manifest.json"
 lock_dir="${repo_env_root}/.locks"
@@ -55,9 +56,9 @@ publish_env() {
     echo "PYTHONDONTWRITEBYTECODE=1"
     echo "PATH=${wrapper_dir}:${workspace_venv}/bin:${PATH}"
     if [[ -n "${PYTHONPATH:-}" ]]; then
-      echo "PYTHONPATH=${repo_root}/src:${PYTHONPATH}"
+      echo "PYTHONPATH=${metadata_root}:${repo_root}/src:${PYTHONPATH}"
     else
-      echo "PYTHONPATH=${repo_root}/src"
+      echo "PYTHONPATH=${metadata_root}:${repo_root}/src"
     fi
   } >> "${GITHUB_ENV}"
   echo "Shared CI env: ${env_dir}"
@@ -103,6 +104,53 @@ fi
 exec "\${real_uv}" "\$@"
 EOF
   chmod +x "${wrapper_dir}/uv"
+}
+
+write_project_metadata() {
+  rm -rf "${metadata_root}"
+  mkdir -p "${metadata_root}"
+  "${python_bin}" - "${repo_root}" "${metadata_root}" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+metadata_root = Path(sys.argv[2])
+project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))[
+    "project"
+]
+name = project["name"]
+version = project["version"]
+dist_name = re.sub(r"[-_.]+", "_", name)
+dist_info = metadata_root / f"{dist_name}-{version}.dist-info"
+dist_info.mkdir(parents=True, exist_ok=True)
+entry_point_groups: dict[str, dict[str, str]] = {}
+scripts = project.get("scripts", {})
+if scripts:
+    entry_point_groups["console_scripts"] = scripts
+entry_point_groups.update(project.get("entry-points", {}))
+
+(dist_info / "METADATA").write_text(
+    f"Metadata-Version: 2.3\nName: {name}\nVersion: {version}\n",
+    encoding="utf-8",
+)
+(dist_info / "entry_points.txt").write_text(
+    "\n".join(
+        line
+        for group, entries in entry_point_groups.items()
+        for line in (
+            f"[{group}]",
+            *(f"{entry_name} = {target}" for entry_name, target in entries.items()),
+            "",
+        )
+    ),
+    encoding="utf-8",
+)
+(dist_info / "RECORD").write_text("", encoding="utf-8")
+PY
 }
 
 mkdir -p "${lock_dir}"
@@ -184,4 +232,5 @@ fi
 
 link_workspace_venv
 write_uv_wrapper
+write_project_metadata
 publish_env
