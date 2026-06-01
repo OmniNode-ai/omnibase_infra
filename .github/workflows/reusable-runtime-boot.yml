@@ -157,15 +157,17 @@ jobs:
           elif command -v docker-compose >/dev/null 2>&1; then
             compose_cmd="docker-compose"
           else
-            echo "::error::Docker Compose not available; install docker compose v2 or docker-compose"
-            exit 1
+            skip_reason="Docker Compose not available on runner; compose runtime boot smoke skipped (OMN-12563)"
+            echo "::warning::${skip_reason}"
+            echo "RUNTIME_BOOT_SKIP_REASON=${skip_reason}" >> "$GITHUB_ENV"
+            exit 0
           fi
           echo "DOCKER_COMPOSE_CMD=${compose_cmd}" >> "$GITHUB_ENV"
           read -r -a compose_cmd_parts <<< "$compose_cmd"
           "${compose_cmd_parts[@]}" version
 
       - name: Bring up compose stack (postgres + redpanda)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -314,7 +316,7 @@ jobs:
           fi
 
       - name: Run database migrations (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -324,7 +326,7 @@ jobs:
           uv run python scripts/run-migrations.py
 
       - name: Pre-warm Redpanda metadata (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           # Fresh Redpanda brokers need time for their metadata subsystem to
@@ -338,7 +340,7 @@ jobs:
           echo "Redpanda pre-warm complete"
 
       - name: Stage contracts outside /home (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -351,7 +353,7 @@ jobs:
           echo "ONEX_CONTRACTS_DIR=/tmp/onex-contracts" >> "$GITHUB_ENV"
 
       - name: Launch runtime (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         env:
           # Fresh Redpanda brokers exhibit metadata propagation lag — topics are
@@ -373,7 +375,7 @@ jobs:
           echo "RUNTIME_PID=$!" >> "$GITHUB_ENV"
 
       - name: Launch runtime-effects (compose mode)
-        if: inputs.mode == 'compose'
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         working-directory: ${{ github.workspace }}
         env:
           KAFKA_TIMEOUT_SECONDS: "120"
@@ -391,6 +393,7 @@ jobs:
           echo "RUNTIME_EFFECTS_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for runtime and runtime-effects health (hard gate)
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: health_wait
         run: |
           set -euo pipefail
@@ -459,6 +462,7 @@ jobs:
           fi
 
       - name: Hold 60s — runtime and runtime-effects stability
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           runtime_url="http://${RUNTIME_HOST}:8085/health"
@@ -521,6 +525,7 @@ jobs:
           fi
 
       - name: Fail on startup auto-wiring or registration errors
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           # OMN-9458: hard-fail on startup log regressions seen during the
@@ -552,6 +557,7 @@ jobs:
           fi
 
       - name: Query registration_projections for active/fresh rows
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: pg_liveness
         env:
           REAL_PG_PASSWORD: ${{ secrets.RUNTIME_PG_PASSWORD }}
@@ -581,6 +587,7 @@ jobs:
           fi
 
       - name: Assert runtime consumer groups are active
+        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: rpk_groups
         run: |
           set -euo pipefail
@@ -667,6 +674,7 @@ jobs:
             --arg mode "${{ inputs.mode }}" \
             --arg runtime_host "${RUNTIME_HOST}" \
             --arg pg_port "${PG_PORT}" \
+            --arg skip_reason "${RUNTIME_BOOT_SKIP_REASON:-}" \
             --slurpfile health health_initial.json \
             --slurpfile effects_health effects_health_initial.json \
             --arg active_fresh "${active_fresh_raw}" \
@@ -676,6 +684,8 @@ jobs:
               mode: $mode,
               runtime_host: $runtime_host,
               pg_port: $pg_port,
+              skipped: ($skip_reason != ""),
+              skip_reason: $skip_reason,
               health: $health[0],
               effects_health: $effects_health[0],
               active_fresh_registrations: ($active_fresh | tonumber),
@@ -693,7 +703,7 @@ jobs:
           retention-days: 14
 
       - name: Upload runtime startup logs
-        if: always() && inputs.mode == 'compose'
+        if: always() && inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
         uses: actions/upload-artifact@v7
         with:
           name: runtime-startup-logs-${{ inputs.mode }}
@@ -706,11 +716,15 @@ jobs:
       - name: Stop background runtime (compose mode)
         if: always() && inputs.mode == 'compose'
         run: |
-          read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD:-docker compose}"
           if [[ -n "${RUNTIME_PID:-}" ]]; then
             kill "${RUNTIME_PID}" 2>/dev/null || true
           fi
           if [[ -n "${RUNTIME_EFFECTS_PID:-}" ]]; then
             kill "${RUNTIME_EFFECTS_PID}" 2>/dev/null || true
           fi
-          "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
+          if [[ -n "${DOCKER_COMPOSE_CMD:-}" ]]; then
+            read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD}"
+            "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
+          else
+            echo "Docker Compose command unavailable; cleanup skipped"
+          fi

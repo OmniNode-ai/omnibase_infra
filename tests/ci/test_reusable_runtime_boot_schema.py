@@ -267,12 +267,61 @@ def test_boot_resolves_compose_frontend_for_runner_variants(
     assert "docker_compose_cmd" in all_text
     assert "docker compose version" in all_text
     assert "docker-compose" in all_text
+    assert "runtime_boot_skip_reason" in all_text
+    assert "compose runtime boot smoke skipped" in all_text
     assert 'read -r -a compose_cmd <<< "${docker_compose_cmd}"' in all_text
     assert '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project}"' in all_text
     assert (
         '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project:-omnibase-infra}"'
         in all_text
     )
+    assert '"${docker_compose_cmd:-docker compose}"' not in all_text
+
+
+def test_compose_runtime_boot_skip_gates_compose_dependent_steps(
+    workflow: Workflow,
+) -> None:
+    """Missing runner Compose tooling must skip the smoke, not fail the PR."""
+    steps = _boot_steps(workflow)
+    compose_dependent_steps = [
+        step
+        for step in steps
+        if step.get("name")
+        in {
+            "Bring up compose stack (postgres + redpanda)",
+            "Run database migrations (compose mode)",
+            "Pre-warm Redpanda metadata (compose mode)",
+            "Stage contracts outside /home (compose mode)",
+            "Launch runtime (compose mode)",
+            "Launch runtime-effects (compose mode)",
+        }
+    ]
+    assert compose_dependent_steps, "compose-dependent steps missing"
+    for step in compose_dependent_steps:
+        assert "env.RUNTIME_BOOT_SKIP_REASON == ''" in str(step.get("if", ""))
+
+    hard_gate_steps = [
+        step
+        for step in steps
+        if step.get("name")
+        in {
+            "Wait for runtime and runtime-effects health (hard gate)",
+            "Hold 60s — runtime and runtime-effects stability",
+            "Fail on startup auto-wiring or registration errors",
+            "Query registration_projections for active/fresh rows",
+            "Assert runtime consumer groups are active",
+        }
+    ]
+    assert hard_gate_steps, "runtime hard-gate steps missing"
+    for step in hard_gate_steps:
+        assert step.get("if") == "env.RUNTIME_BOOT_SKIP_REASON == ''"
+
+    artifact_step = next(
+        step for step in steps if step.get("name") == "Emit smoke-result.json artifact"
+    )
+    artifact_text = _step_text(artifact_step)
+    assert "skipped:" in artifact_text
+    assert "skip_reason:" in artifact_text
 
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
