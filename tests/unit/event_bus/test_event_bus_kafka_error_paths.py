@@ -22,6 +22,7 @@ Related: OMN-12385
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,7 +40,7 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models import ModelNodeIdentity
 
-_SERVERS = "localhost:9092"
+_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 _ENV = "test"
 
 
