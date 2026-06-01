@@ -196,10 +196,7 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
     )
     sibling_steps = sibling_workflow["jobs"]["sibling-compat"]["steps"]
-    assert all(
-        "setup-python-uv" not in step.get("uses", "")
-        for step in sibling_steps
-    )
+    assert all("setup-python-uv" not in step.get("uses", "") for step in sibling_steps)
     run_lines = [
         line.strip()
         for step in sibling_steps
