@@ -57,7 +57,7 @@ jobs:
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Python and uv
+      - name: Setup Python and uv (with retry-wrapped install)
         uses: ./omnibase_infra/.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -66,11 +66,9 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-sibling-compat
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
-
-      - name: Install omnibase_infra dev dependencies
-        working-directory: omnibase_infra
-        run: uv sync
+          working-directory: omnibase_infra
+          sync-attempts: "5"
+          sync-retry-delay-seconds: "10"
 
       - name: Validate sibling repo compatibility (OMN-4315)
         working-directory: omnibase_infra
