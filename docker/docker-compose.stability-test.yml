@@ -100,6 +100,8 @@ services:
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
@@ -130,6 +132,8 @@ services:
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-effects
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES}
@@ -172,6 +176,8 @@ services:
       KAFKA_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-worker
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES}

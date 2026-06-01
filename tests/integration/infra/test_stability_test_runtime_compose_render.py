@@ -119,6 +119,8 @@ COMPOSE_RENDER_ENV = {
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    "ONEX_INFRA_HOST": "192.0.2.10",
+    "ONEX_INFRA_USER": "render-only-user",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
@@ -245,6 +247,8 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
+        assert environment["ONEX_INFRA_HOST"] == "192.0.2.10"
+        assert environment["ONEX_INFRA_USER"] == "render-only-user"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
         assert "image" not in services[service_name]

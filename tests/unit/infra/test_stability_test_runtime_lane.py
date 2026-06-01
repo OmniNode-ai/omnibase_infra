@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -73,6 +74,7 @@ def _construct_compose_value(
         return loader.construct_mapping(node)
     if isinstance(node, yaml.SequenceNode):
         return loader.construct_sequence(node)
+    assert isinstance(node, yaml.ScalarNode)
     return loader.construct_scalar(node)
 
 
@@ -83,7 +85,7 @@ class _TestSafeLoader(yaml.SafeLoader):
 _TestSafeLoader.add_constructor("!override", _construct_compose_value)
 
 
-def _load_overlay() -> dict:
+def _load_overlay() -> dict[str, Any]:
     overlay_text = OVERLAY_FILE.read_text(encoding="utf-8")
     overlay = yaml.load(overlay_text, Loader=_TestSafeLoader)  # noqa: S506
     assert isinstance(overlay, dict)
@@ -100,7 +102,7 @@ def _load_runtime_policy_env() -> dict[str, str]:
     return env
 
 
-def _load_base_compose() -> dict:
+def _load_base_compose() -> dict[str, Any]:
     base_text = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
     base = yaml.load(base_text, Loader=yaml.SafeLoader)
     assert isinstance(base, dict)
@@ -150,6 +152,14 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
+        assert (
+            environment["ONEX_INFRA_HOST"]
+            == "${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}"
+        )
+        assert (
+            environment["ONEX_INFRA_USER"]
+            == "${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}"
+        )
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
 
