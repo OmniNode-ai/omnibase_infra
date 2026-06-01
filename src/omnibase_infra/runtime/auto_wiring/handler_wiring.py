@@ -185,6 +185,11 @@ def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
     return False
 
 
+def _is_protocol_handler_class(handler_cls: type) -> bool:
+    """Return True when a handler routing entry points at a Protocol class."""
+    return bool(getattr(handler_cls, "_is_protocol", False))
+
+
 async def _async_resolve_from_container(
     container: object,
     handler_cls: type,
@@ -2445,25 +2450,27 @@ def _prepare_handler_wiring(
         ownership_query=ownership_query,
     )
 
-    def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
-        """Return a containment-only PreparedWiring for an async-incompat handler.
+    def _quarantine_prepared(
+        *,
+        reason: EnumQuarantineReason,
+        detail: str,
+    ) -> PreparedWiring:
+        """Return a containment-only PreparedWiring for a known bad handler.
 
-        OMN-9457: the handler's constructor raised ``RuntimeError: asyncio.run()
-        cannot be called from a running event loop``. We deterministically
-        contain it — no dispatcher / route registration — and surface it on the
-        wiring report so follow-up migration is visible rather than
-        partially-broken runtime state.
+        Known containment-worthy declaration/construction failures are
+        surfaced in the wiring report instead of partially registering a broken
+        dispatcher. Resolver Step-6 constructor exhaustion TypeError remains
+        boot-fatal outside these explicit reasons.
         """
-        detail = _sanitize_exc(exc)
         logger.warning(
-            "Auto-wiring: quarantining async-incompatible handler %s.%s "
-            "(contract=%s, package=%s): %s. Runtime-effects boot will "
-            "continue; convert the handler to async-safe construction to "
-            "re-enable it.",
+            "Auto-wiring: quarantining handler %s.%s "
+            "(contract=%s, package=%s, reason=%s): %s. Runtime-effects boot "
+            "will continue; follow-up migration required.",
             handler_ref.module,
             handler_ref.name,
             contract.name,
             contract.package_name,
+            reason.value,
             detail,
         )
         return PreparedWiring(
@@ -2474,8 +2481,8 @@ def _prepare_handler_wiring(
             handler_name=handler_ref.name,
             handler_module=handler_ref.module,
             resolution_outcome=EnumHandlerResolutionOutcome.UNRESOLVABLE,
-            skip_reason=f"quarantined:{EnumQuarantineReason.ASYNC_INCOMPATIBLE.value}",
-            quarantine_reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+            skip_reason=f"quarantined:{reason.value}",
+            quarantine_reason=reason,
             quarantine_detail=detail,
         )
 
@@ -2507,12 +2514,26 @@ def _prepare_handler_wiring(
         )
         try:
             resolution = resolver.resolve(ctx)
+        except TypeError as exc:
+            # OMN-12501: Protocol interfaces are non-instantiable by design.
+            # They are invalid as handler_routing targets, but should be
+            # reported as contract migration work rather than crashing
+            # runtime-effects boot under the generic resolver TypeError path.
+            if _is_protocol_handler_class(handler_cls):
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION,
+                    detail=_sanitize_exc(exc),
+                )
+            raise
         except RuntimeError as exc:
             # OMN-9457: deterministic containment for handlers whose
             # construction path calls asyncio.run() inside runtime-managed
             # async boot. Any other RuntimeError propagates unchanged.
             if _is_async_incompat_runtime_error(exc):
-                return _quarantine_prepared(exc)
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+                    detail=_sanitize_exc(exc),
+                )
             raise
 
     # _early_category was computed up-front so the quarantine sentinel could
