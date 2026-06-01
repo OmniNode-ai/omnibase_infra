@@ -1475,6 +1475,13 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
+def _literal_event_type_aliases_from_topics(
+    subscribe_topics: tuple[str, ...],
+) -> set[str]:
+    """Return literal wire-topic aliases accepted as envelope event_type keys."""
+    return {topic.strip() for topic in subscribe_topics if topic.strip()}
+
+
 def _strict_dispatcher_coverage_enabled() -> bool:
     """Return True when strict orchestrator dispatcher coverage is enabled."""
     return os.environ.get(_STRICT_DISPATCHER_COVERAGE_ENV, "").lower() in (
@@ -2397,12 +2404,16 @@ def _prepare_handler_wiring(
     # Strip surrounding whitespace so registration matches the dispatch-engine
     # normalization (message_dispatch_engine.py normalizes via .strip()).
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    subscribe_topics = contract.event_bus.subscribe_topics if contract.event_bus else ()
+    literal_topic_aliases = _literal_event_type_aliases_from_topics(subscribe_topics)
+    if literal_topic_aliases:
+        message_types = (message_types or set()).union(literal_topic_aliases)
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
     elif contract.event_bus:
         topic_aliases = {
             alias
-            for topic in contract.event_bus.subscribe_topics
+            for topic in subscribe_topics
             if (alias := _derive_event_type_alias_from_topic(topic)) is not None
         }
         if topic_aliases:
