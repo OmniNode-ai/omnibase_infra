@@ -108,6 +108,8 @@ RUN set -eu; \
     fi
 
 # Build-time environment configuration
+# Keep uv's network timeout aligned with CI install steps for large public-index
+# wheel installs during runtime image builds.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
