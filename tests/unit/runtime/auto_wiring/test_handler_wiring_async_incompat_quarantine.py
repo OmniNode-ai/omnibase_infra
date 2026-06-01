@@ -217,7 +217,8 @@ class _HandlerAsyncIncompatInInitWithWrap:
 class _HandlerProtocolDeclaration(Protocol):
     """Invalid handler_routing target: interface, not concrete handler."""
 
-    async def handle(self, envelope: object) -> None: ...
+    async def handle(self, envelope: object) -> None:
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
