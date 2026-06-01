@@ -306,7 +306,8 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert "/home/runner/.cache/omni/ci-envs" in ensure_source
     assert "flock 9" in ensure_source
     assert 'mkdir "${lock_path}"' in ensure_source
-    assert 'UV_PROJECT_ENVIRONMENT="${tmp_dir}/.venv"' in ensure_source
+    assert 'UV_PROJECT_ENVIRONMENT="${venv_dir}"' in ensure_source
+    assert 'cat > "${manifest_path}"' in ensure_source
     assert 'workspace_venv="${repo_root}/.venv"' in ensure_source
     assert 'wrapper_dir="${repo_root}/.omni-ci-bin"' in ensure_source
     assert 'ln -sfn "${venv_dir}" "${workspace_venv}"' in ensure_source

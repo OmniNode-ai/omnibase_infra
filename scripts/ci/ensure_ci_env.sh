@@ -36,7 +36,6 @@ wrapper_dir="${repo_root}/.omni-ci-bin"
 real_uv="$(command -v uv)"
 manifest_path="${env_dir}/manifest.json"
 lock_dir="${repo_env_root}/.locks"
-tmp_root="${repo_env_root}/.tmp"
 
 ready() {
   [[ -x "${venv_dir}/bin/python" && -f "${manifest_path}" ]]
@@ -103,7 +102,7 @@ EOF
   chmod +x "${wrapper_dir}/uv"
 }
 
-mkdir -p "${lock_dir}" "${tmp_root}"
+mkdir -p "${lock_dir}"
 
 if ! ready; then
   if command -v flock >/dev/null 2>&1; then
@@ -120,14 +119,13 @@ if ! ready; then
   fi
 
   if ! ready; then
-    tmp_dir="${tmp_root}/${digest}.$$"
-    rm -rf "${tmp_dir}"
-    mkdir -p "${tmp_dir}"
+    rm -rf "${env_dir}"
+    mkdir -p "${env_dir}"
 
     export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
     export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"
     export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"
-    export UV_PROJECT_ENVIRONMENT="${tmp_dir}/.venv"
+    export UV_PROJECT_ENVIRONMENT="${venv_dir}"
     export UV_NO_CACHE="${UV_NO_CACHE:-0}"
 
     git config --global http.version HTTP/1.1
@@ -144,7 +142,7 @@ if ! ready; then
     echo "install args: ${install_args}"
     uv sync "${install_argv[@]}"
 
-    cat > "${tmp_dir}/manifest.json" <<EOF
+    cat > "${manifest_path}" <<EOF
 {
   "schema": 1,
   "repo": "${repo_name}",
@@ -154,7 +152,6 @@ if ! ready; then
   "install_args": "${install_args}"
 }
 EOF
-    mv "${tmp_dir}" "${env_dir}"
     chmod -R a-w "${env_dir}"
   fi
 fi

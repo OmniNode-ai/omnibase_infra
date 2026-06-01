@@ -29,14 +29,14 @@ The digest includes:
 - the setup action and CI environment scripts
 - runner platform
 
-The environment is built under `flock`, published atomically, and made
-read-only. Each checkout gets a local `.venv` symlink to the published env and
-a checkout-local `uv` wrapper that turns ordinary `uv run <tool> ...` calls into
+The environment is built at its final digest path under `flock`, marked ready
+by writing `manifest.json` only after install succeeds, and made read-only.
+Each checkout gets a local `.venv` symlink to the published env and a
+checkout-local `uv` wrapper that turns ordinary `uv run <tool> ...` calls into
 direct execution from `.venv/bin`. Commands with extra uv-run options still
-delegate to the real uv binary. Jobs set
-`UV_PROJECT_ENVIRONMENT=<checkout>/.venv`, `UV_NO_SYNC=1`, and
-`PYTHONPATH=<checkout>/src`. The dependency environment is shared, but the
-authoritative source under test remains the current checkout.
+delegate to the real uv binary. Jobs set `UV_PROJECT_ENVIRONMENT=<checkout>/.venv`,
+`UV_NO_SYNC=1`, and `PYTHONPATH=<checkout>/src`. The dependency environment is
+shared, but the authoritative source under test remains the current checkout.
 
 Public fork PRs do not use the host-local environment and keep isolated setup.
 
