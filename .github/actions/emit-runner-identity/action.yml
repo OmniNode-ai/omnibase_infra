@@ -1,0 +1,66 @@
+name: 'Emit runner image identity'
+description: >-
+  Emit the bound runner image identity (OMN-12567) as job startup evidence. The identity is a binding — image digest + dependency manifest + Python version + uv version + shared-env version — not a human label. Surfacing it in every job makes image-drift debugging deterministic instead of guesswork.
+author: 'OmniNode'
+inputs:
+  lock-file:
+    description: 'Path to the bound runner image identity lock file.'
+    required: false
+    default: 'docker/runners/runner-image.lock.json'
+  working-directory:
+    description: 'Working directory containing the repo checkout.'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Emit runner image identity
+      id: emit_runner_identity
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OMNI_RUNNER_LOCK_FILE: ${{ inputs.lock-file }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${pythonLocation:-}" && -x "${pythonLocation}/bin/python" ]]; then
+          python_bin="${pythonLocation}/bin/python"
+        else
+          python_bin="$(command -v python3)"
+        fi
+
+        if [[ ! -f "${OMNI_RUNNER_LOCK_FILE}" ]]; then
+          echo "::warning::runner image lock file not found: ${OMNI_RUNNER_LOCK_FILE}; skipping identity emission"
+          exit 0
+        fi
+
+        evidence="$(
+          PYTHONPATH="scripts/ci" "${python_bin}" \
+            scripts/ci/runner_image_identity.py \
+            --lock-file "${OMNI_RUNNER_LOCK_FILE}" \
+            --mode emit
+        )"
+
+        echo "runner image identity (startup evidence): ${evidence}"
+        echo "runner_image_identity=${evidence}" >> "${GITHUB_OUTPUT}"
+        echo "OMNI_RUNNER_IMAGE_IDENTITY_EVIDENCE=${evidence}" >> "${GITHUB_ENV}"
+
+        # The image baked into the running container (if any) must match the
+        # committed lock identity; surface a mismatch loudly without failing the
+        # job, so drift is visible in the step summary.
+        baked="${OMNI_RUNNER_IMAGE_IDENTITY:-}"
+        recorded="$("${python_bin}" -c 'import json,os; print(json.load(open(os.environ["OMNI_RUNNER_LOCK_FILE"]))["identity_digest"])')"
+        if [[ -n "${baked}" && "${baked}" != "unbound" && "${baked}" != "${recorded}" ]]; then
+          echo "::warning::runner image identity drift: baked=${baked} recorded=${recorded}"
+        fi
+
+        {
+          echo "### Runner image identity (OMN-12567)"
+          echo ""
+          echo '```json'
+          echo "${evidence}"
+          echo '```'
+          if [[ -n "${baked}" && "${baked}" != "unbound" ]]; then
+            echo ""
+            echo "- baked image identity: \`${baked}\`"
+          fi
+        } >> "${GITHUB_STEP_SUMMARY}"

@@ -36,6 +36,21 @@ jobs:
           git diff --cached --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
 
+      - name: Verify and bump runner image identity (OMN-12567)
+        # The runner image version is a binding, not a label. A release must not
+        # ship with a stale bound identity: verify the committed lock matches the
+        # live manifest/python/uv/shared-env inputs. The image version is bumped
+        # by editing docker/runners/runner-image.lock.json and regenerating with
+        # `--mode generate`; this gate fails the release if that was skipped.
+        run: |
+          PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py \
+            --mode verify
+          identity="$(PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py --mode emit)"
+          echo "### Runner image identity (release)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          echo "${identity}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate tag matches pyproject.toml version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

@@ -85,3 +85,80 @@ After the infra canary proves stable, replicate the same pattern per repo:
 
 Repos with incompatible dependency graphs get separate env roots. Shared base
 layers are fine; shared mutable dependency environments are not.
+
+## Versioned Runner Image Contract (OMN-12567)
+
+The canary above proved the host-local prebuilt env. OMN-12567 graduates it from
+an infra canary to a versioned **runner image contract**: the repo-specific
+prebuilt `.venv` is baked into the runner image, and the image "version" is a
+**binding, not a human label**.
+
+### Bound identity, not a label
+
+`docker/runners/runner-image.lock.json` records the bound identity. The
+`identity_digest` folds, into one reproducible value:
+
+- the pinned base image digest,
+- the dependency manifest (`pyproject.toml` + `uv.lock`),
+- the Python version,
+- the uv version,
+- the runner / gh / kubectl versions,
+- the shared CI env (canary) digest from `ci_env_digest.py`, and
+- the integer `image_version`.
+
+So "runner image v14" is a reproducible artifact: change any component and the
+digest changes. `scripts/ci/runner_image_identity.py` is the generator and the
+assertion:
+
+```bash
+# Recompute and rewrite the lock after bumping any input (e.g. uv.lock).
+PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py --mode generate
+# Fail fast if the committed lock is stale (wired into release + build).
+PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py --mode verify
+# Print the machine-readable startup-evidence line.
+PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py --mode emit
+```
+
+`scripts/ci/build_runner_image.sh` verifies the lock, stamps the bound identity
+into the image via build args (`OMNI_RUNNER_IMAGE_IDENTITY`,
+`OMNI_RUNNER_IMAGE_VERSION`), bakes the prebuilt env, and tags the image.
+
+### Startup evidence on every job
+
+Every CI job that prepares Python via `setup-python-uv` emits the bound identity
+into its startup evidence (`$GITHUB_STEP_SUMMARY` and
+`OMNI_RUNNER_IMAGE_IDENTITY_EVIDENCE` in `$GITHUB_ENV`). The reusable
+`.github/actions/emit-runner-identity` action exposes the same emission for
+non-Python jobs. Image-drift debugging reads the recorded digest instead of
+guessing.
+
+### Zero `uv sync` on the happy path
+
+With the env baked into the image and the canary symlink wiring active, the
+happy-path job resolves **zero `uv sync`**: `UV_NO_SYNC=1` is published, the
+workspace `.venv` is a symlink to the prebuilt env, and `uv run <tool>` is
+redirected to `.venv/bin`. A `uv sync` on the happy path is a regression.
+
+### Mutating jobs must opt out explicitly
+
+Jobs that intentionally mutate the Python environment after setup (`uv sync`,
+`uv pip install`, editable sibling installs) must set
+`shared-env-enabled: "false"` so they get an isolated writable environment and
+never write into the shared prebuilt env. Enumerated mutating jobs:
+
+| Job | Why it mutates | Opt-out |
+|-----|----------------|---------|
+| `compliance` | runs sweeps that `uv sync` extra groups | `shared-env-enabled: "false"` |
+| `schema-handshake` | editable sibling repo installs | `shared-env-enabled: "false"` |
+| `kafka-boundary-compat` | editable sibling repo installs | `shared-env-enabled: "false"` |
+| `contract-compliance` | pinned `onex_change_control` git+https install | isolated `setup-uv` (no shared env) |
+
+Adding a new mutating job means adding the `shared-env-enabled: "false"` opt-out
+and a row here in the same PR.
+
+### Bump on release
+
+The image/env version is bumped by editing `image_version` in
+`runner-image.lock.json` and regenerating the lock. The `release` workflow runs
+`runner_image_identity.py --mode verify` and fails the release if the committed
+lock is stale — a release cannot ship an un-regenerated bound identity.
