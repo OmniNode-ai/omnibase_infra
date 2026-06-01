@@ -29,7 +29,7 @@ env:
       && 'false'
       || 'true'
     }}
-  OMNI_CI_ENV_ROOT: "/opt/omni/ci-envs"
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
   # uv resolves several pinned git dependencies during CI.  The self-hosted
   # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
   # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.

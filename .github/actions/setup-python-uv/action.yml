@@ -60,7 +60,7 @@ inputs:
   shared-env-root:
     description: Host-local root for immutable CI environments.
     required: false
-    default: '/opt/omni/ci-envs'
+    default: '/home/runner/.cache/omni/ci-envs'
   shared-env-install-args:
     description: Arguments used when building the immutable shared CI env.
     required: false

@@ -24,7 +24,7 @@ env:
       && 'false'
       || 'true'
     }}
-  OMNI_CI_ENV_ROOT: "/opt/omni/ci-envs"
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
 
 jobs:
   type-safety:

@@ -6,7 +6,7 @@ set -euo pipefail
 repo_root="$(pwd)"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-env_root="${OMNI_CI_ENV_ROOT:-/opt/omni/ci-envs}"
+env_root="${OMNI_CI_ENV_ROOT:-/home/runner/.cache/omni/ci-envs}"
 repo_name="${OMNI_CI_REPO:-omnibase_infra}"
 python_version="${PYTHON_VERSION:-3.12}"
 uv_version="${UV_VERSION:-0.6.14}"

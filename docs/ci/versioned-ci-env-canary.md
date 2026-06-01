@@ -16,7 +16,7 @@ That is unlike live infra, where a runtime uses a prepared environment.
 Trusted CI jobs now opt into a shared dependency environment:
 
 ```text
-/opt/omni/ci-envs/omnibase_infra/<digest>/.venv
+/home/runner/.cache/omni/ci-envs/omnibase_infra/<digest>/.venv
 ```
 
 The digest includes:
@@ -46,13 +46,17 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
 - Keep old digest directories until active PRs using them have drained.
 - If a shared env is suspected corrupt, remove only that digest directory after
   disabling affected runs or after they complete.
+- `/home/runner/.cache/omni/ci-envs` is the canary root because the runner user
+  can create it without sudo. A future ops hardening step can move the root to
+  `/opt/omni/ci-envs` after that path is provisioned with the runner user as
+  owner.
 
 ## Follow-Up Shape
 
 After the infra canary proves stable, replicate the same pattern per repo:
 
 ```text
-/opt/omni/ci-envs/<repo>/<digest>/.venv
+/home/runner/.cache/omni/ci-envs/<repo>/<digest>/.venv
 ```
 
 Repos with incompatible dependency graphs get separate env roots. Shared base
