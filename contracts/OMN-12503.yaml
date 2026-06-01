@@ -2,9 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-12503"
 title: "Add stability runtime ONEX health probe env"
 summary: >-
-  Require ONEX_INFRA_HOST and ONEX_INFRA_USER in the stability-test runtime lane
-  so node_session_orchestrator health, deploy-agent, and observability probes can
-  run inside the deployed runtime process.
+  Require ONEX_INFRA_HOST and ONEX_INFRA_USER in the stability-test runtime lane so node_session_orchestrator health, deploy-agent, and observability probes can run inside the deployed runtime process.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

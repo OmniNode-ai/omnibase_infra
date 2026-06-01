@@ -9,7 +9,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -110,7 +110,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
-    "INFISICAL_REDIS_URL": "redis://valkey:6379",
+    "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
     "GITHUB_TOKEN": "render-only-github-token",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
@@ -187,11 +187,12 @@ def _compose_config_json() -> dict[str, Any]:
 
     rendered_config = json.loads(result.stdout)
     assert isinstance(rendered_config, dict)
-    return rendered_config
+    return cast("dict[str, Any]", rendered_config)
 
 
 def _published_ports(service_config: dict[str, Any]) -> set[str]:
-    return {str(port["published"]) for port in service_config.get("ports", [])}
+    ports = cast("list[dict[str, Any]]", service_config.get("ports", []))
+    return {str(port["published"]) for port in ports}
 
 
 def _label_value(service_config: dict[str, Any], key: str) -> str | None:
