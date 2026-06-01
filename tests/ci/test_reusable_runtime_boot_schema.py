@@ -259,9 +259,7 @@ def test_compose_mode_installs_docker_compose_plugin(workflow: Workflow) -> None
     assert "docker_compose_version" in install_text
     assert "docker-compose-linux-x86_64" in install_text
 
-    compose_steps = [
-        s for s in steps if "bring up compose stack" in _step_text(s)
-    ]
+    compose_steps = [s for s in steps if "bring up compose stack" in _step_text(s)]
     assert compose_steps, "compose bring-up step missing"
     assert steps.index(install_step) < steps.index(compose_steps[0])
 
