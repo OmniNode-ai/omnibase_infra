@@ -19,6 +19,17 @@ env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
+  # OMN-12564 canary: trusted self-hosted CI reuses an immutable host-local
+  # dependency environment keyed by uv.lock/tool versions instead of resolving
+  # dependencies independently in every job. Public fork PRs keep isolated setup.
+  OMNI_CI_SHARED_ENV_ENABLED: >-
+    ${{
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+      && 'false'
+      || 'true'
+    }}
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
   # uv resolves several pinned git dependencies during CI.  The self-hosted
   # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
   # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.
@@ -501,6 +512,7 @@ jobs:
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
+          shared-env-enabled: "false"
 
       - name: Preinstall CPU-only torch for sibling deps
         working-directory: omnibase_infra
@@ -994,6 +1006,7 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
+          shared-env-enabled: "false"
 
       - name: Install dependencies
         run: uv sync --no-cache
@@ -1107,8 +1120,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-dependency-glob: 'onex_change_control/uv.lock'
+          enable-cache: false
 
       - name: Install onex_change_control
         working-directory: onex_change_control
@@ -1305,6 +1317,7 @@ jobs:
           cache-key-prefix: uv-boundary
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
+          shared-env-enabled: "false"
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
