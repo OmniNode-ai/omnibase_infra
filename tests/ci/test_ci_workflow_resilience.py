@@ -180,12 +180,65 @@ def test_docker_integration_installs_compose_plugin_before_tests() -> None:
 def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
     assert action["inputs"]["cache-enabled"]["default"] == "true"
+    assert action["inputs"]["shared-env-enabled"]["default"] == "auto"
+    assert action["inputs"]["shared-env-root"]["default"] == "/opt/omni/ci-envs"
+    assert (
+        action["inputs"]["shared-env-install-args"]["default"]
+        == "--frozen --all-extras --no-install-project"
+    )
+
+    shared_mode_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Resolve shared CI env mode"
+    )
+    assert shared_mode_step["id"] == "shared_env_mode"
+    assert "OMNI_CI_SHARED_ENV_ENABLED" in shared_mode_step["run"]
+
+    shared_env_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Prepare shared CI env"
+    )
+    assert (
+        shared_env_step["if"]
+        == "steps.shared_env_mode.outputs.enabled == 'true' && inputs.skip-install != 'true'"
+    )
+    assert (
+        shared_env_step["run"].strip()
+        == '"${GITHUB_ACTION_PATH}/../../../scripts/ci/ensure_ci_env.sh"'
+    )
+    assert shared_env_step["env"]["OMNI_CI_ENV_ROOT"] == "${{ inputs.shared-env-root }}"
+
     cache_step = next(
         step for step in action["runs"]["steps"] if step.get("name") == "Load cached uv"
     )
-    assert cache_step["if"] == "inputs.cache-enabled != 'false'"
+    assert (
+        cache_step["if"]
+        == "steps.shared_env_mode.outputs.enabled != 'true' && inputs.cache-enabled != 'false'"
+    )
+
+    install_step = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Install dependencies"
+    )
+    assert (
+        install_step["if"]
+        == "steps.shared_env_mode.outputs.enabled != 'true' && inputs.skip-install != 'true'"
+    )
 
     ci_workflow = _load_yaml(CI_WORKFLOW)
+    assert ci_workflow["env"]["OMNI_CI_ENV_ROOT"] == "/opt/omni/ci-envs"
+    assert "OMNI_CI_SHARED_ENV_ENABLED" in ci_workflow["env"]
+    assert (
+        "head.repo.full_name != github.repository"
+        in ci_workflow["env"]["OMNI_CI_SHARED_ENV_ENABLED"]
+    )
+    standards_workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
+    assert standards_workflow["env"]["OMNI_CI_ENV_ROOT"] == "/opt/omni/ci-envs"
+    assert "OMNI_CI_SHARED_ENV_ENABLED" in standards_workflow["env"]
+
     for job_name, job in ci_workflow["jobs"].items():
         setup_steps = [
             step
@@ -230,6 +283,51 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert docker_cache_step["if"] == "${{ false }}"
     assert docker_cache_step["uses"] == "actions/cache/restore@v5"
+
+
+def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
+    digest_script = REPO_ROOT / "scripts" / "ci" / "ci_env_digest.py"
+    ensure_script = REPO_ROOT / "scripts" / "ci" / "ensure_ci_env.sh"
+
+    digest_source = digest_script.read_text(encoding="utf-8")
+    assert "pyproject.toml" in digest_source
+    assert "uv.lock" in digest_source
+    assert "python_version" in digest_source
+    assert "uv_version" in digest_source
+    assert "install_args" in digest_source
+
+    ensure_source = ensure_script.read_text(encoding="utf-8")
+    assert "/opt/omni/ci-envs" in ensure_source
+    assert "flock 9" in ensure_source
+    assert 'mkdir "${lock_path}"' in ensure_source
+    assert 'UV_PROJECT_ENVIRONMENT="${tmp_dir}/.venv"' in ensure_source
+    assert "uv sync" in ensure_source
+    assert "chmod -R a-w" in ensure_source
+    assert "UV_NO_SYNC=1" in ensure_source
+    assert "PYTHONPATH=${repo_root}/src" in ensure_source
+
+
+def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["contract-compliance"]
+
+    assert job["timeout-minutes"] == 20
+    steps = job["steps"]
+    checkout_occ = next(
+        step for step in steps if step.get("name") == "Checkout onex_change_control"
+    )
+    assert (
+        checkout_occ["with"]["token"] == "${{ secrets.CROSS_REPO_PAT || github.token }}"
+    )
+
+    install_step = next(
+        step for step in steps if step.get("name") == "Install onex_change_control"
+    )
+    run_script = install_step["run"]
+    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
+    assert "max_attempts=3" in run_script
+    assert "until uv sync --no-cache --all-extras" in run_script
+    assert "uv sync onex_change_control failed after" in run_script
 
 
 def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:

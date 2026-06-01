@@ -15,6 +15,16 @@ env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
   REPO_NAME: "omnibase_infra"
+  # OMN-12564 canary: trusted self-hosted CI uses the same immutable
+  # host-local dependency environment contract as the main CI workflow.
+  OMNI_CI_SHARED_ENV_ENABLED: >-
+    ${{
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+      && 'false'
+      || 'true'
+    }}
+  OMNI_CI_ENV_ROOT: "/opt/omni/ci-envs"
 
 jobs:
   type-safety:

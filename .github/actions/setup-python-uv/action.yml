@@ -51,6 +51,20 @@ inputs:
       Token used to authenticate uv git+https dependency fetches against github.com. Defaults to the workflow GITHUB_TOKEN, which authenticates same-org public-repo fetches and lifts them above the anonymous rate limit. Override with `secrets.CROSS_REPO_PAT` for private cross-repo deps.
     required: false
     default: ${{ github.token }}
+  shared-env-enabled:
+    description: >-
+      Use the host-local immutable CI environment cache. "auto" enables it only
+      when OMNI_CI_SHARED_ENV_ENABLED=true in the workflow environment.
+    required: false
+    default: 'auto'
+  shared-env-root:
+    description: Host-local root for immutable CI environments.
+    required: false
+    default: '/opt/omni/ci-envs'
+  shared-env-install-args:
+    description: Arguments used when building the immutable shared CI env.
+    required: false
+    default: '--frozen --all-extras --no-install-project'
 runs:
   using: 'composite'
   steps:
@@ -63,8 +77,48 @@ runs:
       with:
         version: ${{ inputs.uv-version }}
         enable-cache: ${{ inputs.cache-enabled != 'false' }}
+    - name: Resolve shared CI env mode
+      id: shared_env_mode
+      shell: bash
+      env:
+        SHARED_ENV_ENABLED: ${{ inputs.shared-env-enabled }}
+      run: |
+        case "${SHARED_ENV_ENABLED}" in
+          true)
+            enabled=true
+            ;;
+          false)
+            enabled=false
+            ;;
+          auto)
+            if [ "${OMNI_CI_SHARED_ENV_ENABLED:-false}" = "true" ]; then
+              enabled=true
+            else
+              enabled=false
+            fi
+            ;;
+          *)
+            echo "::error::shared-env-enabled must be true, false, or auto"
+            exit 2
+            ;;
+        esac
+        echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
+        echo "shared CI env enabled: ${enabled}"
+    - name: Prepare shared CI env
+      if: steps.shared_env_mode.outputs.enabled == 'true' && inputs.skip-install != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OMNI_CI_ENV_ROOT: ${{ inputs.shared-env-root }}
+        OMNI_CI_REPO: omnibase_infra
+        OMNI_CI_ENV_INSTALL_ARGS: ${{ inputs.shared-env-install-args }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        UV_VERSION: ${{ inputs.uv-version }}
+        GIT_FETCH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        "${GITHUB_ACTION_PATH}/../../../scripts/ci/ensure_ci_env.sh"
     - name: Load cached uv
-      if: inputs.cache-enabled != 'false'
+      if: steps.shared_env_mode.outputs.enabled != 'true' && inputs.cache-enabled != 'false'
       uses: actions/cache@v4
       with:
         path: ~/.cache/uv
@@ -72,7 +126,7 @@ runs:
         restore-keys: |
           ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ inputs.cache-version }}-
     - name: Install dependencies
-      if: inputs.skip-install != 'true'
+      if: steps.shared_env_mode.outputs.enabled != 'true' && inputs.skip-install != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
