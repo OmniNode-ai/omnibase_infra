@@ -41,6 +41,6 @@ jobs:
           echo "blocked unrelated PRs without reliably proving compatibility."
           echo ""
           echo "This job intentionally preserves the required GitHub context and"
-          echo "does not run checkout, Python setup, uv sync, or sibling install"
+          echo "does not run checkout, Python setup, package sync, or sibling install"
           echo "validation until the process is redesigned and re-enabled."
           echo "================================================================"
