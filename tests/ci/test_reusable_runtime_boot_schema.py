@@ -258,6 +258,23 @@ def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
         )
 
 
+def test_boot_resolves_compose_frontend_for_runner_variants(
+    workflow: Workflow,
+) -> None:
+    """Self-hosted runners may expose Compose as either docker compose or docker-compose."""
+    steps = _boot_steps(workflow)
+    all_text = "\n".join(_step_text(s) for s in steps)
+    assert "docker_compose_cmd" in all_text
+    assert "docker compose version" in all_text
+    assert "docker-compose" in all_text
+    assert 'read -r -a compose_cmd <<< "${docker_compose_cmd}"' in all_text
+    assert '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project}"' in all_text
+    assert (
+        '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project:-omnibase-infra}"'
+        in all_text
+    )
+
+
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
     """Health-wait step must assert the actual shape from health_checker.py:
     top-level `.status == "healthy"` AND `.details.is_running == true`, AND

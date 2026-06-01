@@ -148,6 +148,22 @@ jobs:
           # omnibase-infra-redpanda container, so a host-level rpk install is
           # unnecessary in compose mode.
 
+      - name: Resolve Docker Compose command
+        if: inputs.mode == 'compose'
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then
+            compose_cmd="docker compose"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            compose_cmd="docker-compose"
+          else
+            echo "::error::Docker Compose not available; install docker compose v2 or docker-compose"
+            exit 1
+          fi
+          echo "DOCKER_COMPOSE_CMD=${compose_cmd}" >> "$GITHUB_ENV"
+          read -r -a compose_cmd_parts <<< "$compose_cmd"
+          "${compose_cmd_parts[@]}" version
+
       - name: Bring up compose stack (postgres + redpanda)
         if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
@@ -192,6 +208,7 @@ jobs:
           export REDPANDA_ADMIN_PORT="$(pick_free_port)"
           export REDPANDA_SCHEMA_REGISTRY_PORT="$(pick_free_port)"
           export REDPANDA_PANDAPROXY_PORT="$(pick_free_port)"
+          read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD}"
           {
             echo "POSTGRES_PORT=${POSTGRES_PORT}"
             echo "PG_PORT=${POSTGRES_PORT}"
@@ -206,7 +223,7 @@ jobs:
           REDPANDA_ADMIN_PORT="${REDPANDA_ADMIN_PORT}" \
           REDPANDA_SCHEMA_REGISTRY_PORT="${REDPANDA_SCHEMA_REGISTRY_PORT}" \
           REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
-            docker compose -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
+            "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
 
           # Self-hosted CI runners run inside Docker containers that share the
           # host Docker daemon via /var/run/docker.sock. Port bindings on the
@@ -689,10 +706,11 @@ jobs:
       - name: Stop background runtime (compose mode)
         if: always() && inputs.mode == 'compose'
         run: |
+          read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD:-docker compose}"
           if [[ -n "${RUNTIME_PID:-}" ]]; then
             kill "${RUNTIME_PID}" 2>/dev/null || true
           fi
           if [[ -n "${RUNTIME_EFFECTS_PID:-}" ]]; then
             kill "${RUNTIME_EFFECTS_PID}" 2>/dev/null || true
           fi
-          docker compose -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
+          "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
