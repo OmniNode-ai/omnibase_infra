@@ -235,13 +235,24 @@ COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_wo
 # branch ever runs; the other branch's install artifacts never enter the image.
 ARG OMNIBASE_COMPAT_REF="4d887307aae34d9d40d389ba91070cb411ce3df5"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/4d887307aae34d9d40d389ba91070cb411ce3df5.tar.gz"
-# OMN-10728: ONEX_CHANGE_CONTROL_REF must be the full commit SHA so that the
-# install URL itself changes when main advances — this busts the uv cache mount
-# (keyed on URL, not on resolved HEAD) and forces a fresh fetch.
+# onex_change_control tracks the moving `main` branch.
 ARG ONEX_CHANGE_CONTROL_REF=main
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
+#
+# OMN-12424: uv keys its git source cache on the *resolved commit* for a moving
+# ref (`@dev` / `@main`), so a plain rebuild - even `docker build --no-cache`,
+# which busts Docker layer cache but NOT the `type=cache` BuildKit mount below -
+# can reinstall a stale wheel from a previous commit of dev/main. (OMN-10728's
+# SHA-pin theory was wrong: the install URL `@dev` does not change when dev
+# advances, so the cache is never invalidated.) Pinning to a fixed SHA would fix
+# staleness but defeats the whole point of tracking the moving branch, so each
+# release-mode git install passes `--refresh-package <name>`: uv re-resolves and
+# re-fetches *only* that package's git source on every build while reusing the
+# cache for all other packages. The result: every rebuild always installs the
+# current HEAD of the tracked branch. omnibase_compat is a SHA-pinned immutable
+# tarball, so it needs no refresh.
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
@@ -258,9 +269,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     else \
         uv pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
-        uv pip install --no-deps \
+        uv pip install --no-deps --refresh-package onex-change-control \
             "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"; \
-        uv pip install --no-deps \
+        uv pip install --no-deps --refresh-package omnimarket \
             "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"; \
     fi
 
