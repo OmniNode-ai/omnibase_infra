@@ -32,6 +32,8 @@ repo_env_root="${env_root}/${repo_name}"
 env_dir="${repo_env_root}/${digest}"
 venv_dir="${env_dir}/.venv"
 workspace_venv="${repo_root}/.venv"
+wrapper_dir="${repo_root}/.omni-ci-bin"
+real_uv="$(command -v uv)"
 manifest_path="${env_dir}/manifest.json"
 lock_dir="${repo_env_root}/.locks"
 tmp_root="${repo_env_root}/.tmp"
@@ -47,8 +49,9 @@ publish_env() {
     echo "VIRTUAL_ENV=${workspace_venv}"
     echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"
     echo "UV_NO_SYNC=1"
+    echo "OMNI_CI_SHARED_UV_RUN_DIRECT=1"
     echo "PYTHONDONTWRITEBYTECODE=1"
-    echo "PATH=${workspace_venv}/bin:${PATH}"
+    echo "PATH=${wrapper_dir}:${workspace_venv}/bin:${PATH}"
     if [[ -n "${PYTHONPATH:-}" ]]; then
       echo "PYTHONPATH=${repo_root}/src:${PYTHONPATH}"
     else
@@ -68,6 +71,36 @@ link_workspace_venv() {
   else
     ln -s "${venv_dir}" "${workspace_venv}"
   fi
+}
+
+write_uv_wrapper() {
+  mkdir -p "${wrapper_dir}"
+  cat > "${wrapper_dir}/uv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_uv="${real_uv}"
+workspace_venv="${workspace_venv}"
+
+if [[ "\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1" && "\${1:-}" == "run" ]]; then
+  shift
+  if [[ "\${1:-}" == "--" ]]; then
+    shift
+  fi
+
+  if [[ "\$#" -gt 0 && "\${1:0:1}" != "-" ]]; then
+    cmd="\${1}"
+    shift
+    if [[ -x "\${workspace_venv}/bin/\${cmd}" ]]; then
+      exec "\${workspace_venv}/bin/\${cmd}" "\$@"
+    fi
+    exec "\${cmd}" "\$@"
+  fi
+fi
+
+exec "\${real_uv}" "\$@"
+EOF
+  chmod +x "${wrapper_dir}/uv"
 }
 
 mkdir -p "${lock_dir}" "${tmp_root}"
@@ -127,4 +160,5 @@ EOF
 fi
 
 link_workspace_venv
+write_uv_wrapper
 publish_env

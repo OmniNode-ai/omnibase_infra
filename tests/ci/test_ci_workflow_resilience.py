@@ -308,9 +308,13 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert 'mkdir "${lock_path}"' in ensure_source
     assert 'UV_PROJECT_ENVIRONMENT="${tmp_dir}/.venv"' in ensure_source
     assert 'workspace_venv="${repo_root}/.venv"' in ensure_source
+    assert 'wrapper_dir="${repo_root}/.omni-ci-bin"' in ensure_source
     assert 'ln -sfn "${venv_dir}" "${workspace_venv}"' in ensure_source
+    assert "OMNI_CI_SHARED_UV_RUN_DIRECT=1" in ensure_source
+    assert 'if [[ "\\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1"' in ensure_source
+    assert 'exec "\\${workspace_venv}/bin/\\${cmd}" "\\$@"' in ensure_source
     assert 'echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"' in ensure_source
-    assert 'echo "PATH=${workspace_venv}/bin:${PATH}"' in ensure_source
+    assert 'echo "PATH=${wrapper_dir}:${workspace_venv}/bin:${PATH}"' in ensure_source
     assert "uv sync" in ensure_source
     assert "chmod -R a-w" in ensure_source
     assert "UV_NO_SYNC=1" in ensure_source
