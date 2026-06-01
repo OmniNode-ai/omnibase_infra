@@ -107,7 +107,8 @@ RUN mkdir -p /home/runner/.runner-creds && chown runner:runner /home/runner/.run
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY runner-job-started.sh /usr/local/bin/runner-job-started.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/runner-job-started.sh
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/runner-job-started.sh /usr/local/bin/healthcheck.sh
 
 # Install gosu for privilege de-escalation in entrypoint.
 # The entrypoint starts as root to fix Docker socket GID, then drops to runner.

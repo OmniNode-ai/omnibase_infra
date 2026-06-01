@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -75,3 +77,54 @@ def test_runner_scripts_do_not_embed_legacy_count() -> None:
 
     assert "RUNNER_COUNT=10" not in deploy_script
     assert "EXPECTED_RUNNERS=10" not in monitor_script
+
+
+def test_runner_healthcheck_probes_github_egress() -> None:
+    """OMN-12433: the runner healthcheck must verify github.com egress.
+
+    A pgrep-only healthcheck passes while a runner has silently lost its
+    connection to GitHub (egress fault), letting dead runners stay "healthy"
+    in Docker and wedge the merge queue. The healthcheck script must prove both
+    the listener is alive AND github.com is reachable.
+    """
+    script = (REPO_ROOT / "docker" / "runners" / "healthcheck.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "pgrep -f Runner.Listener" in script
+    assert "--max-time" in script
+    curl_commands = [
+        shlex.split(line.removeprefix("if ! ").removesuffix("; then").strip())
+        for line in script.splitlines()
+        if line.startswith("if ! curl ")
+    ]
+    assert len(curl_commands) == 1
+    endpoint = urlsplit(curl_commands[0][-1])
+    assert (endpoint.scheme, endpoint.netloc, endpoint.path) == (
+        "https",
+        "github.com",
+        "/",
+    )
+
+
+def test_runner_compose_healthcheck_uses_egress_script() -> None:
+    """OMN-12433: every runner service must run the egress healthcheck script,
+    not the old pgrep-only test, and mount the script into the container."""
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    base_test = compose["x-runner-base"]["healthcheck"]["test"]
+    assert base_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+
+    hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
+    for name, definition in compose["services"].items():
+        if not re.fullmatch(r"omninode-runner-\d+", name):
+            continue
+        # Per-service volumes override the anchor (YAML lists don't deep-merge),
+        # so each runner must mount the healthcheck script explicitly.
+        assert hc_mount in definition["volumes"], f"{name} missing healthcheck mount"
+        # No runner may regress to the bare pgrep-only healthcheck.
+        resolved_test = definition.get("healthcheck", {}).get("test", base_test)
+        assert resolved_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
