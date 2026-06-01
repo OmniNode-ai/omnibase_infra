@@ -307,6 +307,10 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert "flock 9" in ensure_source
     assert 'mkdir "${lock_path}"' in ensure_source
     assert 'UV_PROJECT_ENVIRONMENT="${tmp_dir}/.venv"' in ensure_source
+    assert 'workspace_venv="${repo_root}/.venv"' in ensure_source
+    assert 'ln -sfn "${venv_dir}" "${workspace_venv}"' in ensure_source
+    assert 'echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"' in ensure_source
+    assert 'echo "PATH=${workspace_venv}/bin:${PATH}"' in ensure_source
     assert "uv sync" in ensure_source
     assert "chmod -R a-w" in ensure_source
     assert "UV_NO_SYNC=1" in ensure_source

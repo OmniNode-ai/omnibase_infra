@@ -30,7 +30,9 @@ The digest includes:
 - runner platform
 
 The environment is built under `flock`, published atomically, and made
-read-only. Jobs set `UV_PROJECT_ENVIRONMENT` to the published `.venv`,
+read-only. Each checkout gets a local `.venv` symlink to the published env so
+existing `uv run ...` workflow commands discover the environment without
+resolving dependencies. Jobs set `UV_PROJECT_ENVIRONMENT=<checkout>/.venv`,
 `UV_NO_SYNC=1`, and `PYTHONPATH=<checkout>/src`. The dependency environment is
 shared, but the authoritative source under test remains the current checkout.
 
@@ -41,6 +43,8 @@ Public fork PRs do not use the host-local environment and keep isolated setup.
 - Do not run `uv sync` into an existing shared env from ordinary CI jobs.
 - Do not install the checked-out project into the shared env; use
   `--no-install-project` so PR source cannot be stale.
+- Do not replace a real workspace `.venv`; the canary only manages the checkout
+  `.venv` when it is absent or already a symlink to a shared env.
 - Include dependency groups in the canary env (`--all-groups`) so CI tools such
   as `mypy`, `ruff`, and `pytest` are present without per-job resolution.
 - Bump the environment by changing lockfile/tool inputs, not by mutating an

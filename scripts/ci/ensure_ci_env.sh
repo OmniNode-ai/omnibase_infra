@@ -31,6 +31,7 @@ digest="$(
 repo_env_root="${env_root}/${repo_name}"
 env_dir="${repo_env_root}/${digest}"
 venv_dir="${env_dir}/.venv"
+workspace_venv="${repo_root}/.venv"
 manifest_path="${env_dir}/manifest.json"
 lock_dir="${repo_env_root}/.locks"
 tmp_root="${repo_env_root}/.tmp"
@@ -43,11 +44,11 @@ publish_env() {
   {
     echo "OMNI_CI_ENV_DIGEST=${digest}"
     echo "OMNI_CI_ENV_DIR=${env_dir}"
-    echo "VIRTUAL_ENV=${venv_dir}"
-    echo "UV_PROJECT_ENVIRONMENT=${venv_dir}"
+    echo "VIRTUAL_ENV=${workspace_venv}"
+    echo "UV_PROJECT_ENVIRONMENT=${workspace_venv}"
     echo "UV_NO_SYNC=1"
     echo "PYTHONDONTWRITEBYTECODE=1"
-    echo "PATH=${venv_dir}/bin:${PATH}"
+    echo "PATH=${workspace_venv}/bin:${PATH}"
     if [[ -n "${PYTHONPATH:-}" ]]; then
       echo "PYTHONPATH=${repo_root}/src:${PYTHONPATH}"
     else
@@ -55,6 +56,18 @@ publish_env() {
     fi
   } >> "${GITHUB_ENV}"
   echo "Shared CI env: ${env_dir}"
+}
+
+link_workspace_venv() {
+  if [[ -e "${workspace_venv}" || -L "${workspace_venv}" ]]; then
+    if [[ ! -L "${workspace_venv}" ]]; then
+      echo "::error::workspace .venv exists and is not a symlink: ${workspace_venv}"
+      exit 2
+    fi
+    ln -sfn "${venv_dir}" "${workspace_venv}"
+  else
+    ln -s "${venv_dir}" "${workspace_venv}"
+  fi
 }
 
 mkdir -p "${lock_dir}" "${tmp_root}"
@@ -113,4 +126,5 @@ EOF
   fi
 fi
 
+link_workspace_venv
 publish_env
