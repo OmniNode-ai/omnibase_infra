@@ -46,6 +46,11 @@ inputs:
     description: 'Base delay in seconds between uv sync retries'
     required: false
     default: '10'
+  github-token:
+    description: >-
+      Token used to authenticate uv git+https dependency fetches against github.com. Defaults to the workflow GITHUB_TOKEN, which authenticates same-org public-repo fetches and lifts them above the anonymous rate limit. Override with `secrets.CROSS_REPO_PAT` for private cross-repo deps.
+    required: false
+    default: ${{ github.token }}
 runs:
   using: 'composite'
   steps:
@@ -75,9 +80,27 @@ runs:
         INSTALL_ARGS: ${{ inputs.install-args }}
         UV_SYNC_ATTEMPTS: ${{ inputs.sync-attempts }}
         UV_SYNC_RETRY_DELAY_SECONDS: ${{ inputs.sync-retry-delay-seconds }}
+        GIT_FETCH_TOKEN: ${{ inputs.github-token }}
       run: |
         export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+        export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"
+        export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"
         git config --global http.version HTTP/1.1
+        # Authenticate uv's internal git+https fetches. Anonymous github.com
+        # requests are rate-limited (60/hr); many parallel --no-cache syncs from
+        # one runner egress IP trip "Empty reply from server". Authenticated
+        # requests get 5000/hr. uv shells out to `git fetch`, which inherits the
+        # GIT_CONFIG_* env vars below — a process-scoped insteadOf rewrite that
+        # never writes the token to a persistent gitconfig on the self-hosted
+        # runner. (OMN-12432)
+        if [ -n "${GIT_FETCH_TOKEN}" ]; then
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/"
+          echo "git github.com fetches: authenticated (x-access-token)"
+        else
+          echo "::warning::github-token not provided; uv git fetches stay anonymous and may be rate-limited"
+        fi
         read -r -a install_args <<< "$INSTALL_ARGS"
         sync_attempts="${UV_SYNC_ATTEMPTS}"
         retry_delay_seconds="${UV_SYNC_RETRY_DELAY_SECONDS}"

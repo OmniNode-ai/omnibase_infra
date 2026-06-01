@@ -31,19 +31,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install dependencies
-        run: uv sync --no-cache --all-extras
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: "false"
+          cache-key-prefix: uv-type-safety
+          install-args: --all-extras
+          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Run MyPy type checking
         run: |
@@ -67,19 +63,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install dependencies
-        run: uv sync --no-cache --all-extras
+          uv-version: ${{ env.UV_VERSION }}
+          cache-enabled: "false"
+          cache-key-prefix: uv-type-union
+          install-args: --all-extras
+          github-token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Check for Optional/Union usage (PEP 604)
         run: uv run ruff check src/ --select UP007,UP006
@@ -108,7 +100,17 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Install onex_change_control (pinned)
+        env:
+          GIT_FETCH_TOKEN: ${{ secrets.CROSS_REPO_PAT || github.token }}
         run: |
+          # Authenticate the git+https fetch so it isn't anonymous-rate-limited
+          # on the self-hosted runner ("Empty reply from server"). Process-scoped
+          # insteadOf rewrite; never writes the token to disk. (OMN-12432)
+          if [ -n "${GIT_FETCH_TOKEN}" ]; then
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"
+            export GIT_CONFIG_VALUE_0="https://github.com/"
+          fi
           uv venv .venv --python "${pythonLocation}/bin/python"
           . .venv/bin/activate
           uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
