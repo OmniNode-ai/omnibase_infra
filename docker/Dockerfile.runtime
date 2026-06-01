@@ -233,9 +233,9 @@ COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_wo
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
-# onex_change_control tracks the moving `main` branch (default).
+ARG OMNIBASE_COMPAT_REF="4d887307aae34d9d40d389ba91070cb411ce3df5"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/4d887307aae34d9d40d389ba91070cb411ce3df5.tar.gz"
+# onex_change_control tracks the moving `main` branch.
 ARG ONEX_CHANGE_CONTROL_REF=main
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
