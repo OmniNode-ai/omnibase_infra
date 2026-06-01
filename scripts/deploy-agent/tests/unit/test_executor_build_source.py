@@ -12,6 +12,7 @@ import pytest
 import yaml
 from deploy_agent.events import (
     BuildSource,
+    EnumRuntimeLane,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -37,6 +38,7 @@ def test_rebuild_request_accepts_canonical_build_source() -> None:
         correlation_id=uuid4(),
         requested_by="test",
         scope=Scope.RUNTIME,
+        runtime_lane=EnumRuntimeLane.DEV,
         build_source="workspace",
     )
 
@@ -49,6 +51,7 @@ def test_rebuild_request_rejects_unknown_build_source() -> None:
             correlation_id=uuid4(),
             requested_by="test",
             scope=Scope.RUNTIME,
+            runtime_lane=EnumRuntimeLane.DEV,
             build_source="local",  # type: ignore[arg-type]
         )
 

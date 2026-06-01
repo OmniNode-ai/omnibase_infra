@@ -26,7 +26,13 @@ import subprocess
 from unittest.mock import patch
 
 import pytest
-from deploy_agent.events import Phase, PhaseStatus, Scope, services_for_scope
+from deploy_agent.events import (
+    EnumRuntimeLane,
+    Phase,
+    PhaseStatus,
+    Scope,
+    services_for_scope,
+)
 from deploy_agent.executor import (
     DeployExecutor,
     _requested_services_for_up,
@@ -122,7 +128,9 @@ class TestRuntimeScopeComposeUp:
             f"list; got {compose_cmd}"
         )
         # Verification must be scoped to the requested runtime services.
-        mock_verify.assert_called_once_with(runtime_services, timeout_s=120)
+        mock_verify.assert_called_once_with(
+            runtime_services, timeout_s=120, lane=EnumRuntimeLane.DEV
+        )
 
     def test_runtime_scope_subset_preserves_requested_services_only(self) -> None:
         """An explicit runtime subset must be targeted verbatim; verification
@@ -155,7 +163,9 @@ class TestRuntimeScopeComposeUp:
 
         assert "--no-deps" in compose_cmd
         assert compose_cmd[-len(requested) :] == requested
-        mock_verify.assert_called_once_with(requested, timeout_s=120)
+        mock_verify.assert_called_once_with(
+            requested, timeout_s=120, lane=EnumRuntimeLane.DEV
+        )
 
 
 @pytest.mark.unit
@@ -205,7 +215,9 @@ class TestCoreAndFullScopeComposeUp:
         )
         # Verification uses the scope default list when no explicit services
         # were requested.
-        mock_verify.assert_called_once_with(core_services, timeout_s=120)
+        mock_verify.assert_called_once_with(
+            core_services, timeout_s=120, lane=EnumRuntimeLane.DEV
+        )
 
     def test_core_scope_honors_explicit_service_subset(self) -> None:
         executor = DeployExecutor()
@@ -236,4 +248,6 @@ class TestCoreAndFullScopeComposeUp:
 
         assert "--no-deps" not in compose_cmd
         assert compose_cmd[-len(requested) :] == requested
-        mock_verify.assert_called_once_with(requested, timeout_s=120)
+        mock_verify.assert_called_once_with(
+            requested, timeout_s=120, lane=EnumRuntimeLane.DEV
+        )

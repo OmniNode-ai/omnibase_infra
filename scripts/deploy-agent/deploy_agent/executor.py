@@ -13,9 +13,13 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from deploy_agent.events import (
     BuildSource,
+    EnumRuntimeLane,
     ModelHealthCheck,
+    ModelRebuildRequested,
     Phase,
     PhaseStatus,
     Scope,
@@ -35,7 +39,9 @@ logger = logging.getLogger(__name__)
 REPO_DIR = os.environ.get(
     "DEPLOY_AGENT_REPO_DIR", "/data/omninode/omni_home/omnibase_infra"
 )
-DEPLOY_AGENT_DIR = os.environ.get("DEPLOY_AGENT_DIR", "/data/omninode/deploy-agent")
+DEPLOY_AGENT_DIR = os.environ.get(
+    "DEPLOY_AGENT_DIR", "/data/omninode/omnibase_infra/scripts/deploy-agent"
+)
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
@@ -57,6 +63,107 @@ RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
 )
 
 _BUILD_SOURCE_ALLOWED = ", ".join(source.value for source in BuildSource)
+
+
+class DigestMismatchError(RuntimeError):
+    """Raised when the running container image digest != the requested digest.
+
+    Fails the deploy closed before any health check runs — a lane must never be
+    marked healthy while serving an artifact that does not match the pinned
+    (stability-proven) digest.
+    """
+
+
+class ProdStabilityDigestMissingError(RuntimeError):
+    """Raised when a prod deploy request lacks a matching stability READY digest.
+
+    This is a boundary-level guard: it must fire before any deploy effect runs,
+    not just before health checks.
+    """
+
+
+class ModelLaneConfig(BaseModel):
+    """Per-lane compose file(s), compose project, and runtime health targets.
+
+    The base ``docker-compose.infra.yml`` is always the first compose file;
+    non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
+    the overlay's container names, project, and host port bindings win.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lane: EnumRuntimeLane
+    compose_files: tuple[str, ...]
+    compose_project: str
+    runtime_health_targets: tuple[tuple[str, int], ...]
+
+
+_STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
+_PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
+
+_LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
+    EnumRuntimeLane.DEV: ModelLaneConfig(
+        lane=EnumRuntimeLane.DEV,
+        compose_files=(COMPOSE_FILE,),
+        compose_project=COMPOSE_PROJECT,
+        runtime_health_targets=RUNTIME_HEALTH_TARGETS,
+    ),
+    EnumRuntimeLane.STABILITY_TEST: ModelLaneConfig(
+        lane=EnumRuntimeLane.STABILITY_TEST,
+        compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
+        compose_project="omnibase-infra-stability-test",
+        runtime_health_targets=(
+            ("omninode-runtime", 18085),
+            ("runtime-effects", 18086),
+        ),
+    ),
+    EnumRuntimeLane.PROD: ModelLaneConfig(
+        lane=EnumRuntimeLane.PROD,
+        compose_files=(COMPOSE_FILE, _PROD_OVERLAY),
+        compose_project="omnibase-infra-prod",
+        runtime_health_targets=(
+            ("omninode-runtime", 28085),
+            ("runtime-effects", 28086),
+        ),
+    ),
+}
+
+
+def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
+    """Return the compose/project/health configuration for a runtime lane."""
+    return _LANE_CONFIGS[lane]
+
+
+def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
+    """Return the ``-f <file>`` token sequence for a lane's compose invocation."""
+    args: list[str] = []
+    for compose_file in lane_config_for(lane).compose_files:
+        args.extend(["-f", compose_file])
+    return args
+
+
+def assert_prod_request_has_stability_digest(
+    cmd: ModelRebuildRequested, *, stability_ready_digest: str | None
+) -> None:
+    """Reject a prod request lacking a matching stability READY digest.
+
+    Boundary-level guard: this is invoked before any deploy effect so a prod
+    deploy can never start without a stability-proven artifact. Non-prod lanes
+    are unaffected.
+    """
+    if cmd.runtime_lane != EnumRuntimeLane.PROD:
+        return
+    if stability_ready_digest is None:
+        raise ProdStabilityDigestMissingError(
+            "prod deploy rejected: no stability-test READY digest is available; "
+            "production may only deploy a digest already proven in stability-test"
+        )
+    if cmd.image_digest != stability_ready_digest:
+        raise ProdStabilityDigestMissingError(
+            "prod deploy rejected: requested image_digest "
+            f"{cmd.image_digest!r} does not equal the stability-test READY digest "
+            f"{stability_ready_digest!r}"
+        )
 
 
 def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
@@ -194,15 +301,16 @@ def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
     )
 
 
-def _compose_service_states() -> dict[str, tuple[str, int | None]]:
+def _compose_service_states(
+    lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+) -> dict[str, tuple[str, int | None]]:
     result = subprocess.run(
         [
             "docker",
             "compose",
-            "-f",
-            COMPOSE_FILE,
+            *_compose_file_args(lane),
             "-p",
-            COMPOSE_PROJECT,
+            lane_config_for(lane).compose_project,
             "ps",
             "-a",
             "--format",
@@ -238,14 +346,17 @@ def _service_satisfied(state: str, exit_code: int | None) -> bool:
 
 
 def verify_containers_up(
-    expected_containers: list[str], timeout_s: int = 120
+    expected_containers: list[str],
+    timeout_s: int = 120,
+    *,
+    lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
 ) -> tuple[bool, list[str]]:
     """Poll compose until services are running or completed successfully."""
     deadline = time.monotonic() + timeout_s
     last_states: dict[str, tuple[str, int | None]] = {}
     while time.monotonic() < deadline:
         try:
-            last_states = _compose_service_states()
+            last_states = _compose_service_states(lane)
         except RuntimeError as exc:
             logger.warning("verify_containers_up: docker compose ps failed: %s", exc)
             time.sleep(2)
@@ -264,7 +375,7 @@ def verify_containers_up(
         )
         time.sleep(2)
     try:
-        last_states = _compose_service_states()
+        last_states = _compose_service_states(lane)
     except RuntimeError:
         last_states = {}
     missing = [
@@ -603,9 +714,29 @@ class DeployExecutor:
         git_sha: str = "",
         build_source: BuildSource | str = BuildSource.RELEASE,
         skip_self_update: bool = False,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        image_digest: str | None = None,
     ) -> list[str]:
         self.self_update(skip=skip_self_update)
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+
+        # prod deploys the stability-proven digest — it pulls the pinned image
+        # and never rebuilds from a ref (the digest is the authority).
+        if lane == EnumRuntimeLane.PROD:
+            if not image_digest:
+                raise ProdStabilityDigestMissingError(
+                    "prod rebuild_scope requires a pinned image_digest"
+                )
+            self._pull_pinned_image(image_digest, lane)
+            if scope == Scope.FULL:
+                self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+                self._compose_up(
+                    Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+                )
+                return services_for_scope(Scope.FULL)
+            self._compose_up(phase, scope, services, on_phase_update, lane=lane)
+            return services if services else services_for_scope(scope)
+
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
@@ -616,13 +747,93 @@ class DeployExecutor:
             self._compose_build(
                 Scope.RUNTIME, git_sha, on_phase_update, build_source=build_source
             )
-            self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update)
-            self._compose_up(Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update)
+            self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+            self._compose_up(
+                Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+            )
             return services_for_scope(Scope.FULL)
 
         self._compose_build(scope, git_sha, on_phase_update, build_source=build_source)
-        self._compose_up(phase, scope, services, on_phase_update)
+        self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         return services if services else services_for_scope(scope)
+
+    def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
+        """Pull the exact stability-proven image digest for a prod deploy.
+
+        Production never rebuilds from a ref; it resolves and pulls the pinned
+        digest so the artifact is byte-identical to the one proven in
+        stability-test.
+        """
+        result = _run(
+            ["docker", "pull", image_digest],
+            timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"docker pull {image_digest} failed for lane {lane.value}: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        logger.info(
+            "_pull_pinned_image: pulled pinned digest %s for lane %s",
+            image_digest,
+            lane.value,
+        )
+
+    def verify_running_image_digest(
+        self, *, lane: EnumRuntimeLane, expected_digest: str
+    ) -> None:
+        """Verify the running runtime container's image digest == requested.
+
+        FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
+        before health checks so a lane is never marked healthy while serving an
+        artifact that does not match the pinned digest.
+        """
+        config = lane_config_for(lane)
+        runtime_container, _ = config.runtime_health_targets[0]
+        result = _run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{index .Image}}{{range .RepoDigests}} {{.}}{{end}}",
+                runtime_container,
+            ],
+            timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],
+        )
+        if result.returncode != 0:
+            raise DigestMismatchError(
+                f"could not inspect running image digest for {runtime_container} "
+                f"(lane {lane.value}): {result.stderr.strip() or result.stdout.strip()}"
+            )
+        observed = result.stdout.strip()
+        if expected_digest not in observed:
+            raise DigestMismatchError(
+                f"running container {runtime_container} image digest {observed!r} "
+                f"does not contain requested digest {expected_digest!r} "
+                f"(lane {lane.value}); failing closed"
+            )
+        logger.info(
+            "verify_running_image_digest: %s matches requested digest %s (lane %s)",
+            runtime_container,
+            expected_digest,
+            lane.value,
+        )
+
+    def deploy_and_verify(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        expected_digest: str,
+        on_phase_update: PhaseCallback,
+    ) -> list[ModelHealthCheck]:
+        """Verify the running digest, then run health checks.
+
+        Digest verification runs first and fails closed: a mismatch aborts
+        before any health check, so a lane serving the wrong artifact can never
+        be reported healthy.
+        """
+        self.verify_running_image_digest(lane=lane, expected_digest=expected_digest)
+        return self.verify(on_phase_update=on_phase_update, lane=lane)
 
     @staticmethod
     def _resolve_plugin_ref(repo_dir: str) -> str:
@@ -796,19 +1007,21 @@ class DeployExecutor:
         scope: Scope,
         services: list[str],
         on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS.get(phase, 300)
 
+        config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services)
         cmd = [
             "docker",
             "compose",
-            "-f",
-            COMPOSE_FILE,
+            *_compose_file_args(lane),
             "-p",
-            COMPOSE_PROJECT,
+            config.compose_project,
             "--profile",
             profile,
             "up",
@@ -846,7 +1059,7 @@ class DeployExecutor:
             len(expected),
             expected,
         )
-        ok, stuck = verify_containers_up(expected, timeout_s=120)
+        ok, stuck = verify_containers_up(expected, timeout_s=120, lane=lane)
         if not ok:
             logger.warning(
                 "Containers stuck after compose up — attempting docker start recovery: %s",
@@ -857,10 +1070,9 @@ class DeployExecutor:
                     [
                         "docker",
                         "compose",
-                        "-f",
-                        COMPOSE_FILE,
+                        *_compose_file_args(lane),
                         "-p",
-                        COMPOSE_PROJECT,
+                        config.compose_project,
                         "up",
                         "-d",
                         "--no-deps",
@@ -877,7 +1089,7 @@ class DeployExecutor:
                     logger.warning(
                         "docker start %s failed: %s", name, start_result.stderr[:200]
                     )
-            ok, stuck = verify_containers_up(expected, timeout_s=60)
+            ok, stuck = verify_containers_up(expected, timeout_s=60, lane=lane)
             if not ok:
                 detail = (
                     f"Containers still not running after docker start recovery: {stuck}"
@@ -889,7 +1101,12 @@ class DeployExecutor:
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 
-    def verify(self, on_phase_update: PhaseCallback) -> list[ModelHealthCheck]:
+    def verify(
+        self,
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    ) -> list[ModelHealthCheck]:
         on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.VERIFICATION]
         checks: list[ModelHealthCheck] = []
@@ -982,10 +1199,11 @@ class DeployExecutor:
 
         # Runtime health endpoint checks.
         #
-        # OMN-9728: deployment readiness is owned by the runtime health servers
-        # on 8085/8086. Ports 8000/8001/8002 are LLM endpoints and cannot prove
-        # that the runtime or runtime-effects processes are healthy.
-        for service, port in RUNTIME_HEALTH_TARGETS:
+        # OMN-9728: deployment readiness is owned by the runtime health servers.
+        # Ports 8000/8001/8002 are LLM endpoints and cannot prove that the
+        # runtime or runtime-effects processes are healthy. The host ports vary
+        # per lane (dev 8085/8086, stability-test 18085/18086, prod 28085/28086).
+        for service, port in lane_config_for(lane).runtime_health_targets:
             start = time.monotonic()
             result = _run(
                 [
