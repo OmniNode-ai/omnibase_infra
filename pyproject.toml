@@ -168,8 +168,8 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# Release v0.37.0: pin to release tags for core v0.42.0 and spi v0.22.0
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main" }
+# Release v0.38.0: pin core to the paired v0.43.0 release PR head until the tag is published.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "4ffca7643294fcad4f9654f4d1839ca8002b4454" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
