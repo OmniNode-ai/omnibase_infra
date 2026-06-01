@@ -28,6 +28,23 @@ class ModelRunnerFleetConfig(BaseModel):
         ge=1,
         description="Optional maximum runner count enabled only by the compose burst profile.",
     )
+    network_pool_capacity: int = Field(
+        default=31,
+        gt=0,
+        description=(
+            "Max Docker networks the runner host's address pool can subnet "
+            "before exhaustion (OMN-12566). Drives subnet-pool alerting."
+        ),
+    )
+    network_pool_warn_ratio: float = Field(
+        default=0.8,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Fraction of network_pool_capacity at which to alert before the "
+            "subnet pool is exhausted (OMN-12566)."
+        ),
+    )
 
 
 def default_runner_fleet_config_path() -> Path:

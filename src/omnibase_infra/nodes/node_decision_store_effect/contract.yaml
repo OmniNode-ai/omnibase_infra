@@ -21,16 +21,17 @@ node_name: "node_decision_store_effect"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
   Two-stage effect node for decision store persistence. Stage 1 normalises and upserts the decision record into decision_store, committing independently of Stage 2. Stage 2 runs structural conflict detection against ACTIVE decisions in the same scope_domain + scope_layer, writing pairs >= 0.3 confidence to decision_conflicts and enforcing the ACTIVE invariant for pairs >= 0.9. Stage 2 failure never rolls back Stage 1. Supports two intent types: write_decision (two-stage) and write_conflict (idempotent pair insert).
+  Contract patch 1 records handler-internal dataclass annotations only; runtime behavior, topics, payloads, and storage semantics are unchanged.
 
 # Strongly typed I/O models
 input_model:
