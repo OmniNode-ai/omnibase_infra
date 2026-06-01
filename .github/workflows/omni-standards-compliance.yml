@@ -113,7 +113,29 @@ jobs:
           fi
           uv venv .venv --python "${pythonLocation}/bin/python"
           . .venv/bin/activate
-          uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
+          python - <<'PY' > /tmp/onex-change-control-overrides.txt
+          import tomllib
+          from pathlib import Path
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          source = (
+              pyproject.get("tool", {})
+              .get("uv", {})
+              .get("sources", {})
+              .get("omnibase-core")
+          )
+          if isinstance(source, dict) and source.get("git"):
+              ref = source.get("rev") or source.get("tag") or source.get("branch")
+              if ref:
+                  print(f"omnibase-core @ git+{source['git']}@{ref}")
+          PY
+          if [ -s /tmp/onex-change-control-overrides.txt ]; then
+            uv pip install \
+              --overrides /tmp/onex-change-control-overrides.txt \
+              "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
+          else
+            uv pip install "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
+          fi
 
       - name: Run handler contract compliance check
         run: |
