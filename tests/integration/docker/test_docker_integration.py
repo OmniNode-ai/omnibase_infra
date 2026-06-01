@@ -679,7 +679,7 @@ class TestDockerRuntime:
             subprocess.run(
                 ["docker", "rm", "-f", container_name],
                 capture_output=True,
-                timeout=30,
+                timeout=120,
                 check=False,
                 shell=False,
             )
