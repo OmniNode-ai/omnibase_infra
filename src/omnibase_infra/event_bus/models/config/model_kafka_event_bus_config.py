@@ -275,6 +275,30 @@ class ModelKafkaEventBusConfig(BaseModel):
         le=10.0,
     )
 
+    # Consumer cold-start concurrency (OMN-12448). Bounds the burst of
+    # consumer-group joins during start_consuming() so a runtime subscribing to
+    # hundreds of topics does not stampede the broker's group coordinator and
+    # blow the per-consumer start timeout. Contract-config only — deliberately
+    # not exposed as an env override.
+    consumer_start_concurrency: int = Field(
+        default=32,
+        description=(
+            "Maximum consumer-group starts in flight during start_consuming(). "
+            "Caps the cold-start burst on the broker group coordinator."
+        ),
+        ge=1,
+        le=1024,
+    )
+    consumer_start_max_retries: int = Field(
+        default=3,
+        description=(
+            "Retry passes for a transiently-failing consumer start before "
+            "aborting boot. 0 disables retries."
+        ),
+        ge=0,
+        le=10,
+    )
+
     # Kafka producer settings
     acks: EnumKafkaAcks = Field(
         default=EnumKafkaAcks.ALL,

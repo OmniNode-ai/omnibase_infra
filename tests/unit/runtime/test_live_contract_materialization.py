@@ -234,11 +234,17 @@ class TestMaterializeHandlerLive:
         assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
-    async def test_materialize_rejects_untrusted_namespace(self) -> None:
-        """Handler from untrusted namespace is rejected."""
+    async def test_materialize_rejects_untrusted_namespace(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Handler from untrusted namespace is rejected without logging its path."""
         runtime = _make_runtime()
-        descriptor = _make_descriptor(handler_class="evil_package.malicious.Handler")
+        handler_class = "evil_package.malicious.SecretHandler"
+        descriptor = _make_descriptor(handler_class=handler_class)
         correlation_id = uuid4()
+        caplog.set_level(
+            "WARNING", logger="omnibase_infra.runtime.runtime_host_process"
+        )
 
         result = await runtime._materialize_handler_live(
             node_name="test-node",
@@ -248,6 +254,75 @@ class TestMaterializeHandlerLive:
 
         assert result is False
         assert "effect_test" not in runtime._handlers
+        rejection_records = [
+            record
+            for record in caplog.records
+            if "handler_class outside allowed namespaces" in record.getMessage()
+        ]
+        assert len(rejection_records) == 1
+        assert rejection_records[0].handler_class_redacted is True
+        assert rejection_records[0].allowed_namespace_count > 0
+        assert not hasattr(rejection_records[0], "handler_class")
+        assert not hasattr(rejection_records[0], "allowed_namespaces")
+        assert handler_class not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_materialize_accepts_omnimarket_namespace(self) -> None:
+        """Handler from the omnimarket. namespace passes the trusted-namespace gate.
+
+        Asserts the live materializer uses the shared
+        TRUSTED_HANDLER_NAMESPACE_PREFIXES policy (which includes "omnimarket.")
+        rather than the previous infra/core-only hardcoded tuple. A market
+        handler_class must clear Step 4 (namespace validation) and reach
+        instantiation/registration (OMN-12449).
+        """
+        from omnibase_infra.runtime.constants_security import (
+            TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+        )
+
+        # Precondition: the shared policy is the one that grants omnimarket trust.
+        assert "omnimarket." in TRUSTED_HANDLER_NAMESPACE_PREFIXES
+
+        runtime = _make_runtime()
+        descriptor = _make_descriptor(
+            handler_class="omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.NodeAislopSweep"
+        )
+        correlation_id = uuid4()
+
+        mock_handler_instance = MagicMock()
+        mock_handler_instance.initialize = AsyncMock()
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
+        mock_container = MagicMock()
+        mock_registry = MagicMock()
+
+        with (
+            patch.object(
+                runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
+            ),
+            patch(
+                "omnibase_infra.runtime.runtime_host_process.importlib.import_module"
+            ) as mock_import,
+        ):
+            mock_module = MagicMock()
+            mock_module.NodeAislopSweep = mock_handler_cls
+            mock_import.return_value = mock_module
+
+            result = await runtime._materialize_handler_live(
+                node_name="node_aislop_sweep",
+                descriptor=descriptor,
+                correlation_id=correlation_id,
+            )
+
+        # Passed the namespace gate and materialized — proving omnimarket is trusted.
+        assert result is True
+        assert "effect_test" in runtime._handlers
+        mock_registry.register.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_materialize_handles_import_error(self) -> None:
