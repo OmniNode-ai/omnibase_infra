@@ -83,7 +83,6 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3 \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
     && python3.12 -m ensurepip --upgrade \
-    && python3.12 -m pip install --no-cache-dir --upgrade pip \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3 \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip
 
