@@ -1,0 +1,43 @@
+# OMN-12597 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-12597
+title: "Re-sync vendored omnimarket savings node migration to its canonical source"
+summary: >
+  Follow-up to OMN-12559 (PR #1820). The vendored copy of node_projection_savings 076_create_delegation_savings_projection_view.sql diverged from its canonical owner in omnimarket: the COALESCE argument order on the latency_ms projection column was swapped (vendored had COALESCE(latency_ms, delegation_latency_ms); omnimarket source has COALESCE(delegation_latency_ms, latency_ms)). omnimarket owns the node migration, so the vendored copy must mirror the source 1:1. This re-syncs the vendored file via scripts/sync-node-migrations.sh so the drift guard passes and the savings view prefers the delegation-specific latency column as the node intends. Proven by the auto-discovery test suite, including the drift guard test_sync_check_reports_in_sync which previously FAILED when the local omnimarket source was resolvable.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Auto-discovery suite passes, including the vendored-tree drift guard."
+    command: "OMNI_HOME=$OMNI_HOME uv run pytest tests/unit/migrations/test_node_migration_discovery.py -q"
+  - kind: ci
+    description: "Vendored node migrations stay in sync with the omnimarket source (drift guard)."
+    command: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - kind: manual
+    description: "Deploy-gate proof: migration SQL re-sync only; the next migrate image build carries the corrected vendored file. No live deploy performed pre-merge."
+    command: "deploy-gate: no live deploy performed pre-merge; next migrate image build (Dockerfile.migrate COPY is recursive) carries the re-synced nodes/ subtree"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-discovery-tests
+    description: "Node-migration auto-discovery suite passes (8/8), including the drift guard that was failing pre-fix."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "OMNI_HOME=$OMNI_HOME uv run pytest tests/unit/migrations/test_node_migration_discovery.py -q"
+  - id: dod-vendor-sync
+    description: "Vendored node migration is in sync with omnimarket origin/dev after re-sync."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - id: dod-deploy-gate
+    description: "No pre-merge live deploy required; the next migrate image build carries the re-synced vendored node migration."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy-gate: no live deploy performed pre-merge; next migrate image build carries the re-synced nodes/ subtree"
