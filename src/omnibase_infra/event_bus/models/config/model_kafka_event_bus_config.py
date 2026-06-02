@@ -218,6 +218,13 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )
+    api_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit aiokafka API version, for example '2.8.0'. "
+            "When unset, aiokafka auto-negotiates the broker version."
+        ),
+    )
     environment: str = Field(
         default="local",
         description=(
@@ -790,6 +797,31 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         return v.strip()
 
+    @field_validator("api_version", mode="before")
+    @classmethod
+    def validate_api_version(cls, v: object) -> str | None:
+        """Validate optional aiokafka API version override."""
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            v = str(v)
+        value = v.strip()
+        if not value:
+            return None
+        if not re.match(r"^\d+\.\d+\.\d+$", value):
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_config",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                "api_version must use '<major>.<minor>.<patch>' format",
+                context=context,
+                parameter="api_version",
+                value=value,
+            )
+        return value
+
     @field_validator("environment", mode="before")
     @classmethod
     def validate_environment(cls, v: object) -> str:
@@ -867,6 +899,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         env_mappings: dict[str, str] = {
             "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
+            "KAFKA_API_VERSION": "api_version",
             "KAFKA_TIMEOUT_SECONDS": "timeout_seconds",
             "KAFKA_ENVIRONMENT": "environment",
             "KAFKA_MAX_RETRY_ATTEMPTS": "max_retry_attempts",
