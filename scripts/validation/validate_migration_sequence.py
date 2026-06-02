@@ -31,6 +31,22 @@ MIGRATION_DIRS: tuple[str, ...] = (
     "src/omnibase_infra/migrations/forward",
 )
 
+# Subtree(s) that are tracked under a SEPARATE migration-id namespace and
+# therefore do NOT participate in the flat numeric sequence (OMN-12559).
+# Node-owned migrations vendored from omnimarket live under
+# docker/migrations/forward/nodes/<node>/ and are applied by
+# run-forward-migrations.sh under namespaced  node:<node>:<file>  ids. A node
+# migration numbered 076 must NOT be reported as colliding with the flat
+# docker/076_* file — they are distinct identity spaces by design, which is
+# exactly what eliminates the renumber-as-operational-pattern.
+EXCLUDED_SUBTREE_PREFIXES: tuple[str, ...] = ("docker/migrations/forward/nodes/",)
+
+
+def _is_in_excluded_subtree(rel_path: str) -> bool:
+    """True if rel_path lives under a separately-namespaced subtree."""
+    normalized = rel_path.replace("\\", "/")
+    return any(normalized.startswith(prefix) for prefix in EXCLUDED_SUBTREE_PREFIXES)
+
 
 @dataclass
 class DuplicateConflict:
@@ -149,6 +165,9 @@ def validate_migration_sequence(
     # Check whether any staged file is a migration file
     staged_migration_rel: set[str] = set()
     for sp in staged_paths:
+        if _is_in_excluded_subtree(sp):
+            # Namespaced node migrations do not share the flat sequence.
+            continue
         for mdir in MIGRATION_DIRS:
             if sp.startswith((mdir + "/", mdir.replace("/", "\\") + "\\")):
                 seq = extract_sequence_number(Path(sp).name)
@@ -166,11 +185,14 @@ def validate_migration_sequence(
     # (staged files may not yet exist on disk if they were just added)
     seen: dict[int, str] = {}  # seq -> relative path string
 
-    # Gather all .sql files from both migration dirs (filesystem scan)
+    # Gather all .sql files from both migration dirs (filesystem scan).
+    # Files under separately-namespaced subtrees (node migrations) are excluded.
     all_files: list[str] = []
     for mdir in MIGRATION_DIRS:
         for f in _scan_migration_dir(repo_path, mdir):
             rel = str(f.relative_to(repo_path))
+            if _is_in_excluded_subtree(rel):
+                continue
             all_files.append(rel)
 
     # Also include staged paths that are migrations but may not be on disk yet

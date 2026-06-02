@@ -148,3 +148,34 @@ def test_runner_sha256_comment_tracks_runner_version() -> None:
     assert re.search(r"^ENV RUNNER_SHA256=[0-9a-f]{64}\s*$", source, re.MULTILINE), (
         "runner Dockerfile must pin a 64-hex-char RUNNER_SHA256"
     )
+
+
+def test_runner_image_external_downloads_are_retried() -> None:
+    """External binary downloads must not be one-shot curl calls.
+
+    The runner-image build-smoke runs inside CI and downloads several binaries
+    from GitHub, dl.k8s.io, Docker, and gosu. Transient TLS/protocol failures
+    in those downloads should be retried in the Docker build itself.
+    """
+    source = RUNNER_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "RUN cat >/usr/local/bin/omni-curl" in source
+    assert "--http1.1" in source
+    assert "--retry 5" in source
+    assert "--retry-connrefused" in source
+    assert "--retry-max-time 300" in source
+
+    download_urls = (
+        "github.com/astral-sh/uv",
+        "download.docker.com/linux/ubuntu/gpg",
+        "github.com/cli/cli",
+        "dl.k8s.io/release",
+        "github.com/actions/runner",
+        "github.com/tianon/gosu",
+    )
+    run_blocks = re.findall(
+        r"(?ms)^RUN .*?(?=^RUN |^COPY |^USER |^WORKDIR |^ENTRYPOINT |\\Z)", source
+    )
+    for url in download_urls:
+        block = next(block for block in run_blocks if url in block)
+        assert "omni-curl" in block, f"{url} must use retrying omni-curl"

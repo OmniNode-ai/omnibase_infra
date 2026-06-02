@@ -220,6 +220,50 @@ class TestValidateMigrationSequence:
         conflict = result.conflicts[0]
         assert conflict.sequence == 5
 
+    # ── node-namespaced subtree exclusion (OMN-12559) ─────────────────────────
+
+    @pytest.mark.unit
+    def test_node_subtree_file_does_not_collide_with_flat_sequence(
+        self, tmp_path: Path
+    ) -> None:
+        """A node migration numbered 076 must NOT collide with flat docker/076.
+
+        Node migrations live under docker/migrations/forward/nodes/<node>/ and
+        are tracked under a separate node:<node>:<file> id space, so they do not
+        participate in the flat numeric sequence — no renumber is ever required.
+        """
+        docker_dir, _ = _make_migration_dirs(tmp_path)
+        # Flat infra 076 already exists.
+        _write_sql(docker_dir, "076_add_savings_estimate_provenance.sql")
+        # Vendored node migration also numbered 076, in the namespaced subtree.
+        node_dir = docker_dir / "nodes" / "node_projection_savings"
+        node_dir.mkdir(parents=True)
+        node_file = "076_create_delegation_savings_projection_view.sql"
+        _write_sql(node_dir, node_file)
+        staged_path = f"{DOCKER_MIGRATIONS}/nodes/node_projection_savings/{node_file}"
+        with _mock_staged(tmp_path, [staged_path]):
+            result = validate_migration_sequence(tmp_path)
+        # No conflict: the node 076 is in a separate namespace.
+        assert result.is_valid
+        assert not result.has_staged_migrations
+
+    @pytest.mark.unit
+    def test_node_subtree_excluded_even_when_flat_migration_staged(
+        self, tmp_path: Path
+    ) -> None:
+        """Flat staged migration triggers scan, but node subtree files are excluded."""
+        docker_dir, _ = _make_migration_dirs(tmp_path)
+        _write_sql(docker_dir, "090_new_flat.sql")
+        node_dir = docker_dir / "nodes" / "node_projection_savings"
+        node_dir.mkdir(parents=True)
+        # Node file shares seq 090 — must NOT be flagged as a collision.
+        _write_sql(node_dir, "090_node_view.sql")
+        staged_path = f"{DOCKER_MIGRATIONS}/090_new_flat.sql"
+        with _mock_staged(tmp_path, [staged_path]):
+            result = validate_migration_sequence(tmp_path)
+        assert result.is_valid
+        assert result.has_staged_migrations
+
 
 # ── generate_report ───────────────────────────────────────────────────────────
 

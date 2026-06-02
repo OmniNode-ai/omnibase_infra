@@ -256,16 +256,17 @@ jobs:
             fi
           fi
 
-          # Wait for both compose services to be healthy via docker exec.
-          # Use docker exec for readiness before selecting the runtime
-          # endpoint surface exposed to the runner.
+          # Wait for both compose services to be usable via docker exec.
+          # Redpanda's single-node dev-container can keep `rpk cluster health`
+          # false longer than the broker API is unavailable; runtime boot only
+          # needs Kafka API reachability, so probe topic listing explicitly.
           for i in $(seq 1 90); do
             pg_ok=false
             kafka_ok=false
             if docker exec "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" pg_isready -U postgres >/dev/null 2>&1; then
               pg_ok=true
             fi
-            if docker exec "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" rpk cluster health >/dev/null 2>&1; then
+            if docker exec "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" rpk topic list --brokers redpanda:9092 >/dev/null 2>&1; then
               kafka_ok=true
             fi
             if $pg_ok && $kafka_ok; then
