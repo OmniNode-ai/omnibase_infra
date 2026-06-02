@@ -14,7 +14,6 @@ on:
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
-  UV_HTTP_TIMEOUT: "600"
   REPO_NAME: "omnibase_infra"
   UV_HTTP_TIMEOUT: "600"
   # OMN-12564 canary: trusted self-hosted CI uses the same immutable
