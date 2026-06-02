@@ -72,6 +72,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
+# Bounded external binary downloads. The runner image build-smoke runs in CI,
+# so one-shot curl calls make the image contract depend on transient CDN/TLS
+# behavior. Force HTTP/1.1 and retry connection/protocol resets with a cap.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN cat >/usr/local/bin/omni-curl <<'EOF' \
+    && chmod +x /usr/local/bin/omni-curl
+#!/usr/bin/env bash
+set -euo pipefail
+exec curl \
+  --http1.1 \
+  --fail \
+  --show-error \
+  --location \
+  --retry 5 \
+  --retry-delay 5 \
+  --retry-max-time 300 \
+  --retry-connrefused \
+  "$@"
+EOF
+
 # Install Python 3.12 via deadsnakes PPA
 RUN add-apt-repository ppa:deadsnakes/ppa -y \
     && apt-get update \
@@ -87,13 +107,13 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip
 
 # Install uv
-RUN curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+RUN omni-curl "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
     | tar -xz -C /usr/local/bin --strip-components=1 uv-x86_64-unknown-linux-gnu/uv \
     && chmod +x /usr/local/bin/uv
 
 # Install Docker CLI (no daemon — socket mounted at runtime)
 RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    && omni-curl https://download.docker.com/linux/ubuntu/gpg \
         | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
@@ -104,12 +124,12 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gh CLI
-RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+RUN omni-curl "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
     | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh" \
     && chmod +x /usr/local/bin/gh
 
 # Install kubectl
-RUN curl -fsSLo /usr/local/bin/kubectl \
+RUN omni-curl -o /usr/local/bin/kubectl \
     "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod +x /usr/local/bin/kubectl
 
@@ -125,7 +145,7 @@ ENV RUNNER_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d2
 
 RUN mkdir -p "${RUNNER_HOME}" \
     && cd "${RUNNER_HOME}" \
-    && curl -fsSLo runner.tar.gz \
+    && omni-curl -o runner.tar.gz \
         "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
     && echo "${RUNNER_SHA256}  runner.tar.gz" | sha256sum --check --strict \
     && tar xzf runner.tar.gz \
@@ -183,7 +203,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/runner-job-started.sh /
 
 # Install gosu for privilege de-escalation in entrypoint.
 # The entrypoint starts as root to fix Docker socket GID, then drops to runner.
-RUN curl -fsSLo /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.17/gosu-amd64" \
+RUN omni-curl -o /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.17/gosu-amd64" \
     && chmod +x /usr/local/bin/gosu \
     && gosu nobody true
 
