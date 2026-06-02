@@ -85,6 +85,7 @@ SYNC_PATHS=(
     "docker/runners/entrypoint.sh"
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
+    "docker/runners/healthcheck.sh"
     "docker/docker-compose.runners.yml"
 )
 
@@ -194,6 +195,7 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
+        "${REPO_ROOT}/docker/runners/healthcheck.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
     # Sync compose file into docker/

@@ -1,10 +1,10 @@
 # docker-compose.runners.yml
 # OmniNode self-hosted GitHub Actions runners
-# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714
+# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582
 #
-# Runs the configured steady-state runner fleet; burst runners are profile-gated.
-# The steady-state and burst counts are owned by config/runner_fleet.yaml.
-# Each runner registers with GitHub org OmniNode-ai in the 'omnibase-ci' runner group.
+# Runs the full steady-state runner fleet. The fleet count is owned by
+# config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
+# org OmniNode-ai in the 'omnibase-ci' runner group.
 #
 # Prerequisites:
 #   - Build the runner image first (OMN-3275):
@@ -34,13 +34,15 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     - 84 GB steady across 14 runners; 120 GB only with the burst profile
+#   mem_limit: 6g     - per-runner memory limit (not a reservation); 48 runners
+#                       share the host's 91 GB, peak usage ~21 GB observed live
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
-#   cpus: "2.0"       — 28 vCPUs steady; 40 vCPUs only with the burst profile
-#   pids_limit: 4096  — prevents fork bombs from runaway test processes
+#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 48 runners
+#                       share the host's 32 vCPUs (over-subscription tolerated)
+#   pids_limit: 4096  - prevents fork bombs from runaway test processes
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
-# Do NOT use deploy.resources — those are Swarm-only and silently ignored here.
+# Do NOT use deploy.resources - those are Swarm-only and silently ignored here.
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -247,7 +249,6 @@ services:
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-15
     environment:
       !!merge <<: *runner-env
@@ -260,7 +261,6 @@ services:
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-16
     environment:
       !!merge <<: *runner-env
@@ -273,7 +273,6 @@ services:
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-17
     environment:
       !!merge <<: *runner-env
@@ -286,7 +285,6 @@ services:
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-18
     environment:
       !!merge <<: *runner-env
@@ -299,7 +297,6 @@ services:
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-19
     environment:
       !!merge <<: *runner-env
@@ -312,7 +309,6 @@ services:
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
-    profiles: ["burst"]
     container_name: omninode-runner-20
     environment:
       !!merge <<: *runner-env
@@ -323,6 +319,342 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-20-creds:/home/runner/.runner-creds
+  omninode-runner-21:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-21
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-21
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-21-creds:/home/runner/.runner-creds
+  omninode-runner-22:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-22
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-22
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-22-creds:/home/runner/.runner-creds
+  omninode-runner-23:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-23
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-23
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-23-creds:/home/runner/.runner-creds
+  omninode-runner-24:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-24
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-24
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-24-creds:/home/runner/.runner-creds
+  omninode-runner-25:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-25
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-25
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-25-creds:/home/runner/.runner-creds
+  omninode-runner-26:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-26
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-26
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-26-creds:/home/runner/.runner-creds
+  omninode-runner-27:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-27
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-27
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-27-creds:/home/runner/.runner-creds
+  omninode-runner-28:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-28
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-28
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-28-creds:/home/runner/.runner-creds
+  omninode-runner-29:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-29
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-29
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-29-creds:/home/runner/.runner-creds
+  omninode-runner-30:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-30
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-30-creds:/home/runner/.runner-creds
+  omninode-runner-31:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-31
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-31
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-31-creds:/home/runner/.runner-creds
+  omninode-runner-32:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-32
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-32
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-32-creds:/home/runner/.runner-creds
+  omninode-runner-33:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-33
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-33
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-33-creds:/home/runner/.runner-creds
+  omninode-runner-34:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-34
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-34
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-34-creds:/home/runner/.runner-creds
+  omninode-runner-35:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-35
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-35
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-35-creds:/home/runner/.runner-creds
+  omninode-runner-36:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-36
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-36
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-36-creds:/home/runner/.runner-creds
+  omninode-runner-37:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-37
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-37
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-37-creds:/home/runner/.runner-creds
+  omninode-runner-38:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-38
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-38
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-38-creds:/home/runner/.runner-creds
+  omninode-runner-39:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-39
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-39
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-39-creds:/home/runner/.runner-creds
+  omninode-runner-40:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-40
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-40
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-40-creds:/home/runner/.runner-creds
+  omninode-runner-41:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-41
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-41
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-41-creds:/home/runner/.runner-creds
+  omninode-runner-42:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-42
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-42
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-42-creds:/home/runner/.runner-creds
+  omninode-runner-43:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-43
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-43
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-43-creds:/home/runner/.runner-creds
+  omninode-runner-44:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-44
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-44
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-44-creds:/home/runner/.runner-creds
+  omninode-runner-45:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-45
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-45
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-45-creds:/home/runner/.runner-creds
+  omninode-runner-46:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-46
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-46
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-46-creds:/home/runner/.runner-creds
+  omninode-runner-47:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-47
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-47
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-47-creds:/home/runner/.runner-creds
+  omninode-runner-48:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-48
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-48
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-48-creds:/home/runner/.runner-creds
 volumes:
   runner-1-creds:
     name: omninode-runner-1-creds
@@ -364,3 +696,59 @@ volumes:
     name: omninode-runner-19-creds
   runner-20-creds:
     name: omninode-runner-20-creds
+  runner-21-creds:
+    name: omninode-runner-21-creds
+  runner-22-creds:
+    name: omninode-runner-22-creds
+  runner-23-creds:
+    name: omninode-runner-23-creds
+  runner-24-creds:
+    name: omninode-runner-24-creds
+  runner-25-creds:
+    name: omninode-runner-25-creds
+  runner-26-creds:
+    name: omninode-runner-26-creds
+  runner-27-creds:
+    name: omninode-runner-27-creds
+  runner-28-creds:
+    name: omninode-runner-28-creds
+  runner-29-creds:
+    name: omninode-runner-29-creds
+  runner-30-creds:
+    name: omninode-runner-30-creds
+  runner-31-creds:
+    name: omninode-runner-31-creds
+  runner-32-creds:
+    name: omninode-runner-32-creds
+  runner-33-creds:
+    name: omninode-runner-33-creds
+  runner-34-creds:
+    name: omninode-runner-34-creds
+  runner-35-creds:
+    name: omninode-runner-35-creds
+  runner-36-creds:
+    name: omninode-runner-36-creds
+  runner-37-creds:
+    name: omninode-runner-37-creds
+  runner-38-creds:
+    name: omninode-runner-38-creds
+  runner-39-creds:
+    name: omninode-runner-39-creds
+  runner-40-creds:
+    name: omninode-runner-40-creds
+  runner-41-creds:
+    name: omninode-runner-41-creds
+  runner-42-creds:
+    name: omninode-runner-42-creds
+  runner-43-creds:
+    name: omninode-runner-43-creds
+  runner-44-creds:
+    name: omninode-runner-44-creds
+  runner-45-creds:
+    name: omninode-runner-45-creds
+  runner-46-creds:
+    name: omninode-runner-46-creds
+  runner-47-creds:
+    name: omninode-runner-47-creds
+  runner-48-creds:
+    name: omninode-runner-48-creds
