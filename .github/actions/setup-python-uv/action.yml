@@ -67,15 +67,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ inputs.python-version }}
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        version: ${{ inputs.uv-version }}
-        enable-cache: ${{ inputs.cache-enabled != 'false' }}
     - name: Resolve shared CI env mode
       id: shared_env_mode
       shell: bash
@@ -103,6 +94,17 @@ runs:
         esac
         echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
         echo "shared CI env enabled: ${enabled}"
+    - name: Set up Python
+      if: steps.shared_env_mode.outputs.enabled != 'true'
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install uv
+      if: steps.shared_env_mode.outputs.enabled != 'true'
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: ${{ inputs.uv-version }}
+        enable-cache: ${{ inputs.cache-enabled != 'false' }}
     - name: Prepare shared CI env
       if: steps.shared_env_mode.outputs.enabled == 'true' && inputs.skip-install != 'true'
       shell: bash

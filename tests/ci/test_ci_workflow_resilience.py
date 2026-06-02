@@ -17,6 +17,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
+ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "artifact-reconciliation-webhook.yml"
+)
+PR_MERGED_EVENT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-merged-event.yml"
+RUNTIME_REBUILD_TRIGGER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
+)
 OMNI_STANDARDS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "omni-standards-compliance.yml"
 )
@@ -351,7 +358,11 @@ def test_ci_jobs_that_mutate_python_env_disable_shared_env() -> None:
         for step in ci_workflow["jobs"]["compliance"]["steps"]
         if step.get("uses") == "./.github/actions/setup-python-uv"
     )
-    assert compliance_setup["with"]["shared-env-enabled"] == "false"
+    assert compliance_setup["with"].get("shared-env-enabled") != "false"
+    assert not any(
+        step.get("name") == "Install dependencies"
+        for step in ci_workflow["jobs"]["compliance"]["steps"]
+    )
 
     for job_name in ("schema-handshake", "kafka-boundary-compat"):
         setup_step = next(
@@ -598,6 +609,44 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
     assert "max_attempts=3" in install_step["run"]
     assert "until uv pip install" in install_step["run"]
     assert "uv pip install onex_change_control failed after" in install_step["run"]
+
+
+def test_webhook_workflows_use_ci_python_environment() -> None:
+    """Webhook producer jobs must not resolve Python deps outside CI env setup."""
+    workflow_paths = (
+        ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW,
+        PR_MERGED_EVENT_WORKFLOW,
+        RUNTIME_REBUILD_TRIGGER_WORKFLOW,
+    )
+
+    for workflow_path in workflow_paths:
+        workflow = _load_yaml(workflow_path)
+        for job in workflow["jobs"].values():
+            steps = job["steps"]
+            setup_steps = [
+                step
+                for step in steps
+                if step.get("uses") == "./.github/actions/setup-python-uv"
+            ]
+            assert setup_steps, f"{workflow_path.name} must use setup-python-uv"
+            assert all(
+                step["with"]["install-args"] == "--frozen" for step in setup_steps
+            )
+            assert all(step["with"]["cache-enabled"] == "false" for step in setup_steps)
+            assert all(
+                step["with"]["shared-env-enabled"] == "true" for step in setup_steps
+            )
+
+            run_scripts = [
+                step.get("run", "")
+                for step in steps
+                if isinstance(step.get("run"), str)
+            ]
+            assert not any(
+                re.search(r"(^|\n)\s*(?:python -m )?pip install\b", script)
+                for script in run_scripts
+            ), f"{workflow_path.name} must not run pip install directly"
+            assert any("uv run python scripts/" in script for script in run_scripts)
 
 
 def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:

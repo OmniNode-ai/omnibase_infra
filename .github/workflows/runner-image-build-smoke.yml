@@ -69,10 +69,13 @@ jobs:
           fi
           echo "Docker daemon accessible"
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
+          skip-install: "true"
+          cache-enabled: "false"
+          shared-env-enabled: "true"
 
       # Build the versioned runner image to a throwaway local tag. This runs the
       # exact production path: build_runner_image.sh first verifies the bound
@@ -123,6 +126,37 @@ jobs:
             fi
           '
           echo "Runner image build smoke PASSED: identity bound + prebuilt env baked."
+
+      # OMN-12585: assert the baked runner can execute node24 actions
+      # (actions/checkout@v6, used 73x across workflows). The OMN-12567 image
+      # pinned RUNNER_VERSION=2.323.0, which predates node24 execution support
+      # (landed in actions/runner 2.327.0); rolling it to the live fleet (2.334.0)
+      # downgraded the runner and broke "Set up job" with `'using: node24' is not
+      # supported`. A build-only smoke never caught this because PR CI runs on the
+      # OLD fleet, not the NEW image's runner version. Here we inspect the NEW
+      # image directly: the runner ships its bundled node24 under externals/node24
+      # only at >= 2.327, so its presence is a direct, version-agnostic
+      # node24-capability proof.
+      - name: Assert baked runner is node24-capable
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "${SMOKE_TAG}" -lc '
+            set -euo pipefail
+            node24="${RUNNER_HOME}/externals/node24/bin/node"
+            if [[ ! -x "${node24}" ]]; then
+              echo "::error::baked runner has no executable node24 at ${node24}; it cannot run node24 actions (actions/checkout@v6). RUNNER_VERSION is too old (< 2.327.0)."
+              echo "externals dir contents:"
+              ls -la "${RUNNER_HOME}/externals" 2>/dev/null || echo "no externals dir"
+              exit 1
+            fi
+            ver="$("${node24}" --version)"
+            echo "baked runner node24 present: ${node24} (${ver})"
+            case "${ver}" in
+              v24.*) : ;;
+              *) echo "::error::externals/node24 reports ${ver}, expected v24.x"; exit 1 ;;
+            esac
+          '
+          echo "node24 capability PASSED: the baked runner can execute node24 actions."
 
       - name: Cleanup throwaway image
         if: always()

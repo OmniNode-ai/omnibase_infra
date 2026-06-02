@@ -9,7 +9,7 @@
 # contract). Build args MUST match docker/runners/runner-image.lock.json — CI
 # verifies the bound identity via scripts/ci/runner_image_identity.py.
 
-ARG RUNNER_VERSION=2.323.0
+ARG RUNNER_VERSION=2.334.0
 ARG GH_VERSION=2.67.0
 ARG KUBECTL_VERSION=1.32.1
 # uv pinned to the shared CI env (canary) version so the image binding is truthful.
@@ -81,7 +81,10 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y \
         python3.12-dev \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3.12 /usr/local/bin/python
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && python3.12 -m ensurepip --upgrade \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3 \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip
 
 # Install uv
 RUN curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
@@ -117,8 +120,8 @@ RUN groupadd --gid 1001 runner \
     && usermod -aG docker runner
 
 # Download and SHA256-verify GitHub Actions runner binary
-# SHA256 for actions-runner-linux-x64-2.323.0.tar.gz
-ENV RUNNER_SHA256=0dbc9bf5a58620fc52cb6cc0448abcca964a8d74b5f39773b7afcad9ab691e19
+# SHA256 for actions-runner-linux-x64-2.334.0.tar.gz
+ENV RUNNER_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d271
 
 RUN mkdir -p "${RUNNER_HOME}" \
     && cd "${RUNNER_HOME}" \
@@ -148,6 +151,7 @@ RUN chmod 0444 /etc/omni/runner-image.lock.json
 # the env directory ownership matches the runtime user.
 COPY prebuilt-env-context/pyproject.toml /opt/omni/prebuilt/pyproject.toml
 COPY prebuilt-env-context/uv.lock /opt/omni/prebuilt/uv.lock
+COPY prebuilt-env-context/.github/actions/setup-python-uv/action.yml /opt/omni/prebuilt/.github/actions/setup-python-uv/action.yml
 COPY prebuilt-env-context/ci/ /opt/omni/prebuilt/scripts/ci/
 # OMN-12584: chown the *whole* runner cache dir, not only the ci-envs subtree.
 # `mkdir -p "${OMNI_CI_ENV_ROOT}/omnibase_infra"` runs as root and creates the

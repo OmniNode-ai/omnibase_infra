@@ -57,8 +57,11 @@ UV_VERSION="$("${python_bin}" -c \
 echo "[build-runner-image] staging prebuilt env build context..."
 rm -rf "${CONTEXT_DIR}"
 mkdir -p "${CONTEXT_DIR}/ci"
+mkdir -p "${CONTEXT_DIR}/.github/actions/setup-python-uv"
 cp "${REPO_ROOT}/pyproject.toml" "${CONTEXT_DIR}/pyproject.toml"
 cp "${REPO_ROOT}/uv.lock" "${CONTEXT_DIR}/uv.lock"
+cp "${REPO_ROOT}/.github/actions/setup-python-uv/action.yml" \
+  "${CONTEXT_DIR}/.github/actions/setup-python-uv/action.yml"
 cp "${REPO_ROOT}/scripts/ci/ci_env_digest.py" "${CONTEXT_DIR}/ci/ci_env_digest.py"
 cp "${REPO_ROOT}/scripts/ci/ensure_ci_env.sh" "${CONTEXT_DIR}/ci/ensure_ci_env.sh"
 

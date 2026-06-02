@@ -87,6 +87,7 @@ workspace_venv="${workspace_venv}"
 
 if [[ "\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1" && "\${1:-}" == "run" ]]; then
   shift
+  run_args=("\$@")
   if [[ "\${1:-}" == "--" ]]; then
     shift
   fi
@@ -99,6 +100,8 @@ if [[ "\${OMNI_CI_SHARED_UV_RUN_DIRECT:-0}" == "1" && "\${1:-}" == "run" ]]; the
     fi
     exec "\${cmd}" "\$@"
   fi
+
+  exec "\${real_uv}" run "\${run_args[@]}"
 fi
 
 exec "\${real_uv}" "\$@"

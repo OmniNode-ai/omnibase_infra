@@ -1006,10 +1006,6 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
-          shared-env-enabled: "false"
-
-      - name: Install dependencies
-        run: uv sync --no-cache
 
       - name: Check if onex compliance command exists
         id: check-command
@@ -1564,10 +1560,13 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: '3.12'
+          skip-install: "true"
+          cache-enabled: "false"
+          shared-env-enabled: "true"
       - name: Compute changed Python/Markdown files vs PR base
         id: changed
         run: |

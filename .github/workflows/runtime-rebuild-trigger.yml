@@ -60,14 +60,14 @@ jobs:
         with:
           separator: ","
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          pip install --quiet confluent-kafka click
+          cache-key-prefix: uv-runtime-rebuild-trigger
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
 
       - name: Trigger node_redeploy if runtime change detected
         # All potentially attacker-controlled inputs (labels, base_ref, sha) are
@@ -85,7 +85,7 @@ jobs:
           PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
           PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          python scripts/trigger_rebuild_on_merge.py \
+          uv run python scripts/trigger_rebuild_on_merge.py \
             --changed-files "$PR_CHANGED_FILES" \
             --labels "$PR_LABELS" \
             --base-branch "$PR_BASE_BRANCH" \
