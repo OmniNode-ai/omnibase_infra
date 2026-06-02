@@ -89,6 +89,11 @@ def _make_promoted_clone(tmp_path: Path) -> Path:
 
     clone = tmp_path / "clone"
     _git(tmp_path, "clone", "-q", str(origin), str(clone))
+    # CI runners have no global git identity; set a deterministic committer in
+    # the clone so tests that create a new commit (dev-only / second) succeed.
+    _git(clone, "config", "user.email", "test@omninode.ai")
+    _git(clone, "config", "user.name", "Test Runner")
+    _git(clone, "config", "commit.gpgsign", "false")
     # Ensure origin/main is present in the clone's remote-tracking refs.
     _git(clone, "fetch", "-q", "origin", "main")
     return clone
