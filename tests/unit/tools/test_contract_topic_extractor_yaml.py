@@ -138,7 +138,7 @@ def test_extract_from_skill_manifests_returns_valid_entries(skills_root: Path) -
 def test_extract_from_skill_manifests_accepts_canonical_dlq_topics(
     tmp_path: Path,
 ) -> None:
-    """Service manifests may declare canonical four-segment runtime DLQ topics."""
+    """Service manifests may declare canonical five-segment runtime DLQ topics."""
     services_root = tmp_path / "services"
     services_root.mkdir()
     (services_root / "topics.yaml").write_text(
@@ -163,7 +163,7 @@ def test_extract_from_skill_manifests_accepts_canonical_dlq_topics(
         "onex.dlq.omnibase-infra.commands.v1",
     }
     assert {entry.kind for entry in entries} == {"dlq"}
-    assert {entry.producer for entry in entries} == {"dlq"}
+    assert {entry.producer for entry in entries} == {"omnibase-infra"}
 
 
 # ---------------------------------------------------------------------------

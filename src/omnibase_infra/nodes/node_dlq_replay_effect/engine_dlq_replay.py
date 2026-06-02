@@ -30,7 +30,7 @@ from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
-from omnibase_infra.event_bus.topic_constants import TOPIC_DLQ_QUARANTINE
+from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
@@ -109,6 +109,9 @@ class ModelDlqReplayEngineConfig(BaseModel):
 
     bootstrap_servers: str = Field(..., min_length=1)
     dlq_topic: str = Field(..., min_length=1)
+    quarantine_topic: str = Field(
+        default_factory=lambda: build_dlq_topic("quarantine"), min_length=1
+    )
     consumer_group: str = Field(default=DLQ_REPLAY_CONSUMER_GROUP, min_length=1)
     max_replay_count: int = Field(default=5, gt=0)
     rate_limit_per_second: float = Field(default=100.0, gt=0.0)
@@ -430,7 +433,7 @@ class DLQQuarantineProducer:
         key = str(message.correlation_id).encode("utf-8")
         value = json.dumps(payload).encode("utf-8")
         await self._producer.send_and_wait(
-            TOPIC_DLQ_QUARANTINE, value=value, key=key, headers=headers
+            self.config.quarantine_topic, value=value, key=key, headers=headers
         )
 
 
