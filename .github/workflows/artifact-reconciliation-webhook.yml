@@ -43,14 +43,13 @@ jobs:
         with:
           separator: ","
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up CI Python environment
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          pip install --quiet confluent-kafka pydantic click
+          cache-key-prefix: uv-pr-webhook
+          install-args: --frozen
 
       - name: Publish PR webhook event
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -70,7 +69,7 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          python scripts/publish_pr_webhook_event.py \
+          uv run python scripts/publish_pr_webhook_event.py \
             --action "$PR_ACTION" \
             --repo "$PR_REPO" \
             --pr-number "$PR_NUMBER" \
