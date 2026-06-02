@@ -1095,6 +1095,7 @@ jobs:
           OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         with:
           checks: "migration-conflicts"
+          repos: "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
           warn-only: "false"
 
 

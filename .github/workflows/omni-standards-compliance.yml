@@ -15,6 +15,7 @@ env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.8.3"
   REPO_NAME: "omnibase_infra"
+  UV_HTTP_TIMEOUT: "600"
   # OMN-12564 canary: trusted self-hosted CI uses the same immutable
   # host-local dependency environment contract as the main CI workflow.
   OMNI_CI_SHARED_ENV_ENABLED: >-
@@ -22,7 +23,7 @@ env:
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name != github.repository)
       && 'false'
-      || 'true'
+       || 'true'
     }}
   OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
 
@@ -124,6 +125,9 @@ jobs:
           fi
           uv venv .venv --python "${pythonLocation}/bin/python"
           . .venv/bin/activate
+          git config --global http.version HTTP/1.1
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=3

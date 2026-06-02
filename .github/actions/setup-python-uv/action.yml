@@ -138,7 +138,12 @@ runs:
         export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
         export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-1}"
         export UV_CONCURRENT_BUILDS="${UV_CONCURRENT_BUILDS:-1}"
+        export UV_CONCURRENT_INSTALLS="${UV_CONCURRENT_INSTALLS:-1}"
         git config --global http.version HTTP/1.1
+        # Treat a stalled transfer (0 bytes/s) as a failure rather than hanging
+        # indefinitely, so the retry loop below can recover. (OMN-12529)
+        git config --global http.lowSpeedLimit 0
+        git config --global http.lowSpeedTime 999999
         # Authenticate uv's internal git+https fetches. Anonymous github.com
         # requests are rate-limited (60/hr); many parallel --no-cache syncs from
         # one runner egress IP trip "Empty reply from server". Authenticated
