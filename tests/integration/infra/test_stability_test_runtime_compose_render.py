@@ -257,6 +257,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
             "runtime://omninode-pc/stability-test/"
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
+        assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
         assert (
             _label_value(
                 services[service_name],

@@ -144,6 +144,7 @@ x-runtime-env: &runtime-env
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
+  ONEX_STATE_DIR: /app/data/.onex_state
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}

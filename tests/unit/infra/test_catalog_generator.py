@@ -84,6 +84,18 @@ def test_generated_compose_omits_bundle_env_when_unselected() -> None:
 
 
 @pytest.mark.unit
+def test_generated_runtime_services_export_onex_state_dir() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        runtime_env = compose["services"][service_name]["environment"]
+        assert runtime_env["ONEX_STATE_ROOT"] == "/app/data/.onex_state"
+        assert runtime_env["ONEX_STATE_DIR"] == runtime_env["ONEX_STATE_ROOT"]
+
+
+@pytest.mark.unit
 def test_generated_compose_includes_network_and_volumes() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])
