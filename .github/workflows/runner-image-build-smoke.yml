@@ -69,10 +69,12 @@ jobs:
           fi
           echo "Docker daemon accessible"
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.12"
+          skip-install: "true"
+          cache-enabled: "false"
 
       # Build the versioned runner image to a throwaway local tag. This runs the
       # exact production path: build_runner_image.sh first verifies the bound
