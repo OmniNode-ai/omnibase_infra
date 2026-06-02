@@ -149,8 +149,18 @@ RUN chmod 0444 /etc/omni/runner-image.lock.json
 COPY prebuilt-env-context/pyproject.toml /opt/omni/prebuilt/pyproject.toml
 COPY prebuilt-env-context/uv.lock /opt/omni/prebuilt/uv.lock
 COPY prebuilt-env-context/ci/ /opt/omni/prebuilt/scripts/ci/
-RUN mkdir -p "${OMNI_CI_ENV_ROOT}/omnibase_infra" \
-    && chown -R runner:runner /opt/omni/prebuilt "${OMNI_CI_ENV_ROOT}"
+# OMN-12584: chown the *whole* runner cache dir, not only the ci-envs subtree.
+# `mkdir -p "${OMNI_CI_ENV_ROOT}/omnibase_infra"` runs as root and creates the
+# parent /home/runner/.cache owned by root:root. The bake step below runs the
+# shared-env build as USER runner, and uv writes its cache to its default
+# ~/.cache/uv = /home/runner/.cache/uv. If only the ci-envs subtree is
+# runner-owned, that uv-cache mkdir fails with EACCES and the prebuilt-env bake
+# (the core of the OMN-12567 image contract) never completes. Widening the chown
+# to /home/runner/.cache fixes the bake. This is identity-neutral: the Dockerfile
+# is not part of the runner_image_identity binding, so runner-image.lock.json's
+# identity_digest is unchanged.
+RUN mkdir -p "${OMNI_CI_ENV_ROOT}/omnibase_infra" /home/runner/.cache \
+    && chown -R runner:runner /opt/omni/prebuilt /home/runner/.cache
 USER runner
 RUN cd /opt/omni/prebuilt \
     && OMNI_CI_ENV_ROOT="${OMNI_CI_ENV_ROOT}" \
