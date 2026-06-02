@@ -62,10 +62,10 @@ def test_moving_ref_git_install_uses_refresh_package(
 ) -> None:
     """Each moving-ref git install line must carry the matching --refresh-package."""
     # Find the `uv pip install ... git+https://...<repo_slug>.git@... ` install
-    # line (a single logical line may span backslash continuations; the source
-    # keeps each install on one physical `uv pip install ...` statement).
+    # line. The runtime Dockerfile may route uv through the retry wrapper, but
+    # the moving-ref refresh invariant is the same for either executable.
     pattern = re.compile(
-        r"uv pip install[^\n]*--refresh-package\s+"
+        r"(?:uv|uv-with-retry) pip install[^\n]*--refresh-package\s+"
         + re.escape(refresh_name)
         + r"[^\n]*git\+https://github\.com/OmniNode-ai/"
         + re.escape(repo_slug)
@@ -92,9 +92,13 @@ def test_no_moving_ref_git_install_without_refresh(dockerfile_text: str) -> None
         repo_slug = match.group(1)
         if repo_slug not in _MOVING_REF_GIT_PACKAGES:
             continue
-        # Look back to the start of this `uv pip install` statement and forward
-        # to the URL; the whole statement must contain --refresh-package.
-        stmt_start = dockerfile_text.rfind("uv pip install", 0, match.start())
+        # Look back to the start of this uv install statement and forward to
+        # the URL; the whole statement must contain --refresh-package.
+        prefix = dockerfile_text[: match.start()]
+        stmt_start = max(
+            prefix.rfind("uv pip install"),
+            prefix.rfind("uv-with-retry pip install"),
+        )
         assert stmt_start != -1, (
             f"git install of {repo_slug} not preceded by a uv pip install statement"
         )
