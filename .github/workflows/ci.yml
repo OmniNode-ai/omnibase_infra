@@ -1316,6 +1316,25 @@ jobs:
           working-directory: omnibase_infra
           shared-env-enabled: "false"
 
+      - name: Preinstall CPU-only torch for sibling deps
+        working-directory: omnibase_infra
+        run: |
+          set -eu
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=5
+          until uv pip install "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install kafka-boundary torch CPU wheel failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install kafka-boundary torch CPU wheel attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
+
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
         # Use --overrides to install siblings with their full transitive deps while
