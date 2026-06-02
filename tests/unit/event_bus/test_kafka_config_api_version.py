@@ -12,13 +12,17 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
+_TEST_BOOTSTRAP_SERVERS = "localhost:19092"
+
 
 @pytest.mark.unit
 class TestKafkaApiVersionConfig:
     """Verify explicit aiokafka API version config is typed and plumbed."""
 
     def test_api_version_defaults_to_auto_negotiation(self) -> None:
-        config = ModelKafkaEventBusConfig()
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS
+        )
 
         assert config.api_version is None
 
@@ -42,7 +46,10 @@ class TestKafkaApiVersionConfig:
 
     def test_invalid_api_version_fails_closed(self) -> None:
         with pytest.raises(ProtocolConfigurationError, match="api_version"):
-            ModelKafkaEventBusConfig(api_version="2.8")
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=_TEST_BOOTSTRAP_SERVERS,
+                api_version="2.8",
+            )
 
     def test_api_version_kwargs_omitted_when_aiokafka_does_not_support_them(
         self,
@@ -51,7 +58,10 @@ class TestKafkaApiVersionConfig:
             def __init__(self, *, bootstrap_servers: str) -> None:
                 self.bootstrap_servers = bootstrap_servers
 
-        config = ModelKafkaEventBusConfig(api_version="2.8.0")
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS,
+            api_version="2.8.0",
+        )
         bus = EventBusKafka(config=config)
 
         assert bus._build_client_version_kwargs(ClientWithoutApiVersion) == {}
@@ -64,7 +74,10 @@ class TestKafkaApiVersionConfig:
                 self.bootstrap_servers = bootstrap_servers
                 self.api_version = api_version
 
-        config = ModelKafkaEventBusConfig(api_version="2.8.0")
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS,
+            api_version="2.8.0",
+        )
         bus = EventBusKafka(config=config)
 
         assert bus._build_client_version_kwargs(ClientWithApiVersion) == {
@@ -75,7 +88,10 @@ class TestKafkaApiVersionConfig:
     async def test_producer_omits_api_version_when_installed_aiokafka_lacks_support(
         self,
     ) -> None:
-        config = ModelKafkaEventBusConfig(api_version="2.8.0")
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS,
+            api_version="2.8.0",
+        )
         bus = EventBusKafka(config=config)
 
         with patch(
@@ -92,7 +108,9 @@ class TestKafkaApiVersionConfig:
 
     @pytest.mark.asyncio
     async def test_producer_omits_api_version_when_unset(self) -> None:
-        config = ModelKafkaEventBusConfig()
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS
+        )
         bus = EventBusKafka(config=config)
 
         with patch(
@@ -111,7 +129,10 @@ class TestKafkaApiVersionConfig:
     async def test_consumer_omits_api_version_when_installed_aiokafka_lacks_support(
         self,
     ) -> None:
-        config = ModelKafkaEventBusConfig(api_version="2.8.0")
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS,
+            api_version="2.8.0",
+        )
         bus = EventBusKafka(config=config)
         mock_consumer = MagicMock()
         mock_consumer.start = AsyncMock()
