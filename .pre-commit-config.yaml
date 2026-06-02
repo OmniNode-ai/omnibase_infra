@@ -309,6 +309,17 @@ repos:
         files: ^src/omnibase_infra/nodes/reducers/
         pass_filenames: false
         stages: [pre-commit]
+      # Prod promotion-lineage guard tests (OMN-12626, R1)
+      # Runs the guard's unit tests whenever the guard or the prod build/deploy
+      # tooling changes, so the clean-tree + ancestor-of-origin/main + image
+      # revision rules cannot silently regress. Timeout protects against hangs.
+      - id: prod-promotion-lineage-guard
+        name: Prod promotion-lineage guard tests (OMN-12626)
+        entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=thread
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
+        stages: [pre-commit]
       # Markdown link validation (PR #172)
       # Ensures all internal markdown links point to existing files and anchors
       # External links are skipped by default (configurable in .markdown-link-check.json)
