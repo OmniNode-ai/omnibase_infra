@@ -75,6 +75,7 @@ jobs:
           python-version: "3.12"
           skip-install: "true"
           cache-enabled: "false"
+          shared-env-enabled: "true"
 
       # Build the versioned runner image to a throwaway local tag. This runs the
       # exact production path: build_runner_image.sh first verifies the bound

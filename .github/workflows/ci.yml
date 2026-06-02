@@ -1570,6 +1570,7 @@ jobs:
           python-version: '3.12'
           skip-install: "true"
           cache-enabled: "false"
+          shared-env-enabled: "true"
       - name: Compute changed Python/Markdown files vs PR base
         id: changed
         run: |

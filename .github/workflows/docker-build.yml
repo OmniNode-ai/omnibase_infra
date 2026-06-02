@@ -68,6 +68,7 @@ jobs:
           python-version: "3.12"
           skip-install: "true"
           cache-enabled: "false"
+          shared-env-enabled: "true"
 
       - name: Validate Dockerfile plugin pin ranges
         run: python scripts/check_dockerfile_pins.py --dockerfile docker/Dockerfile.runtime
