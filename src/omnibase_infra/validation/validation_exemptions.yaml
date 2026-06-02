@@ -551,6 +551,24 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_register_dispatcher_unlocked'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Unlocked variant of register_dispatcher; carries the identical routing-configuration fields (dispatcher_id, dispatcher, category, message_types, node_kind, operation_bindings, payload_type_matcher). Same coordinator pattern as register_dispatcher (already exempt) — splitting would fragment a single registration operation.
+
+    documentation:
+      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+    ticket: OMN-12416
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_register_dispatcher_dynamic'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Post-freeze dynamic variant of register_dispatcher for contract materialization; carries the same routing-configuration fields including payload_type_matcher so dynamically materialized multi-handler contracts stay type-scoped (OMN-12416). Same coordinator pattern as register_dispatcher (already exempt).
+
+    documentation:
+      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+    ticket: OMN-12416
   # ==========================================================================
   # RegistryDispatcher Exemptions (OMN-934)
   # ==========================================================================

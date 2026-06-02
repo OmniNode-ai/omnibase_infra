@@ -454,7 +454,22 @@ class DispatchResultApplier:
                 result.dispatcher_id,
             )
 
-        if result.status != EnumDispatchStatus.SUCCESS:
+        # Per-handler result application (OMN-12416): a multi-handler contract
+        # aggregates every matched handler into one ModelDispatchResult, so a
+        # single sibling handler's failure marks the aggregate status as
+        # HANDLER_ERROR even when another handler on the same contract succeeded
+        # and produced output. Gating purely on ``status == SUCCESS`` would then
+        # drop the successful handler's output — letting one handler's outcome
+        # suppress another's. Only HANDLER_ERROR represents that partial-success
+        # shape; cancellation/timeouts and other non-success statuses must not
+        # publish side effects even if they happen to carry output fields.
+        has_applicable_output = bool(
+            result.output_events or result.output_intents or result.projection_intents
+        )
+        is_partial_handler_failure = result.status == EnumDispatchStatus.HANDLER_ERROR
+        if result.status != EnumDispatchStatus.SUCCESS and (
+            not is_partial_handler_failure or not has_applicable_output
+        ):
             logger.debug(
                 "Skipping result apply for non-success status=%s "
                 "dispatcher_id=%s correlation_id=%s",
@@ -463,6 +478,19 @@ class DispatchResultApplier:
                 str(effective_correlation_id),
             )
             return
+        if is_partial_handler_failure and has_applicable_output:
+            logger.info(
+                "Applying partial-success dispatch output despite status=%s — "
+                "a sibling handler failed but %d event(s)/%d intent(s)/%d "
+                "projection(s) from succeeding handler(s) are published "
+                "(dispatcher_id=%s correlation_id=%s)",
+                result.status.value if result.status else "unknown",
+                len(result.output_events),
+                len(result.output_intents),
+                len(result.projection_intents),
+                result.dispatcher_id,
+                str(effective_correlation_id),
+            )
 
         # Phase 0: Execute projection synchronously (OMN-2510).
         # Projection MUST complete before any Kafka publish.  If the projection
