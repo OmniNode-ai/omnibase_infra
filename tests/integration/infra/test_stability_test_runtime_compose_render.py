@@ -125,7 +125,7 @@ COMPOSE_RENDER_ENV = {
     "ONEX_INFRA_USER": "jonah",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
-    "REDPANDA_ADVERTISE_HOST": "localhost",
+    "STABILITY_TEST_REDPANDA_ADVERTISE_HOST": "100.109.203.94",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
@@ -391,7 +391,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         assert published_ports.isdisjoint(PRODUCTION_PUBLISHED_PORTS)
 
     redpanda_command = " ".join(services["redpanda"]["command"])
-    assert "localhost:39092" in redpanda_command
+    assert "100.109.203.94:39092" in redpanda_command
+    assert "100.109.203.94:28082" in redpanda_command
+    assert "192.168.86.201:39092" not in redpanda_command
     assert "localhost:19092" not in redpanda_command
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])

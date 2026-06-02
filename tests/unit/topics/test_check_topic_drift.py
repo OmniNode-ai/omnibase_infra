@@ -55,7 +55,7 @@ class TestIsInfrastructureTopic:
     """Tests for infrastructure topic filtering."""
 
     def test_dlq_topic_excluded(self) -> None:
-        assert _is_infrastructure_topic("onex.dlq.intents.v1") is True
+        assert _is_infrastructure_topic("onex.dlq.omnibase-infra.intents.v1") is True
 
     def test_broadcast_topic_excluded(self) -> None:
         assert _is_infrastructure_topic("dev.broadcast") is True

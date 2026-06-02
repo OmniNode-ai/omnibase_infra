@@ -38,11 +38,11 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://redpanda:9092,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}
+      - internal://redpanda:9092,external://${STABILITY_TEST_REDPANDA_ADVERTISE_HOST:?STABILITY_TEST_REDPANDA_ADVERTISE_HOST must be a connected-network address reachable by all stability-test operators}:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}
       - --pandaproxy-addr
       - internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr
-      - internal://redpanda:8082,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT:-28082}
+      - internal://redpanda:8082,external://${STABILITY_TEST_REDPANDA_ADVERTISE_HOST:?STABILITY_TEST_REDPANDA_ADVERTISE_HOST must be a connected-network address reachable by all stability-test operators}:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT:-28082}
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr

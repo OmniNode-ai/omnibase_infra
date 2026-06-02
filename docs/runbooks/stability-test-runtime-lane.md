@@ -69,11 +69,39 @@ the two-phase runtime build plan into a concrete runtime lane:
   - `omnibase-infra-stability-test-network`
   - `omnibase-infra-stability-test-omnimemory-network`
 
+## Connected-Network Kafka Access
+
+The stability-test Redpanda external listener must advertise one address that is
+reachable by every authorized stability-test operator. Do not advertise
+`localhost` or a LAN-only address such as `192.168.86.201` for this lane: Kafka
+clients bootstrap on the supplied broker, then reconnect to the broker address
+returned in metadata.
+
+On `.201`, use the Tailscale address or a stable MagicDNS name as the
+stability-test advertise host:
+
+```bash
+export STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94
+export STABILITY_TEST_REDPANDA_EXTERNAL_PORT=39092
+```
+
+Operators should then bootstrap with the same connected-network endpoint:
+
+```bash
+export KAFKA_BOOTSTRAP_SERVERS=100.109.203.94:39092
+kcat -L -b "$KAFKA_BOOTSTRAP_SERVERS" | sed -n '1,5p'
+```
+
+The metadata must report broker `0` at the connected-network host and port. If
+it reports `localhost` or `192.168.86.201`, off-LAN clients can open the TCP port
+but fail when Kafka redirects them to the advertised broker address.
+
 ## Validation Only
 
 Render the config only:
 
 ```bash
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
@@ -88,6 +116,7 @@ List the rendered services and confirm the stability-test runtime services are
 present:
 
 ```bash
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \

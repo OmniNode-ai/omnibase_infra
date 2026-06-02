@@ -324,9 +324,9 @@ def test_extract_python_source_includes_dlq_literals(tmp_path: Path) -> None:
         """\
         from typing import Final
 
-        DLQ_INTENTS: Final[str] = "onex.dlq.intents.v1"
-        DLQ_EVENTS: Final[str] = "onex.dlq.events.v1"
-        DLQ_COMMANDS: Final[str] = "onex.dlq.commands.v1"
+        DLQ_INTENTS: Final[str] = "onex.dlq.omnibase-infra.intents.v1"
+        DLQ_EVENTS: Final[str] = "onex.dlq.omnibase-infra.events.v1"
+        DLQ_COMMANDS: Final[str] = "onex.dlq.omnibase-infra.commands.v1"
         # 5-segment topic still works alongside DLQ literals
         EVENT_TOPIC: Final[str] = "onex.evt.platform.example.v1"
         """,
@@ -336,15 +336,15 @@ def test_extract_python_source_includes_dlq_literals(tmp_path: Path) -> None:
     entries = extractor.extract_from_python_sources([source])
     topics = {e.topic for e in entries}
 
-    assert "onex.dlq.intents.v1" in topics
-    assert "onex.dlq.events.v1" in topics
-    assert "onex.dlq.commands.v1" in topics
+    assert "onex.dlq.omnibase-infra.intents.v1" in topics
+    assert "onex.dlq.omnibase-infra.events.v1" in topics
+    assert "onex.dlq.omnibase-infra.commands.v1" in topics
     assert "onex.evt.platform.example.v1" in topics
 
     dlq_entries = [e for e in entries if e.kind == "dlq"]
     assert len(dlq_entries) == 3
     assert {e.event_name for e in dlq_entries} == {"intents", "events", "commands"}
-    assert {e.producer for e in dlq_entries} == {"dlq"}
+    assert {e.producer for e in dlq_entries} == {"omnibase-infra"}
 
 
 @pytest.mark.unit

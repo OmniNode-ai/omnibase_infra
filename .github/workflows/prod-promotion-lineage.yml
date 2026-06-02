@@ -1,0 +1,114 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# prod-promotion-lineage.yml — OMN-12626 (R1)
+#
+# Two responsibilities:
+#
+#   1. PR gate (job: guard-tests) — runs the guard's unit tests so the
+#      clean-tree + ancestor-of-origin/main + image-revision rules cannot
+#      silently regress. Triggered on changes to the guard, its tests, or the
+#      prod build/deploy tooling.
+#
+#   2. Reusable lineage check (job: lineage-check, on workflow_call) — runs the
+#      actual guard against the checked-out tree. The prod runtime image build
+#      (build-and-push-runtime.yml, push -> main) calls this so the image is
+#      never built from a dirty or non-promoted tree. main is the promoted ref,
+#      so a real main build passes; a dirty/dev-only build fails closed.
+#
+# This is a REQUIRED status check on the PR gate. No bypass, no skip tokens.
+
+name: Prod Promotion Lineage (OMN-12626)
+
+on:
+  pull_request:
+    paths:
+      - "scripts/check_prod_promotion_lineage.py"
+      - "tests/scripts/test_check_prod_promotion_lineage.py"
+      - "tests/scripts/test_deploy_runtime_prod_lineage.py"
+      - "scripts/deploy-runtime.sh"
+      - "scripts/deploy-agent/deploy_agent/executor.py"
+      - "scripts/deploy-agent/tests/unit/test_executor_promotion_lineage.py"
+      - ".github/workflows/prod-promotion-lineage.yml"
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "scripts/check_prod_promotion_lineage.py"
+      - "tests/scripts/test_check_prod_promotion_lineage.py"
+      - "scripts/deploy-runtime.sh"
+      - "scripts/deploy-agent/deploy_agent/executor.py"
+      - ".github/workflows/prod-promotion-lineage.yml"
+  workflow_call:
+    inputs:
+      enforce_lineage:
+        description: >-
+          When true, run the actual clean-tree + promoted-lineage guard against
+          the checked-out tree (used by the prod image build on main).
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.6.14"
+  CACHE_VERSION: "0.6.0"
+
+jobs:
+  guard-tests:
+    name: Prod promotion-lineage guard tests
+    # Run on PRs and pushes; skipped for the reusable workflow_call path.
+    if: ${{ github.event_name != 'workflow_call' }}
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Run guard unit tests
+        run: |
+          uv run pytest \
+            tests/scripts/test_check_prod_promotion_lineage.py \
+            tests/scripts/test_deploy_runtime_prod_lineage.py \
+            -v
+
+  lineage-check:
+    name: Enforce clean + promoted build source
+    # Only runs when invoked by the prod build (workflow_call with enforce).
+    if: ${{ github.event_name == 'workflow_call' && inputs.enforce_lineage }}
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout (full history for ancestry check)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Fetch origin/main for promoted-lineage ancestry
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Enforce clean + promoted source
+        run: python scripts/check_prod_promotion_lineage.py --repo .
