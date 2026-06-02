@@ -64,6 +64,9 @@ DLQ_TOPIC_VERSION: Final[str] = "v1"
 
 DLQ_DOMAIN: Final[str] = "dlq"
 
+_DLQ_PREFIX: Final[str] = "onex"
+"""Fixed prefix for all DLQ topics. DLQ topics are realm-agnostic."""
+
 # ==============================================================================
 # DLQ Topic Suffixes (without environment prefix)
 # ==============================================================================
@@ -78,6 +81,22 @@ DLQ_EVENT_TOPIC_SUFFIX: Final[str] = f"{DLQ_DOMAIN}.events.{DLQ_TOPIC_VERSION}"
 
 DLQ_COMMAND_TOPIC_SUFFIX: Final[str] = f"{DLQ_DOMAIN}.commands.{DLQ_TOPIC_VERSION}"
 """DLQ topic suffix for permanently failed commands: 'dlq.commands.v1'"""
+
+# ==============================================================================
+# DLQ Quarantine Topic (OMN-12619)
+# ==============================================================================
+# Quarantine is the terminal landing topic for DLQ messages that the replay node
+# determined are NOT replayable (max-retry-exceeded, non-retryable error type,
+# or out-of-filter). It exists to END SILENT MESSAGE LOSS: the previous
+# skip-and-drop path discarded these messages (and, with tracking off, did not
+# even record them). Quarantine durably retains them for human/automated
+# reclassification. Ownership and re-entry semantics are authored in the DLQ
+# replay node contract and docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
+
+TOPIC_DLQ_QUARANTINE: Final[str] = (
+    f"{_DLQ_PREFIX}.{DLQ_DOMAIN}.quarantine.{DLQ_TOPIC_VERSION}"
+)
+"""Fully-qualified DLQ quarantine topic: 'onex.dlq.quarantine.v1'."""
 
 # ==============================================================================
 # Category-to-Suffix Mapping
@@ -149,10 +168,6 @@ Invalid examples: '123abc', '-starts-with-dash', '', 'UPPER'
 .. versionadded:: 0.7.0
     Added for domain-based DLQ routing (OMN-2040).
 """
-
-
-_DLQ_PREFIX: Final[str] = "onex"
-"""Fixed prefix for all DLQ topics. DLQ topics are realm-agnostic."""
 
 
 def build_dlq_topic(

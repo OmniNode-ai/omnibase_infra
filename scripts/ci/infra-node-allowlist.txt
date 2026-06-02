@@ -64,6 +64,8 @@ src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_confl
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_decision.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_query_compute/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_query_compute/handlers/handler_query_decisions.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_dlq_replay_effect/handlers/__init__.py  # OMN-12619: infra-only DLQ replay/quarantine node — Kafka dead-letter transport concern, not a business-domain node.
+src/omnibase_infra/nodes/node_dlq_replay_effect/handlers/handler_dlq_replay.py  # OMN-12619: infra-only DLQ replay/quarantine node — Kafka dead-letter transport concern, not a business-domain node.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_update_outcome.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_write_bundle.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.

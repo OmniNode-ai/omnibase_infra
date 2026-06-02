@@ -1,0 +1,80 @@
+name: dlq-replay-consumer
+description: >
+  Persistent DLQ replay consumer (OMN-12619). Runs NodeDlqReplayEffect from the onex-dlq-replay consumer group; replays eligible DLQ messages to their original topic and quarantines non-replayable messages to onex.dlq.quarantine.v1 instead of dropping them. Replaces the legacy ephemeral dlq-replay-{pid} group from scripts/dlq_replay.py.
+
+image: runtime:latest
+layer: runtime
+container_name: omninode-dlq-replay-consumer
+required_env:
+  - POSTGRES_PASSWORD
+  - VALKEY_PASSWORD
+  - KEYCLOAK_ADMIN_CLIENT_SECRET
+  - ONEX_SERVICE_CLIENT_SECRET
+  - ONEX_REGISTRATION_AUTO_ACK
+  - LLM_CODER_URL
+  - LLM_CODER_FAST_URL
+  - LLM_EMBEDDING_URL
+  - LLM_DEEPSEEK_R1_URL
+  - LLM_ENDPOINT_CIDR_ALLOWLIST
+  - LOCAL_LLM_SHARED_SECRET
+hardcoded_env:
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  KAFKA_BROKER_ALLOWLIST: 'redpanda:'
+  BUS_ID: local
+  ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_STATE_ROOT: /app/data/.onex_state
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  VALKEY_HOST: valkey
+  VALKEY_PORT: '6379'
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
+  USE_EVENT_ROUTING: 'true'
+  KEYCLOAK_ADMIN_URL: http://keycloak:8080
+  OTEL_SERVICE_NAME: omninode-dlq-replay-consumer
+  RUNTIME_PROFILE: effects
+  ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
+  OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  POSTGRES_HOST: postgres
+  ENABLE_RUNTIME_LOG_BRIDGE: 'true'
+operational_defaults:
+  POSTGRES_USER: postgres
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+  KEYCLOAK_REALM: omninode
+  KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
+  KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
+  ONEX_SERVICE_CLIENT_ID: onex-service
+  # Persistent DLQ replay consumer group — kernel reads ONEX_GROUP_ID
+  # (service_kernel.py:639). Replaces ephemeral dlq-replay-{pid}.
+  ONEX_GROUP_ID: onex-dlq-replay
+ports:
+  external: 8097
+  internal: 8085
+healthcheck:
+  test: curl -sf http://localhost:8085/health
+  interval_s: 45
+  timeout_s: 10
+  retries: 5
+  start_period_s: 1800
+volumes:
+  - dlq_replay_consumer_logs:/app/logs
+  - dlq_replay_consumer_data:/app/data
+  - ../contracts:/app/contracts:ro
+depends_on:
+  - service: omninode-runtime
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 768M
+  cpus_reservation: '0.1'
+  memory_reservation: 128M
+stop_grace_period: 90s
+labels:
+  com.omninode.service: dlq-replay-consumer
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'

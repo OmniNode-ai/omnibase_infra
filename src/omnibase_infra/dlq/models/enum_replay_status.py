@@ -22,16 +22,20 @@ class EnumReplayStatus(str, Enum):
     - COMPLETED: Message was successfully replayed to target topic
     - FAILED: Replay attempt failed (will be recorded with error_message)
     - SKIPPED: Message was intentionally not replayed (e.g., non-retryable error)
+    - QUARANTINED: Message was non-replayable and routed to the quarantine
+      topic (onex.dlq.quarantine.v1) instead of being dropped. This replaces
+      the previous skip-and-drop behaviour that silently lost messages.
 
     Usage:
         This enum is the canonical definition for replay status tracking.
-        It is imported by scripts/dlq_replay.py for CLI usage.
+        It is imported by the DLQ replay node and scripts/dlq_replay.py.
     """
 
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    QUARANTINED = "quarantined"
 
 
 __all__: list[str] = ["EnumReplayStatus"]
