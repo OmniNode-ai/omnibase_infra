@@ -5,7 +5,7 @@
 Drives the relocated replay engine: consume DLQ messages from a persistent
 consumer group, decide eligibility with the reused ``should_replay()``, replay
 eligible messages exactly once to their original topic, and QUARANTINE
-non-replayable messages to ``onex.dlq.quarantine.v1`` instead of the legacy
+non-replayable messages to ``onex.dlq.omnibase-infra.quarantine.v1`` instead of the legacy
 skip-and-drop path that silently lost messages.
 
 Truthfulness invariants:

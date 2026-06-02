@@ -38,7 +38,7 @@ class ModelDlqReplayCommand(BaseModel):
         ...,
         min_length=1,
         max_length=255,
-        description="DLQ source topic to drain (e.g. 'onex.dlq.events.v1').",
+        description="DLQ source topic to drain (e.g. 'onex.dlq.omnibase-infra.events.v1').",
     )
     max_replay_count: int = Field(
         default=5,

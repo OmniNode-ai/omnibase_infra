@@ -145,9 +145,9 @@ def test_extract_from_skill_manifests_accepts_canonical_dlq_topics(
         textwrap.dedent(
             """\
             topics:
-              - onex.dlq.intents.v1
-              - onex.dlq.events.v1
-              - onex.dlq.commands.v1
+              - onex.dlq.omnibase-infra.intents.v1
+              - onex.dlq.omnibase-infra.events.v1
+              - onex.dlq.omnibase-infra.commands.v1
             """
         ),
         encoding="utf-8",
@@ -158,9 +158,9 @@ def test_extract_from_skill_manifests_accepts_canonical_dlq_topics(
     topics = {entry.topic for entry in entries}
 
     assert topics == {
-        "onex.dlq.intents.v1",
-        "onex.dlq.events.v1",
-        "onex.dlq.commands.v1",
+        "onex.dlq.omnibase-infra.intents.v1",
+        "onex.dlq.omnibase-infra.events.v1",
+        "onex.dlq.omnibase-infra.commands.v1",
     }
     assert {entry.kind for entry in entries} == {"dlq"}
     assert {entry.producer for entry in entries} == {"dlq"}

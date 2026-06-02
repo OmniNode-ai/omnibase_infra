@@ -4,7 +4,7 @@
 
 Declarative EFFECT shell for replaying Dead Letter Queue messages back to their
 original topics and quarantining non-replayable messages to
-``onex.dlq.quarantine.v1`` instead of dropping them.
+``onex.dlq.omnibase-infra.quarantine.v1`` instead of dropping them.
 
 All behaviour is defined in contract.yaml; this class contains no custom logic.
 
@@ -13,7 +13,7 @@ Architecture:
         -> NodeDlqReplayEffect (this declarative shell)
         -> HandlerDlqReplay
         -> original topic (replay)         when should_replay() is True
-        -> onex.dlq.quarantine.v1          when should_replay() is False
+        -> onex.dlq.omnibase-infra.quarantine.v1          when should_replay() is False
         -> dlq_replay_history (PostgreSQL) for every terminal outcome
 
 Related Tickets:

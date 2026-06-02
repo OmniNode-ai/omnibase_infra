@@ -10,7 +10,7 @@ the node handler drives this engine end-to-end.
 
 What is net-new for OMN-12619:
     - ``DLQQuarantineProducer``: publishes non-replayable messages to
-      ``onex.dlq.quarantine.v1`` instead of the legacy skip-and-drop path.
+      ``onex.dlq.omnibase-infra.quarantine.v1`` instead of the legacy skip-and-drop path.
 
 Eligibility (``should_replay``) is unchanged from the legacy implementation —
 it is not reimplemented; it is moved.
@@ -341,7 +341,7 @@ class DLQProducer:
 
 
 class DLQQuarantineProducer:
-    """Publishes non-replayable messages to onex.dlq.quarantine.v1 (OMN-12619).
+    """Publishes non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (OMN-12619).
 
     This is the durable replacement for the legacy skip-and-drop path. A
     non-replayable message is wrapped with the quarantine decision (reason,

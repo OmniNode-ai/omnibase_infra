@@ -1,6 +1,6 @@
 name: dlq-replay-consumer
 description: >
-  Persistent DLQ replay consumer (OMN-12619). Runs NodeDlqReplayEffect from the onex-dlq-replay consumer group; replays eligible DLQ messages to their original topic and quarantines non-replayable messages to onex.dlq.quarantine.v1 instead of dropping them. Replaces the legacy ephemeral dlq-replay-{pid} group from scripts/dlq_replay.py.
+  Persistent DLQ replay consumer (OMN-12619). Runs NodeDlqReplayEffect from the onex-dlq-replay consumer group; replays eligible DLQ messages to their original topic and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 instead of dropping them. Replaces the legacy ephemeral dlq-replay-{pid} group from scripts/dlq_replay.py.
 
 image: runtime:latest
 layer: runtime

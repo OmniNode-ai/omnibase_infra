@@ -24,6 +24,6 @@ def test_canonical_dlq_topics_are_in_service_manifest() -> None:
     )
     topics = {entry.topic for entry in entries}
 
-    assert "onex.dlq.intents.v1" in topics
-    assert "onex.dlq.events.v1" in topics
-    assert "onex.dlq.commands.v1" in topics
+    assert "onex.dlq.omnibase-infra.intents.v1" in topics
+    assert "onex.dlq.omnibase-infra.events.v1" in topics
+    assert "onex.dlq.omnibase-infra.commands.v1" in topics

@@ -23,7 +23,7 @@ class EnumReplayStatus(str, Enum):
     - FAILED: Replay attempt failed (will be recorded with error_message)
     - SKIPPED: Message was intentionally not replayed (e.g., non-retryable error)
     - QUARANTINED: Message was non-replayable and routed to the quarantine
-      topic (onex.dlq.quarantine.v1) instead of being dropped. This replaces
+      topic (onex.dlq.omnibase-infra.quarantine.v1) instead of being dropped. This replaces
       the previous skip-and-drop behaviour that silently lost messages.
 
     Usage:

@@ -167,28 +167,28 @@ class TestDlqTopicConstants:
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
         topic = build_dlq_topic("intents")
-        assert topic == "onex.dlq.intents.v1"
+        assert topic == "onex.dlq.omnibase-infra.intents.v1"
 
     def test_build_dlq_topic_all_categories(self) -> None:
         """Verify build_dlq_topic handles all message categories."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
         # Test plural forms
-        assert build_dlq_topic("intents") == "onex.dlq.intents.v1"
-        assert build_dlq_topic("events") == "onex.dlq.events.v1"
-        assert build_dlq_topic("commands") == "onex.dlq.commands.v1"
+        assert build_dlq_topic("intents") == "onex.dlq.omnibase-infra.intents.v1"
+        assert build_dlq_topic("events") == "onex.dlq.omnibase-infra.events.v1"
+        assert build_dlq_topic("commands") == "onex.dlq.omnibase-infra.commands.v1"
 
         # Test singular forms (normalized to plural)
-        assert build_dlq_topic("intent") == "onex.dlq.intents.v1"
-        assert build_dlq_topic("event") == "onex.dlq.events.v1"
-        assert build_dlq_topic("command") == "onex.dlq.commands.v1"
+        assert build_dlq_topic("intent") == "onex.dlq.omnibase-infra.intents.v1"
+        assert build_dlq_topic("event") == "onex.dlq.omnibase-infra.events.v1"
+        assert build_dlq_topic("command") == "onex.dlq.omnibase-infra.commands.v1"
 
     def test_build_dlq_topic_custom_version(self) -> None:
         """Verify build_dlq_topic accepts custom version."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
         topic = build_dlq_topic("events", version="v2")
-        assert topic == "onex.dlq.events.v2"
+        assert topic == "onex.dlq.omnibase-infra.events.v2"
 
     def test_build_dlq_topic_invalid_category(self) -> None:
         """Verify build_dlq_topic rejects categories that violate the identifier pattern."""
@@ -201,13 +201,13 @@ class TestDlqTopicConstants:
         """Verify parse_dlq_topic extracts components correctly."""
         from omnibase_infra.event_bus.topic_constants import parse_dlq_topic
 
-        result = parse_dlq_topic("onex.dlq.intents.v1")
+        result = parse_dlq_topic("onex.dlq.omnibase-infra.intents.v1")
         assert result is not None
         assert result["prefix"] == "onex"
         assert result["category"] == "intents"
         assert result["version"] == "v1"
 
-        result = parse_dlq_topic("onex.dlq.events.v2")
+        result = parse_dlq_topic("onex.dlq.omnibase-infra.events.v2")
         assert result is not None
         assert result["prefix"] == "onex"
         assert result["category"] == "events"
@@ -227,9 +227,9 @@ class TestDlqTopicConstants:
         """Verify is_dlq_topic returns True for DLQ topics."""
         from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 
-        assert is_dlq_topic("onex.dlq.intents.v1") is True
-        assert is_dlq_topic("onex.dlq.events.v1") is True
-        assert is_dlq_topic("onex.dlq.commands.v2") is True
+        assert is_dlq_topic("onex.dlq.omnibase-infra.intents.v1") is True
+        assert is_dlq_topic("onex.dlq.omnibase-infra.events.v1") is True
+        assert is_dlq_topic("onex.dlq.omnibase-infra.commands.v2") is True
 
     def test_is_dlq_topic_false(self) -> None:
         """Verify is_dlq_topic returns False for non-DLQ topics."""

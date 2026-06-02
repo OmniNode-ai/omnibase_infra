@@ -50,7 +50,7 @@ _APPROVED_PACKAGES: tuple[str, ...] = (
     "omnimarket",
 )
 
-_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent"})
+_VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent", "dlq"})
 _VALID_DLQ_CATEGORIES: frozenset[str] = frozenset({"intents", "events", "commands"})
 _RE_VERSION = re.compile(r"^v\d+$")
 _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
@@ -59,10 +59,11 @@ _RE_PRODUCER = re.compile(r"^[a-z0-9-]+$")  # no underscores allowed
 # Regex to identify ONEX topic string literals in Python source code.
 # Matches either:
 #   - 5-segment standard topics: onex.<kind>.<producer>.<event-name>.<version>
-#   - 4-segment DLQ topics: onex.dlq.<category>.<version>
+#   - 5-segment DLQ topics: onex.dlq.<producer>.<category>.<version>
+#   - 4-segment legacy DLQ topics: onex.dlq.<category>.<version>
 _RE_ONEX_TOPIC_LITERAL = re.compile(
     r"^onex\.(?:"
-    r"(?:evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+"
+    r"(?:evt|cmd|intent|dlq)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+"
     r"|dlq\.[a-z0-9._-]+\.v\d+"
     r")$"
 )

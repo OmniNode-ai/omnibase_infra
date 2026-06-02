@@ -15,7 +15,7 @@ the consumer / replay producer / quarantine producer / tracking service:
     5. dlq_replay_history records every terminal outcome.
     6. Eligibility is decided by the reused should_replay() (max-retry,
        non-retryable error type) — not a reimplementation.
-    7. The QUARANTINED enum member and onex.dlq.quarantine.v1 constant exist.
+    7. The QUARANTINED enum member and onex.dlq.omnibase-infra.quarantine.v1 constant exist.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def _make_message(
 def _config(**overrides: object) -> ModelDlqReplayEngineConfig:
     base: dict[str, object] = {
         "bootstrap_servers": "localhost:9092",
-        "dlq_topic": "onex.dlq.events.v1",
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
         "max_replay_count": 5,
     }
     base.update(overrides)
@@ -148,7 +148,7 @@ def _handler(
 
 
 def test_quarantine_constants_exist() -> None:
-    assert TOPIC_DLQ_QUARANTINE == "onex.dlq.quarantine.v1"
+    assert TOPIC_DLQ_QUARANTINE == "onex.dlq.omnibase-infra.quarantine.v1"
     assert EnumReplayStatus.QUARANTINED.value == "quarantined"
     assert DLQ_REPLAY_CONSUMER_GROUP == "onex-dlq-replay"
 
@@ -252,7 +252,7 @@ async def test_handle_envelope_returns_typed_output() -> None:
     correlation_id = uuid4()
     envelope: ModelEventEnvelope[ModelDlqReplayRunResult] = ModelEventEnvelope(
         payload=ModelDlqReplayRunResult(
-            dlq_topic="onex.dlq.events.v1",
+            dlq_topic="onex.dlq.omnibase-infra.events.v1",
             total_processed=0,
             completed=0,
             quarantined=0,

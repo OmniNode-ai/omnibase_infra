@@ -1158,9 +1158,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         DLQ Topic Naming Convention:
             Format: onex.dlq.<category>.v1
             Examples:
-                - onex.dlq.intents.v1 (for permanently failed intents)
-                - onex.dlq.events.v1 (for permanently failed events)
-                - onex.dlq.commands.v1 (for permanently failed commands)
+                - onex.dlq.omnibase-infra.intents.v1 (for permanently failed intents)
+                - onex.dlq.omnibase-infra.events.v1 (for permanently failed events)
+                - onex.dlq.omnibase-infra.commands.v1 (for permanently failed commands)
 
         Args:
             category: Message category for DLQ routing. Valid values:
@@ -1177,9 +1177,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         Example:
             >>> config = ModelKafkaEventBusConfig(environment="local")
             >>> config.get_dlq_topic()
-            'onex.dlq.intents.v1'  # onex-topic-allow: pending contract auto-wiring
+            'onex.dlq.omnibase-infra.intents.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> config.get_dlq_topic("events")
-            'onex.dlq.events.v1'  # onex-topic-allow: pending contract auto-wiring
+            'onex.dlq.omnibase-infra.events.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> # Explicit topic takes precedence
             >>> config = ModelKafkaEventBusConfig(
             ...     environment="local",
