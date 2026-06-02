@@ -618,6 +618,11 @@ def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     assert action["inputs"]["sync-attempts"]["default"] == "5"
     assert action["inputs"]["sync-retry-delay-seconds"]["default"] == "10"
 
+    setup_step = next(
+        step for step in action["runs"]["steps"] if step.get("name") == "Set up Python"
+    )
+    assert setup_step["uses"] == "actions/setup-python@v6"
+
     install_step = next(
         step
         for step in action["runs"]["steps"]
