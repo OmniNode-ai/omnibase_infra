@@ -727,7 +727,7 @@ def test_extract_from_real_nodes_directory() -> None:
 
     # All results must be valid ModelContractTopicEntry objects
     for entry in results:
-        assert entry.kind in {"evt", "cmd", "intent"}
+        assert entry.kind in {"evt", "cmd", "intent", "dlq"}
         assert entry.topic.startswith("onex.")
         assert len(entry.source_contracts) >= 1
         assert entry.version.startswith("v")
