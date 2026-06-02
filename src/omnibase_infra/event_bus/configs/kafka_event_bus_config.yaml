@@ -67,6 +67,13 @@ circuit_breaker_reset_timeout: ${KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT:-30.0}
 
 # Sleep interval in seconds between consumer poll iterations
 consumer_sleep_interval: ${KAFKA_CONSUMER_SLEEP_INTERVAL:-0.1}
+# Cold-start consumer concurrency (OMN-12448). Contract-config only — no env
+# override — so a runtime subscribing to hundreds of topics throttles the burst
+# of consumer-group joins instead of stampeding the broker group coordinator.
+# Max consumer-group starts in flight during start_consuming().
+consumer_start_concurrency: 32
+# Retry passes for a transiently-failing consumer start before aborting boot.
+consumer_start_max_retries: 3
 # Where to start reading messages when no committed offset exists
 # Options: "earliest" (beginning), "latest" (end of topic)
 auto_offset_reset: "${KAFKA_AUTO_OFFSET_RESET:-latest}"

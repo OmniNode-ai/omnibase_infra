@@ -44,6 +44,15 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _runs_on_expression(job: dict[str, Any]) -> str:
+    runs_on = job.get("runs-on")
+    if runs_on is None:
+        return ""
+    if isinstance(runs_on, str):
+        return runs_on
+    return str(runs_on)
+
+
 def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-freeze"]
@@ -408,6 +417,29 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     assert "uv sync onex_change_control failed after" in run_script
 
 
+def test_merge_group_and_docker_workflows_have_runner_pool_overrides() -> None:
+    ci_workflow = _load_yaml(CI_WORKFLOW)
+    for job_name, job in ci_workflow["jobs"].items():
+        expression = _runs_on_expression(job)
+        if "self-hosted" not in expression:
+            continue
+
+        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_REQUIRED_CI_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
+        assert "github.event_name == 'merge_group'" in expression, job_name
+
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    for job_name, job in docker_workflow["jobs"].items():
+        expression = _runs_on_expression(job)
+        if "self-hosted" not in expression:
+            continue
+
+        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_DOCKER_CI_RUNS_ON_JSON" in expression, job_name
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
+
+
 def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
     ci_workflow = _load_yaml(CI_WORKFLOW)
     for job_name in ("topic-drift-check", "schema-handshake"):
@@ -554,6 +586,30 @@ def test_runtime_dockerfile_retries_torch_cpu_index_transport_flakes() -> None:
         in dockerfile
     )
     assert "UV_RETRY_ATTEMPTS=8" in dockerfile
+
+
+def test_omni_standards_jobs_use_retrying_uv_install() -> None:
+    workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
+
+    assert workflow["env"]["UV_HTTP_TIMEOUT"] == "600"
+
+    for job_name in ("type-safety", "type-union-check"):
+        steps = workflow["jobs"][job_name]["steps"]
+        setup_step = next(
+            step
+            for step in steps
+            if step.get("uses") == "./.github/actions/setup-python-uv"
+        )
+
+        assert setup_step["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
+        assert setup_step["with"]["uv-version"] == "${{ env.UV_VERSION }}"
+        assert setup_step["with"]["cache-enabled"] == "false"
+        assert setup_step["with"]["install-args"] == "--all-extras"
+        assert setup_step["with"]["sync-attempts"] == "3"
+        assert setup_step["with"]["sync-retry-delay-seconds"] == "10"
+        assert not any(
+            step.get("run") == "uv sync --no-cache --all-extras" for step in steps
+        )
 
 
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:

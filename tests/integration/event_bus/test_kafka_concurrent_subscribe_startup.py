@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -141,3 +142,164 @@ async def test_start_consuming_starts_distinct_consumers_in_parallel() -> None:
     assert len(started) == 3
     assert len(set(started)) == 3
     assert max_active_starts > 1
+
+
+# ---------------------------------------------------------------------------
+# OMN-12448: bounded consumer-startup concurrency + retry-then-raise.
+# Unbounded asyncio.gather over ~870 group-joins stampedes the broker's group
+# coordinator; one slow join blowing the timeout aborts the whole boot, which
+# crash-loops the runtime. start_consuming must cap in-flight starts and retry
+# transient failures before failing the boot.
+# ---------------------------------------------------------------------------
+
+
+def _make_bus_tuned(concurrency: int, max_retries: int) -> EventBusKafka:
+    return EventBusKafka(
+        config=ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:19092",
+            environment="test",
+            consumer_start_concurrency=concurrency,
+            consumer_start_max_retries=max_retries,
+        )
+    )
+
+
+async def _drive_start_consuming(bus: EventBusKafka) -> None:
+    """Run start_consuming to completion of the startup fan-out, then stop."""
+    task = asyncio.create_task(bus.start_consuming())
+    await asyncio.sleep(0.2)
+    await bus.shutdown()
+    await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_caps_in_flight_consumer_starts() -> None:
+    """In-flight consumer starts must never exceed consumer_start_concurrency."""
+    concurrency = 4
+    total = 20
+    bus = _make_bus_tuned(concurrency=concurrency, max_retries=3)
+    bus._started = True
+
+    active = 0
+    max_active = 0
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        bus._group_consumers[(topic, group_id)] = AsyncMock()
+        bus._pending_consumer_keys.discard((topic, group_id))
+        active -= 1
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    async with bus._lock:
+        for idx in range(total):
+            bus._subscribers[f"onex.evt.omnibase-infra.bound-{idx}.v1"] = [
+                ("service", f"sub-{idx}", _handler),
+            ]
+
+    await _drive_start_consuming(bus)
+
+    assert bus._start_consumer_for_topic_unlocked.await_count == total
+    assert max_active <= concurrency
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_retries_transient_failure_without_aborting_boot() -> (
+    None
+):
+    """A consumer that fails once then succeeds must not abort the boot."""
+    bus = _make_bus_tuned(concurrency=4, max_retries=2)
+    bus._started = True
+
+    attempts: dict[str, int] = {}
+    flaky = "onex.evt.omnibase-infra.flaky.v1"
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        attempts[topic] = attempts.get(topic, 0) + 1
+        if topic == flaky and attempts[topic] == 1:
+            # Mirror the real failure path: pending key discarded before raising.
+            bus._pending_consumer_keys.discard((topic, group_id))
+            raise InfraConnectionError("transient group-join timeout")
+        bus._group_consumers[(topic, group_id)] = AsyncMock()
+        bus._pending_consumer_keys.discard((topic, group_id))
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    async with bus._lock:
+        bus._subscribers[flaky] = [("service", "sub-flaky", _handler)]
+        bus._subscribers["onex.evt.omnibase-infra.healthy.v1"] = [
+            ("service", "sub-healthy", _handler),
+        ]
+
+    # Must NOT raise — the flaky consumer recovers on retry.
+    await _drive_start_consuming(bus)
+
+    assert attempts[flaky] == 2
+    assert (flaky, "service.__t." + flaky) not in bus._pending_consumer_keys
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_raises_after_retries_exhausted() -> None:
+    """A consumer that always fails raises only after max_retries are spent."""
+    max_retries = 2
+    bus = _make_bus_tuned(concurrency=4, max_retries=max_retries)
+    bus._started = True
+
+    attempts: dict[str, int] = {}
+    broken = "onex.evt.omnibase-infra.broken.v1"
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        attempts[topic] = attempts.get(topic, 0) + 1
+        if topic == broken:
+            bus._pending_consumer_keys.discard((topic, group_id))
+            raise InfraConnectionError("permanent group-join failure")
+        bus._group_consumers[(topic, group_id)] = AsyncMock()
+        bus._pending_consumer_keys.discard((topic, group_id))
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    async with bus._lock:
+        bus._subscribers[broken] = [("service", "sub-broken", _handler)]
+        bus._subscribers["onex.evt.omnibase-infra.ok.v1"] = [
+            ("service", "sub-ok", _handler),
+        ]
+
+    with pytest.raises(InfraConnectionError, match="permanent group-join failure"):
+        await bus.start_consuming()
+
+    # Initial attempt + max_retries retries.
+    assert attempts[broken] == max_retries + 1
+
+
+@pytest.mark.asyncio
+async def test_start_consuming_does_not_retry_cancellation() -> None:
+    """Cancellation must propagate instead of being treated as a Kafka start retry."""
+    bus = _make_bus_tuned(concurrency=4, max_retries=2)
+    bus._started = True
+
+    cancelled = "onex.evt.omnibase-infra.cancelled.v1"
+
+    async def fake_start(topic: str, group_id: str) -> None:
+        bus._pending_consumer_keys.discard((topic, group_id))
+        raise asyncio.CancelledError
+
+    bus._start_consumer_for_topic_unlocked = AsyncMock(  # type: ignore[method-assign]
+        side_effect=fake_start
+    )
+
+    async with bus._lock:
+        bus._subscribers[cancelled] = [("service", "sub-cancelled", _handler)]
+
+    with pytest.raises(asyncio.CancelledError):
+        await bus.start_consuming()
+
+    assert bus._start_consumer_for_topic_unlocked.await_count == 1
