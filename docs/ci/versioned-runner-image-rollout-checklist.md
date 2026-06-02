@@ -37,11 +37,22 @@ contract must be proven on a **freshly recreated** runner.
 - [ ] Run the validation script on the freshly recreated runner and confirm
       `RESULT: GREEN`:
       `scripts/ci/validate_runner_image.sh --json`.
+- [ ] **node24 capability canary (OMN-12585) — REQUIRED before fleet rollout.**
+      Dispatch a job onto the *recreated* runner that uses `actions/checkout@v6`
+      (a `using: node24` action) and confirm "Set up job" + "Checkout code" pass.
+      A build-only smoke is **insufficient**: PR CI runs on the OLD fleet, so it
+      never exercises the NEW image's runner version against a node24 action. This
+      is the exact gap that let OMN-12567 ship a `2.323.0` runner that broke
+      org-wide CI with `'using: node24' is not supported`. The baked runner must
+      bundle `externals/node24` (present only at runner `>= 2.327.0`); the
+      build-smoke workflow asserts this statically, but the deployed-runner
+      checkout@v6 job is the live proof.
 - [ ] Confirm at least one real CI job ran green on the recreated runner and the
       job's startup evidence shows the bound `runner_image_identity` (from the
       `emit-runner-identity` action) matching the committed lock.
 
-Only after this gate is green does the fleet rollout below begin.
+Only after this gate (including the node24 canary) is green does the fleet
+rollout below begin.
 
 ## Per-repo migration steps
 
@@ -125,9 +136,28 @@ exits non-zero on any required failure:
 It is a **read-only** assertion — it never recreates, restarts, or registers a
 runner. Recreation is a separate, operator-run live runtime step.
 
+## RUNNER_VERSION floor gate (OMN-12585)
+
+Independent of the runner-side validation above, two static invariants on the
+baked `RUNNER_VERSION` are enforced as a **unit gate on every PR**
+(`tests/ci/test_runner_image_node24_floor.py`) and re-asserted by the
+build-smoke workflow:
+
+1. **node24-capable** — `RUNNER_VERSION >= 2.327.0` (node24 execution support;
+   actions/runner#3940). Below this, `actions/checkout@v6` fails at "Set up job".
+2. **non-downgrade** — `RUNNER_VERSION >= 2.334.0` (the live fleet). Bumping the
+   fleet forward means raising `LIVE_FLEET_FLOOR` in that test in the same change.
+
+The Dockerfile `ARG`, the SHA256 comment, and the lock `runner_version` must all
+agree, so a partial bump (version updated, checksum or lock stale) also fails the
+gate. This is "enforcement, not detection": the regression that let a `2.323.0`
+runner reach the fleet had no gate — now it cannot merge green.
+
 ## Acceptance (OMN-12568)
 
 - One repo (`omnibase_infra`) runs green on the versioned image **after fresh
   runner recreation** — proven by `validate_runner_image.sh` returning
   `RESULT: GREEN` on the recreated runner plus a green CI run.
+- A `actions/checkout@v6` (node24) job runs green on the recreated runner before
+  fleet rollout (OMN-12585).
 - This rollout checklist exists with explicit opt-outs noted (this document).
