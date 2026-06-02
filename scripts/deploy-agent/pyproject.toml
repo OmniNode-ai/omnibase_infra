@@ -11,11 +11,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-aiohttp>=1.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-aiohttp>=1.0", "pyyaml>=6.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["unit: unit tests in isolation"]
 
 [tool.setuptools.packages.find]
 include = ["deploy_agent*"]

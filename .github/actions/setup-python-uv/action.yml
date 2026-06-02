@@ -53,8 +53,7 @@ inputs:
     default: ${{ github.token }}
   shared-env-enabled:
     description: >-
-      Use the host-local immutable CI environment cache. "auto" enables it only
-      when OMNI_CI_SHARED_ENV_ENABLED=true in the workflow environment.
+      Use the host-local immutable CI environment cache. "auto" enables it only when OMNI_CI_SHARED_ENV_ENABLED=true in the workflow environment.
     required: false
     default: 'auto'
   shared-env-root:
@@ -202,3 +201,36 @@ runs:
           sleep "$sleep_seconds"
           attempt=$((attempt + 1))
         done
+    - name: Emit runner image identity
+      # OMN-12567: every job that prepares Python emits the bound runner image
+      # identity as startup evidence so image-drift debugging is deterministic.
+      # The action-relative path makes this work for both same-repo and
+      # cross-repo (subdir) checkout layouts.
+      shell: bash
+      run: |
+        set -euo pipefail
+        scripts_ci="${GITHUB_ACTION_PATH}/../../../scripts/ci"
+        lock_file="${GITHUB_ACTION_PATH}/../../../docker/runners/runner-image.lock.json"
+        if [[ ! -f "${lock_file}" ]]; then
+          echo "::warning::runner image lock file not found at ${lock_file}; skipping identity emission"
+          exit 0
+        fi
+        if [[ -n "${pythonLocation:-}" && -x "${pythonLocation}/bin/python" ]]; then
+          python_bin="${pythonLocation}/bin/python"
+        else
+          python_bin="$(command -v python3)"
+        fi
+        evidence="$(
+          PYTHONPATH="${scripts_ci}" "${python_bin}" \
+            "${scripts_ci}/runner_image_identity.py" \
+            --lock-file "${lock_file}" --mode emit
+        )"
+        echo "runner image identity (startup evidence): ${evidence}"
+        echo "OMNI_RUNNER_IMAGE_IDENTITY_EVIDENCE=${evidence}" >> "${GITHUB_ENV}"
+        {
+          echo "### Runner image identity (OMN-12567)"
+          echo ""
+          echo '```json'
+          echo "${evidence}"
+          echo '```'
+        } >> "${GITHUB_STEP_SUMMARY}"

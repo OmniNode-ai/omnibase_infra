@@ -13,6 +13,7 @@
 #   - OMN-6082: Runner health snapshot CLI emitter
 #   - OMN-6091: Full ONEX node conversion (deferred)
 #   - OMN-7114: Register missing topics in provisioner
+#   - OMN-12566: Docker subnet-pool occupancy events (same CLI emitter)
 name: "node_runner_health_snapshot_effect"
 contract_version:
   major: 1
@@ -42,11 +43,16 @@ event_bus:
   subscribe_topics: []
   publish_topics:
     - "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+    - "onex.evt.omnibase-infra.network-pool-status.v1"
 published_events:
   - topic: "onex.evt.omnibase-infra.runner-health-snapshot.v1"
     event_type: "RunnerHealthSnapshotEvent"
     message_category: "EVENT"
     description: "Periodic health snapshot from GitHub Actions runners"
+  - topic: "onex.evt.omnibase-infra.network-pool-status.v1"
+    event_type: "NetworkPoolStatusEvent"
+    message_category: "EVENT"
+    description: "Periodic Docker subnet-pool occupancy snapshot from runner hosts"
 metadata:
   description: "Captures point-in-time health metrics from GitHub Actions runners and publishes snapshots for trend analysis"
   author: "OmniNode Team"

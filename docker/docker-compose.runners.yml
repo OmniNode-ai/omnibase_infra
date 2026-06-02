@@ -58,12 +58,17 @@ x-runner-base: &runner-base
     - /var/run/docker.sock:/var/run/docker.sock
     - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+    - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
   group_add:
     - "984" # Match host Docker socket GID for DinD access
+  # OMN-12433: healthcheck proves BOTH the listener is alive AND github.com is
+  # reachable. The old pgrep-only check passed while runners were silently
+  # disconnected from GitHub (lost egress), letting dead runners stay in the
+  # pool and wedge the merge queue. timeout covers the curl --max-time 8.
   healthcheck:
-    test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+    test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
     interval: 30s
-    timeout: 10s
+    timeout: 12s
     retries: 3
     start_period: 120s
   logging:
@@ -82,6 +87,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
@@ -93,6 +99,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
@@ -104,6 +111,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
@@ -115,6 +123,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
@@ -126,6 +135,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
@@ -137,6 +147,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
@@ -148,6 +159,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
@@ -159,6 +171,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
@@ -170,6 +183,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
@@ -181,6 +195,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-10-creds:/home/runner/.runner-creds
   omninode-runner-11:
     !!merge <<: *runner-base
@@ -192,6 +207,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-11-creds:/home/runner/.runner-creds
   omninode-runner-12:
     !!merge <<: *runner-base
@@ -203,6 +219,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
@@ -214,6 +231,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
@@ -225,6 +243,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
@@ -237,6 +256,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
@@ -249,6 +269,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
@@ -261,6 +282,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
@@ -273,6 +295,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
@@ -285,6 +308,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
@@ -297,6 +321,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-20-creds:/home/runner/.runner-creds
 volumes:
   runner-1-creds:

@@ -176,7 +176,8 @@ async def test_cli_emit_publishes_snapshot(
         result = await main(["--host", "192.168.86.201", "--emit"])
 
     assert result == 0
-    mock_emit.assert_awaited_once_with(mock_snapshot)
+    # Without --network there are no extra network-pool events to ride along.
+    mock_emit.assert_awaited_once_with(mock_snapshot, extra_events=())
 
 
 @pytest.mark.unit
@@ -223,3 +224,129 @@ async def test_cli_uses_configured_runner_count(
         runner_count=12,
         runner_prefix="omninode-runner",
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_network_events_ride_snapshot_emit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--network --emit: network-pool + janitor events ride the snapshot emit
+    through the SAME _emit_to_kafka call (single Kafka credential read)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4 as _uuid4
+
+    from omnibase_infra.observability.runner_health.model_network_janitor_result import (
+        ModelNetworkJanitorResult,
+    )
+    from omnibase_infra.observability.runner_health.model_network_pool_status import (
+        ModelNetworkPoolStatus,
+    )
+
+    config_path = tmp_path / "runner_fleet.yaml"
+    _write_runner_fleet_config(config_path)
+    monkeypatch.setenv("RUNNER_FLEET_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    mock_snapshot = _make_snapshot()
+
+    janitor_result = ModelNetworkJanitorResult(
+        correlation_id=_uuid4(),
+        ran_at=datetime.now(tz=UTC),
+        host="192.168.86.201",
+        dry_run=True,
+        decisions=(),
+        reclaimed=(),
+        reclaim_errors=(),
+    )
+    pool_status = ModelNetworkPoolStatus(
+        host="192.168.86.201", network_count=5, pool_capacity=31
+    )
+
+    with (
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.CollectorRunnerHealth"
+        ) as mock_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.JanitorDockerNetwork"
+        ) as mock_janitor_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.CollectorNetworkPool"
+        ) as mock_pool_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health._emit_to_kafka",
+            new=AsyncMock(),
+        ) as mock_emit,
+    ):
+        mock_cls.return_value.collect = AsyncMock(return_value=mock_snapshot)
+        mock_janitor_cls.return_value.run = AsyncMock(return_value=janitor_result)
+        mock_pool_cls.return_value.collect = AsyncMock(return_value=pool_status)
+        result = await main(["--host", "192.168.86.201", "--network", "--emit"])
+
+    assert result == 0
+    mock_emit.assert_awaited_once()
+    _, kwargs = mock_emit.await_args
+    extra = kwargs["extra_events"]
+    # Two extra events: pool status + janitor result, both on the network topic.
+    assert len(extra) == 2
+    topics = {ev[0] for ev in extra}
+    assert topics == {"onex.evt.omnibase-infra.network-pool-status.v1"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_network_pool_pressure_alerts_when_healthy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pool pressure fires a Slack alert even when all runners are healthy —
+    the alert is NOT gated on runner degradation (OMN-12566)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4 as _uuid4
+
+    from omnibase_infra.observability.runner_health.model_network_janitor_result import (
+        ModelNetworkJanitorResult,
+    )
+    from omnibase_infra.observability.runner_health.model_network_pool_status import (
+        ModelNetworkPoolStatus,
+    )
+
+    config_path = tmp_path / "runner_fleet.yaml"
+    _write_runner_fleet_config(config_path)
+    monkeypatch.setenv("RUNNER_FLEET_CONFIG_PATH", str(config_path))
+    mock_snapshot = _make_snapshot(healthy_count=10, degraded_count=0)
+
+    janitor_result = ModelNetworkJanitorResult(
+        correlation_id=_uuid4(),
+        ran_at=datetime.now(tz=UTC),
+        host="192.168.86.201",
+        dry_run=True,
+    )
+    # 28/31 networks -> over the 0.8 threshold -> pressure alert.
+    pool_status = ModelNetworkPoolStatus(
+        host="192.168.86.201", network_count=28, pool_capacity=31
+    )
+
+    with (
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.CollectorRunnerHealth"
+        ) as mock_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.JanitorDockerNetwork"
+        ) as mock_janitor_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health.CollectorNetworkPool"
+        ) as mock_pool_cls,
+        patch(
+            "omnibase_infra.observability.runner_health.cli_runner_health._send_slack_alert",
+            new=AsyncMock(),
+        ) as mock_alert,
+    ):
+        mock_cls.return_value.collect = AsyncMock(return_value=mock_snapshot)
+        mock_janitor_cls.return_value.run = AsyncMock(return_value=janitor_result)
+        mock_pool_cls.return_value.collect = AsyncMock(return_value=pool_status)
+        result = await main(["--host", "192.168.86.201", "--network", "--alert"])
+
+    assert result == 0
+    mock_alert.assert_awaited_once()
+    _, kwargs = mock_alert.await_args
+    assert kwargs["extra_message"], "pool pressure message must be present"
+    assert "Subnet Pool Pressure" in kwargs["extra_message"]

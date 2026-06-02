@@ -54,6 +54,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.inference-response.v1"  # onex.evt.omnibase-infra.inference-response.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
+    EVT_NETWORK_POOL_STATUS_V1 = "onex.evt.omnibase-infra.network-pool-status.v1"  # onex.evt.omnibase-infra.network-pool-status.v1
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1

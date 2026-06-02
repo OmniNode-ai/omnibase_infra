@@ -69,6 +69,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_LINEAR_SNAPSHOT,
     SUFFIX_LLM_EMBEDDING_REQUEST,
     SUFFIX_LLM_INFERENCE_REQUEST,
+    SUFFIX_NETWORK_POOL_STATUS,
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
@@ -235,6 +236,8 @@ __all__: list[str] = [
     "SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED",
     # Runner health monitoring (OMN-6075)
     "SUFFIX_RUNNER_HEALTH_SNAPSHOT",
+    # Docker subnet-pool occupancy (OMN-12566)
+    "SUFFIX_NETWORK_POOL_STATUS",
     # Row count probe diagnostic (OMN-5653)
     "SUFFIX_ROW_COUNT_DIAGNOSTIC",
     # Runtime health event pipeline (OMN-5529)
