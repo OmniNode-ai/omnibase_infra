@@ -521,6 +521,30 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     assert job["timeout-minutes"] >= 10
 
 
+def test_omni_standards_jobs_use_retrying_uv_install() -> None:
+    workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
+
+    assert workflow["env"]["UV_HTTP_TIMEOUT"] == "600"
+
+    for job_name in ("type-safety", "type-union-check"):
+        steps = workflow["jobs"][job_name]["steps"]
+        setup_step = next(
+            step
+            for step in steps
+            if step.get("uses") == "./.github/actions/setup-python-uv"
+        )
+
+        assert setup_step["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
+        assert setup_step["with"]["uv-version"] == "${{ env.UV_VERSION }}"
+        assert setup_step["with"]["cache-enabled"] == "false"
+        assert setup_step["with"]["install-args"] == "--all-extras"
+        assert setup_step["with"]["sync-attempts"] == "3"
+        assert setup_step["with"]["sync-retry-delay-seconds"] == "10"
+        assert not any(
+            step.get("run") == "uv sync --no-cache --all-extras" for step in steps
+        )
+
+
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
