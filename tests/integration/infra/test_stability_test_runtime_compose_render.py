@@ -119,12 +119,13 @@ COMPOSE_RENDER_ENV = {
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
-    "ONEX_INFRA_HOST": "192.0.2.10",
-    "ONEX_INFRA_USER": "render-only-user",
+    "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
+    "ONEX_INFRA_HOST": "192.168.86.201",
+    "ONEX_INFRA_USER": "jonah",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
-    "REDPANDA_ADVERTISE_HOST": "localhost",
+    "STABILITY_TEST_REDPANDA_ADVERTISE_HOST": "100.109.203.94",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
@@ -247,8 +248,9 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
-        assert environment["ONEX_INFRA_HOST"] == "192.0.2.10"
-        assert environment["ONEX_INFRA_USER"] == "render-only-user"
+        assert environment["ONEX_INFRA_HOST"] == "192.168.86.201"
+        assert environment["ONEX_INFRA_USER"] == "jonah"
+        assert environment["ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
         assert "image" not in services[service_name]
@@ -389,7 +391,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         assert published_ports.isdisjoint(PRODUCTION_PUBLISHED_PORTS)
 
     redpanda_command = " ".join(services["redpanda"]["command"])
-    assert "localhost:39092" in redpanda_command
+    assert "100.109.203.94:39092" in redpanda_command
+    assert "100.109.203.94:28082" in redpanda_command
+    assert "192.168.86.201:39092" not in redpanda_command
     assert "localhost:19092" not in redpanda_command
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
@@ -406,3 +410,17 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         }
         assert "/app/contracts" not in volume_targets, service_name
         assert "/app/skills" in volume_targets, service_name
+        assert "/data/omninode/omni_home" in volume_targets, service_name
+
+
+@pytest.mark.integration
+def test_stability_lane_render_exposes_session_health_contract() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment["ONEX_INFRA_HOST"] == "192.168.86.201"
+        assert environment["ONEX_INFRA_USER"] == "jonah"
+        assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"

@@ -154,11 +154,18 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert (
             environment["ONEX_INFRA_HOST"]
-            == "${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}"
+            == "${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}"
         )
         assert (
             environment["ONEX_INFRA_USER"]
-            == "${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}"
+            == "${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}"
+        )
+        assert (
+            environment["OMNI_HOME"]
+            == "${OMNI_HOME:?OMNI_HOME required for stability session health probes}"
+        )
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == (
+            "${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
         )
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
@@ -233,6 +240,18 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
 
 
 @pytest.mark.unit
+def test_stability_lane_redpanda_requires_connected_network_advertise_host() -> None:
+    overlay = _load_overlay()
+    redpanda_command = " ".join(overlay["services"]["redpanda"]["command"])
+
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" in redpanda_command
+    assert "${REDPANDA_ADVERTISE_HOST" not in redpanda_command
+    assert "localhost:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT" not in redpanda_command
+    assert "localhost:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT" not in redpanda_command
+    assert "reachable by all stability-test operators" in redpanda_command
+
+
+@pytest.mark.unit
 def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
@@ -304,6 +323,37 @@ def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> N
         assert "../contracts:/app/contracts:ro" not in volumes
         assert all(":/app/contracts" not in volume for volume in volumes)
         assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+
+
+@pytest.mark.unit
+def test_stability_lane_runtime_services_define_session_health_contract() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    for service_name in RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        volumes = services[service_name]["volumes"]
+
+        assert (
+            "ONEX_INFRA_HOST required for stability session health probes"
+            in environment["ONEX_INFRA_HOST"]
+        )
+        assert (
+            "ONEX_INFRA_USER required for stability session health probes"
+            in environment["ONEX_INFRA_USER"]
+        )
+        assert (
+            "OMNI_HOME required for stability session health probes"
+            in environment["OMNI_HOME"]
+        )
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == (
+            "${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+        )
+        assert (
+            "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:"
+            "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
+            in volumes
+        )
 
 
 @pytest.mark.unit

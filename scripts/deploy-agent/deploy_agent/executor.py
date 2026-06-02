@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict
 
@@ -63,6 +65,61 @@ RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
 )
 
 _BUILD_SOURCE_ALLOWED = ", ".join(source.value for source in BuildSource)
+
+# Promotion-lineage guard (OMN-12626, R1). Loaded from scripts/ by file path
+# because scripts/ is not an importable package. The guard refuses to build a
+# prod-bound (release-mode) image from a dirty or non-promoted source tree.
+_PROMOTION_GUARD_PATH = Path(REPO_DIR) / "scripts" / "check_prod_promotion_lineage.py"
+
+
+def _load_promotion_guard() -> ModuleType:
+    """Load the prod promotion-lineage guard module from scripts/ by path.
+
+    Raises RuntimeError (fail-fast) when the guard is missing so a release
+    build can never silently skip the clean-tree + promoted-lineage check.
+    """
+    mod_name = "check_prod_promotion_lineage"
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
+    if not _PROMOTION_GUARD_PATH.is_file():
+        raise RuntimeError(
+            "prod promotion-lineage guard not found at "
+            f"{_PROMOTION_GUARD_PATH}; cannot verify clean+promoted build source."
+        )
+    spec = importlib.util.spec_from_file_location(mod_name, _PROMOTION_GUARD_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(
+            f"could not load prod promotion-lineage guard from {_PROMOTION_GUARD_PATH}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def assert_release_build_promoted(
+    build_source: BuildSource, *, repo_dir: str = REPO_DIR
+) -> None:
+    """Enforce clean + promoted source for prod-bound (release-mode) builds.
+
+    Release-mode builds produce the digest that is later pinned and promoted to
+    prod. They MUST come from a clean working tree whose HEAD is an
+    ancestor-of/equal-to origin/main. Workspace builds (local dev iteration) are
+    exempt by design — they never reach prod.
+
+    Raises the guard's ``ProdLineageError`` when the source is dirty or
+    not promoted. Fails the build CLOSED before any docker build side effects.
+    """
+    if build_source != BuildSource.RELEASE:
+        return
+    guard = _load_promotion_guard()
+    sha = guard.assert_prod_build_promoted(Path(repo_dir))
+    logger.info(
+        "assert_release_build_promoted: release build source %s is clean and "
+        "promoted (HEAD %s is ancestor-of/equal-to origin/main)",
+        repo_dir,
+        sha[:12],
+    )
 
 
 class DigestMismatchError(RuntimeError):
@@ -926,6 +983,11 @@ class DeployExecutor:
 
         selected_source = _coerce_build_source(build_source, layer="deploy-agent")
         omni_home = os.environ.get("OMNI_HOME", "").strip()
+
+        # OMN-12626 (R1): release-mode builds produce the digest that is later
+        # pinned/promoted to prod. Refuse to build one from a dirty or
+        # non-promoted (dev-only) source tree before any docker side effects.
+        assert_release_build_promoted(selected_source)
 
         if selected_source == BuildSource.WORKSPACE:
             if not omni_home:

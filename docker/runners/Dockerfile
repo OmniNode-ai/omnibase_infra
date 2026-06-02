@@ -89,6 +89,7 @@ exec curl \
   --retry-delay 5 \
   --retry-max-time 300 \
   --retry-connrefused \
+  --retry-all-errors \
   "$@"
 EOF
 
@@ -107,8 +108,11 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip
 
 # Install uv
-RUN omni-curl "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
-    | tar -xz -C /usr/local/bin --strip-components=1 uv-x86_64-unknown-linux-gnu/uv \
+RUN tmp_dir="$(mktemp -d)" \
+    && omni-curl -o "${tmp_dir}/uv.tar.gz" \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+    && tar -xzf "${tmp_dir}/uv.tar.gz" -C /usr/local/bin --strip-components=1 uv-x86_64-unknown-linux-gnu/uv \
+    && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/uv
 
 # Install Docker CLI (no daemon — socket mounted at runtime)
@@ -124,8 +128,11 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gh CLI
-RUN omni-curl "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh" \
+RUN tmp_dir="$(mktemp -d)" \
+    && omni-curl -o "${tmp_dir}/gh.tar.gz" \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+    && tar -xzf "${tmp_dir}/gh.tar.gz" -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh" \
+    && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/gh
 
 # Install kubectl
