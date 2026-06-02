@@ -20,9 +20,7 @@ class TestKafkaApiVersionConfig:
     """Verify explicit aiokafka API version config is typed and plumbed."""
 
     def test_api_version_defaults_to_auto_negotiation(self) -> None:
-        config = ModelKafkaEventBusConfig(
-            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS
-        )
+        config = ModelKafkaEventBusConfig(bootstrap_servers=_TEST_BOOTSTRAP_SERVERS)
 
         assert config.api_version is None
 
@@ -108,9 +106,7 @@ class TestKafkaApiVersionConfig:
 
     @pytest.mark.asyncio
     async def test_producer_omits_api_version_when_unset(self) -> None:
-        config = ModelKafkaEventBusConfig(
-            bootstrap_servers=_TEST_BOOTSTRAP_SERVERS
-        )
+        config = ModelKafkaEventBusConfig(bootstrap_servers=_TEST_BOOTSTRAP_SERVERS)
         bus = EventBusKafka(config=config)
 
         with patch(
