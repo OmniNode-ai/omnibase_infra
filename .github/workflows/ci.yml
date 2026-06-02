@@ -1006,10 +1006,6 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
-          shared-env-enabled: "false"
-
-      - name: Install dependencies
-        run: uv sync --no-cache
 
       - name: Check if onex compliance command exists
         id: check-command

@@ -358,7 +358,11 @@ def test_ci_jobs_that_mutate_python_env_disable_shared_env() -> None:
         for step in ci_workflow["jobs"]["compliance"]["steps"]
         if step.get("uses") == "./.github/actions/setup-python-uv"
     )
-    assert compliance_setup["with"]["shared-env-enabled"] == "false"
+    assert compliance_setup["with"].get("shared-env-enabled") != "false"
+    assert not any(
+        step.get("name") == "Install dependencies"
+        for step in ci_workflow["jobs"]["compliance"]["steps"]
+    )
 
     for job_name in ("schema-handshake", "kafka-boundary-compat"):
         setup_step = next(
