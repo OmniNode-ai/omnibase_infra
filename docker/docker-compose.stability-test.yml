@@ -105,8 +105,8 @@ services:
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:-${INFRA_HOST:?INFRA_HOST required for stability session health probes}}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:-${USER:?USER required for stability session health probes}}
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
       OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
       SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-main
@@ -141,8 +141,8 @@ services:
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:-${INFRA_HOST:?INFRA_HOST required for stability session health probes}}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:-${USER:?USER required for stability session health probes}}
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
       OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
       SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-effects
@@ -189,8 +189,8 @@ services:
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:-${INFRA_HOST:?INFRA_HOST required for stability session health probes}}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:-${USER:?USER required for stability session health probes}}
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
       OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
       SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-worker

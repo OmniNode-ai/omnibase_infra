@@ -154,11 +154,11 @@ def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
         assert environment["ONEX_STATE_ROOT"] == "/app/data/.onex_state_stability_test"
         assert (
             environment["ONEX_INFRA_HOST"]
-            == "${ONEX_INFRA_HOST:-${INFRA_HOST:?INFRA_HOST required for stability session health probes}}"
+            == "${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}"
         )
         assert (
             environment["ONEX_INFRA_USER"]
-            == "${ONEX_INFRA_USER:-${USER:?USER required for stability session health probes}}"
+            == "${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}"
         )
         assert (
             environment["OMNI_HOME"]
@@ -323,11 +323,11 @@ def test_stability_lane_runtime_services_define_session_health_contract() -> Non
         volumes = services[service_name]["volumes"]
 
         assert (
-            "INFRA_HOST required for stability session health probes"
+            "ONEX_INFRA_HOST required for stability session health probes"
             in environment["ONEX_INFRA_HOST"]
         )
         assert (
-            "USER required for stability session health probes"
+            "ONEX_INFRA_USER required for stability session health probes"
             in environment["ONEX_INFRA_USER"]
         )
         assert (
