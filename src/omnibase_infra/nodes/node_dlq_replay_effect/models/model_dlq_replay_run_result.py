@@ -11,7 +11,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result import (
-    ModelReplayResult,
+    ModelDlqReplayResult,
 )
 
 
@@ -35,7 +35,7 @@ class ModelDlqReplayRunResult(BaseModel):
     failed: int = Field(..., ge=0, description="Replay attempts that failed.")
     pending: int = Field(..., ge=0, description="Dry-run would-replay count.")
     dry_run: bool = Field(..., description="Whether this run published nothing.")
-    results: tuple[ModelReplayResult, ...] = Field(
+    results: tuple[ModelDlqReplayResult, ...] = Field(
         default=(), description="Per-message results in processing order."
     )
 

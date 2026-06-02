@@ -21,10 +21,11 @@ class EnumReplayStatus(str, Enum):
     - PENDING: Replay has been initiated but not yet completed
     - COMPLETED: Message was successfully replayed to target topic
     - FAILED: Replay attempt failed (will be recorded with error_message)
-    - SKIPPED: Message was intentionally not replayed (e.g., non-retryable error)
+    - SKIPPED: Message was intentionally not replayed by a legacy or dry-run path
     - QUARANTINED: Message was non-replayable and routed to the quarantine
-      topic (onex.dlq.omnibase-infra.quarantine.v1) instead of being dropped. This replaces
-      the previous skip-and-drop behaviour that silently lost messages.
+      topic (onex.dlq.omnibase-infra.quarantine.v1) instead of being dropped.
+      This replaces the previous skip-and-drop behaviour that silently lost
+      messages.
 
     Usage:
         This enum is the canonical definition for replay status tracking.

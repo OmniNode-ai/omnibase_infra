@@ -303,7 +303,7 @@ def parse_dlq_topic(topic: str) -> dict[str, str] | None:
         >>> parse_dlq_topic("onex.dlq.omnibase-infra.intents.v1")
         {'prefix': 'onex', 'producer': 'omnibase-infra', 'category': 'intents', 'version': 'v1'}
         >>> parse_dlq_topic("onex.dlq.omnibase-infra.events.v2")
-        {'prefix': 'onex', 'category': 'events', 'version': 'v2'}
+        {'prefix': 'onex', 'producer': 'omnibase-infra', 'category': 'events', 'version': 'v2'}
         >>> parse_dlq_topic("not.a.dlq.topic")
         None
     """

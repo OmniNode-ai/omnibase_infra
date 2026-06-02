@@ -6,7 +6,7 @@
 # Node: NodeDlqReplayEffect
 #
 # Contract-native replacement for the manual DLQ replay CLI
-# (scripts/dlq_replay.py). Consumes onex.dlq.<category>.v1 from a persistent
+# (scripts/dlq_replay.py). Consumes onex.dlq.omnibase-infra.<category>.v1 from a persistent
 # consumer group (onex-dlq-replay), replays eligible messages to their original
 # topic, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1
 # instead of the legacy skip-and-drop path that silently lost messages.
@@ -27,7 +27,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that drains a DLQ topic (onex.dlq.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
+  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
 
 # Event bus subscription/publication
 event_bus:
@@ -87,6 +87,7 @@ io_operations:
       - quarantined
       - failed
       - pending
+      - dry_run
 # Dependencies
 dependencies:
   - name: "consumer"

@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
 
 
-class ModelReplayResult(BaseModel):
+class ModelDlqReplayResult(BaseModel):
     """Result of a single message replay decision/attempt."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -29,4 +29,4 @@ class ModelReplayResult(BaseModel):
     )
 
 
-__all__ = ["ModelReplayResult"]
+__all__ = ["ModelDlqReplayResult"]

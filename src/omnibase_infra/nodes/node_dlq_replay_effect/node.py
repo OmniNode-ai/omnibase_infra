@@ -9,7 +9,7 @@ original topics and quarantining non-replayable messages to
 All behaviour is defined in contract.yaml; this class contains no custom logic.
 
 Architecture:
-    onex.dlq.<category>.v1 (Kafka, persistent group onex-dlq-replay)
+    onex.dlq.omnibase-infra.<category>.v1 (Kafka, persistent group onex-dlq-replay)
         -> NodeDlqReplayEffect (this declarative shell)
         -> HandlerDlqReplay
         -> original topic (replay)         when should_replay() is True

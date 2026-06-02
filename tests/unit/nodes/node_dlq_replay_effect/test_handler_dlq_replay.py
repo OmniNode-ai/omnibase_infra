@@ -31,6 +31,7 @@ from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayReco
 from omnibase_infra.event_bus.topic_constants import TOPIC_DLQ_QUARANTINE
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQ_REPLAY_CONSUMER_GROUP,
+    DLQQuarantineProducer,
     ModelDlqReplayEngineConfig,
     should_replay,
 )
@@ -86,10 +87,14 @@ class _FakeConsumer:
     ) -> None:
         self._messages = messages
         self.config = config
+        self.commits = 0
 
     async def consume_messages(self) -> AsyncIterator[ModelDlqMessage]:
         for message in self._messages:
             yield message
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 class _FakeProducer:
@@ -106,16 +111,25 @@ class _FakeProducer:
 
 
 class _FakeQuarantineProducer:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self, config: ModelDlqReplayEngineConfig, *, fail: bool = False
+    ) -> None:
+        self.config = config
         self.fail = fail
-        self.quarantined: list[tuple[ModelDlqMessage, str]] = []
+        self.quarantined: list[tuple[ModelDlqMessage, str, dict[str, object]]] = []
 
     async def quarantine_message(
         self, message: ModelDlqMessage, reason: str, quarantine_correlation_id: object
     ) -> None:
         if self.fail:
             raise RuntimeError("quarantine broker down")
-        self.quarantined.append((message, reason))
+        payload = DLQQuarantineProducer.build_quarantine_payload(
+            message,
+            reason,
+            quarantine_correlation_id,  # type: ignore[arg-type]
+            self.config.dlq_topic,
+        )
+        self.quarantined.append((message, reason, payload))
 
 
 class _FakeTracking:
@@ -135,16 +149,22 @@ def _handler(
     replay_fail: bool = False,
     quarantine_fail: bool = False,
     tracking: _FakeTracking | None = None,
-) -> tuple[HandlerDlqReplay, _FakeProducer, _FakeQuarantineProducer]:
+) -> tuple[
+    HandlerDlqReplay,
+    _FakeConsumer,
+    _FakeProducer,
+    _FakeQuarantineProducer,
+]:
+    consumer = _FakeConsumer(messages, config)
     producer = _FakeProducer(fail=replay_fail)
-    quarantine = _FakeQuarantineProducer(fail=quarantine_fail)
+    quarantine = _FakeQuarantineProducer(config, fail=quarantine_fail)
     handler = HandlerDlqReplay(
-        consumer=_FakeConsumer(messages, config),  # type: ignore[arg-type]
+        consumer=consumer,  # type: ignore[arg-type]
         producer=producer,  # type: ignore[arg-type]
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=tracking,  # type: ignore[arg-type]
     )
-    return handler, producer, quarantine
+    return handler, consumer, producer, quarantine
 
 
 def test_quarantine_constants_exist() -> None:
@@ -165,7 +185,9 @@ async def test_non_replayable_message_is_quarantined_not_dropped() -> None:
     # retry_count >= max -> non-replayable
     msg = _make_message(retry_count=9)
     tracking = _FakeTracking()
-    handler, producer, quarantine = _handler([msg], _config(), tracking=tracking)
+    handler, consumer, producer, quarantine = _handler(
+        [msg], _config(), tracking=tracking
+    )
 
     result = await handler.run()
 
@@ -175,7 +197,9 @@ async def test_non_replayable_message_is_quarantined_not_dropped() -> None:
     assert result.failed == 0
     # message was published to quarantine, NOT dropped, NOT replayed
     assert len(quarantine.quarantined) == 1
+    assert quarantine.quarantined[0][2]["source_dlq_topic"] == consumer.config.dlq_topic
     assert len(producer.replayed) == 0
+    assert consumer.commits == 1
     # tracking recorded a QUARANTINED (not SKIPPED) terminal outcome
     assert len(tracking.records) == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.QUARANTINED
@@ -185,7 +209,9 @@ async def test_non_replayable_message_is_quarantined_not_dropped() -> None:
 async def test_eligible_message_replayed_exactly_once() -> None:
     msg = _make_message(retry_count=0, error_type="InfraConnectionError")
     tracking = _FakeTracking()
-    handler, producer, quarantine = _handler([msg], _config(), tracking=tracking)
+    handler, consumer, producer, quarantine = _handler(
+        [msg], _config(), tracking=tracking
+    )
 
     result = await handler.run()
 
@@ -193,6 +219,7 @@ async def test_eligible_message_replayed_exactly_once() -> None:
     assert result.quarantined == 0
     assert len(producer.replayed) == 1  # exactly once
     assert len(quarantine.quarantined) == 0
+    assert consumer.commits == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.COMPLETED
     assert tracking.records[0].success is True
 
@@ -200,7 +227,7 @@ async def test_eligible_message_replayed_exactly_once() -> None:
 async def test_replay_failure_records_failed_not_false_success() -> None:
     msg = _make_message(retry_count=0, error_type="InfraConnectionError")
     tracking = _FakeTracking()
-    handler, _producer, _quarantine = _handler(
+    handler, consumer, _producer, _quarantine = _handler(
         [msg], _config(), replay_fail=True, tracking=tracking
     )
 
@@ -212,12 +239,13 @@ async def test_replay_failure_records_failed_not_false_success() -> None:
     assert len(tracking.records) == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.FAILED
     assert tracking.records[0].success is False
+    assert consumer.commits == 1
 
 
 async def test_quarantine_failure_records_failed_not_silent_loss() -> None:
     msg = _make_message(retry_count=9)  # non-replayable
     tracking = _FakeTracking()
-    handler, _producer, _quarantine = _handler(
+    handler, consumer, _producer, _quarantine = _handler(
         [msg], _config(), quarantine_fail=True, tracking=tracking
     )
 
@@ -229,12 +257,13 @@ async def test_quarantine_failure_records_failed_not_silent_loss() -> None:
     assert len(tracking.records) == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.FAILED
     assert tracking.records[0].success is False
+    assert consumer.commits == 1
 
 
 async def test_dry_run_publishes_nothing() -> None:
     eligible = _make_message(retry_count=0, error_type="InfraConnectionError")
     non_replayable = _make_message(retry_count=9)
-    handler, producer, quarantine = _handler(
+    handler, consumer, producer, quarantine = _handler(
         [eligible, non_replayable], _config(dry_run=True)
     )
 
@@ -244,11 +273,12 @@ async def test_dry_run_publishes_nothing() -> None:
     assert result.pending == 2
     assert len(producer.replayed) == 0
     assert len(quarantine.quarantined) == 0
+    assert consumer.commits == 0
 
 
 async def test_handle_envelope_returns_typed_output() -> None:
     msg = _make_message(retry_count=0, error_type="InfraConnectionError")
-    handler, _producer, _quarantine = _handler([msg], _config())
+    handler, _consumer, _producer, _quarantine = _handler([msg], _config())
     correlation_id = uuid4()
     envelope: ModelEventEnvelope[ModelDlqReplayRunResult] = ModelEventEnvelope(
         payload=ModelDlqReplayRunResult(

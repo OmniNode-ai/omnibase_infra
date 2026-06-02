@@ -12,7 +12,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_command
     ModelDlqReplayCommand,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result import (
-    ModelReplayResult,
+    ModelDlqReplayResult,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
@@ -22,6 +22,6 @@ __all__ = [
     "EnumDlqReplayFilterType",
     "ModelDlqMessage",
     "ModelDlqReplayCommand",
+    "ModelDlqReplayResult",
     "ModelDlqReplayRunResult",
-    "ModelReplayResult",
 ]

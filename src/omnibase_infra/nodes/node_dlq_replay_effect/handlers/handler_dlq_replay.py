@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
@@ -40,7 +39,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import
     ModelDlqMessage,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result import (
-    ModelReplayResult,
+    ModelDlqReplayResult,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
@@ -106,7 +105,7 @@ class HandlerDlqReplay:
 
     async def run(self) -> ModelDlqReplayRunResult:
         """Consume the DLQ topic, replaying or quarantining each message."""
-        results: list[ModelReplayResult] = []
+        results: list[ModelDlqReplayResult] = []
         count = 0
         limit = self._config.limit
 
@@ -116,9 +115,12 @@ class HandlerDlqReplay:
             results.append(await self._process_message(message))
             count += 1
 
+        if results and not self._config.dry_run:
+            await self._consumer.commit()
+
         return self._summarize(results)
 
-    async def _process_message(self, message: ModelDlqMessage) -> ModelReplayResult:
+    async def _process_message(self, message: ModelDlqMessage) -> ModelDlqReplayResult:
         eligible, reason = should_replay(message, self._config)
 
         if not eligible:
@@ -127,7 +129,7 @@ class HandlerDlqReplay:
         replay_correlation_id = generate_replay_correlation_id()
 
         if self._config.dry_run:
-            return ModelReplayResult(
+            return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
                 original_topic=message.original_topic,
                 status=EnumReplayStatus.PENDING,
@@ -149,7 +151,7 @@ class HandlerDlqReplay:
                 message.correlation_id,
                 message.original_topic,
             )
-            return ModelReplayResult(
+            return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
                 original_topic=message.original_topic,
                 status=EnumReplayStatus.FAILED,
@@ -158,7 +160,7 @@ class HandlerDlqReplay:
             )
 
         await self._record(message, EnumReplayStatus.COMPLETED, replay_correlation_id)
-        return ModelReplayResult(
+        return ModelDlqReplayResult(
             correlation_id=message.correlation_id,
             original_topic=message.original_topic,
             status=EnumReplayStatus.COMPLETED,
@@ -168,12 +170,12 @@ class HandlerDlqReplay:
 
     async def _quarantine(
         self, message: ModelDlqMessage, reason: str
-    ) -> ModelReplayResult:
+    ) -> ModelDlqReplayResult:
         """Route a non-replayable message to quarantine (never drop it)."""
         quarantine_correlation_id = generate_replay_correlation_id()
 
         if self._config.dry_run:
-            return ModelReplayResult(
+            return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
                 original_topic=message.original_topic,
                 status=EnumReplayStatus.PENDING,
@@ -196,7 +198,7 @@ class HandlerDlqReplay:
                 "FAILED to quarantine non-replayable message %s",
                 message.correlation_id,
             )
-            return ModelReplayResult(
+            return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
                 original_topic=message.original_topic,
                 status=EnumReplayStatus.FAILED,
@@ -211,7 +213,7 @@ class HandlerDlqReplay:
             error_message=reason,
         )
         logger.info("QUARANTINED %s (%s)", message.correlation_id, reason)
-        return ModelReplayResult(
+        return ModelDlqReplayResult(
             correlation_id=message.correlation_id,
             original_topic=message.original_topic,
             status=EnumReplayStatus.QUARANTINED,
@@ -244,7 +246,9 @@ class HandlerDlqReplay:
         )
         await self._tracking.record_replay_attempt(record)
 
-    def _summarize(self, results: list[ModelReplayResult]) -> ModelDlqReplayRunResult:
+    def _summarize(
+        self, results: list[ModelDlqReplayResult]
+    ) -> ModelDlqReplayRunResult:
         def _count(status: EnumReplayStatus) -> int:
             return sum(1 for r in results if r.status == status)
 

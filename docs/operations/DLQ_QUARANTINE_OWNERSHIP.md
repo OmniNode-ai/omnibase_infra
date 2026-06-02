@@ -7,14 +7,14 @@
 ## Why quarantine exists
 
 The legacy manual replay CLI (`scripts/dlq_replay.py`) handled non-replayable
-DLQ messages with a **skip-and-drop** path (`:1117-1139`). In the default
+DLQ messages with a **skip-and-drop** path in its replay command flow. In the default
 configuration (`--enable-tracking` off) those messages were not even recorded —
 they were logged and lost. That is **silent message loss**.
 
 `NodeDlqReplayEffect` replaces skip-and-drop with **quarantine**: every
-non-replayable message is published durably to `onex.dlq.quarantine.v1` and a
-terminal `QUARANTINED` row is written to `dlq_replay_history`. A message is
-never dropped.
+non-replayable message is published durably to
+`onex.dlq.omnibase-infra.quarantine.v1` and a terminal `QUARANTINED` row is
+written to `dlq_replay_history`. A message is never dropped.
 
 A message is non-replayable when `should_replay()` returns `False`:
 
@@ -28,7 +28,7 @@ A message is non-replayable when `should_replay()` returns `False`:
 
 | Field | Value |
 |-------|-------|
-| Topic | `onex.dlq.quarantine.v1` (`TOPIC_DLQ_QUARANTINE`) |
+| Topic | `onex.dlq.omnibase-infra.quarantine.v1` (`TOPIC_DLQ_QUARANTINE`) |
 | Producer | `NodeDlqReplayEffect` (`DLQQuarantineProducer`) |
 | Key | original message `correlation_id` |
 | Retention | long retention, MUST exceed replay-topic retention (default 90d) |
@@ -43,7 +43,7 @@ needed for re-entry.
 
 | Owner | Role | Responsibility |
 |-------|------|----------------|
-| **Retention owner** | Platform infrastructure team | Owns the `onex.dlq.quarantine.v1` topic retention. Retention must exceed the replay topics so a message is never aged out before reclassification. |
+| **Retention owner** | Platform infrastructure team | Owns the `onex.dlq.omnibase-infra.quarantine.v1` topic retention. Retention must exceed the replay topics so a message is never aged out before reclassification. |
 | **Reclassification owner** | Team that owns the `original_topic` | Decides whether a quarantined message is genuinely terminal (discard after audit) or was misclassified (transient error mis-tagged non-retryable). Keyed by `original_correlation_id`. |
 | **Replay-eligibility-change owner** | Original-topic team, with platform review | Owns changes to what counts as replay-eligible — edits to `EnumNonRetryableErrorCategory` or `max_replay_count`. These affect every DLQ consumer and require platform review. |
 

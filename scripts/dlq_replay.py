@@ -7,19 +7,20 @@ As of OMN-12619 the replay engine is owned by ``NodeDlqReplayEffect``
 (``src/omnibase_infra/nodes/node_dlq_replay_effect``). This script is now a
 thin CLI adapter: it parses args, builds the node's engine config, and drives
 ``HandlerDlqReplay``. The Kafka I/O classes, the eligibility predicate
-(``should_replay``), and ``ModelReplayResult`` were relocated into the node and
+(``should_replay``), and ``ModelDlqReplayResult`` were relocated into the node and
 are imported back here — they are no longer defined in this file.
 
-Non-replayable messages are QUARANTINED to ``onex.dlq.quarantine.v1`` (never
-dropped). The node uses the persistent ``onex-dlq-replay`` consumer group; this
-CLI shares that engine. Prefer running the node via the
+Non-replayable messages are QUARANTINED to
+``onex.dlq.omnibase-infra.quarantine.v1`` (never dropped). The node uses the
+persistent ``onex-dlq-replay`` consumer group; this CLI shares that engine.
+Prefer running the node via the
 ``dlq-replay-consumer`` service for steady-state operation — this CLI is for
 operator-initiated, ad-hoc runs.
 
 Usage:
-    python scripts/dlq_replay.py list --dlq-topic onex.dlq.events.v1
-    python scripts/dlq_replay.py replay --dlq-topic onex.dlq.events.v1 --dry-run
-    python scripts/dlq_replay.py replay --dlq-topic onex.dlq.events.v1 --enable-tracking
+    python scripts/dlq_replay.py list --dlq-topic onex.dlq.omnibase-infra.events.v1
+    python scripts/dlq_replay.py replay --dlq-topic onex.dlq.omnibase-infra.events.v1 --dry-run
+    python scripts/dlq_replay.py replay --dlq-topic onex.dlq.omnibase-infra.events.v1 --enable-tracking
 
 Environment Variables:
     KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (REQUIRED - no default)
@@ -83,7 +84,7 @@ class ModelReplayConfig(BaseModel):
     """
 
     bootstrap_servers: str
-    dlq_topic: str = "onex.dlq.events.v1"
+    dlq_topic: str = "onex.dlq.omnibase-infra.events.v1"
     max_replay_count: int = 5
     rate_limit_per_second: float = 100.0
     dry_run: bool = False
@@ -458,11 +459,11 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/dlq_replay.py list --dlq-topic onex.dlq.events.v1
-  python scripts/dlq_replay.py replay --dlq-topic onex.dlq.events.v1 --dry-run
-  python scripts/dlq_replay.py stats --dlq-topic onex.dlq.events.v1
+  python scripts/dlq_replay.py list --dlq-topic onex.dlq.omnibase-infra.events.v1
+  python scripts/dlq_replay.py replay --dlq-topic onex.dlq.omnibase-infra.events.v1 --dry-run
+  python scripts/dlq_replay.py stats --dlq-topic onex.dlq.omnibase-infra.events.v1
 
-Non-replayable messages are quarantined to onex.dlq.quarantine.v1 (never dropped).
+Non-replayable messages are quarantined to onex.dlq.omnibase-infra.quarantine.v1 (never dropped).
 See docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
         """,
     )
@@ -473,8 +474,8 @@ See docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
     )
     parser.add_argument(
         "--dlq-topic",
-        default="onex.dlq.events.v1",
-        help="DLQ topic name (default: onex.dlq.events.v1)",
+        default="onex.dlq.omnibase-infra.events.v1",
+        help="DLQ topic name (default: onex.dlq.omnibase-infra.events.v1)",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"

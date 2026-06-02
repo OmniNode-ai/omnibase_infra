@@ -181,6 +181,10 @@ def should_replay(
     elif config.filter_type == EnumDlqReplayFilterType.BY_CORRELATION_ID:
         if message.correlation_id not in config.filter_correlation_ids:
             return (False, f"Correlation ID not in filter: {message.correlation_id}")
+    elif config.filter_type == EnumDlqReplayFilterType.BY_TIME_RANGE:
+        # Time windows are applied orthogonally above; this branch makes the
+        # time-range-only filter explicit in logs and future maintenance.
+        return (True, "Eligible for replay within time range")
 
     return (True, "Eligible for replay")
 
@@ -388,6 +392,7 @@ class DLQQuarantineProducer:
         message: ModelDlqMessage,
         reason: str,
         quarantine_correlation_id: UUID,
+        source_dlq_topic: str,
     ) -> dict[str, object]:
         """Build the durable quarantine record payload."""
         return {
@@ -399,7 +404,7 @@ class DLQQuarantineProducer:
             "original_correlation_id": str(message.correlation_id),
             "error_type": message.error_type,
             "retry_count": message.retry_count,
-            "source_dlq_topic": message.original_topic,
+            "source_dlq_topic": source_dlq_topic,
             "source_dlq_offset": message.dlq_offset,
             "source_dlq_partition": message.dlq_partition,
             "original_payload": message.raw_payload,
@@ -420,7 +425,7 @@ class DLQQuarantineProducer:
             raise RuntimeError("Quarantine producer not started")
 
         payload = self.build_quarantine_payload(
-            message, reason, quarantine_correlation_id
+            message, reason, quarantine_correlation_id, self.config.dlq_topic
         )
         headers: list[tuple[str, bytes]] = [
             ("x-quarantine-reason", reason.encode("utf-8")),
