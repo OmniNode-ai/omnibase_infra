@@ -710,6 +710,18 @@ Producer: cli_runner_health.py (cron-scheduled)
 Consumer: omnidash (future)
 """
 
+SUFFIX_NETWORK_POOL_STATUS: str = "onex.evt.omnibase-infra.network-pool-status.v1"
+"""Topic suffix for Docker subnet-pool occupancy events (OMN-12566).
+
+Published by the runner health CLI (cli_runner_health.py) on each network
+collection cycle. Each event carries a ``ModelNetworkPoolStatus`` payload so
+subnet-pool occupancy history is durable, not ephemeral, and alerting can
+trigger before the address pool is exhausted.
+
+Producer: cli_runner_health.py (cron-scheduled, --network)
+Consumer: omnidash (future)
+"""
+
 SUFFIX_ROW_COUNT_DIAGNOSTIC: str = "onex.evt.omnibase-infra.row-count-diagnostic.v1"
 """Topic suffix for row count probe diagnostic events (OMN-5653).
 
@@ -894,6 +906,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Runner health snapshot events (1 partition — low-throughput, OMN-11276)
     ModelTopicSpec(
         suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Docker subnet-pool occupancy events (1 partition — low-throughput, OMN-12566)
+    ModelTopicSpec(
+        suffix=SUFFIX_NETWORK_POOL_STATUS,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",

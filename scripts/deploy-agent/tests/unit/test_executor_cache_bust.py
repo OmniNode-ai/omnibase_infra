@@ -71,7 +71,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             call_order.append("build")
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             call_order.append("up")
 
         executor._compose_build = fake_build  # type: ignore[method-assign]
@@ -93,7 +95,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             build_scopes.append(scope)
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             pass
 
         executor._compose_build = fake_build  # type: ignore[method-assign]
@@ -112,7 +116,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             git_sha_seen_in_build.append(sha)
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             pass
 
         executor._compose_build = fake_build  # type: ignore[method-assign]

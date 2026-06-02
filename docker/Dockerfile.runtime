@@ -108,10 +108,18 @@ RUN set -eu; \
     fi
 
 # Build-time environment configuration
+# Keep uv's network timeout aligned with CI install steps for large public-index
+# wheel installs during runtime image builds.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_HTTP_TIMEOUT=600 \
+    UV_RETRY_ATTEMPTS=8 \
+    UV_RETRY_DELAY_SECONDS=10 \
+    UV_CONCURRENT_DOWNLOADS=4 \
+    UV_CONCURRENT_BUILDS=1 \
+    UV_CONCURRENT_INSTALLS=1 \
     # uv configuration: create venv inside project directory
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
@@ -139,6 +147,37 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Version pinned via UV_VERSION build arg for reproducible builds
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
+RUN git config --global http.version HTTP/1.1 \
+    && git config --global http.lowSpeedLimit 0 \
+    && git config --global http.lowSpeedTime 999999
+
+RUN cat > /usr/local/bin/uv-with-retry <<'EOF'
+#!/bin/sh
+set -eu
+
+attempt=1
+max_attempts="${UV_RETRY_ATTEMPTS:-3}"
+retry_delay_seconds="${UV_RETRY_DELAY_SECONDS:-10}"
+
+while true; do
+  if uv "$@"; then
+    exit 0
+  fi
+
+  status=$?
+  if [ "${attempt}" -ge "${max_attempts}" ]; then
+    echo "uv $* failed after ${attempt} attempt(s)" >&2
+    exit "${status}"
+  fi
+
+  sleep_seconds=$((retry_delay_seconds * attempt))
+  echo "uv $* attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${sleep_seconds}s" >&2
+  sleep "${sleep_seconds}"
+  attempt=$((attempt + 1))
+done
+EOF
+RUN chmod +x /usr/local/bin/uv-with-retry
+
 WORKDIR /app
 
 # ============================================================================
@@ -158,7 +197,7 @@ COPY uv.lock ./
 # - Installs only main dependencies (no dev dependencies)
 # - --no-install-project flag installs dependencies without installing the package itself
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project
+    uv-with-retry sync --no-dev --no-install-project
 
 # ARG GIT_SHA placed immediately before COPY src/ so that passing
 # --build-arg GIT_SHA=<new-sha> invalidates this layer and all subsequent
@@ -174,12 +213,12 @@ COPY src/ ./src/
 # Install the root package itself (now that source code is available)
 # This is a separate step to maximize cache reuse
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev
+    uv-with-retry sync --no-dev
 
 # Pre-install torch CPU-only (~200MB) to prevent CUDA torch (~2.5GB) from being
 # pulled by adaptive-classifier. Must come BEFORE plugin installs.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+    uv-with-retry pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Install ONEX plugin composition-layer dependencies.
 # These are NOT declared in pyproject.toml because they are runtime plugins,
@@ -201,7 +240,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # the Dockerfile is updated (OMN-5474). Range pins stay valid across releases.
 # Run `scripts/check_dockerfile_pins.py` to validate ranges against PyPI.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
+    uv-with-retry pip install --no-deps \
     "omninode-claude>=0.9.0,<2.0.0" \
     "omninode-memory>=0.9.0,<2.0.0" \
     "omninode-intelligence>=0.15.0,<2.0.0"
@@ -233,15 +272,26 @@ COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_wo
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
-# OMN-10728: ONEX_CHANGE_CONTROL_REF must be the full commit SHA so that the
-# install URL itself changes when main advances — this busts the uv cache mount
-# (keyed on URL, not on resolved HEAD) and forces a fresh fetch.
+ARG OMNIBASE_COMPAT_REF="4d887307aae34d9d40d389ba91070cb411ce3df5"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/4d887307aae34d9d40d389ba91070cb411ce3df5.tar.gz"
+# onex_change_control tracks the moving `main` branch.
 ARG ONEX_CHANGE_CONTROL_REF=main
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
+#
+# OMN-12424: uv keys its git source cache on the *resolved commit* for a moving
+# ref (`@dev` / `@main`), so a plain rebuild - even `docker build --no-cache`,
+# which busts Docker layer cache but NOT the `type=cache` BuildKit mount below -
+# can reinstall a stale wheel from a previous commit of dev/main. (OMN-10728's
+# SHA-pin theory was wrong: the install URL `@dev` does not change when dev
+# advances, so the cache is never invalidated.) Pinning to a fixed SHA would fix
+# staleness but defeats the whole point of tracking the moving branch, so each
+# release-mode git install passes `--refresh-package <name>`: uv re-resolves and
+# re-fetches *only* that package's git source on every build while reusing the
+# cache for all other packages. The result: every rebuild always installs the
+# current HEAD of the tracked branch. omnibase_compat is a SHA-pinned immutable
+# tarball, so it needs no refresh.
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
@@ -252,15 +302,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
             fi; \
         done; \
-        uv pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
-        uv pip install --no-deps /workspace/sibling-repos/onex_change_control; \
-        uv pip install --no-deps /workspace/sibling-repos/omnimarket; \
+        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
+        uv-with-retry pip install --no-deps /workspace/sibling-repos/onex_change_control; \
+        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnimarket; \
     else \
-        uv pip install --no-deps \
+        uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
-        uv pip install --no-deps \
+        uv-with-retry pip install --no-deps --refresh-package onex-change-control \
             "git+https://github.com/OmniNode-ai/onex_change_control.git@${ONEX_CHANGE_CONTROL_REF}#egg=onex-change-control"; \
-        uv pip install --no-deps \
+        uv-with-retry pip install --no-deps --refresh-package omnimarket \
             "git+https://github.com/OmniNode-ai/omnimarket.git@${OMNIMARKET_REF}#egg=omnimarket"; \
     fi
 
@@ -286,13 +336,13 @@ RUN /app/.venv/bin/python -m omnibase_infra.runtime.strip_runtime_entry_points
 # consistent with the plugin-pin pattern enforced by check_dockerfile_pins.py.
 # --index-url ensures only CPU-only wheels are considered.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu
+    uv-with-retry pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu
 
 # Install external (non-ONEX) deps required by the plugins above.
 # Most are already satisfied by omnibase_infra's own transitive deps.
 # Only plugin-specific additions are listed here.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install \
+    uv-with-retry pip install \
     "tiktoken>=0.5.0" \
     "adaptive-classifier>=0.1.2" \
     "confluent-kafka>=2.12.0,<3.0.0" \
@@ -315,13 +365,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
 # Force upgrade here after all plugin installs to ensure the patched version is present.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install "protobuf>=5.29.6"
+    uv-with-retry pip install "protobuf>=5.29.6"
 
 # Security: upgrade setuptools to clear CVE-2025-47273 (HIGH, path traversal, fixed in >=78.1.1).
 # setuptools ships with python:3.12-slim base image at an older version flagged by Trivy.
 # Force upgrade here after all other installs to ensure the patched version is present.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install "setuptools>=78.1.1"
+    uv-with-retry pip install "setuptools>=78.1.1"
 
 # Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
 RUN /app/.venv/bin/python -c "\

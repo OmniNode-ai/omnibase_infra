@@ -890,28 +890,39 @@ class TestPolicyRegistryPerformanceRegression:
             for patch in range(5)
         ]  # 125 unique versions
 
-        # Cold cache: first parse of each version
+        iterations = 20
+
+        # Cold cache: repeatedly reset and parse each version. Measuring a
+        # single 125-version cold pass is sub-millisecond on CI runners, which
+        # makes the ratio sensitive to timer noise.
         cold_start = time.perf_counter()
-        for v in versions:
-            _ = RegistryPolicy._parse_semver(v)
+        for _ in range(iterations):
+            RegistryPolicy._reset_semver_cache()
+            for v in versions:
+                _ = RegistryPolicy._parse_semver(v)
         cold_time = time.perf_counter() - cold_start
 
-        # Warm cache: repeated parse (should hit cache)
+        # Warm cache: repeated parse of the same versions should hit cache.
+        RegistryPolicy._reset_semver_cache()
+        for v in versions:
+            _ = RegistryPolicy._parse_semver(v)
         warm_start = time.perf_counter()
-        for _ in range(10):  # 10 iterations
+        for _ in range(iterations):
             for v in versions:
                 _ = RegistryPolicy._parse_semver(v)
         warm_time = time.perf_counter() - warm_start
 
-        # Warm should be at least 5x faster due to cache (10 iterations)
+        # Warm should be materially faster due to cache.
         # We expect ~10x speedup since all lookups hit cache
         # Use conservative threshold to avoid flakiness
-        per_iteration_warm = warm_time / 10
-        ratio = per_iteration_warm / cold_time
+        per_iteration_cold = cold_time / iterations
+        per_iteration_warm = warm_time / iterations
+        ratio = per_iteration_warm / per_iteration_cold
 
         assert ratio < 2.0, (
             f"Semver cache not effective. "
-            f"Cold: {cold_time * 1000:.2f}ms, Warm per iteration: {per_iteration_warm * 1000:.2f}ms. "
+            f"Cold per iteration: {per_iteration_cold * 1000:.2f}ms, "
+            f"Warm per iteration: {per_iteration_warm * 1000:.2f}ms. "
             f"Ratio: {ratio:.2f}x (expected < 2.0x). "
             f"This indicates cache regression."
         )

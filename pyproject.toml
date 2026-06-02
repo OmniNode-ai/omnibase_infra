@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.37.0"
+version = "0.38.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.42.0,<0.43.0",
+    "omnibase-core>=0.43.0,<0.44.0",
     "omnibase-spi>=0.22.0,<0.23.0",
     # ============================================================================
     # External Dependency Security Guidance
@@ -163,14 +163,14 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.42.0,<0.43.0",
+    "omnibase-core>=0.43.0,<0.44.0",
     "omnibase-spi>=0.22.0,<0.23.0",
 ]
 
 [tool.uv.sources]
-# Release v0.37.0: pin to release tags for core v0.42.0 and spi v0.22.0
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.42.0" }
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.22.0" }
+# Release v0.38.0: pin core to the paired v0.43.0 release PR head until the tag is published.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "4ffca7643294fcad4f9654f4d1839ca8002b4454" }
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
 target-version = "py312"
@@ -290,6 +290,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Integration tests with controlled table names - S608 false positives
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
+# Migration discovery integration test - controlled view/id names (OMN-12559)
+"tests/integration/migrations/test_node_migration_discovery_applies.py" = ["S608"]
 # S106: Hardcoded password in function arg - test fixtures only
 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
 # T201: Print statements OK in tests

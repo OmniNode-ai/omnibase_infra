@@ -4,15 +4,26 @@
 
 # trigger_rebuild_on_merge.py
 #
-# Publishes onex.cmd.deploy.rebuild-requested.v1 when a merged PR contains
-# runtime changes. Called from the runtime-rebuild-trigger GHA workflow on
-# push to main.
+# Publishes onex.cmd.omnimarket.redeploy-start.v1 (consumed by node_redeploy)
+# when a merged PR contains runtime changes. Called from the
+# runtime-rebuild-trigger GHA workflow on PR merge to dev or main.
+#
+# node_redeploy owns the deployment lifecycle (lane policy, digest pinning,
+# readiness, rollback) and is the SOLE emitter of
+# onex.cmd.deploy.rebuild-requested.v1 to the deploy agent. CI publishes a typed
+# start command only; it never talks to the deploy agent directly.
 #
 # Triggers when:
 #   - PR had the "runtime_change" label, OR
 #   - Any changed file matches src/omnimarket/** or src/omnibase_infra/nodes/**
 #
-# Ticket: OMN-8917
+# Lane policy (the triggering ref decides the lane — no hardcoded origin/main):
+#   - merge to dev  -> runtime_lane=dev,            source_branch=dev
+#   - merge to main -> runtime_lane=stability-test, source_branch=main
+#     (dev->main promotion proves the stability lane; prod deploys the
+#      stability-proven digest later via node_redeploy, not from CI)
+#
+# Tickets: OMN-8917 (original auto-trigger), OMN-12573 (re-point to node_redeploy)
 #
 # Required environment variables (when not --dry-run):
 #   KAFKA_BOOTSTRAP_SERVERS   -- broker address(es), e.g. host:9092
@@ -24,7 +35,8 @@
 #   python scripts/trigger_rebuild_on_merge.py \
 #     --changed-files "src/omnimarket/nodes/foo/handler.py,README.md" \
 #     --labels "runtime_change,bug" \
-#     --git-ref "origin/main" \
+#     --base-branch "dev" \
+#     --source-sha "<merge_commit_sha>" \
 #     [--dry-run]
 
 from __future__ import annotations
@@ -40,7 +52,9 @@ from datetime import UTC, datetime
 
 import click
 
-TOPIC = "onex.cmd.deploy.rebuild-requested.v1"
+# CI publishes the node_redeploy start command; node_redeploy is the sole
+# emitter of the deploy-agent rebuild command downstream.
+TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
 _RUNTIME_PATH_PATTERNS = [
     "src/omnimarket/*",
@@ -48,6 +62,15 @@ _RUNTIME_PATH_PATTERNS = [
 ]
 
 _RUNTIME_LABEL = "runtime_change"
+
+# Maps the merged PR's base branch to a node_redeploy runtime lane. Values match
+# deploy_agent.events.EnumRuntimeLane (dev | stability-test | prod). prod is not
+# triggerable from CI: production deploys the stability-proven digest through
+# node_redeploy's promotion gate, never from a merge event.
+_BASE_BRANCH_LANES: dict[str, str] = {
+    "dev": "dev",
+    "main": "stability-test",
+}
 
 
 def should_trigger(changed_files: list[str], labels: list[str]) -> bool:
@@ -61,31 +84,53 @@ def should_trigger(changed_files: list[str], labels: list[str]) -> bool:
     return False
 
 
-def _sign_envelope(envelope: dict, secret: str) -> dict:
+def lane_for_base_branch(base_branch: str) -> str:
+    """Map a merged PR's base branch to a node_redeploy runtime lane.
+
+    Fails closed on unmapped branches: a misconfigured trigger must not silently
+    pick a default lane and rebuild the wrong runtime.
+    """
+    lane = _BASE_BRANCH_LANES.get(base_branch)
+    if lane is None:
+        allowed = ", ".join(sorted(_BASE_BRANCH_LANES))
+        msg = (
+            f"No runtime lane mapping for base branch {base_branch!r}; "
+            f"allowed base branches: {allowed}"
+        )
+        raise ValueError(msg)
+    return lane
+
+
+def _sign_envelope(envelope: dict[str, object], secret: str) -> dict[str, object]:
     body_dict = {k: v for k, v in envelope.items() if k != "_signature"}
     body = json.dumps(body_dict, sort_keys=True, separators=(",", ":")).encode()
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return {**envelope, "_signature": signature}
 
 
-def publish_rebuild_event(
+def publish_redeploy_start_event(
     bootstrap_servers: str,
     username: str,
     password: str,
     hmac_secret: str,
-    git_ref: str,
+    runtime_lane: str,
+    source_branch: str,
+    source_sha: str,
     correlation_id: str,
     requested_by: str,
 ) -> None:
-    """Publish a signed rebuild-requested event to Kafka via SASL_SSL."""
-    from confluent_kafka import Producer  # type: ignore[import-untyped]
+    """Publish a signed redeploy-start command to node_redeploy via SASL_SSL."""
+    from confluent_kafka import Producer
 
     envelope = {
         "correlation_id": correlation_id,
         "requested_by": requested_by,
-        "scope": "runtime",
-        "services": [],
-        "git_ref": git_ref,
+        "runtime_lane": runtime_lane,
+        "source_branch": source_branch,
+        "source_sha": source_sha,
+        # dev dogfoods OCC drafting; stability gates on readiness before prod.
+        "requires_occ": True,
+        "requires_readiness_gate": runtime_lane != "dev",
         "requested_at": datetime.now(UTC).isoformat(),
     }
     signed = _sign_envelope(envelope, hmac_secret)
@@ -101,13 +146,13 @@ def publish_rebuild_event(
 
     delivery_error: BaseException | None = None
 
-    def _on_delivery(err: object, _msg: object) -> None:  # type: ignore[misc]
+    def _on_delivery(err: object, _msg: object) -> None:
         nonlocal delivery_error
         if err is not None:
             delivery_error = RuntimeError(str(err))
 
     message = json.dumps(signed, default=str).encode("utf-8")
-    key = f"gha-rebuild/{correlation_id}".encode()
+    key = f"gha-redeploy/{correlation_id}".encode()
 
     producer.produce(
         topic=TOPIC,
@@ -133,14 +178,19 @@ def publish_rebuild_event(
     help="Comma-separated list of PR label names",
 )
 @click.option(
-    "--git-ref",
-    default="origin/main",
-    help="Git ref to rebuild (default: origin/main)",
+    "--base-branch",
+    required=True,
+    help="Merged PR base branch (dev | main) — decides the runtime lane",
+)
+@click.option(
+    "--source-sha",
+    required=True,
+    help="Merge commit SHA of the triggering PR (the ref node_redeploy rebuilds)",
 )
 @click.option(
     "--requested-by",
     default="gha-runtime-rebuild-trigger",
-    help="Identifier for who is requesting the rebuild",
+    help="Identifier for who is requesting the redeploy",
 )
 @click.option(
     "--correlation-id",
@@ -156,15 +206,17 @@ def publish_rebuild_event(
 def main(
     changed_files: str,
     labels: str,
-    git_ref: str,
+    base_branch: str,
+    source_sha: str,
     requested_by: str,
     correlation_id: str,
     dry_run: bool,
 ) -> None:
-    """Publish rebuild-requested event if PR contains runtime changes.
+    """Publish a node_redeploy start command if a PR contains runtime changes.
 
-    Triggers when PR had runtime_change label OR changed files match
-    src/omnimarket/** or src/omnibase_infra/nodes/**.
+    Triggers when PR had the runtime_change label OR changed files match
+    src/omnimarket/** or src/omnibase_infra/nodes/**. The triggering base branch
+    decides the runtime lane; the merge SHA is the ref node_redeploy rebuilds.
     """
     files: list[str] = (
         [f.strip() for f in changed_files.split(",") if f.strip()]
@@ -177,6 +229,8 @@ def main(
 
     corr_id = correlation_id or str(uuid.uuid4())
 
+    runtime_lane = lane_for_base_branch(base_branch)
+
     if not should_trigger(files, label_list):
         click.echo(
             "No rebuild trigger: no runtime_change label or runtime path changes detected."
@@ -184,8 +238,9 @@ def main(
         sys.exit(0)
 
     click.echo(
-        f"Rebuild triggered: git_ref={git_ref} correlation_id={corr_id} "
-        f"labels={label_list} files_matched={[f for f in files if any(f.startswith(p.rstrip('*')) for p in _RUNTIME_PATH_PATTERNS)]}"
+        f"Redeploy triggered: runtime_lane={runtime_lane} source_branch={base_branch} "
+        f"source_sha={source_sha} correlation_id={corr_id} labels={label_list} "
+        f"files_matched={[f for f in files if any(f.startswith(p.rstrip('*')) for p in _RUNTIME_PATH_PATTERNS)]}"
     )
 
     if dry_run:
@@ -208,12 +263,14 @@ def main(
         sys.exit(1)
 
     try:
-        publish_rebuild_event(
+        publish_redeploy_start_event(
             bootstrap_servers=bootstrap_servers,
             username=username,
             password=password,
             hmac_secret=hmac_secret,
-            git_ref=git_ref,
+            runtime_lane=runtime_lane,
+            source_branch=base_branch,
+            source_sha=source_sha,
             correlation_id=corr_id,
             requested_by=requested_by,
         )
@@ -221,7 +278,7 @@ def main(
         click.echo(f"Delivery error: {exc}", err=True)
         sys.exit(1)
 
-    click.echo(f"Published rebuild-requested to {TOPIC} (correlation_id={corr_id})")
+    click.echo(f"Published redeploy-start to {TOPIC} (correlation_id={corr_id})")
 
 
 if __name__ == "__main__":

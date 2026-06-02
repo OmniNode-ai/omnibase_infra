@@ -178,7 +178,9 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             call_order.append("build")
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             call_order.append("up")
 
         executor.self_update = fake_self_update  # type: ignore[method-assign]
@@ -203,7 +205,7 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_build(scope, sha, cb, **kwargs) -> None:
             pass
 
-        def fake_up(phase, scope, services, cb) -> None:
+        def fake_up(phase, scope, services, cb, **kwargs) -> None:
             pass
 
         executor.self_update = fake_self_update  # type: ignore[method-assign]

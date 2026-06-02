@@ -7,5 +7,14 @@ github_org: OmniNode-ai
 runner_host: 192.168.86.201
 runner_group: omnibase-ci
 runner_name_prefix: omninode-runner
-expected_count: 14
-burst_count: 20
+# Reconciled to the live .201 fleet (OMN-12582): 48 always-on steady-state
+# runners, matching the hand-scaled live compose. All 48 are steady (no burst
+# profiles), so burst_count == expected_count (no separate burst tier).
+expected_count: 48
+burst_count: 48
+# Docker subnet-pool alerting (OMN-12566). The runner host's default address
+# pool can subnet a bounded number of networks before `docker network create`
+# fails with "all predefined address pools have been fully subnetted". Alert at
+# network_pool_warn_ratio of capacity so the janitor reclaims before exhaustion.
+network_pool_capacity: 31
+network_pool_warn_ratio: 0.8
