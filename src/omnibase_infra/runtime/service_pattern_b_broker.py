@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -258,6 +259,7 @@ class RuntimePatternBBroker:
             heartbeat_interval_ms=getattr(config, "heartbeat_interval_ms", 15000),
             max_poll_interval_ms=getattr(config, "max_poll_interval_ms", 300000),
             retry_backoff_ms=getattr(config, "reconnect_backoff_ms", 2000),
+            **self._direct_kafka_client_version_kwargs(AIOKafkaConsumer),
             **self._direct_kafka_auth_kwargs(),
         )
 
@@ -365,6 +367,21 @@ class RuntimePatternBBroker:
             build_auth_kwargs,
         )()
         return dict(auth_kwargs or {})
+
+    def _direct_kafka_client_version_kwargs(
+        self, client_cls: type[object]
+    ) -> dict[str, object]:
+        config = getattr(self._kafka_event_bus(), "config", SimpleNamespace())
+        api_version = getattr(config, "api_version", None)
+        if api_version is None:
+            return {}
+        try:
+            parameters = inspect.signature(client_cls.__init__).parameters
+        except (TypeError, ValueError):
+            return {}
+        if "api_version" not in parameters:
+            return {}
+        return {"api_version": api_version}
 
     def _kafka_bootstrap_servers(self) -> str:
         bootstrap_servers = getattr(  # noqa: B009

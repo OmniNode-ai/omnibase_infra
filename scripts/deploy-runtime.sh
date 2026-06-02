@@ -88,6 +88,14 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# When true (--prod, or ONEX_DEPLOY_LANE=prod), the prod promotion-lineage guard
+# runs before any build: the source tree must be clean AND HEAD must be an
+# ancestor-of/equal-to origin/main. Prevents building the prod image from a
+# dirty or dev-only tree (OMN-12626, R1).
+PROD_LANE=false
+if [[ "${ONEX_DEPLOY_LANE:-}" == "prod" ]]; then
+    PROD_LANE=true
+fi
 # When --force overwrites an existing deployment, the previous directory is
 # moved here as a backup. On success the backup is removed; on failure
 # cleanup_on_exit() restores it.
@@ -147,6 +155,9 @@ OPTIONS
     --restart           Restart runtime containers after build (requires --execute).
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
+    --prod              Enforce the prod promotion-lineage guard before build:
+                        source tree must be clean AND HEAD an ancestor-of/equal-to
+                        origin/main. Also honored via ONEX_DEPLOY_LANE=prod.
     --help              Show this help message and exit.
 
 DEPLOYMENT ROOT
@@ -231,6 +242,10 @@ parse_args() {
                 ;;
             --print-compose-cmd)
                 PRINT_COMPOSE_CMD=true
+                shift
+                ;;
+            --prod)
+                PROD_LANE=true
                 shift
                 ;;
             --help|-h)
@@ -482,6 +497,55 @@ check_git_dirty() {
             log_warn "  Includes ${untracked_count} untracked file(s)."
         fi
     fi
+}
+
+guard_prod_promotion_lineage() {
+    # Fail-fast when building the prod lane from a dirty or non-promoted tree.
+    #
+    # Delegates to scripts/check_prod_promotion_lineage.py so the clean-tree +
+    # ancestor-of-origin/main lineage rules are enforced by a single, tested
+    # source of truth. Only runs when --prod / ONEX_DEPLOY_LANE=prod is set;
+    # non-prod lanes keep the advisory check_git_dirty warning (OMN-12626, R1).
+    local repo_root="$1"
+    if [[ "${PROD_LANE}" != true ]]; then
+        return 0
+    fi
+
+    log_step "Prod Promotion-Lineage Guard (OMN-12626)"
+
+    local guard="${repo_root}/scripts/check_prod_promotion_lineage.py"
+    if [[ ! -f "${guard}" ]]; then
+        log_error "Prod promotion-lineage guard not found: ${guard}"
+        log_error "Cannot build prod from an unverifiable source tree. Aborting."
+        exit 1
+    fi
+
+    # Prefer the repo venv, then uv, then system python3 — fail-fast if none run.
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the prod lineage guard."
+        exit 1
+    fi
+
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! uv run --project "${repo_root}" python "${guard}" --repo "${repo_root}"; then
+            log_error "Prod promotion-lineage guard FAILED. Refusing to build prod."
+            exit 1
+        fi
+    else
+        if ! "${python_bin}" "${guard}" --repo "${repo_root}"; then
+            log_error "Prod promotion-lineage guard FAILED. Refusing to build prod."
+            exit 1
+        fi
+    fi
+
+    log_info "Prod promotion-lineage guard passed: source clean + promoted."
 }
 
 # =============================================================================
@@ -1504,6 +1568,11 @@ main() {
     log_info "Version: ${version}"
     log_info "Git SHA: ${git_sha}"
     check_git_dirty "${repo_root}"
+
+    # Prod lane: hard-fail on dirty/non-promoted source before any build/deploy.
+    # Runs in both dry-run and execute modes so operators see the rejection
+    # during preview, not after a build starts (OMN-12626, R1).
+    guard_prod_promotion_lineage "${repo_root}"
 
     # Compute paths
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"

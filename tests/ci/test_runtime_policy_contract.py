@@ -47,6 +47,7 @@ def test_runtime_policy_contract_declares_three_runtime_lanes() -> None:
     assert contract.profiles["dev"].effects_port == 8086
     assert contract.profiles["stability-test"].main_port == 18085
     assert contract.profiles["stability-test"].effects_port == 18086
+    assert contract.profiles["stability-test"].topic_provisioner_max_partitions == 1
     assert contract.profiles["prod"].main_port == 28085
     assert contract.profiles["prod"].effects_port == 28086
 
@@ -68,6 +69,7 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     assert env["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
     assert env["DEV_RUNTIME_MAIN_PORT"] == "8085"
     assert env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
+    assert env["STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
     assert env["PROD_RUNTIME_MAIN_PORT"] == "28085"
     assert (
         env["STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES"]

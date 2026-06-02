@@ -20,6 +20,7 @@ class ModelRuntimeProfilePolicy(BaseModel):
     compose_project: str = Field(min_length=1)
     main_port: int = Field(ge=1, le=65535)
     effects_port: int = Field(ge=1, le=65535)
+    topic_provisioner_max_partitions: int = Field(ge=0)
     processes: dict[RuntimeProcessName, ModelRuntimeProcessPolicy] = Field(
         alias="services"
     )
