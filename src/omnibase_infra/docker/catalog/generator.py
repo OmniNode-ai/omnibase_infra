@@ -60,6 +60,10 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
                 if not vol_name.startswith(".") and not vol_name.startswith("/"):
                     all_volumes.add(vol_name)
 
+        # Tmpfs mounts
+        if manifest.tmpfs:
+            svc["tmpfs"] = list(manifest.tmpfs)
+
         # Networks
         networks: list[str] = ["omnibase-infra-network"]
         if manifest.extra_networks:

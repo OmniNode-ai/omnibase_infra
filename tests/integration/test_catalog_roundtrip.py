@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 
 REPO_ROOT = str(Path(__file__).parent.parent.parent)
@@ -184,6 +185,19 @@ def test_catalog_runtime_without_memgraph_excludes_memory_env() -> None:
         assert not key.startswith("OMNIMEMORY_"), (
             f"Unexpected OMNIMEMORY var '{key}' in runtime-only stack"
         )
+
+
+@pytest.mark.integration
+def test_catalog_runtime_renders_local_ingress_tmpfs() -> None:
+    """Generated runtime compose must preserve the runtime-owned socket tmpfs."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    stack = resolver.resolve(["runtime"])
+    compose = generate_compose(stack)
+    services = compose["services"]
+    assert isinstance(services, dict)
+
+    runtime_service = services["omninode-runtime"]
+    assert runtime_service["tmpfs"] == ["/run/onex-runtime:uid=1000,gid=1000,mode=0770"]
 
 
 @pytest.mark.integration
