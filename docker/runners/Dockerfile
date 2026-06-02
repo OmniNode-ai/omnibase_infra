@@ -151,6 +151,7 @@ RUN chmod 0444 /etc/omni/runner-image.lock.json
 # the env directory ownership matches the runtime user.
 COPY prebuilt-env-context/pyproject.toml /opt/omni/prebuilt/pyproject.toml
 COPY prebuilt-env-context/uv.lock /opt/omni/prebuilt/uv.lock
+COPY prebuilt-env-context/.github/actions/setup-python-uv/action.yml /opt/omni/prebuilt/.github/actions/setup-python-uv/action.yml
 COPY prebuilt-env-context/ci/ /opt/omni/prebuilt/scripts/ci/
 # OMN-12584: chown the *whole* runner cache dir, not only the ci-envs subtree.
 # `mkdir -p "${OMNI_CI_ENV_ROOT}/omnibase_infra"` runs as root and creates the
