@@ -58,7 +58,7 @@ runtime-observability-projections:
   inject_required_env:
     - OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN
 runtime-infrastructure:
-  description: "Runtime infrastructure glue — migrations, workers, autoheal (OMN-9332)"
+  description: "Runtime infrastructure glue — migrations, workers, autoheal, DLQ replay (OMN-9332, OMN-12619)"
   services:
     - forward-migration
     - migration-gate
@@ -66,6 +66,7 @@ runtime-infrastructure:
     - runtime-worker
     - retry-worker
     - autoheal
+    - dlq-replay-consumer
   includes: []
   inject_env: {}
   inject_required_env: []

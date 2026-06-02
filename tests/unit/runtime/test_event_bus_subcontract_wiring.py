@@ -551,7 +551,7 @@ class TestDispatchCallback:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "content_error"
-        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.omnibase-infra.events.v1"
 
     @pytest.mark.asyncio
     async def test_dispatch_callback_routes_no_dispatcher_result_to_derived_dlq(
@@ -573,7 +573,7 @@ class TestDispatchCallback:
             started_at=datetime.now(UTC),
             correlation_id=correlation_id,
             error_message="No dispatcher found for test.event",
-            dlq_topic="onex.dlq.events.v1",
+            dlq_topic="onex.dlq.omnibase-infra.events.v1",
         )
 
         wiring = EventBusSubcontractWiring(
@@ -595,7 +595,7 @@ class TestDispatchCallback:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "content_error"
-        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.omnibase-infra.events.v1"
         assert call_kwargs["consumer_group"] == "dev.test-handler"
         mock_event_bus.commit_offset.assert_called_once_with(sample_event_message)
         result_applier.apply.assert_not_called()
@@ -1454,7 +1454,7 @@ class TestErrorClassification:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "content_error"
-        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.omnibase-infra.events.v1"
 
     @pytest.mark.asyncio
     async def test_validation_error_classified_as_content_error(
