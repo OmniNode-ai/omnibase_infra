@@ -258,6 +258,11 @@ class PreparedWiring:
     quarantine_detail: str = ""
     route_ids: list[str] = field(default_factory=list)
     routes: list[ModelDispatchRoute] = field(default_factory=list)
+    # Type-scoping predicate built from the entry's contract-declared
+    # ``event_model``. When set, the dispatch engine selects this dispatcher
+    # only for payloads that match the event_model, so sibling handlers on a
+    # multi-handler contract are not all invoked for one message (OMN-12416).
+    payload_type_matcher: Callable[[object], bool] | None = None
 
     @property
     def is_skip(self) -> bool:
@@ -434,6 +439,41 @@ def _make_dispatch_callback(
         return _normalize_handler_result(typed_result, envelope, event_model.name)
 
     return _callback
+
+
+def _make_payload_type_matcher(
+    event_model: ModelHandlerRef,
+) -> Callable[[object], bool]:
+    """Build a payload-type predicate from a contract-declared ``event_model``.
+
+    The returned predicate answers "does this payload match the handler's
+    declared event_model?" — True when the payload is already an instance of
+    the model, or when it validates against the model (e.g. a dict / raw
+    envelope payload). It is used by the dispatch engine to type-scope routing
+    so a multi-handler contract delivers each message only to the handler whose
+    event_model matches the payload (OMN-12416).
+
+    The event_model class is imported lazily on first match and then cached, so
+    wiring stays consistent with ``_make_dispatch_callback`` (which also defers
+    the event_model import to the per-message path) and a declared-but-not-yet-
+    importable model does not change failure timing. A payload that does not
+    validate yields False (not an exception): "not this handler's type".
+    """
+    cached_model_cls: list[type[BaseModel]] = []
+
+    def _matches(payload: object) -> bool:
+        if not cached_model_cls:
+            cached_model_cls.append(_import_event_model_class(event_model))
+        model_cls = cached_model_cls[0]
+        if isinstance(payload, model_cls):
+            return True
+        try:
+            model_cls.model_validate(payload)
+        except Exception:  # noqa: BLE001 — validation failure means "not my type"
+            return False
+        return True
+
+    return _matches
 
 
 def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
@@ -2207,6 +2247,9 @@ async def _subscribe_contract_topics(
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        load_published_events_map,
+    )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
     )
@@ -2229,9 +2272,19 @@ async def _subscribe_contract_topics(
         assert isinstance(event_bus, ProtocolEventBusLike), (
             f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
         )
+        # Route each returned model to ITS declared topic via the contract's
+        # published_events map (event_type short-name -> topic). Without this,
+        # a multi-publish-topic contract (e.g. the LLM call effect publishing
+        # both delegation-call-completed and inference-response) would route
+        # every returned model to the single ``output_topic`` fallback (the
+        # first publish topic), mis-routing the inference response (OMN-12416).
+        # Resolved from the contract's own discovered path, so the map is read
+        # from the installed contract regardless of cwd.
+        output_topic_map = load_published_events_map(contract.contract_path)
         effective_result_applier = DispatchResultApplier(
             event_bus=event_bus,
             output_topic=output_topic,
+            output_topic_map=output_topic_map,
             allowed_output_topics=contract.event_bus.publish_topics,
         )
     node_identity = ModelNodeIdentity(
@@ -2594,8 +2647,20 @@ def _prepare_handler_wiring(
             [t.get("name") for t in db_tables],
             projection_terminal_event,
         )
+        # Projection handlers route by topic/db_io, not event_model; leave
+        # them untyped so the projection dispatch path is unchanged.
+        payload_type_matcher: Callable[[object], bool] | None = None
     else:
         callback = _make_dispatch_callback(handler_instance, entry.event_model)
+        # Type-scope the dispatcher on its declared event_model so a
+        # multi-handler contract routes each message to the single handler
+        # whose event_model matches the payload (OMN-12416). Untyped
+        # (operation-only) handlers stay un-scoped — legacy matching applies.
+        payload_type_matcher = (
+            _make_payload_type_matcher(entry.event_model)
+            if entry.event_model is not None
+            else None
+        )
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_key)
 
     # Pre-compute routes (no engine calls yet)
@@ -2625,6 +2690,7 @@ def _prepare_handler_wiring(
         resolution_outcome=resolution.outcome,
         route_ids=route_ids,
         routes=routes,
+        payload_type_matcher=payload_type_matcher,
     )
 
 
@@ -2678,6 +2744,7 @@ def _commit_handler_wiring(
                 dispatcher=prepared.dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
+                payload_type_matcher=prepared.payload_type_matcher,
             )
             for route in prepared.routes:
                 engine._register_route_dynamic(route)
@@ -2687,6 +2754,7 @@ def _commit_handler_wiring(
                 dispatcher=prepared.dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
+                payload_type_matcher=prepared.payload_type_matcher,
             )
             for route in prepared.routes:
                 engine.register_route(route)

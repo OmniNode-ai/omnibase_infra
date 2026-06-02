@@ -372,6 +372,15 @@ class DispatchEntryInternal:
             handler parameters from envelope/payload/context. When set,
             bindings are resolved BEFORE handler execution and materialized
             into a new envelope with __bindings namespace.
+        payload_type_matcher: Optional predicate that returns True when a
+            payload matches this dispatcher's contract-declared ``event_model``.
+            When set, the dispatcher is type-scoped: it is selected for a
+            message ONLY when the predicate accepts the message payload. This
+            is how a multi-handler contract routes each consumed message to the
+            single handler whose ``event_model`` matches the payload type,
+            instead of fanning the message out to every sibling handler
+            (OMN-12416). ``None`` preserves the legacy string-only matching for
+            operation-only or untyped dispatchers.
     """
 
     __slots__ = (
@@ -382,6 +391,7 @@ class DispatchEntryInternal:
         "message_types",
         "node_kind",
         "operation_bindings",
+        "payload_type_matcher",
     )
 
     def __init__(
@@ -393,6 +403,7 @@ class DispatchEntryInternal:
         node_kind: EnumNodeKind | None = None,
         accepts_context: bool = False,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
@@ -403,6 +414,8 @@ class DispatchEntryInternal:
         self.operation_bindings = (
             operation_bindings  # Declarative bindings for this dispatcher
         )
+        # None means "not type-scoped" — legacy string-only matching applies.
+        self.payload_type_matcher = payload_type_matcher
 
 
 class MessageDispatchEngine:
@@ -641,6 +654,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None = None,
         node_kind: None = None,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None: ...  # Stub: no node_kind -> DispatcherFunc (no context)
 
     @overload
@@ -653,6 +667,7 @@ class MessageDispatchEngine:
         *,
         node_kind: EnumNodeKind,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None: ...  # Stub: with node_kind -> ContextAwareDispatcherFunc (gets context)
 
     def register_dispatcher(
@@ -663,6 +678,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None = None,
         node_kind: EnumNodeKind | None = None,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -691,6 +707,14 @@ class MessageDispatchEngine:
                 bindings are resolved BEFORE handler execution and materialized
                 into a new envelope with __bindings namespace. The original
                 envelope is NEVER mutated.
+            payload_type_matcher: Optional predicate that returns True when a
+                payload matches this dispatcher's contract-declared
+                ``event_model``. When provided, the dispatcher is type-scoped:
+                during routing it is selected ONLY when the predicate accepts
+                the message payload, so a multi-handler contract delivers each
+                message to the single handler whose ``event_model`` matches the
+                payload type rather than fanning out to every sibling handler
+                (OMN-12416). When None, legacy string-only matching applies.
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -768,6 +792,7 @@ class MessageDispatchEngine:
                 message_types=message_types,
                 node_kind=node_kind,
                 operation_bindings=operation_bindings,
+                payload_type_matcher=payload_type_matcher,
             )
 
     def _validate_dispatcher_registration(
@@ -804,6 +829,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None,
         operation_bindings: ModelOperationBindingsSubcontract | None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None:
         if dispatcher_id in self._dispatchers:
             raise ModelOnexError(
@@ -821,6 +847,7 @@ class MessageDispatchEngine:
             node_kind=node_kind,
             accepts_context=accepts_context,
             operation_bindings=operation_bindings,
+            payload_type_matcher=payload_type_matcher,
         )
         self._dispatchers[dispatcher_id] = entry
 
@@ -909,12 +936,15 @@ class MessageDispatchEngine:
         dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
+        payload_type_matcher: Callable[[object], bool] | None = None,
     ) -> None:
         """Register a dispatcher post-freeze for dynamic contract materialization.
 
         Identical to register_dispatcher() but skips the is_frozen check.
         Does not support node_kind or operation_bindings — dynamic materialization
         wires handlers that do not require context injection or operation binding.
+        ``payload_type_matcher`` IS supported so dynamically materialized
+        multi-handler contracts stay type-scoped (OMN-12416).
 
         INVARIANT: Only callable through validated contract materialization
         (via _commit_handler_wiring with dynamic_materialization_authorized=True).
@@ -937,6 +967,7 @@ class MessageDispatchEngine:
                 message_types=message_types,
                 node_kind=None,
                 operation_bindings=None,
+                payload_type_matcher=payload_type_matcher,
             )
 
             self._logger.info(
@@ -1101,8 +1132,14 @@ class MessageDispatchEngine:
 
         # Extract correlation/trace IDs for logging (kept as UUID, converted to string at serialization)
         # Per ONEX guidelines: auto-generate correlation_id if not provided (uuid4())
-        correlation_id = envelope.correlation_id or uuid4()
-        trace_id = envelope.trace_id
+        if isinstance(envelope, dict):
+            correlation_id = envelope.get("correlation_id") or uuid4()
+            trace_id = envelope.get("trace_id")
+            span_id = envelope.get("span_id")
+        else:
+            correlation_id = envelope.correlation_id or uuid4()
+            trace_id = envelope.trace_id
+            span_id = envelope.span_id
 
         # Step 1: Parse topic to get category
         topic_category = EnumMessageCategory.from_topic(topic)
@@ -1189,26 +1226,34 @@ class MessageDispatchEngine:
         # Related: OMN-2037
         if isinstance(envelope, dict):
             envelope_event_type = envelope.get("event_type")
+            envelope_payload = envelope.get("payload", envelope)
         elif (
             hasattr(type(envelope), "model_fields")
             and "event_type" in type(envelope).model_fields
         ):
             envelope_event_type = getattr(envelope, "event_type", None)
+            envelope_payload = envelope.payload
         else:
             envelope_event_type = getattr(envelope, "event_type", None)
+            envelope_payload = envelope.payload
         normalized_event_type = (
             str(envelope_event_type).strip() if envelope_event_type is not None else ""
         )
         if normalized_event_type:
             message_type = normalized_event_type
         else:
-            message_type = type(envelope.payload).__name__
+            message_type = type(envelope_payload).__name__
 
-        # Step 4: Find matching dispatchers
+        # Step 4: Find matching dispatchers. The payload is passed so type-scoped
+        # dispatchers (those registered with a payload_type_matcher) are selected
+        # only when the payload matches their contract-declared event_model — a
+        # multi-handler contract routes each message to the single matching
+        # handler instead of fanning out to every sibling (OMN-12416).
         matching_dispatchers = self._find_matching_dispatchers(
             topic=topic,
             category=topic_category,
             message_type=message_type,
+            payload=envelope_payload,
         )
 
         # Log routing decision at DEBUG level
@@ -1611,7 +1656,7 @@ class MessageDispatchEngine:
                 else None,
                 correlation_id=correlation_id,
                 trace_id=trace_id,
-                span_id=envelope.span_id,
+                span_id=span_id,
             )
         except ValidationError as result_validation_error:
             # Pydantic validation failed during result construction
@@ -1761,18 +1806,34 @@ class MessageDispatchEngine:
         topic: str,
         category: EnumMessageCategory,
         message_type: str,
+        payload: object | None = None,
     ) -> list[DispatchEntryInternal]:
         """
         Find all dispatchers that match the given criteria.
 
-        Matching is done in two phases:
+        Matching is done in three phases:
         1. Find routes that match topic pattern and category
         2. Find dispatchers for those routes that accept the message type
+        3. Type-scope: drop any dispatcher whose contract-declared event_model
+           does not match the message payload (OMN-12416)
+
+        Phase 3 makes a multi-handler contract route each consumed message to
+        the single handler whose ``event_model`` matches the payload, instead
+        of fanning out to every sibling handler. A dispatcher that declared an
+        ``event_model`` (i.e. registered with a ``payload_type_matcher``) is
+        kept ONLY when its matcher accepts ``payload``. A non-match means "this
+        is not my message" and is NOT an error — the dispatcher is simply not
+        selected, so it never receives a payload it cannot validate. Dispatchers
+        without a ``payload_type_matcher`` (operation-only / untyped) keep the
+        legacy string-only matching and are unaffected.
 
         Args:
             topic: The topic to match
             category: The message category
             message_type: The specific message type
+            payload: The message payload, used for event_model type-scoping.
+                When None (e.g. legacy callers without a payload), type-scoping
+                is skipped and string-only matching applies.
 
         Returns:
             List of matching dispatcher entries (may be empty)
@@ -1815,10 +1876,51 @@ class MessageDispatchEngine:
             ):
                 continue
 
+            # Type-scope on the contract-declared event_model (OMN-12416).
+            # Only applies when the dispatcher declared a matcher AND a payload
+            # is available. A matcher that rejects the payload removes this
+            # dispatcher from the candidate set — it never receives a non-matching
+            # payload, so sibling handlers on a multi-handler contract no longer
+            # all fire for one message.
+            if (
+                payload is not None
+                and entry.payload_type_matcher is not None
+                and not self._payload_matches_dispatcher(entry, payload)
+            ):
+                self._logger.debug(
+                    "Type-scoping: dispatcher '%s' skipped — payload type %s does "
+                    "not match its declared event_model (message_type=%s)",
+                    dispatcher_id,
+                    type(payload).__name__,
+                    message_type,
+                )
+                continue
+
             matching_dispatchers.append(entry)
             seen_dispatcher_ids.add(dispatcher_id)
 
         return matching_dispatchers
+
+    def _payload_matches_dispatcher(
+        self,
+        entry: DispatchEntryInternal,
+        payload: object,
+    ) -> bool:
+        """Return True when ``payload`` matches a type-scoped dispatcher's event_model.
+
+        The matcher validates the payload against the dispatcher's
+        contract-declared ``event_model``. A matcher that raises is treated as a
+        non-match (the payload does not conform to this dispatcher's model), so a
+        malformed or wrong-type payload never selects a type-scoped dispatcher.
+        Callers MUST only invoke this when ``entry.payload_type_matcher`` is set.
+        """
+        matcher = entry.payload_type_matcher
+        if matcher is None:
+            return True
+        try:
+            return bool(matcher(payload))
+        except Exception:  # noqa: BLE001 — a raising matcher means "not my type"
+            return False
 
     async def _execute_dispatcher(
         self,
