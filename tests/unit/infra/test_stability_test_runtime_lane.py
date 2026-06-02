@@ -240,6 +240,18 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
 
 
 @pytest.mark.unit
+def test_stability_lane_redpanda_requires_connected_network_advertise_host() -> None:
+    overlay = _load_overlay()
+    redpanda_command = " ".join(overlay["services"]["redpanda"]["command"])
+
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" in redpanda_command
+    assert "${REDPANDA_ADVERTISE_HOST" not in redpanda_command
+    assert "localhost:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT" not in redpanda_command
+    assert "localhost:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT" not in redpanda_command
+    assert "reachable by all stability-test operators" in redpanda_command
+
+
+@pytest.mark.unit
 def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
