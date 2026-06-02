@@ -99,8 +99,15 @@ class _FakeAIOKafkaConsumer:
     topic_partitions_by_topic: ClassVar[dict[str, set[int]] | None] = None
     require_metadata_refresh: ClassVar[bool] = False
 
-    def __init__(self, *topics: object, **kwargs: object) -> None:
+    def __init__(
+        self,
+        *topics: object,
+        api_version: str | None = None,
+        **kwargs: object,
+    ) -> None:
         self.topics = topics
+        if api_version is not None:
+            kwargs["api_version"] = api_version
         self.kwargs = kwargs
         self._client = _FakeAIOKafkaClient(self)
         self.messages: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
@@ -193,6 +200,7 @@ class _FakeKafkaTransport:
         heartbeat_interval_ms=15000,
         max_poll_interval_ms=300000,
         reconnect_backoff_ms=2000,
+        api_version="2.8.0",
     )
     _bootstrap_servers = "pattern-b-test-broker"
 
@@ -408,6 +416,7 @@ async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
     assert result.status == "completed"
     assert result.payload == {"status": "complete", "dispatch_count": 5}
     assert created_consumers[0].kwargs["group_id"] is None
+    assert created_consumers[0].kwargs["api_version"] == "2.8.0"
     assert created_consumers[0].assigned_partitions
     assert created_consumers[0].stopped is True
 
