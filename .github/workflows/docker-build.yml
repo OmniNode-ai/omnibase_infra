@@ -276,6 +276,8 @@ jobs:
           cache-version: docker
           cache-enabled: "false"
           shared-env-enabled: "true"
+          cache-key-prefix: uv-docker
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Run Docker integration tests WITHOUT pytest-xdist (no -n auto)
       # This prevents worker crashes during Docker builds
