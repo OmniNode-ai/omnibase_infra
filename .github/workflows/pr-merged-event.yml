@@ -54,7 +54,9 @@ jobs:
         with:
           python-version: "3.12"
           cache-key-prefix: uv-pr-merged-event
+          cache-enabled: "false"
           install-args: --frozen
+          shared-env-enabled: "true"
 
       - name: Publish PR merged event
         # All potentially attacker-controlled inputs (head_ref, author, title)

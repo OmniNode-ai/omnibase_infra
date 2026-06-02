@@ -628,6 +628,10 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
             assert all(
                 step["with"]["install-args"] == "--frozen" for step in setup_steps
             )
+            assert all(step["with"]["cache-enabled"] == "false" for step in setup_steps)
+            assert all(
+                step["with"]["shared-env-enabled"] == "true" for step in setup_steps
+            )
 
             run_scripts = [
                 step.get("run", "")

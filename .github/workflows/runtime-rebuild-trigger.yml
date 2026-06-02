@@ -65,7 +65,9 @@ jobs:
         with:
           python-version: "3.12"
           cache-key-prefix: uv-runtime-rebuild-trigger
+          cache-enabled: "false"
           install-args: --frozen
+          shared-env-enabled: "true"
 
       - name: Trigger node_redeploy if runtime change detected
         # All potentially attacker-controlled inputs (labels, base_ref, sha) are
