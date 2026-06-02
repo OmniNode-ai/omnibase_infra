@@ -1,0 +1,130 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-12584: Build-smoke gate for the versioned self-hosted runner image.
+#
+# Why this exists: the OMN-12567 runner image (docker/runners/Dockerfile) merged
+# green but had NEVER been built. Its prebuilt-env bake stage failed with an
+# EACCES because the runner user could not create its uv cache under the
+# root-owned /home/runner/.cache. No CI job built docker/runners/Dockerfile, so a
+# non-building image passed every check. This workflow closes that gap:
+# "enforcement, not detection" — when a PR touches the runner image inputs, we
+# actually build the image (through the prebuilt-env bake stage that broke) so a
+# non-building runner image can never merge green again.
+#
+# Bounded: build only, no push, no fleet recreate, no retag of :latest. The
+# throwaway tag is local-only and discarded.
+
+name: Runner Image Build Smoke
+
+on:
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - 'docker/runners/**'
+      - 'scripts/ci/build_runner_image.sh'
+      - 'scripts/ci/runner_image_identity.py'
+      - 'scripts/ci/ensure_ci_env.sh'
+      - 'scripts/ci/ci_env_digest.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/runner-image-build-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: runner-image-build-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  runner-image-build-smoke:
+    name: runner-image-build-smoke
+    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted
+    # omnibase-ci; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # The prebuilt-env bake runs `uv sync --frozen --all-extras --all-groups`,
+    # which dominates the build. 30 min gives a comfortable buffer for a cold
+    # cache; a warm self-hosted cache completes in a few minutes.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "::error::Docker daemon is not accessible. On self-hosted runners, ensure the runner user is in the docker group and /var/run/docker.sock is bind-mounted."
+            ls -la /var/run/docker.sock 2>/dev/null || echo "Socket not found"
+            echo "Current user: $(whoami) (uid=$(id -u), groups=$(id -Gn))"
+            exit 1
+          fi
+          echo "Docker daemon accessible"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Build the versioned runner image to a throwaway local tag. This runs the
+      # exact production path: build_runner_image.sh first verifies the bound
+      # identity (runner_image_identity.py --mode verify, so lock drift fails
+      # here too), stages the prebuilt-env context, then `docker build`s through
+      # the prebuilt-env bake stage — the stage that broke in OMN-12567. No push,
+      # no fleet contact. The image is local-only and removed afterward.
+      - name: Build runner image (smoke, no push)
+        run: |
+          set -euo pipefail
+          SMOKE_TAG="omninode-runner:smoke-${{ github.run_id }}"
+          echo "Building ${SMOKE_TAG} from docker/runners/Dockerfile (build-only, no push)"
+          bash scripts/ci/build_runner_image.sh --tag "${SMOKE_TAG}"
+          echo "SMOKE_TAG=${SMOKE_TAG}" >> "${GITHUB_ENV}"
+
+      # Prove the prebuilt-env bake actually produced a ready shared CI env and
+      # the bound identity was baked (not "unbound"). A build that "succeeds" but
+      # skips the bake would not satisfy the OMN-12567 contract.
+      - name: Assert baked identity + prebuilt env present
+        run: |
+          set -euo pipefail
+          LOCK_IDENTITY="$(python3 -c 'import json;print(json.load(open("docker/runners/runner-image.lock.json"))["identity_digest"])')"
+          BAKED_LABEL="$(docker inspect --format '{{ index .Config.Labels "org.omninode.runner.image.identity" }}' "${SMOKE_TAG}")"
+          echo "lock identity_digest:  ${LOCK_IDENTITY}"
+          echo "baked image label:     ${BAKED_LABEL}"
+          if [[ "${BAKED_LABEL}" != "${LOCK_IDENTITY}" ]]; then
+            echo "::error::baked identity label '${BAKED_LABEL}' != lock identity_digest '${LOCK_IDENTITY}'"
+            exit 1
+          fi
+          if [[ -z "${BAKED_LABEL}" || "${BAKED_LABEL}" == "unbound" ]]; then
+            echo "::error::runner image identity is unbound"
+            exit 1
+          fi
+          # The prebuilt-env bake must have materialised a ready env (manifest.json
+          # + .venv/bin/python) — this is the EACCES-class regression guard.
+          docker run --rm --entrypoint bash "${SMOKE_TAG}" -lc '
+            set -euo pipefail
+            ready=0
+            for d in "${OMNI_CI_ENV_ROOT}"/omnibase_infra/*/; do
+              if [[ -f "${d}manifest.json" && -x "${d}.venv/bin/python" ]]; then
+                echo "ready prebuilt env: ${d}"
+                ready=1
+              fi
+            done
+            if [[ "${ready}" -ne 1 ]]; then
+              echo "::error::no ready prebuilt CI env baked under ${OMNI_CI_ENV_ROOT}/omnibase_infra"
+              exit 1
+            fi
+          '
+          echo "Runner image build smoke PASSED: identity bound + prebuilt env baked."
+
+      - name: Cleanup throwaway image
+        if: always()
+        run: |
+          docker image rm "${SMOKE_TAG:-}" 2>/dev/null || true
