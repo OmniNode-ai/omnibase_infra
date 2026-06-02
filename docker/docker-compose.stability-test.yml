@@ -101,12 +101,14 @@ services:
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
+      OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
+      SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-main
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
@@ -118,6 +120,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
@@ -134,12 +137,14 @@ services:
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-effects
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
+      OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
+      SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-effects
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
@@ -150,6 +155,7 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
@@ -179,12 +185,14 @@ services:
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?session orchestrator health probes require ONEX_INFRA_HOST}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?session orchestrator health probes require ONEX_INFRA_USER}
       ONEX_RUNTIME_ID: stability-test-worker
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/worker
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-workers
+      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
+      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
+      OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
+      SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
       KAFKA_INSTANCE_ID: stability-test-worker
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_WORKER_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_BIFROST_VERIFY_ENDPOINTS}
@@ -193,6 +201,7 @@ services:
       - worker_logs:/app/logs
       - stability_test_worker_data:/app/data
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     labels:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-10281"
