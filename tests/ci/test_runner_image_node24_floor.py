@@ -163,7 +163,10 @@ def test_runner_image_external_downloads_are_retried() -> None:
     assert "--http1.1" in source
     assert "--retry 5" in source
     assert "--retry-connrefused" in source
+    assert "--retry-all-errors" in source
     assert "--retry-max-time 300" in source
+    assert 'omni-curl "https://github.com/astral-sh/uv' not in source
+    assert 'omni-curl "https://github.com/cli/cli' not in source
 
     download_urls = (
         "github.com/astral-sh/uv",

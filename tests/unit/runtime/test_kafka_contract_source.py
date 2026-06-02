@@ -42,6 +42,7 @@ from omnibase_infra.models.handlers import (
 )
 from omnibase_infra.runtime.kafka_contract_source import (
     MAX_CONTRACT_SIZE,
+    ContractYamlParser,
     KafkaContractSource,
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
@@ -1076,3 +1077,110 @@ class TestKafkaContractSourceThreadSafety:
 
         # No exceptions should have occurred
         assert len(errors) == 0, f"Thread safety errors: {errors}"
+
+
+# =============================================================================
+# Market-Node Handler Resolution Tests (OMN-12449)
+# =============================================================================
+
+
+def _market_contract_yaml(
+    *,
+    routing_module: str | None = None,
+    routing_class: str | None = None,
+    top_level_module: str | None = None,
+    top_level_class: str | None = None,
+) -> str:
+    """Build a market-node-shaped handler contract YAML.
+
+    Satisfies the required ModelHandlerContract fields (handler_id, name,
+    contract_version, descriptor, input_model, output_model) so the parser
+    reaches handler_class resolution, but declares the handler module under
+    handler_routing.handlers[].handler (routing form) and/or a top-level
+    handler block — not under metadata.handler_class.
+    """
+    yaml_content = '''handler_id: "compute.market.aislop_sweep"
+name: "aislop_sweep"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+descriptor:
+  node_archetype: "compute"
+input_model: "omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.AislopSweepRequest"
+output_model: "omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.AislopSweepResult"'''
+
+    if top_level_module is not None or top_level_class is not None:
+        yaml_content += "\nhandler:"
+        if top_level_module is not None:
+            yaml_content += f'\n  module: "{top_level_module}"'
+        if top_level_class is not None:
+            yaml_content += f'\n  class: "{top_level_class}"'
+
+    if routing_module is not None or routing_class is not None:
+        yaml_content += """
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sweep"
+      handler:"""
+        if routing_class is not None:
+            yaml_content += f'\n          name: "{routing_class}"'
+        if routing_module is not None:
+            yaml_content += f'\n          module: "{routing_module}"'
+
+    return yaml_content
+
+
+class TestMarketNodeHandlerResolution:
+    """Resolve handler_class from node-shaped contracts (no metadata.handler_class)."""
+
+    _MODULE = "omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep"
+    _CLASS = "NodeAislopSweep"
+
+    def test_resolves_from_handler_routing(self) -> None:
+        """Routing form: handler_routing.handlers[0].handler.{module,name}."""
+        parser = ContractYamlParser(environment="dev")
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+        )
+
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+
+        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
+
+    def test_resolves_from_top_level_handler(self) -> None:
+        """Top-level fallback: handler.{module,class} when routing is absent."""
+        parser = ContractYamlParser(environment="dev")
+        contract_yaml = _market_contract_yaml(
+            top_level_module=self._MODULE,
+            top_level_class=self._CLASS,
+        )
+
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+
+        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
+
+    def test_routing_form_preferred_over_top_level(self) -> None:
+        """Routing form wins when both forms are present."""
+        parser = ContractYamlParser(environment="dev")
+        contract_yaml = _market_contract_yaml(
+            routing_module=self._MODULE,
+            routing_class=self._CLASS,
+            top_level_module="omnimarket.nodes.other.handler_other",
+            top_level_class="HandlerOther",
+        )
+
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+
+        assert descriptor.handler_class == f"{self._MODULE}.{self._CLASS}"
+
+    def test_unresolvable_handler_class_is_none(self) -> None:
+        """No metadata.handler_class and no handler block -> handler_class is None."""
+        parser = ContractYamlParser(environment="dev")
+        contract_yaml = _market_contract_yaml()
+
+        descriptor = parser.parse("node_aislop_sweep", contract_yaml, uuid4())
+
+        assert descriptor.handler_class is None

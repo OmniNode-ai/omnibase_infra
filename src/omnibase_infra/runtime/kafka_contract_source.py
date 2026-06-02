@@ -139,6 +139,63 @@ MAX_CONTRACT_SIZE = 10 * 1024 * 1024  # 10MB
 _TEST_HANDLER_NAMESPACE_PREFIXES = ("tests.",)
 
 
+def _resolve_handler_class_from_routing(
+    contract_data: dict[str, object],
+) -> str | None:
+    """Resolve a fully qualified handler class path from a node contract.
+
+    Market node contracts do not declare ``metadata.handler_class`` (the form
+    ModelHandlerContract reads). Instead they declare the handler module under
+    ``handler_routing.handlers[].handler.module`` and/or a top-level
+    ``handler.module``, with the class name under ``.name`` (routing form) or
+    ``.class`` (top-level form). This helper joins module + class into the
+    ``module.ClassName`` path the live materializer imports.
+
+    The routing form is preferred over the top-level form because routing is the
+    canonical dispatch surface; the top-level ``handler`` block is a convenience
+    declaration.
+
+    Args:
+        contract_data: Parsed contract YAML as a mapping.
+
+    Returns:
+        Fully qualified ``module.ClassName`` path, or None when neither the
+        routing nor the top-level handler block carries a resolvable module.
+    """
+
+    def _join(module: object, class_name: object) -> str | None:
+        if (
+            isinstance(module, str)
+            and module
+            and isinstance(class_name, str)
+            and class_name
+        ):
+            return f"{module}.{class_name}"
+        return None
+
+    # Prefer the routing form: handler_routing.handlers[0].handler.{module,name}
+    handler_routing = contract_data.get("handler_routing")
+    if isinstance(handler_routing, dict):
+        handlers = handler_routing.get("handlers")
+        if isinstance(handlers, list) and handlers:
+            first = handlers[0]
+            if isinstance(first, dict):
+                handler = first.get("handler")
+                if isinstance(handler, dict):
+                    resolved = _join(handler.get("module"), handler.get("name"))
+                    if resolved is not None:
+                        return resolved
+
+    # Fall back to the top-level form: handler.{module,class}
+    top_level = contract_data.get("handler")
+    if isinstance(top_level, dict):
+        resolved = _join(top_level.get("module"), top_level.get("class"))
+        if resolved is not None:
+            return resolved
+
+    return None
+
+
 class ContractYamlParser:  # ai-slop-ok: pre-existing
     """Parse contract YAML into ModelHandlerDescriptor.
 
@@ -219,17 +276,24 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         contract = ModelHandlerContract.model_validate(contract_data)
 
         # Extract handler_class from metadata section
-        # NOTE: handler_class must be in metadata per ModelHandlerContract schema
-        # (root-level extra fields are forbidden by Pydantic extra='forbid')
+        # NOTE: handler_class is read from metadata for handler-shaped contracts
+        # (root-level extra fields are ignored by ModelHandlerContract).
         handler_class = None
         if isinstance(contract_data, dict):
             metadata = contract_data.get("metadata", {})
             if isinstance(metadata, dict):
                 handler_class = metadata.get("handler_class")
 
+        # Fallback for node-shaped (market) contracts: these declare the handler
+        # module under handler_routing.handlers[].handler.module (and/or a
+        # top-level handler.module) rather than metadata.handler_class. Join
+        # module + class into the fully qualified path the materializer imports.
+        if handler_class is None and isinstance(contract_data, dict):
+            handler_class = _resolve_handler_class_from_routing(contract_data)
+
         if handler_class is None:
             logger.debug(
-                "handler_class missing from contract, handler may not be loadable",
+                "handler_class unresolvable from contract, handler may not be loadable",
                 extra={
                     "node_name": node_name,
                     "handler_id": contract.handler_id,
