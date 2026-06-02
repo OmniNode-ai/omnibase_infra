@@ -202,6 +202,7 @@ import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
 from aiokafka.errors import (
+    BrokerNotAvailableError,
     InvalidPartitionsError,
     KafkaError,
     UnknownTopicOrPartitionError,
@@ -1751,22 +1752,25 @@ class EventBusKafka(
             **self._build_auth_kwargs(),
         )
 
-        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError or
-        # InvalidPartitionsError during consumer.start() when partition metadata
-        # has not yet propagated after topic creation. Both errors are transient
-        # in Redpanda --smp 1 --mode dev-container: UnknownTopicOrPartitionError
-        # appears when metadata hasn't propagated yet; InvalidPartitionsError
+        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError,
+        # InvalidPartitionsError, or BrokerNotAvailableError during
+        # consumer.start() when topic or partition metadata has not yet
+        # propagated after topic creation. These are transient in Redpanda
+        # --smp 1 --mode dev-container: UnknownTopicOrPartitionError appears
+        # when metadata has not propagated yet; InvalidPartitionsError
         # (Kafka error 37) appears when the broker acknowledges the topic exists
-        # but hasn't finalized partition metadata. Neither error is permanent —
-        # both resolve once Redpanda stabilizes the topic state.
+        # but has not finalized partition metadata; BrokerNotAvailableError
+        # appears while the broker cannot yet serve metadata for the topic.
+        # None is permanent when topic provisioning is still converging.
         #
         # aiokafka raises these from _wait_topics() inside consumer.start(). They
         # propagate out of asyncio.wait_for before the timeout fires, so
         # KAFKA_TIMEOUT_SECONDS alone does not help.
         #
-        # Fix: retry both errors with exponential backoff within the timeout
-        # budget. Each failed attempt stops and discards the consumer; a fresh
-        # AIOKafkaConsumer is created for each retry to avoid stale state.
+        # Fix: retry metadata errors with exponential backoff within the
+        # timeout budget. Each failed attempt stops and discards the consumer;
+        # a fresh AIOKafkaConsumer is created for each retry to avoid stale
+        # state.
         metadata_retry_deadline = (
             asyncio.get_event_loop().time() + self._timeout_seconds
         )
@@ -1793,7 +1797,11 @@ class EventBusKafka(
                     )
                 raise
 
-            except (UnknownTopicOrPartitionError, InvalidPartitionsError) as e:
+            except (
+                UnknownTopicOrPartitionError,
+                InvalidPartitionsError,
+                BrokerNotAvailableError,
+            ) as e:
                 # Transient metadata propagation lag — stop the failed consumer,
                 # wait briefly, and retry if still within the timeout budget.
                 error_type = type(e).__name__

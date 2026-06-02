@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration test for InvalidPartitionsError retry in consumer start (OMN-9120).
+"""Integration tests for transient metadata retry in consumer start.
 
 Verifies that EventBusKafka._start_consumer_for_topic retries when the broker
-returns InvalidPartitionsError (Kafka error 37), which Redpanda --smp 1
---mode dev-container raises for topics auto-created with > 1 partition.
+returns transient metadata errors, which Redpanda --smp 1 --mode dev-container
+can raise while topic metadata converges.
 
 Without the fix, InvalidPartitionsError fell to the generic except Exception
 block and raised InfraConnectionError immediately. With the fix, it enters the
@@ -20,7 +20,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-from aiokafka.errors import InvalidPartitionsError
+from aiokafka.errors import BrokerNotAvailableError, InvalidPartitionsError
 
 from omnibase_infra.errors import InfraTimeoutError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -95,6 +95,63 @@ async def test_invalid_partitions_error_is_retried_and_recovers(
     # Failed consumer was stopped for cleanup
     consumer_first.stop.assert_awaited_once()
     # Successful consumer was started
+    consumer_second.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_broker_not_available_error_is_retried_and_recovers(
+    kafka_config: ModelKafkaEventBusConfig,
+) -> None:
+    """Consumer start recovers after BrokerNotAvailableError on first attempt.
+
+    Redpanda can return BrokerNotAvailableError while an auto-created topic is
+    visible to the broker but metadata is not yet stable enough for aiokafka's
+    consumer startup path.
+    """
+    bus = EventBusKafka(config=kafka_config)
+
+    producer_mock = MagicMock()
+    producer_mock.start = AsyncMock()
+    producer_mock.stop = AsyncMock()
+
+    with patch(
+        "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+        return_value=producer_mock,
+    ):
+        await bus.start()
+
+    consumer_first = MagicMock()
+    consumer_first.start = AsyncMock(side_effect=BrokerNotAvailableError())
+    consumer_first.stop = AsyncMock()
+
+    consumer_second = MagicMock()
+    consumer_second.start = AsyncMock()
+    consumer_second.stop = AsyncMock()
+
+    call_count = 0
+
+    def make_consumer(*args: object, **kwargs: object) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return consumer_first
+        return consumer_second
+
+    with (
+        patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+            side_effect=make_consumer,
+        ),
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await bus.subscribe(
+            "onex.evt.integration.broker-not-available-retry.v1",
+            on_message=AsyncMock(),
+            group_id="integration-broker-not-available-retry-group",
+        )
+
+    assert call_count == 2
+    consumer_first.stop.assert_awaited_once()
     consumer_second.start.assert_awaited_once()
 
 
