@@ -9,8 +9,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
 ]
 
 [[package]]
@@ -1980,8 +1980,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.42.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0#fc211e3648681a79f609c2c153a254baaef682ab" }
+version = "0.43.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454#4ffca7643294fcad4f9654f4d1839ca8002b4454" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.37.0"
+version = "0.38.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -2093,8 +2093,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.42.0" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.64" },
@@ -2149,7 +2149,7 @@ dev = [
 [[package]]
 name = "omnibase-spi"
 version = "0.22.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.22.0#c01f70cd14e4b68ee83d20468df87e5ce91bee90" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main#b7bac17636ae53fb4c51f071377a0c93501d0c27" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },

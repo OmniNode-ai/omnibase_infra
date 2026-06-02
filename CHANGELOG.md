@@ -1,3 +1,18 @@
+## v0.38.0 (2026-05-31)
+
+### Features
+- feat(OMN-12294): drop bridge-backed delegation dispatch, use pure Kafka port (stage 2) (#1779)
+- feat(OMN-9545): remove dead instance-discovery fields from registry API (#1777)
+- feat(OMN-10409): skip Bifrost render for projection API (#1780)
+
+### Bug Fixes
+- fix(OMN-12432): authenticate uv git+https fetches in CI (#1789)
+- fix(OMN-6664): clean up non-standard noqa suppressions (#1778)
+
+### Changed
+- Bumps omnibase-core pin to >=0.43.0,<0.44.0
+- And 33+ additional commits since v0.37.0
+
 ## v0.32.0 (2026-04-03)
 
 ### Features
