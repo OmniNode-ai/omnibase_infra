@@ -477,7 +477,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     # GitHub CLI for runtime-owned PR lifecycle inventory and merge gates
     gh \
-    # git is required by gh; SSH supports runtime-owned host/session probes.
+    # git is required by gh and session health repo probes.
+    # SSH supports runtime-owned host/session probes.
     git \
     openssh-client \
     # CA certificates for HTTPS connections
