@@ -19,6 +19,7 @@ from omnibase_core.models.contracts.model_topic_schema_binding import (
     ModelTopicSchemaBinding,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
 from omnibase_infra.migration.models.model_consumer_group_lag import (
     ModelConsumerGroupLag,
 )
@@ -59,15 +60,16 @@ class _FakeOffset:
 
 
 class _FakeAdmin:
-    """In-memory ProtocolKafkaAdminLike for committed/end offsets."""
+    """In-memory admin mirroring the aiokafka 0.13.0 surface.
 
-    def __init__(
-        self,
-        committed: dict[_FakeTopicPartition, int],
-        end: dict[_FakeTopicPartition, int],
-    ) -> None:
+    Intentionally has NO ``list_offsets`` — that method does not exist on the
+    pinned ``AIOKafkaAdminClient`` (OMN-12632). Stubbing it here was the masking
+    that hid the production crash; log-end offsets are served by the consumer via
+    :class:`AdapterKafkaAdminLag` instead.
+    """
+
+    def __init__(self, committed: dict[_FakeTopicPartition, int]) -> None:
         self._committed = committed
-        self._end = end
 
     async def start(self) -> None:  # pragma: no cover - protocol shape
         return None
@@ -87,8 +89,24 @@ class _FakeAdmin:
     async def list_consumer_group_offsets(self, group_id, **kwargs):
         return {tp: _FakeOffset(off) for tp, off in self._committed.items()}
 
-    async def list_offsets(self, topic_partitions):
-        return {tp: _FakeOffset(self._end[tp]) for tp in topic_partitions}
+
+class _FakeConsumer:
+    """In-memory consumer mirroring ``AIOKafkaConsumer.end_offsets`` (0.13.0)."""
+
+    def __init__(self, end: dict[_FakeTopicPartition, int]) -> None:
+        self._end = end
+
+    async def end_offsets(self, partitions):
+        return {tp: self._end[tp] for tp in partitions}
+
+
+def _observer(
+    committed: dict[_FakeTopicPartition, int],
+    end: dict[_FakeTopicPartition, int],
+) -> ServiceConsumerLagObserver:
+    """Build an observer over the adapter, mirroring the real wired surface."""
+    adapter = AdapterKafkaAdminLag(_FakeAdmin(committed), _FakeConsumer(end))
+    return ServiceConsumerLagObserver(adapter)
 
 
 def _binding(topic: str, major: int) -> ModelTopicSchemaBinding:
@@ -179,11 +197,10 @@ def test_group_lag_empty_is_not_drained() -> None:
 async def test_observer_computes_lag_from_committed_and_end() -> None:
     tp0 = _FakeTopicPartition("onex.evt.orders.order-placed.v1", 0)
     tp1 = _FakeTopicPartition("onex.evt.orders.order-placed.v1", 1)
-    admin = _FakeAdmin(
+    observer = _observer(
         committed={tp0: 10, tp1: 7},
         end={tp0: 10, tp1: 12},
     )
-    observer = ServiceConsumerLagObserver(admin)
     lag = await observer.observe("dev.orders.order-placed.consume.v1")
     assert lag.total_lag == 5
     assert lag.lag_for_topic("onex.evt.orders.order-placed.v1") == 5
@@ -192,8 +209,7 @@ async def test_observer_computes_lag_from_committed_and_end() -> None:
 @pytest.mark.asyncio
 async def test_observer_normalizes_negative_committed_to_zero() -> None:
     tp0 = _FakeTopicPartition("onex.evt.orders.order-placed.v1", 0)
-    admin = _FakeAdmin(committed={tp0: -1}, end={tp0: 4})
-    observer = ServiceConsumerLagObserver(admin)
+    observer = _observer(committed={tp0: -1}, end={tp0: 4})
     lag = await observer.observe("g")
     assert lag.total_lag == 4
 
@@ -206,8 +222,7 @@ async def test_observer_normalizes_negative_committed_to_zero() -> None:
 @pytest.mark.asyncio
 async def test_gate_blocks_retirement_while_lag_remains() -> None:
     tp0 = _FakeTopicPartition("onex.evt.orders.order-placed.v1", 0)
-    admin = _FakeAdmin(committed={tp0: 3}, end={tp0: 5})
-    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    gate = ServiceDrainProofGate(_observer(committed={tp0: 3}, end={tp0: 5}))
     decision = await gate.evaluate(_migration_contract())
     assert decision.retirement_allowed is False
     assert decision.residual_lag == 2
@@ -216,8 +231,7 @@ async def test_gate_blocks_retirement_while_lag_remains() -> None:
 @pytest.mark.asyncio
 async def test_gate_allows_retirement_after_drain_proof() -> None:
     tp0 = _FakeTopicPartition("onex.evt.orders.order-placed.v1", 0)
-    admin = _FakeAdmin(committed={tp0: 5}, end={tp0: 5})
-    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    gate = ServiceDrainProofGate(_observer(committed={tp0: 5}, end={tp0: 5}))
     decision = await gate.evaluate(_migration_contract())
     assert decision.retirement_allowed is True
     assert decision.residual_lag == 0
@@ -225,8 +239,7 @@ async def test_gate_allows_retirement_after_drain_proof() -> None:
 
 @pytest.mark.asyncio
 async def test_gate_blocks_when_no_offsets_observed() -> None:
-    admin = _FakeAdmin(committed={}, end={})
-    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    gate = ServiceDrainProofGate(_observer(committed={}, end={}))
     decision = await gate.evaluate(_migration_contract())
     # Absence of evidence is not proof of drain.
     assert decision.retirement_allowed is False
@@ -237,8 +250,7 @@ async def test_gate_blocks_when_group_has_offsets_but_not_on_old_topic() -> None
     # The group commits offsets on an UNRELATED topic but nothing on old_topic.
     # Global non-emptiness must not be mistaken for old-topic drain proof.
     other = _FakeTopicPartition("onex.evt.orders.order-shipped.v1", 0)
-    admin = _FakeAdmin(committed={other: 5}, end={other: 5})
-    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    gate = ServiceDrainProofGate(_observer(committed={other: 5}, end={other: 5}))
     decision = await gate.evaluate(_migration_contract())
     assert decision.retirement_allowed is False
     assert "no committed offsets" in decision.reason
@@ -246,8 +258,7 @@ async def test_gate_blocks_when_group_has_offsets_but_not_on_old_topic() -> None
 
 @pytest.mark.asyncio
 async def test_gate_allows_when_drain_proof_opted_out() -> None:
-    admin = _FakeAdmin(committed={}, end={})
-    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    gate = ServiceDrainProofGate(_observer(committed={}, end={}))
     # An opt-out contract still requires OLD_TOPIC_DRAINED cutover criterion only
     # when drain_proof_required is True; build a valid opt-out contract.
     contract = ModelTopicMigrationContract(
