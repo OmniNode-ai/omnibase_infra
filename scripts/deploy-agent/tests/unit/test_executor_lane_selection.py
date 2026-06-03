@@ -40,6 +40,7 @@ class TestLaneConfig:
     def test_dev_lane_matches_legacy_module_constants(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
         assert cfg.compose_project == COMPOSE_PROJECT == "omnibase-infra"
+        assert cfg.postgres_container == "omnibase-infra-postgres"
         assert cfg.compose_files == (COMPOSE_FILE,)
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.runtime_health_targets == (
@@ -50,6 +51,7 @@ class TestLaneConfig:
     def test_stability_test_lane_config(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
         assert cfg.compose_project == "omnibase-infra-stability-test"
+        assert cfg.postgres_container == "omnibase-infra-stability-test-postgres"
         # overlay must be layered on top of the base infra compose file
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert any("docker-compose.stability-test.yml" in f for f in cfg.compose_files)
@@ -61,6 +63,7 @@ class TestLaneConfig:
     def test_prod_lane_config(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.PROD)
         assert cfg.compose_project == "omnibase-infra-prod"
+        assert cfg.postgres_container == "omnibase-infra-prod-postgres"
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert any("docker-compose.prod.yml" in f for f in cfg.compose_files)
         assert cfg.runtime_health_targets == (
@@ -181,9 +184,10 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "handler_registry count" in cmd:
+            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+                assert "omnibase-infra-stability-test-postgres" in cmd
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0, stdout="4\n", stderr=""
+                    args=cmd, returncode=0, stdout="t\n", stderr=""
                 )
             if (
                 "http://localhost:18085/health" in cmd
@@ -214,9 +218,10 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "handler_registry count" in cmd:
+            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+                assert "omnibase-infra-prod-postgres" in cmd
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0, stdout="4\n", stderr=""
+                    args=cmd, returncode=0, stdout="t\n", stderr=""
                 )
             if (
                 "http://localhost:28085/health" in cmd
@@ -248,9 +253,10 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "handler_registry count" in cmd:
+            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+                assert "omnibase-infra-postgres" in cmd
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0, stdout="4\n", stderr=""
+                    args=cmd, returncode=0, stdout="t\n", stderr=""
                 )
             if (
                 "http://localhost:8085/health" in cmd
