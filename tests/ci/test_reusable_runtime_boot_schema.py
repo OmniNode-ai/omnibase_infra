@@ -160,6 +160,10 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     assert "compose service endpoints reachable by docker dns" in compose_text
     assert "compose service endpoints reachable by host-published ports" in compose_text
     assert "unreachable from the runner by docker dns or localhost" in compose_text
+    assert "capture_compose_infra_diagnostics" in compose_text
+    assert "redpanda logs tail" in compose_text
+    assert "rpk topic list --brokers redpanda:9092" in compose_text
+    assert "compose services not healthy after 150s" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
     assert "kafka_bootstrap_servers=localhost:${kafka_port}" in compose_text
     assert "postgres:5432" in compose_text
@@ -241,6 +245,27 @@ def test_boot_disables_uv_cache_cleanup(workflow: Workflow) -> None:
         s for s in steps if "astral-sh/setup-uv" in str(s.get("uses", ""))
     )
     assert setup_step["with"]["enable-cache"] is False
+
+
+def test_compose_mode_installs_docker_compose_plugin(workflow: Workflow) -> None:
+    job = _boot_job(workflow)
+    assert job["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
+
+    steps = _boot_steps(workflow)
+    install_steps = [
+        s for s in steps if "install docker compose plugin" in _step_text(s)
+    ]
+    assert install_steps, "Docker Compose plugin install step missing"
+    install_step = install_steps[0]
+    assert str(install_step.get("if", "")) == "inputs.mode == 'compose'"
+    install_text = _step_text(install_step)
+    assert "docker compose version" in install_text
+    assert "docker_compose_version" in install_text
+    assert "docker-compose-linux-x86_64" in install_text
+
+    compose_steps = [s for s in steps if "bring up compose stack" in _step_text(s)]
+    assert compose_steps, "compose bring-up step missing"
+    assert steps.index(install_step) < steps.index(compose_steps[0])
 
 
 def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
@@ -450,7 +475,9 @@ def test_boot_uploads_smoke_result_artifact(workflow: Workflow) -> None:
     assert matched, "smoke-result.json artifact output missing"
     # OMN-9458: artifact payload must include effects_health so downstream
     # tooling can discriminate runtime vs runtime-effects startup regressions.
-    assert "effects_health" in WORKFLOW_PATH.read_text()
+    raw = WORKFLOW_PATH.read_text()
+    assert "effects_health" in raw
+    assert "compose_infra_diagnostics" in raw
 
 
 def test_boot_has_nine_steps_minimum(workflow: Workflow) -> None:

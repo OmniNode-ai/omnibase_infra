@@ -83,6 +83,7 @@ jobs:
       ONEX_EVENT_BUS_TYPE: "kafka"
       POSTGRES_DATABASE: "omnibase_infra"
       LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+      DOCKER_COMPOSE_VERSION: "v2.40.3"
 
     steps:
       - name: Validate mode input
@@ -147,6 +148,23 @@ jobs:
           # rpk is executed via `docker exec` against the compose-managed
           # omnibase-infra-redpanda container, so a host-level rpk install is
           # unnecessary in compose mode.
+
+      - name: Install Docker Compose plugin (compose mode)
+        if: inputs.mode == 'compose'
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then
+            docker compose version
+            exit 0
+          fi
+
+          plugin_dir="${HOME}/.docker/cli-plugins"
+          mkdir -p "${plugin_dir}"
+          curl -fsSL \
+            "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+            -o "${plugin_dir}/docker-compose"
+          chmod +x "${plugin_dir}/docker-compose"
+          docker compose version
 
       - name: Resolve Docker Compose command
         if: inputs.mode == 'compose'
@@ -227,6 +245,28 @@ jobs:
           REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
             "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
 
+          capture_compose_infra_diagnostics() {
+            {
+              echo "== docker compose ps =="
+              "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml ps || true
+              echo
+              echo "== postgres inspect health =="
+              docker inspect --format '{{json .State.Health}}' "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" || true
+              echo
+              echo "== redpanda inspect health =="
+              docker inspect --format '{{json .State.Health}}' "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" || true
+              echo
+              echo "== redpanda cluster health =="
+              docker exec "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" rpk cluster health --brokers redpanda:9092 || true
+              echo
+              echo "== redpanda cluster info =="
+              docker exec "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" rpk cluster info --brokers redpanda:9092 || true
+              echo
+              echo "== redpanda logs tail =="
+              docker logs --tail 200 "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" || true
+            } > compose_infra_diagnostics.txt 2>&1 || true
+          }
+
           # Self-hosted CI runners run inside Docker containers that share the
           # host Docker daemon via /var/run/docker.sock. Port bindings on the
           # host (localhost:$POSTGRES_PORT, localhost:$KAFKA_PORT) are NOT reachable from the
@@ -260,7 +300,7 @@ jobs:
           # Redpanda's single-node dev-container can keep `rpk cluster health`
           # false longer than the broker API is unavailable; runtime boot only
           # needs Kafka API reachability, so probe topic listing explicitly.
-          for i in $(seq 1 90); do
+          for i in $(seq 1 150); do
             pg_ok=false
             kafka_ok=false
             if docker exec "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" pg_isready -U postgres >/dev/null 2>&1; then
@@ -277,7 +317,8 @@ jobs:
             sleep 1
           done
           if ! $pg_ok || ! $kafka_ok; then
-            echo "::error::compose services not healthy after 90s — pg=${pg_ok} kafka=${kafka_ok}"
+            capture_compose_infra_diagnostics
+            echo "::error::compose services not healthy after 150s — pg=${pg_ok} kafka=${kafka_ok}"
             exit 1
           fi
 
@@ -667,6 +708,9 @@ jobs:
           if [[ ! -f startup_logs.txt ]]; then
             : > startup_logs.txt
           fi
+          if [[ ! -f compose_infra_diagnostics.txt ]]; then
+            : > compose_infra_diagnostics.txt
+          fi
           active_fresh_raw='${{ steps.pg_liveness.outputs.active_fresh_registrations }}'
           if [[ -z "$active_fresh_raw" ]]; then
             active_fresh_raw='0'
@@ -681,6 +725,7 @@ jobs:
             --arg active_fresh "${active_fresh_raw}" \
             --rawfile rpk_groups rpk_groups.txt \
             --rawfile startup_logs startup_logs.txt \
+            --rawfile compose_infra_diagnostics compose_infra_diagnostics.txt \
             '{
               mode: $mode,
               runtime_host: $runtime_host,
@@ -691,7 +736,8 @@ jobs:
               effects_health: $effects_health[0],
               active_fresh_registrations: ($active_fresh | tonumber),
               rpk_groups: $rpk_groups,
-              startup_logs: $startup_logs
+              startup_logs: $startup_logs,
+              compose_infra_diagnostics: $compose_infra_diagnostics
             }' > smoke-result.json
 
       - name: Upload smoke-result.json
