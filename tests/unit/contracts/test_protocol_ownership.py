@@ -161,6 +161,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaReplayConsumer": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_replay_consumer.py",
     "ProtocolOffsetAndTimestamp": "nodes/node_kafka_replay_compute/protocols/protocol_offset_and_timestamp.py",
     "ProtocolTopicPartition": "nodes/node_kafka_replay_compute/protocols/protocol_topic_partition.py",
+    # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
+    # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
+    # admin omits, without a hard aiokafka import at parse time.
+    "ProtocolKafkaLagConsumer": "migration/protocols/protocol_kafka_lag_consumer.py",
     # [NODE] OMN-11573 narrows the GitHubHttpClient surface used by the PR
     # poller so handler tests can inject a deterministic triage adapter.
     "ProtocolGitHubTriageClient": "nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py",
