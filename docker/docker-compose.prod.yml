@@ -34,11 +34,11 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://redpanda:9092,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_EXTERNAL_PORT:-49092}
+      - internal://redpanda:9092,external://${PROD_REDPANDA_ADVERTISE_HOST:?PROD_REDPANDA_ADVERTISE_HOST required}:${PROD_REDPANDA_EXTERNAL_PORT:-49092}
       - --pandaproxy-addr
       - internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr
-      - internal://redpanda:8082,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_PANDAPROXY_PORT:-48082}
+      - internal://redpanda:8082,external://${PROD_REDPANDA_ADVERTISE_HOST:?PROD_REDPANDA_ADVERTISE_HOST required}:${PROD_REDPANDA_PANDAPROXY_PORT:-48082}
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr
