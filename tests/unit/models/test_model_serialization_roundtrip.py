@@ -10,10 +10,10 @@ and runtime.models packages.
 Uses curated per-model factory functions (NOT schema-driven automatic construction)
 per OMN-4920 specification.
 
-Discovery: 66 total models across event_bus.models (6) and runtime.models (60).
-Coverage: 18 factories, 0 skipped, 0 normalizing = 18/66 (27%).
+Discovery: 65 total models across event_bus.models (6) and runtime.models (59).
+Coverage: 18 factories, 0 skipped, 0 normalizing = 18/65 (28%).
 Stop rule applied: 18 models exceeds the ~15 target.
-Remaining 48 models are dispositioned below in UNCOVERED_MODELS.
+Remaining 47 models are dispositioned below in UNCOVERED_MODELS.
 """
 
 from __future__ import annotations
@@ -143,7 +143,6 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelHealthCheckResult": "Uses JsonType dict with recursive type alias",
     "ModelHealthCheckResponse": "Uses JsonType dict + Literal status type",
     "ModelHttpClientConfig": "Config with URL/timeout validation",
-    "ModelIntentExecutionSummary": "Complex execution tracking model",
     "ModelKafkaProducerConfig": "Kafka-specific config with broker validation",
     "ModelMaterializedResources": "Resource tracking with complex state",
     "ModelMaterializerConfig": "Config with path/resource dependencies",

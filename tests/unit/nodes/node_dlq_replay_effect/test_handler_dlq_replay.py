@@ -88,6 +88,17 @@ class _FakeConsumer:
         self._messages = messages
         self.config = config
         self.commits = 0
+        self._started = False
+        self.starts = 0
+        self.stops = 0
+
+    async def start(self) -> None:
+        self._started = True
+        self.starts += 1
+
+    async def stop(self) -> None:
+        self._started = False
+        self.stops += 1
 
     async def consume_messages(self) -> AsyncIterator[ModelDlqMessage]:
         for message in self._messages:
@@ -101,6 +112,17 @@ class _FakeProducer:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.replayed: list[tuple[str, object]] = []
+        self._started = False
+        self.starts = 0
+        self.stops = 0
+
+    async def start(self) -> None:
+        self._started = True
+        self.starts += 1
+
+    async def stop(self) -> None:
+        self._started = False
+        self.stops += 1
 
     async def replay_message(
         self, message: ModelDlqMessage, replay_correlation_id: object
@@ -117,6 +139,17 @@ class _FakeQuarantineProducer:
         self.config = config
         self.fail = fail
         self.quarantined: list[tuple[ModelDlqMessage, str, dict[str, object]]] = []
+        self._started = False
+        self.starts = 0
+        self.stops = 0
+
+    async def start(self) -> None:
+        self._started = True
+        self.starts += 1
+
+    async def stop(self) -> None:
+        self._started = False
+        self.stops += 1
 
     async def quarantine_message(
         self, message: ModelDlqMessage, reason: str, quarantine_correlation_id: object
@@ -222,6 +255,20 @@ async def test_eligible_message_replayed_exactly_once() -> None:
     assert consumer.commits == 1
     assert tracking.records[0].replay_status == EnumReplayStatus.COMPLETED
     assert tracking.records[0].success is True
+
+
+async def test_run_starts_and_stops_runtime_dependencies_lazily() -> None:
+    msg = _make_message(retry_count=0, error_type="InfraConnectionError")
+    handler, consumer, producer, quarantine = _handler([msg], _config())
+
+    await handler.run()
+
+    assert consumer.starts == 1
+    assert producer.starts == 1
+    assert quarantine.starts == 1
+    assert consumer.stops == 1
+    assert producer.stops == 1
+    assert quarantine.stops == 1
 
 
 async def test_replay_failure_records_failed_not_false_success() -> None:

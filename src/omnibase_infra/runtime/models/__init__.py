@@ -136,11 +136,6 @@ from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClie
 from omnibase_infra.runtime.models.model_kafka_producer_config import (
     ModelKafkaProducerConfig,
 )
-
-# NOTE: ModelIntentExecutionSummary is NOT imported here to avoid circular import.
-# It depends on ModelBackendResult from nodes.effects, which loads after runtime.models.
-# Import directly when needed:
-#   from omnibase_infra.runtime.models.model_intent_execution_summary import ModelIntentExecutionSummary
 from omnibase_infra.runtime.models.model_lifecycle_result import (
     ModelLifecycleResult,
 )
@@ -269,7 +264,6 @@ __all__: list[str] = [
     "ModelHandshakeResult",
     "ModelHealthCheckResponse",
     "ModelHealthCheckResult",
-    # NOTE: ModelIntentExecutionSummary excluded - import directly from module
     "ModelLifecycleResult",
     "ModelLocalRuntimeIngressError",
     "ModelLocalRuntimeIngressHealth",

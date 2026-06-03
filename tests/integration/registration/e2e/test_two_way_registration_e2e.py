@@ -1331,7 +1331,7 @@ class TestSuite4HeartbeatPublishing:
         # Execute the returned intents against PostgreSQL.
         # The handler is pure compute (returns intents), so we must apply
         # the UPDATE intents to the database manually, mirroring what the
-        # runtime's IntentExecutionRouter does in production.
+        # ContractRegistrationEventRouter._execute_intents path does in production.
         intent_effect = IntentEffectPostgresUpdate(pool=postgres_pool)
         for intent in handler_output.intents:
             await intent_effect.execute(intent.payload, correlation_id=correlation_id)
