@@ -63,10 +63,10 @@ def _installed_direct_url(dist_name: str) -> dict | None:
         dist = importlib.metadata.distribution(dist_name)
     except importlib.metadata.PackageNotFoundError:
         return None
-    direct_url_file = dist.locate_file("direct_url.json")
-    if not Path(str(direct_url_file)).exists():
+    direct_url_text = dist.read_text("direct_url.json")
+    if direct_url_text is None:
         return None
-    return json.loads(Path(str(direct_url_file)).read_text(encoding="utf-8"))
+    return json.loads(direct_url_text)
 
 
 def main() -> int:

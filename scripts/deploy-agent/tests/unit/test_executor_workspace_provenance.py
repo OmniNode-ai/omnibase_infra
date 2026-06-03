@@ -50,6 +50,35 @@ def test_provenance_script_exists() -> None:
     )
 
 
+def test_provenance_script_reads_direct_url_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "compute_workspace_provenance_direct_url_test", str(PROVENANCE_SCRIPT)
+    )
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+
+    mock_dist = MagicMock()
+    mock_dist.read_text.return_value = json.dumps(
+        {"url": "file:///workspace/sibling-repos/omnimarket"}
+    )
+    monkeypatch.setattr(
+        mod.importlib.metadata,
+        "distribution",
+        lambda _: mock_dist,
+    )
+
+    assert mod._installed_direct_url("omnimarket") == {
+        "url": "file:///workspace/sibling-repos/omnimarket"
+    }
+    mock_dist.read_text.assert_called_once_with("direct_url.json")
+
+
 # ---------------------------------------------------------------------------
 # _stage_workspace helper
 # ---------------------------------------------------------------------------
