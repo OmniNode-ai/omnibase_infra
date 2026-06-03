@@ -199,7 +199,9 @@ def test_runtime_handler_dependencies_include_pool_backed_handlers() -> None:
 
 
 @pytest.mark.integration
-def test_runtime_handler_dependencies_include_dlq_replay_when_kafka_configured() -> None:
+def test_runtime_handler_dependencies_include_dlq_replay_when_kafka_configured() -> (
+    None
+):
     """Kernel exposes explicit Kafka deps for the DLQ replay handler."""
     from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
         DLQConsumer,
