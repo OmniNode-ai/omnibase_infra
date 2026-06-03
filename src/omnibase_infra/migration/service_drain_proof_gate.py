@@ -103,7 +103,9 @@ class ServiceDrainProofGate:
         lag: ModelConsumerGroupLag = await self._observer.observe(old_group)
         residual = lag.lag_for_topic(old_topic)
 
-        if not lag.partition_offsets:
+        # Drain evidence must be per-topic: the group may commit offsets on other
+        # topics, so global non-emptiness is not proof the OLD topic was drained.
+        if not lag.has_partitions_for_topic(old_topic):
             return ModelDrainProofDecision(
                 migration_ticket=contract.ticket,
                 old_consumer_group=old_group,
@@ -111,8 +113,9 @@ class ServiceDrainProofGate:
                 retirement_allowed=False,
                 residual_lag=0,
                 reason=(
-                    f"no committed offsets observed for group {old_group!r}; "
-                    "drain is unproven (absence of evidence is not proof of drain)."
+                    f"no committed offsets observed for group {old_group!r} on "
+                    f"old topic {old_topic!r}; drain is unproven (absence of "
+                    "evidence is not proof of drain)."
                 ),
             )
 

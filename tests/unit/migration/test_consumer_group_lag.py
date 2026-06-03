@@ -233,6 +233,18 @@ async def test_gate_blocks_when_no_offsets_observed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gate_blocks_when_group_has_offsets_but_not_on_old_topic() -> None:
+    # The group commits offsets on an UNRELATED topic but nothing on old_topic.
+    # Global non-emptiness must not be mistaken for old-topic drain proof.
+    other = _FakeTopicPartition("onex.evt.orders.order-shipped.v1", 0)
+    admin = _FakeAdmin(committed={other: 5}, end={other: 5})
+    gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))
+    decision = await gate.evaluate(_migration_contract())
+    assert decision.retirement_allowed is False
+    assert "no committed offsets" in decision.reason
+
+
+@pytest.mark.asyncio
 async def test_gate_allows_when_drain_proof_opted_out() -> None:
     admin = _FakeAdmin(committed={}, end={})
     gate = ServiceDrainProofGate(ServiceConsumerLagObserver(admin))

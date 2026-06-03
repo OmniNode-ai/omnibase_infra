@@ -130,26 +130,37 @@ def _state_without_boundary(row: ModelTopicMigrationProjectionRow) -> dict[str, 
 
 
 def test_cross_boundary_replay_yields_equivalent_state() -> None:
-    """Old-topic-path and new-topic-path corpora project equivalent state."""
-    old_path = _build_corpus(
+    """Same domain corpus on DIFFERENT topic names projects equivalent state.
+
+    The two paths carry genuinely different topic-name pairs (a real migration
+    boundary). Boundary exclusion is what makes the business state equivalent —
+    without stripping the topic-name fields the diff would be non-empty, so the
+    test actually exercises the boundary-exclusion logic.
+    """
+    pre_migration = _build_corpus(
         old_topic="onex.evt.orders.order-placed.v1",
         new_topic="onex.evt.orders.order-placed.v2",
     )
-    # The "new path" replays the same domain corpus after the namespace/version
-    # boundary; the boundary fields differ, the business state must not.
-    new_path = _build_corpus(
-        old_topic="onex.evt.orders.order-placed.v1",
-        new_topic="onex.evt.orders.order-placed.v2",
+    post_migration = _build_corpus(
+        old_topic="onex.evt.orders.order-placed.v2",
+        new_topic="onex.evt.orders.order-placed.v3",
     )
 
-    old_state = _state_without_boundary(_project_terminal_state(old_path))
-    new_state = _state_without_boundary(_project_terminal_state(new_path))
+    # Sanity: the FULL projected rows DO differ (the boundary is real).
+    pre_full = _project_terminal_state(pre_migration).model_dump(mode="json")
+    post_full = _project_terminal_state(post_migration).model_dump(mode="json")
+    assert DeepDiff(pre_full, post_full), (
+        "expected the topic-name boundary to make full rows differ"
+    )
 
-    diff = ModelOutputDiff.from_deepdiff(DeepDiff(old_state, new_state))
+    pre_state = _state_without_boundary(_project_terminal_state(pre_migration))
+    post_state = _state_without_boundary(_project_terminal_state(post_migration))
+
+    diff = ModelOutputDiff.from_deepdiff(DeepDiff(pre_state, post_state))
     assert not diff.has_differences, (
         f"cross-boundary projected state diverged: {diff.model_dump()}"
     )
-    assert old_state["current_state"] == EnumMigrationPhase.COMPLETE.value
+    assert pre_state["current_state"] == EnumMigrationPhase.COMPLETE.value
 
 
 def test_boundary_paths_differ_only_in_topic_fields() -> None:

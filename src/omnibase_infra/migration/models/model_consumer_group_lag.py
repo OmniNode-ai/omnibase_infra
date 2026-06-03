@@ -57,5 +57,14 @@ class ModelConsumerGroupLag(BaseModel):
         """Total lag restricted to a single topic's partitions."""
         return sum(po.lag for po in self.partition_offsets if po.topic == topic)
 
+    def has_partitions_for_topic(self, topic: str) -> bool:
+        """True iff at least one observed partition belongs to ``topic``.
+
+        The drain-proof gate uses this to distinguish "drained" (observed,
+        zero lag) from "no evidence for this topic" (no observed partitions) —
+        absence of evidence is not proof of drain.
+        """
+        return any(po.topic == topic for po in self.partition_offsets)
+
 
 __all__ = ["ModelConsumerGroupLag"]

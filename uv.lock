@@ -2052,6 +2052,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "deepdiff" },
     { name = "hypothesis" },
     { name = "kafka-python" },
     { name = "locust" },
@@ -2125,6 +2126,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "deepdiff", specifier = ">=8.0.0,<9.0.0" },
     { name = "hypothesis", specifier = ">=6.148.7,<7.0.0" },
     { name = "kafka-python", specifier = ">=2.0.2,<3.0.0" },
     { name = "locust", specifier = ">=2.31.8,<3.0.0" },

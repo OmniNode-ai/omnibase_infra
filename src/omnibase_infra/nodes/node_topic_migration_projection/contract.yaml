@@ -41,9 +41,11 @@ output_model:
   module: "omnibase_infra.nodes.node_topic_migration_projection.models.model_topic_migration_projection_row"
   description: "Materialized topic_migration_projection row."
 handler_routing:
-  routing_strategy: "operation_match"
+  routing_strategy: "payload_type_match"
   handlers:
-    - operation: "project_topic_migration"
+    - event_model:
+        name: "ModelTopicMigrationLifecycleEvent"
+        module: "omnibase_infra.nodes.node_topic_migration_executor_effect.models.model_topic_migration_lifecycle_event"
       handler:
         name: "HandlerTopicMigrationProjection"
         module: "omnibase_infra.nodes.node_topic_migration_projection.handlers.handler_topic_migration_projection"
