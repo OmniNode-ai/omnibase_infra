@@ -1088,20 +1088,6 @@ class DeployExecutor:
         result = _run(cmd, timeout=timeout, env=_compose_env())
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")
-        if scope == Scope.RUNTIME:
-            tag_result = _run(
-                [
-                    "docker",
-                    "tag",
-                    "omnibase-infra-omninode-runtime:latest",
-                    "runtime:latest",
-                ],
-                timeout=30,
-            )
-            if tag_result.returncode != 0:
-                raise RuntimeError(
-                    f"Docker runtime image tag failed: {tag_result.stderr}"
-                )
 
     def _compose_up(
         self,
