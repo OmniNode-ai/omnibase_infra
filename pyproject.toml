@@ -145,7 +145,7 @@ dev = [
     "ruff>=0.14.7,<0.16.0",  # Ruff handles both formatting and linting (replaces black + isort)
     "types-pyyaml>=6.0.12.20250822,<7.0.0",
     "pre-commit>=4.3.0,<5.0.0",
-    "deepdiff>=8.0.0,<9.0.0",  # OMN-12623: direct use in tests/replay topic-migration equivalence harness
+    "deepdiff>=8.0.0,<10.0.0",  # OMN-12623: direct use in tests/replay topic-migration equivalence harness
 
     # Test infrastructure dependencies
     "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
