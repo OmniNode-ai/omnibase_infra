@@ -309,6 +309,59 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         )
 
     @pytest.mark.unit
+    def test_topic_migration_executor_deps_materialized(self) -> None:
+        """Runtime materializes topic-migration executor collaborators."""
+        contract = _make_contract(handler_name="HandlerTopicMigrationExecutor")
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class HandlerTopicMigrationExecutor:
+            def __init__(self, provisioner: object, drain_proof_gate: object) -> None:
+                self.provisioner = provisioner
+                self.drain_proof_gate = drain_proof_gate
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        fake_provisioner = object()
+        fake_gate = object()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring."
+                "_import_handler_class",
+                return_value=HandlerTopicMigrationExecutor,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring."
+                "_build_topic_migration_executor_dependencies",
+                return_value={
+                    "provisioner": fake_provisioner,
+                    "drain_proof_gate": fake_gate,
+                },
+            ),
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        assert prepared.is_skip is False
+        assert (
+            prepared.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
+        )
+        assert prepared.dispatcher is not None
+
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_wire_from_manifest_threads_materialized_deps_to_resolver(
         self,

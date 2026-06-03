@@ -107,6 +107,7 @@ _SENSITIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
+_TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -1387,8 +1388,45 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """
     required_params = _required_handler_init_params(handler_cls)
     return not required_params or required_params <= frozenset(
-        {"event_bus", "dispatch_port"}
+        {"event_bus", "dispatch_port", "provisioner", "drain_proof_gate"}
     )
+
+
+def _contracts_root_for_runtime_dependencies() -> Path:
+    raw = os.environ.get("ONEX_CONTRACTS_DIR")
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parents[2] / "nodes"
+
+
+def _build_topic_migration_executor_dependencies() -> dict[str, object]:
+    """Build concrete collaborators for HandlerTopicMigrationExecutor.
+
+    The handler declares these as required constructor services. Materializing
+    them here keeps generic resolver Step 2 deterministic while preserving the
+    handler's strict constructor contract.
+    """
+    from aiokafka import AIOKafkaAdminClient, AIOKafkaConsumer
+
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+    from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
+    from omnibase_infra.migration.service_consumer_lag_observer import (
+        ServiceConsumerLagObserver,
+    )
+    from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
+
+    bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE: env
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers)
+    lag_admin = AdapterKafkaAdminLag(admin, consumer)
+    observer = ServiceConsumerLagObserver(lag_admin)
+    return {
+        "provisioner": TopicProvisioner(
+            bootstrap_servers=bootstrap_servers,
+            contracts_root=_contracts_root_for_runtime_dependencies(),
+        ),
+        "drain_proof_gate": ServiceDrainProofGate(observer),
+    }
 
 
 def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:
@@ -1437,11 +1475,6 @@ def _materialize_known_handler_dependencies(
     required_params = _required_handler_init_params(handler_cls)
     if not required_params and not requires_delegation_port:
         return materialized_explicit_dependencies
-    if not (
-        required_params.intersection({"container", "ownership_query", "dispatch_port"})
-        or ("dispatch_port" in constructor_params and requires_delegation_port)
-    ):
-        return materialized_explicit_dependencies
     available = {
         name: value
         for name, value in (
@@ -1451,6 +1484,14 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
+    if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
+        available.update(_build_topic_migration_executor_dependencies())
+    if not (
+        required_params.intersection({"container", "ownership_query", "dispatch_port"})
+        or ("dispatch_port" in constructor_params and requires_delegation_port)
+        or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
+    ):
+        return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
         # Pure Kafka delegation chain (OMN-12294): the delegate-skill handler
         # dispatches via the Kafka-backed RuntimeDelegationDispatchPort. The
