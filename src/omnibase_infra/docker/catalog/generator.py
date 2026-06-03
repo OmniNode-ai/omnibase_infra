@@ -9,6 +9,27 @@ from __future__ import annotations
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
 from omnibase_infra.docker.catalog.resolver import ResolvedStack
 
+_RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
+
+
+def _runtime_image_build() -> dict[str, object]:
+    """Return the canonical build stanza for the shared runtime image."""
+    return {
+        "context": "..",
+        "dockerfile": "docker/Dockerfile.runtime",
+        "args": {
+            "BUILD_SOURCE": "${BUILD_SOURCE:-release}",
+            "EXPECTED_BUILD_SOURCE": "${EXPECTED_BUILD_SOURCE:-release}",
+            "OMNI_HOME": "${OMNI_HOME:-}",
+            "RUNTIME_VERSION": "${RUNTIME_VERSION:-0.1.0}",
+            "BUILD_DATE": "${BUILD_DATE:-}",
+            "VCS_REF": "${VCS_REF:-}",
+            "GIT_SHA": "${GIT_SHA:-unknown}",
+            "RUNTIME_SOURCE_HASH": "${RUNTIME_SOURCE_HASH:-unknown}",
+            "COMPOSE_PROJECT": "${COMPOSE_PROJECT:-omnibase-infra}",
+        },
+    }
+
 
 def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
     """Generate a docker-compose dict from a resolved stack."""
@@ -21,6 +42,8 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
 
         # Image
         svc["image"] = manifest.image
+        if name == _RUNTIME_IMAGE_BUILD_SERVICE and manifest.image == "runtime:latest":
+            svc["build"] = _runtime_image_build()
 
         # Container name
         if manifest.container_name:

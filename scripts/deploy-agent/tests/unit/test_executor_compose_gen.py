@@ -120,6 +120,30 @@ class TestComposeGen:
             f"Expected --output {COMPOSE_FILE!r}, got {cmd[output_idx]!r}"
         )
 
+    def test_compose_gen_prefers_repo_src_on_pythonpath(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """compose_gen must not import catalog code from a stale canonical clone."""
+        from deploy_agent.executor import REPO_DIR
+
+        executor = DeployExecutor()
+        captured_env: dict[str, str] = {}
+        monkeypatch.setenv("PYTHONPATH", "/stale/canonical/src")
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_env.update(kwargs["env"])
+            return _make_result()
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            executor.compose_gen(["core", "runtime"], _noop_phase_update)
+
+        assert captured_env["PYTHONPATH"].split(":")[:2] == [
+            f"{REPO_DIR}/src",
+            "/stale/canonical/src",
+        ]
+
     def test_compose_gen_succeeds_on_catalog_cli_failure(self) -> None:
         """compose_gen must not raise even when the catalog CLI exits non-zero (non-fatal)."""
         executor = DeployExecutor()
