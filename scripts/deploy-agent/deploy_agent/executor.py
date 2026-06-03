@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
@@ -340,6 +341,33 @@ def _compose_env() -> dict[str, str]:
     for key, value in defaults.items():
         env.setdefault(key, value)
     return env
+
+
+def _env_with_repo_pythonpath(env: Mapping[str, str]) -> dict[str, str]:
+    """Return env with this deploy repo's src path first on PYTHONPATH."""
+    repo_src = f"{REPO_DIR}/src"
+    current = env.get("PYTHONPATH", "")
+    return {
+        **env,
+        "PYTHONPATH": f"{repo_src}:{current}" if current else repo_src,
+    }
+
+
+def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
+    """Return the runtime package version stamped into rebuilt images."""
+    pyproject = Path(repo_dir) / "pyproject.toml"
+    if not pyproject.is_file():
+        pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        version = str(data["project"]["version"]).strip()
+    except (FileNotFoundError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(
+            f"Could not resolve RUNTIME_VERSION from {pyproject}"
+        ) from exc
+    if not version:
+        raise RuntimeError(f"Empty RUNTIME_VERSION in {pyproject}")
+    return version
 
 
 def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
@@ -691,7 +719,12 @@ class DeployExecutor:
             COMPOSE_FILE,
         ]
 
-        result = _run(cmd, timeout=timeout, cwd=REPO_DIR, env=_compose_env())
+        result = _run(
+            cmd,
+            timeout=timeout,
+            cwd=REPO_DIR,
+            env=_env_with_repo_pythonpath(_compose_env()),
+        )
         if result.returncode != 0:
             logger.warning(
                 "compose_gen returned non-zero (exit=%d) — continuing with existing compose file. stderr: %s",
@@ -1024,6 +1057,7 @@ class DeployExecutor:
         import datetime
 
         build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        runtime_version = _runtime_version_from_pyproject()
 
         cmd = [
             "docker",
@@ -1041,6 +1075,8 @@ class DeployExecutor:
             f"VCS_REF={git_sha}",
             "--build-arg",
             f"BUILD_DATE={build_date}",
+            "--build-arg",
+            f"RUNTIME_VERSION={runtime_version}",
             "--build-arg",
             f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",

@@ -46,6 +46,23 @@ def test_generated_compose_preserves_depends_on_conditions() -> None:
 
 
 @pytest.mark.unit
+def test_generated_runtime_compose_preserves_runtime_image_build() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+
+    build = compose["services"]["omninode-runtime"]["build"]
+    assert build["context"] == ".."
+    assert build["dockerfile"] == "docker/Dockerfile.runtime"
+    assert build["args"]["BUILD_SOURCE"] == "${BUILD_SOURCE:-release}"
+    assert build["args"]["EXPECTED_BUILD_SOURCE"] == "${EXPECTED_BUILD_SOURCE:-release}"
+    assert build["args"]["OMNI_HOME"] == "${OMNI_HOME:-}"
+    assert build["args"]["GIT_SHA"] == "${GIT_SHA:-unknown}"
+    assert build["args"]["VCS_REF"] == "${VCS_REF:-}"
+    assert build["args"]["BUILD_DATE"] == "${BUILD_DATE:-}"
+
+
+@pytest.mark.unit
 def test_generated_compose_preserves_redpanda_ulimits() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])

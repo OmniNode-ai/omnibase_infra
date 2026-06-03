@@ -193,6 +193,7 @@ def test_workspace_build_passes_build_date_and_vcs_ref(
 
     build_cmd = captured_cmds[0]
     assert "VCS_REF=deadbeef" in build_cmd
+    assert "RUNTIME_VERSION=0.38.0" in build_cmd
     assert any(a.startswith("BUILD_DATE=") for a in build_cmd)
 
 
