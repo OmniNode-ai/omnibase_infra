@@ -1406,7 +1406,8 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     them here keeps generic resolver Step 2 deterministic while preserving the
     handler's strict constructor contract.
     """
-    from aiokafka import AIOKafkaAdminClient, AIOKafkaConsumer
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
 
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag

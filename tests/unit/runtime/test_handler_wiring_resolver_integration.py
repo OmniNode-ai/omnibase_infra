@@ -42,6 +42,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _assert_is_ownership_query,
+    _build_topic_migration_executor_dependencies,
     _prepare_handler_wiring,
     wire_from_manifest,
 )
@@ -360,6 +361,23 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
         )
         assert prepared.dispatcher is not None
+
+    @pytest.mark.unit
+    def test_topic_migration_executor_builder_uses_admin_namespace(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pinned aiokafka exposes AIOKafkaAdminClient from aiokafka.admin."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+        with (
+            patch("aiokafka.admin.AIOKafkaAdminClient") as admin_cls,
+            patch("aiokafka.AIOKafkaConsumer") as consumer_cls,
+        ):
+            deps = _build_topic_migration_executor_dependencies()
+
+        admin_cls.assert_called_once_with(bootstrap_servers="localhost:9092")
+        consumer_cls.assert_called_once_with(bootstrap_servers="localhost:9092")
+        assert set(deps) == {"provisioner", "drain_proof_gate"}
 
     @pytest.mark.unit
     @pytest.mark.asyncio
