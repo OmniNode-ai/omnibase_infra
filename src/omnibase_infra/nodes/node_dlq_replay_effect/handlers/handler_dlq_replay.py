@@ -105,20 +105,51 @@ class HandlerDlqReplay:
 
     async def run(self) -> ModelDlqReplayRunResult:
         """Consume the DLQ topic, replaying or quarantining each message."""
-        results: list[ModelDlqReplayResult] = []
-        count = 0
-        limit = self._config.limit
+        started_dependencies = await self._ensure_runtime_dependencies_started()
+        try:
+            results: list[ModelDlqReplayResult] = []
+            count = 0
+            limit = self._config.limit
 
-        async for message in self._consumer.consume_messages():
-            if limit is not None and count >= limit:
-                break
-            results.append(await self._process_message(message))
-            count += 1
+            async for message in self._consumer.consume_messages():
+                if limit is not None and count >= limit:
+                    break
+                results.append(await self._process_message(message))
+                count += 1
 
-        if results and not self._config.dry_run:
-            await self._consumer.commit()
+            if results and not self._config.dry_run:
+                await self._consumer.commit()
 
-        return self._summarize(results)
+            return self._summarize(results)
+        finally:
+            await self._stop_runtime_dependencies(started_dependencies)
+
+    async def _ensure_runtime_dependencies_started(self) -> list[object]:
+        """Start owned Kafka dependencies lazily when a replay run executes."""
+        started: list[object] = []
+        try:
+            for dependency in (
+                self._consumer,
+                self._producer,
+                self._quarantine_producer,
+            ):
+                if getattr(dependency, "_started", False):
+                    continue
+                start = getattr(dependency, "start", None)
+                if start is None:
+                    continue
+                await start()
+                started.append(dependency)
+            return started
+        except Exception:
+            await self._stop_runtime_dependencies(started)
+            raise
+
+    async def _stop_runtime_dependencies(self, dependencies: list[object]) -> None:
+        for dependency in reversed(dependencies):
+            stop = getattr(dependency, "stop", None)
+            if stop is not None:
+                await stop()
 
     async def _process_message(self, message: ModelDlqMessage) -> ModelDlqReplayResult:
         eligible, reason = should_replay(message, self._config)

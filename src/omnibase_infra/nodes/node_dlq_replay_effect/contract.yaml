@@ -92,15 +92,15 @@ io_operations:
 dependencies:
   - name: "consumer"
     type: "service"
-    description: "Persistent DLQ consumer (group onex-dlq-replay)"
+    description: "Runtime-materialized persistent DLQ consumer (group onex-dlq-replay), lazy-started by HandlerDlqReplay when a replay run executes"
     required: true
   - name: "producer"
     type: "service"
-    description: "Replay producer to original topics"
+    description: "Runtime-materialized replay producer to original topics, lazy-started by HandlerDlqReplay when a replay run executes"
     required: true
   - name: "quarantine_producer"
     type: "service"
-    description: "Quarantine producer to onex.dlq.omnibase-infra.quarantine.v1"
+    description: "Runtime-materialized quarantine producer to onex.dlq.omnibase-infra.quarantine.v1, lazy-started by HandlerDlqReplay when a replay run executes"
     required: true
   - name: "tracking"
     type: "service"
@@ -162,7 +162,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-06-02"
+  updated: "2026-06-03"
   tags:
     - effect
     - dlq
