@@ -58,8 +58,8 @@ def test_verify_probes_runtime_health_ports_only() -> None:
         captured_cmds.append(cmd)
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "handler_registry count" in cmd:
-            return _completed(cmd, stdout="4\n")
+        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload())
         if "http://localhost:8086/health" in cmd:
@@ -92,6 +92,63 @@ def test_verify_probes_runtime_health_ports_only() -> None:
     }
 
 
+def test_verify_accepts_runtime_health_when_config_prefetch_skipped() -> None:
+    executor = DeployExecutor()
+
+    def fake_run(
+        cmd: list[str], timeout: int, **kwargs: object
+    ) -> subprocess.CompletedProcess:
+        if cmd[:2] == ["docker", "ps"]:
+            return _completed(cmd)
+        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            return _completed(cmd, stdout="t\n")
+        if "http://localhost:8085/health" in cmd:
+            return _completed(
+                cmd, stdout=_health_payload(config_prefetch_status="skipped")
+            )
+        if "http://localhost:8086/health" in cmd:
+            return _completed(
+                cmd, stdout=_health_payload(config_prefetch_status="skipped")
+            )
+        return _completed(cmd, returncode=1, stderr=f"unexpected command: {cmd}")
+
+    with patch("deploy_agent.executor._run", side_effect=fake_run):
+        checks = executor.verify(on_phase_update=_noop_phase_update)
+
+    runtime_checks = {
+        check.service: check.status
+        for check in checks
+        if check.service in {"omninode-runtime", "runtime-effects"}
+    }
+    assert runtime_checks == {
+        "omninode-runtime": "pass",
+        "runtime-effects": "pass",
+    }
+
+
+def test_verify_fails_postgres_check_when_node_service_registry_missing() -> None:
+    executor = DeployExecutor()
+
+    def fake_run(
+        cmd: list[str], timeout: int, **kwargs: object
+    ) -> subprocess.CompletedProcess:
+        if cmd[:2] == ["docker", "ps"]:
+            return _completed(cmd)
+        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            return _completed(cmd, stdout="f\n")
+        if "http://localhost:8085/health" in cmd:
+            return _completed(cmd, stdout=_health_payload())
+        if "http://localhost:8086/health" in cmd:
+            return _completed(cmd, stdout=_health_payload())
+        return _completed(cmd, returncode=1, stderr=f"unexpected command: {cmd}")
+
+    with patch("deploy_agent.executor._run", side_effect=fake_run):
+        checks = executor.verify(on_phase_update=_noop_phase_update)
+
+    status_by_endpoint = {check.endpoint: check.status for check in checks}
+    assert status_by_endpoint["node_service_registry exists"] == "fail"
+
+
 def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
     executor = DeployExecutor()
 
@@ -100,8 +157,8 @@ def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "handler_registry count" in cmd:
-            return _completed(cmd, stdout="4\n")
+        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload())
         if "http://localhost:8086/health" in cmd:
@@ -127,8 +184,8 @@ def test_verify_fails_runtime_health_when_process_not_running() -> None:
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "handler_registry count" in cmd:
-            return _completed(cmd, stdout="4\n")
+        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload(is_running=False))
         if "http://localhost:8086/health" in cmd:

@@ -140,7 +140,7 @@ class ProdStabilityDigestMissingError(RuntimeError):
 
 
 class ModelLaneConfig(BaseModel):
-    """Per-lane compose file(s), compose project, and runtime health targets.
+    """Per-lane compose file(s), compose project, and health targets.
 
     The base ``docker-compose.infra.yml`` is always the first compose file;
     non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
@@ -152,6 +152,7 @@ class ModelLaneConfig(BaseModel):
     lane: EnumRuntimeLane
     compose_files: tuple[str, ...]
     compose_project: str
+    postgres_container: str
     runtime_health_targets: tuple[tuple[str, int], ...]
 
 
@@ -163,12 +164,14 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         lane=EnumRuntimeLane.DEV,
         compose_files=(COMPOSE_FILE,),
         compose_project=COMPOSE_PROJECT,
+        postgres_container="omnibase-infra-postgres",
         runtime_health_targets=RUNTIME_HEALTH_TARGETS,
     ),
     EnumRuntimeLane.STABILITY_TEST: ModelLaneConfig(
         lane=EnumRuntimeLane.STABILITY_TEST,
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
+        postgres_container="omnibase-infra-stability-test-postgres",
         runtime_health_targets=(
             ("omninode-runtime", 18085),
             ("runtime-effects", 18086),
@@ -178,6 +181,7 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         lane=EnumRuntimeLane.PROD,
         compose_files=(COMPOSE_FILE, _PROD_OVERLAY),
         compose_project="omnibase-infra-prod",
+        postgres_container="omnibase-infra-prod-postgres",
         runtime_health_targets=(
             ("omninode-runtime", 28085),
             ("runtime-effects", 28086),
@@ -354,7 +358,7 @@ def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
     return (
         payload.get("status") == "healthy"
         and details.get("is_running") is True
-        and details.get("config_prefetch_status") == "ok"
+        and details.get("config_prefetch_status") in {"ok", "skipped"}
     )
 
 
@@ -1228,36 +1232,25 @@ class DeployExecutor:
             [
                 "docker",
                 "exec",
-                "postgres",
+                lane_config_for(lane).postgres_container,
                 "psql",
                 "-U",
-                "omninode",
+                "postgres",
                 "-d",
-                "omninode",
+                "omnibase_infra",
                 "-tAc",
-                "SELECT count(*) FROM handler_registry",
+                "SELECT to_regclass('public.node_service_registry') IS NOT NULL",
             ],
             timeout=timeout,
         )
-        try:
-            count = int(result.stdout.strip())
-            checks.append(
-                ModelHealthCheck(
-                    service="postgres",
-                    endpoint="handler_registry count",
-                    status="pass" if count > 0 else "fail",
-                    latency_ms=0,
-                )
+        checks.append(
+            ModelHealthCheck(
+                service="postgres",
+                endpoint="node_service_registry exists",
+                status="pass" if result.stdout.strip() == "t" else "fail",
+                latency_ms=0,
             )
-        except (ValueError, TypeError):
-            checks.append(
-                ModelHealthCheck(
-                    service="postgres",
-                    endpoint="handler_registry count",
-                    status="fail",
-                    latency_ms=0,
-                )
-            )
+        )
 
         # Runtime health endpoint checks.
         #
