@@ -44,6 +44,12 @@ SAVINGS_VIEW = (
     / "node_projection_savings"
     / "076_create_delegation_savings_projection_view.sql"
 )
+REGISTRATION_CREATE = (
+    NODES_DIR / "node_projection_registration" / "0000_create_node_service_registry.sql"
+)
+REGISTRATION_HEARTBEAT = (
+    NODES_DIR / "node_projection_registration" / "0001_add_heartbeat_columns.sql"
+)
 
 pytestmark = pytest.mark.unit
 
@@ -81,6 +87,23 @@ class TestVendoredViewMigrations:
         assert "0008_generation_events.sql" in files
         assert "0010_create_delegation_dashboard_projection_views.sql" in files
 
+    def test_registration_projection_migrations_vendored(self) -> None:
+        """The node_service_registry owner migrations are vendored durably."""
+        assert REGISTRATION_CREATE.is_file(), (
+            "node_service_registry create migration must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_registration/"
+        )
+        assert REGISTRATION_HEARTBEAT.is_file(), (
+            "node_service_registry heartbeat-column migration must be vendored "
+            "beside the create migration"
+        )
+
+        create_sql = REGISTRATION_CREATE.read_text(encoding="utf-8")
+        heartbeat_sql = REGISTRATION_HEARTBEAT.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS node_service_registry" in create_sql
+        assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in heartbeat_sql
+        assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in heartbeat_sql
+
 
 class TestNamespacedDiscoveryWiring:
     """run-forward-migrations.sh applies node migrations under namespaced ids."""
@@ -115,6 +138,7 @@ class TestSyncedNodesAllowlist:
         content = SYNCED_NODES.read_text(encoding="utf-8")
         assert "node_projection_delegation" in content
         assert "node_projection_savings" in content
+        assert "node_projection_registration" in content
 
 
 def _resolve_omnimarket_src() -> Path | None:
