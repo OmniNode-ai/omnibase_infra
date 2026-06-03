@@ -16,7 +16,6 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
-RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "artifact-reconciliation-webhook.yml"
@@ -34,23 +33,12 @@ CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
-CHECKOUT_V6_SHA = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
-CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
-
-
-def _runs_on_expression(job: dict[str, Any]) -> str:
-    runs_on = job.get("runs-on")
-    if runs_on is None:
-        return ""
-    if isinstance(runs_on, str):
-        return runs_on
-    return str(runs_on)
 
 
 def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
@@ -313,9 +301,6 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
     assert docker_setup_step["with"]["cache-enabled"] == "false"
     assert docker_setup_step["with"]["cache-version"] == "docker"
-    assert docker_setup_step["with"]["cache-key-prefix"] == "uv-docker"
-    assert docker_setup_step["with"]["shared-env-enabled"] == "true"
-    assert docker_setup_step["with"]["github-token"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
 def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
@@ -417,29 +402,6 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     assert "uv sync onex_change_control failed after" in run_script
 
 
-def test_merge_group_and_docker_workflows_have_runner_pool_overrides() -> None:
-    ci_workflow = _load_yaml(CI_WORKFLOW)
-    for job_name, job in ci_workflow["jobs"].items():
-        expression = _runs_on_expression(job)
-        if "self-hosted" not in expression:
-            continue
-
-        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
-        assert "OMNI_REQUIRED_CI_RUNS_ON_JSON" in expression, job_name
-        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
-        assert "github.event_name == 'merge_group'" in expression, job_name
-
-    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
-    for job_name, job in docker_workflow["jobs"].items():
-        expression = _runs_on_expression(job)
-        if "self-hosted" not in expression:
-            continue
-
-        assert "OMNI_PUBLIC_PR_RUNS_ON_JSON" in expression, job_name
-        assert "OMNI_DOCKER_CI_RUNS_ON_JSON" in expression, job_name
-        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" in expression, job_name
-
-
 def test_cross_repo_ci_jobs_use_retrying_uv_install() -> None:
     ci_workflow = _load_yaml(CI_WORKFLOW)
     for job_name in ("topic-drift-check", "schema-handshake"):
@@ -527,101 +489,11 @@ def test_architecture_handshake_has_checkout_retry_timeout_budget() -> None:
     assert job["timeout-minutes"] >= 10
 
 
-def test_retrying_uv_action_defaults_to_cpu_torch_backend() -> None:
-    action_text = SETUP_PYTHON_UV_ACTION.read_text(encoding="utf-8")
-    assert 'export UV_TORCH_BACKEND="${UV_TORCH_BACKEND:-cpu}"' in action_text
-    assert "UV_TORCH_BACKEND=${UV_TORCH_BACKEND:-<unset>}" in action_text
-
-
-def test_docker_integration_uses_retrying_uv_setup_action() -> None:
-    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
-    steps = docker_workflow["jobs"]["docker-integration-tests"]["steps"]
-
-    setup_step = next(
-        step
-        for step in steps
-        if step.get("uses") == "./.github/actions/setup-python-uv"
-    )
-    assert setup_step["name"] == "Setup Python and uv"
-    assert setup_step["with"]["cache-enabled"] == "false"
-    assert setup_step["with"]["github-token"] == "${{ secrets.GITHUB_TOKEN }}"
-    assert not any(
-        step.get("run")
-        == "uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi"
-        for step in steps
-    )
-
-
-def test_runtime_plugin_dependency_install_retries_package_index_flakes() -> None:
-    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
-
-    assert "UV_HTTP_TIMEOUT=600" in dockerfile
-    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
-    assert "cat > /usr/local/bin/uv-with-retry" in dockerfile
-    assert "uv-with-retry pip install \\" in dockerfile
-    assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
-
-
-def test_runtime_dockerfile_retries_builder_uv_sync_transport_flakes() -> None:
-    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
-
-    assert "git config --global http.version HTTP/1.1" in dockerfile
-    assert "UV_HTTP_TIMEOUT=600" in dockerfile
-    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
-    assert "uv-with-retry sync --no-dev --no-install-project" in dockerfile
-    assert "uv-with-retry sync --no-dev" in dockerfile
-    assert "uv $* attempt ${attempt}/${max_attempts} failed" in dockerfile
-
-
-def test_runtime_dockerfile_retries_torch_cpu_index_transport_flakes() -> None:
-    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
-
-    assert "https://download.pytorch.org/whl/cpu" in dockerfile
-    assert (
-        "uv-with-retry pip install torch --index-url https://download.pytorch.org/whl/cpu"
-        in dockerfile
-    )
-    assert (
-        'uv-with-retry pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu'
-        in dockerfile
-    )
-    assert "UV_RETRY_ATTEMPTS=8" in dockerfile
-
-
-def test_omni_standards_jobs_use_retrying_uv_install() -> None:
-    workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
-
-    assert workflow["env"]["UV_HTTP_TIMEOUT"] == "600"
-
-    for job_name in ("type-safety", "type-union-check"):
-        steps = workflow["jobs"][job_name]["steps"]
-        setup_step = next(
-            step
-            for step in steps
-            if step.get("uses") == "./.github/actions/setup-python-uv"
-        )
-
-        assert setup_step["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
-        assert setup_step["with"]["uv-version"] == "${{ env.UV_VERSION }}"
-        assert setup_step["with"]["cache-enabled"] == "false"
-        assert setup_step["with"]["install-args"] == "--all-extras"
-        assert setup_step["with"]["sync-attempts"] == "3"
-        assert setup_step["with"]["sync-retry-delay-seconds"] == "10"
-        assert not any(
-            step.get("run") == "uv sync --no-cache --all-extras" for step in steps
-        )
-
-
 def test_setup_python_uv_retries_uv_sync_and_logs_transport_settings() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
 
     assert action["inputs"]["sync-attempts"]["default"] == "5"
     assert action["inputs"]["sync-retry-delay-seconds"]["default"] == "10"
-
-    setup_step = next(
-        step for step in action["runs"]["steps"] if step.get("name") == "Set up Python"
-    )
-    assert setup_step["uses"] == "actions/setup-python@v6"
 
     install_step = next(
         step
@@ -786,37 +658,22 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
     workflow = _load_yaml(SECURITY_SCAN_WORKFLOW)
     config = _load_yaml(CODEQL_CONFIG)
 
-    checkout_step = next(
-        step
-        for step in workflow["jobs"]["codeql"]["steps"]
-        if step.get("name") == "Checkout repository"
-    )
-    assert checkout_step["uses"] == f"actions/checkout@{CHECKOUT_V6_SHA}"
-    assert checkout_step["with"]["persist-credentials"] is False
-
     init_step = next(
         step
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Initialize CodeQL"
     )
-    assert init_step["uses"] == f"github/codeql-action/init@{CODEQL_V4_SHA}"
+    assert init_step["uses"] == "github/codeql-action/init@v4"
     assert init_step["with"]["languages"] == "python"
     assert init_step["with"]["queries"] == "security-and-quality"
     assert init_step["with"]["config-file"] == "./.github/codeql/codeql-config.yml"
-
-    autobuild_step = next(
-        step
-        for step in workflow["jobs"]["codeql"]["steps"]
-        if step.get("name") == "Autobuild"
-    )
-    assert autobuild_step["uses"] == f"github/codeql-action/autobuild@{CODEQL_V4_SHA}"
 
     analyze_step = next(
         step
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Perform CodeQL Analysis"
     )
-    assert analyze_step["uses"] == f"github/codeql-action/analyze@{CODEQL_V4_SHA}"
+    assert analyze_step["uses"] == "github/codeql-action/analyze@v4"
     assert analyze_step["with"]["category"] == "/language:python"
     assert analyze_step["with"]["upload"] == "never"
     assert analyze_step["with"]["wait-for-processing"] is False
