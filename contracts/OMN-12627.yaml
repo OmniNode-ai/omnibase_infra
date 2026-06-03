@@ -1,0 +1,48 @@
+# OMN-12627 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-12627
+title: "Vendor node_service_registry owner migrations into the infra forward set"
+summary: >
+  Adds omnimarket node_projection_registration to the node-owned migration
+  allowlist and vendors its idempotent node_service_registry migrations into
+  docker/migrations/forward/nodes/. The forward migration runner applies these
+  under canonical namespaced ids node:node_projection_registration:<file>, so a
+  clean runtime/migration image can create the missing prod table without an
+  undocumented hand-created table.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Unit tests prove node_projection_registration migrations are vendored and selected by the sync allowlist."
+    command: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket uv run pytest tests/unit/migrations/test_node_migration_discovery.py -q"
+  - kind: ci
+    description: "Vendored node migrations stay in sync with omnimarket source."
+    command: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - kind: manual
+    description: "Prod DB apply remains gated; this PR only makes the canonical migration path available."
+    command: "deploy-gate: no prod DB mutation or runtime redeploy performed by this PR; apply node:node_projection_registration:* via the approved lane migration runner during the gated runtime sync window"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-registration-vendor-test
+    description: "Focused unit test verifies node_projection_registration migrations are vendored and allowlisted."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket uv run pytest tests/unit/migrations/test_node_migration_discovery.py -q"
+  - id: dod-vendor-sync
+    description: "Vendored node migration tree is in sync with the omnimarket source tree."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - id: dod-no-prod-mutation
+    description: "The autonomous PR does not mutate prod; prod table creation is deferred to the approved migration/deploy window."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy-gate: no prod DB mutation or runtime redeploy performed by this PR; gated apply will record schema_migrations rows for node:node_projection_registration:0000_create_node_service_registry.sql and node:node_projection_registration:0001_add_heartbeat_columns.sql"
