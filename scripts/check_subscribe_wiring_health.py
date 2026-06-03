@@ -99,6 +99,8 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",
     # Chain learning — publisher nodes not yet implemented
     "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-09-01",
+    # Topic migration — command issued by operator/runtime, not a contract-declared publisher (OMN-12623)
+    "onex.cmd.omnibase-infra.topic-migration-execute.v1": "Migration command issued by operator/runtime (node_topic_migration_executor_effect), not Kafka publisher | owner: jonah | expiry: 2026-12-01",
     # Delegation — request comes from omniclaude hooks, not contract-declared
     "onex.cmd.omnibase-infra.delegation-request.v1": "Delegation request from omniclaude hooks | owner: jonah | expiry: 2026-09-01",
     # LLM infrastructure — requests come from orchestrators via intents, not Kafka publish

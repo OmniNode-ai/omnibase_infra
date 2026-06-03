@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.36.1",
+  "package_version": "0.38.0",
   "protocol_count": 23,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
@@ -569,7 +569,7 @@
     },
     "ProtocolKafkaAdminLike": {
       "runtime_checkable": false,
-      "method_count": 5,
+      "method_count": 7,
       "methods": {
         "close": {
           "parameters": [],
@@ -598,6 +598,29 @@
           ],
           "return_annotation": "list[object]"
         },
+        "list_consumer_group_offsets": {
+          "parameters": [
+            {
+              "name": "group_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "group_coordinator_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int | None",
+              "default": "None"
+            },
+            {
+              "name": "partitions",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "Sequence[object] | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "Mapping[object, object]"
+        },
         "list_consumer_groups": {
           "parameters": [
             {
@@ -608,6 +631,17 @@
             }
           ],
           "return_annotation": "Sequence[tuple[str, str | None]]"
+        },
+        "list_offsets": {
+          "parameters": [
+            {
+              "name": "topic_partitions",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "Mapping[object, int]",
+              "default": null
+            }
+          ],
+          "return_annotation": "Mapping[object, object]"
         },
         "start": {
           "parameters": [],

@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ONEX Node Contract
+# Node: NodeTopicMigrationExecutorEffect
+#
+# Executes a topic migration described by a ModelTopicMigrationContract:
+# provisions the new topic, mints the new consumer group, and advances the
+# migration through its lifecycle phases gated by the drain-proof gate.
+#
+# Related Tickets:
+#   - OMN-12623: migration executor + lag/drain + projection + replay harness
+#   - OMN-12621: ModelTopicMigrationContract (core)
+name: "node_topic_migration_executor_effect"
+contract_name: "node_topic_migration_executor_effect"
+node_name: "node_topic_migration_executor_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that executes a topic migration declared by a ModelTopicMigrationContract. Provisions the new topic via TopicProvisioner, mints the new consumer group via compute_consumer_group_id, and advances the migration through DUAL_WRITE -> DUAL_READ -> CUTOVER -> COMPLETE phases. The drain-proof gate blocks CUTOVER/COMPLETE until the old consumer group has fully drained the old topic. Emits a ModelTopicMigrationLifecycleEvent per advanced phase.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.topic-migration-execute.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
+input_model:
+  name: "ModelTopicMigrationCommand"
+  module: "omnibase_infra.nodes.node_topic_migration_executor_effect.models.model_topic_migration_command"
+  description: "Command instructing the executor to advance a topic migration."
+output_model:
+  name: "ModelTopicMigrationLifecycleEvent"
+  module: "omnibase_infra.nodes.node_topic_migration_executor_effect.models.model_topic_migration_lifecycle_event"
+  description: "Lifecycle event emitted for an advanced migration phase."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "execute_topic_migration"
+      handler:
+        name: "HandlerTopicMigrationExecutor"
+        module: "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor"
+      description: "Advance a topic migration one forward phase with drain-proof gating"
+      output_fields:
+        - event_id
+        - migration_ticket
+        - phase
+        - new_topic_provisioned
+        - retirement_allowed
+        - residual_lag
+io_operations:
+  - operation: "execute_topic_migration"
+    description: "Advance a topic migration to the target phase"
+    input_fields:
+      - correlation_id
+      - contract
+      - target_phase
+    output_fields:
+      - event_id
+      - migration_ticket
+      - phase
+      - new_topic_provisioned
+      - retirement_allowed
+      - residual_lag
+dependencies:
+  - name: "topic_provisioner"
+    type: "service"
+    description: "TopicProvisioner for new-topic creation via ModelTopicSpec"
+    required: true
+  - name: "drain_proof_gate"
+    type: "service"
+    description: "ServiceDrainProofGate enforcing old-group drain before retirement"
+    required: true
+  - name: "event_bus"
+    type: "service"
+    description: "Event bus publisher for emitting migration lifecycle events"
+    required: true
+metadata:
+  description: "Contract-native topic-migration executor with drain-proof gating"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-06-02"
+  updated: "2026-06-02"
+  tags:
+    - effect
+    - migration
+    - topic
+    - drain-proof
+    - lifecycle

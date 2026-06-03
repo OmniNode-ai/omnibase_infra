@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ONEX Node Contract
+# Node: NodeTopicMigrationProjection
+#
+# Projects topic-migration lifecycle events into the topic_migration_projection
+# FSM table with idempotency columns.
+#
+# Related Tickets:
+#   - OMN-12623: migration executor + lag/drain + projection + replay harness
+name: "node_topic_migration_projection"
+contract_name: "node_topic_migration_projection"
+node_name: "node_topic_migration_projection"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Compute node that projects topic-migration lifecycle events (onex.evt.omnibase-infra.topic-migration-lifecycle.v1) into the topic_migration_projection table. Materializes the migration FSM state plus idempotency columns (last_applied_event_id/sequence/offset/partition) so the projection is replay-safe and rejects stale/duplicate events.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
+  publish_topics: []
+input_model:
+  name: "ModelTopicMigrationLifecycleEvent"
+  module: "omnibase_infra.nodes.node_topic_migration_executor_effect.models.model_topic_migration_lifecycle_event"
+  description: "Lifecycle event emitted by the migration executor."
+output_model:
+  name: "ModelTopicMigrationProjectionRow"
+  module: "omnibase_infra.nodes.node_topic_migration_projection.models.model_topic_migration_projection_row"
+  description: "Materialized topic_migration_projection row."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "project_topic_migration"
+      handler:
+        name: "HandlerTopicMigrationProjection"
+        module: "omnibase_infra.nodes.node_topic_migration_projection.handlers.handler_topic_migration_projection"
+      description: "Project a migration lifecycle event into a projection row"
+      output_fields:
+        - migration_ticket
+        - current_state
+        - last_applied_event_id
+        - last_applied_sequence
+io_operations:
+  - operation: "project_topic_migration"
+    description: "Transform a lifecycle event into a projection row"
+    input_fields:
+      - event_id
+      - migration_ticket
+      - phase
+      - sequence
+    output_fields:
+      - migration_ticket
+      - current_state
+      - last_applied_event_id
+      - last_applied_sequence
+dependencies: []
+metadata:
+  description: "Topic-migration FSM projection with idempotency columns"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-06-02"
+  updated: "2026-06-02"
+  tags:
+    - compute
+    - projection
+    - migration
+    - topic
+    - fsm

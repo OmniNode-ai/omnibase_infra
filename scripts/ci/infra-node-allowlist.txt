@@ -232,3 +232,7 @@ src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/__init__.p
 src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/handler_source_attestation.py  # OMN-9139: infra-owned attestation node — verifies RUNTIME_SOURCE_HASH provenance, not a business-domain node.
 src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/__init__.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
 src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/handler_postgres_runtime_manifest_insert.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/__init__.py  # OMN-12623: infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py  # OMN-12623: infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_projection/handlers/__init__.py  # OMN-12623: infra-only topic-migration FSM projection handler, not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_projection/handlers/handler_topic_migration_projection.py  # OMN-12623: infra-only topic-migration FSM projection handler, not business-domain.

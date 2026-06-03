@@ -11,7 +11,7 @@ parse time.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 
@@ -44,6 +44,34 @@ class ProtocolKafkaAdminLike(Protocol):
         include_authorized_operations: bool = False,
     ) -> list[object]:
         pass
+
+    async def list_consumer_group_offsets(
+        self,
+        group_id: str,
+        group_coordinator_id: int | None = None,
+        partitions: Sequence[object] | None = None,
+    ) -> Mapping[object, object]:
+        """Return committed offsets for ``group_id``.
+
+        Maps each ``TopicPartition`` the group has committed to an
+        ``OffsetAndMetadata``-like object exposing ``.offset``. Added in
+        OMN-12623 so consumer-group lag (committed vs log-end) is observable for
+        the drain-proof migration gate; the prior protocol only exposed group
+        state/existence.
+        """
+        ...
+
+    async def list_offsets(
+        self,
+        topic_partitions: Mapping[object, int],
+    ) -> Mapping[object, object]:
+        """Return per-partition log-end (or timestamp-resolved) offsets.
+
+        Maps each requested ``TopicPartition`` to an offset response exposing
+        ``.offset`` (the high-water mark when ``-1`` / ``LATEST`` is requested).
+        Used with :meth:`list_consumer_group_offsets` to compute lag.
+        """
+        ...
 
 
 __all__: list[str] = ["ProtocolKafkaAdminLike"]
