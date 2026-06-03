@@ -101,6 +101,7 @@ class TestVendoredViewMigrations:
         create_sql = REGISTRATION_CREATE.read_text(encoding="utf-8")
         heartbeat_sql = REGISTRATION_HEARTBEAT.read_text(encoding="utf-8")
         assert "CREATE TABLE IF NOT EXISTS node_service_registry" in create_sql
+        assert "uptime_seconds BIGINT NOT NULL DEFAULT 0" in create_sql
         assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in heartbeat_sql
         assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in heartbeat_sql
 
