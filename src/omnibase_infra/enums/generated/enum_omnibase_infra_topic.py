@@ -34,6 +34,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
     CMD_PATTERN_B_DISPATCH_V1 = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex.cmd.omnibase-infra.pattern-b-dispatch.v1
     CMD_REMOTE_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"  # onex.cmd.omnibase-infra.remote-agent-invoke.v1
+    CMD_TOPIC_MIGRATION_EXECUTE_V1 = "onex.cmd.omnibase-infra.topic-migration-execute.v1"  # onex.cmd.omnibase-infra.topic-migration-execute.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     DLQ_COMMANDS_V1 = "onex.dlq.omnibase-infra.commands.v1"  # onex.dlq.omnibase-infra.commands.v1
     DLQ_EVENTS_V1 = "onex.dlq.omnibase-infra.events.v1"  # onex.dlq.omnibase-infra.events.v1
@@ -73,4 +74,5 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_SERVICE_LIFECYCLE_V1 = "onex.evt.omnibase-infra.service-lifecycle.v1"  # onex.evt.omnibase-infra.service-lifecycle.v1
     EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
     EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1
+    EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1
     EVT_VECTOR_STORE_COMPLETED_V1 = "onex.evt.omnibase-infra.vector-store-completed.v1"  # onex.evt.omnibase-infra.vector-store-completed.v1

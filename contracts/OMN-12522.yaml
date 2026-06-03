@@ -2,9 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-12522"
 title: "Advertise stability Redpanda on the connected network"
 summary: >-
-  Require the stability-test Redpanda external listener to advertise a
-  connected-network address so authorized off-LAN operators can complete Kafka
-  metadata bootstrap instead of being redirected to a LAN-only broker address.
+  Require the stability-test Redpanda external listener to advertise a connected-network address so authorized off-LAN operators can complete Kafka metadata bootstrap instead of being redirected to a LAN-only broker address.
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:

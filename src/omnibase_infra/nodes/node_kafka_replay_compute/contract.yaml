@@ -11,8 +11,7 @@ contract_version:
   patch: 1
 node_version: "1.0.1"
 description: >
-  Compute node that replays Kafka event-bus envelopes from an explicitly injected target Kafka/Redpanda bootstrap for deterministic projection-equality proofs. The node never reads production bootstrap configuration or mutates runtime .201.
-  Contract patch 1 records handler-internal dataclass annotations only; replay command, output, and transport semantics are unchanged.
+  Compute node that replays Kafka event-bus envelopes from an explicitly injected target Kafka/Redpanda bootstrap for deterministic projection-equality proofs. The node never reads production bootstrap configuration or mutates runtime .201. Contract patch 1 records handler-internal dataclass annotations only; replay command, output, and transport semantics are unchanged.
 
 input_model:
   name: "ModelKafkaReplayInput"

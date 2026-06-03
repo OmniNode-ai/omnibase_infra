@@ -145,6 +145,7 @@ dev = [
     "ruff>=0.14.7,<0.16.0",  # Ruff handles both formatting and linting (replaces black + isort)
     "types-pyyaml>=6.0.12.20250822,<7.0.0",
     "pre-commit>=4.3.0,<5.0.0",
+    "deepdiff>=8.0.0,<9.0.0",  # OMN-12623: direct use in tests/replay topic-migration equivalence harness
 
     # Test infrastructure dependencies
     "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
@@ -168,8 +169,9 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# Release v0.38.0: pin core to the paired v0.43.0 release PR head until the tag is published.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "4ffca7643294fcad4f9654f4d1839ca8002b4454" }
+# OMN-12623: bump core pin to dev HEAD (a1e73fff, OMN-12621 #1191) which adds
+# ModelTopicMigrationContract/ModelTopicSchemaBinding consumed by the migration executor.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "a1e73fff25a05ccb37cbb92d9c91754c59d808c0" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
@@ -544,6 +546,8 @@ node_setup_orchestrator = "omnibase_infra.nodes.node_setup_orchestrator"
 node_setup_preflight_effect = "omnibase_infra.nodes.node_setup_preflight_effect"
 node_setup_validate_effect = "omnibase_infra.nodes.node_setup_validate_effect"
 node_slack_alerter_effect = "omnibase_infra.nodes.node_slack_alerter_effect"
+node_topic_migration_executor_effect = "omnibase_infra.nodes.node_topic_migration_executor_effect"
+node_topic_migration_projection = "omnibase_infra.nodes.node_topic_migration_projection"
 node_update_plan_reducer = "omnibase_infra.nodes.node_update_plan_reducer"
 node_validation_adjudicator = "omnibase_infra.nodes.node_validation_adjudicator"
 node_validation_executor = "omnibase_infra.nodes.node_validation_executor"

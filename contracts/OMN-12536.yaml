@@ -35,13 +35,4 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: >-
-          tmpfs="$(docker inspect omninode-runtime --format '{{json .HostConfig.Tmpfs}}')"
-          && printf '%s\n' "$tmpfs" | grep -F /run/onex-runtime
-          && curl -sf http://127.0.0.1:8085/health
-          | python -c 'import json, sys; data = json.load(sys.stdin); assert data["status"] == "healthy"; assert data["runtime_attached"] is True; assert data["local_ingress"]["running"] is True'
-          && docker exec omnibase-infra-redpanda rpk group describe pattern-b-broker-onex-cmd-omnimarket-pattern-b-dispatch-v1.__t.onex.cmd.omnimarket.pattern-b-dispatch.v1 --brokers redpanda:9092
-          > /tmp/omn-12536-rpk-group.txt
-          && cat /tmp/omn-12536-rpk-group.txt
-          && grep -F Stable /tmp/omn-12536-rpk-group.txt
-          && grep -E 'MEMBERS[[:space:]]+1|MEMBERS=1' /tmp/omn-12536-rpk-group.txt
-          && grep -E 'TOTAL-LAG[[:space:]]+0|TOTAL-LAG=0' /tmp/omn-12536-rpk-group.txt
+          tmpfs="$(docker inspect omninode-runtime --format '{{json .HostConfig.Tmpfs}}')" && printf '%s\n' "$tmpfs" | grep -F /run/onex-runtime && curl -sf http://127.0.0.1:8085/health | python -c 'import json, sys; data = json.load(sys.stdin); assert data["status"] == "healthy"; assert data["runtime_attached"] is True; assert data["local_ingress"]["running"] is True' && docker exec omnibase-infra-redpanda rpk group describe pattern-b-broker-onex-cmd-omnimarket-pattern-b-dispatch-v1.__t.onex.cmd.omnimarket.pattern-b-dispatch.v1 --brokers redpanda:9092 > /tmp/omn-12536-rpk-group.txt && cat /tmp/omn-12536-rpk-group.txt && grep -F Stable /tmp/omn-12536-rpk-group.txt && grep -E 'MEMBERS[[:space:]]+1|MEMBERS=1' /tmp/omn-12536-rpk-group.txt && grep -E 'TOTAL-LAG[[:space:]]+0|TOTAL-LAG=0' /tmp/omn-12536-rpk-group.txt

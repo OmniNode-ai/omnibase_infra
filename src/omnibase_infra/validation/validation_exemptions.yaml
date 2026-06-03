@@ -842,6 +842,38 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1246
+  # ==========================================================================
+  # Topic Migration Service Exemptions (OMN-12623)
+  # ==========================================================================
+  # Lag observation + drain-proof gate are infrastructure services mirroring
+  # ServiceTopicManager / ServiceRuntimeHealthMonitor; they follow the
+  # Service<Name> file/class naming convention.
+  - file_pattern: 'service_consumer_lag_observer\.py'
+    class_pattern: "Class name 'ServiceConsumerLagObserver'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. Infrastructure service computing Kafka consumer-group lag from committed vs log-end offsets, mirroring ServiceTopicManager / ServiceRuntimeHealthMonitor.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-12623
+  - file_pattern: 'service_drain_proof_gate\.py'
+    class_pattern: "Class name 'ServiceDrainProofGate'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. Infrastructure service gating old-consumer-group retirement on a zero-lag drain proof for topic migrations.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-12623
+  - file_pattern: 'model_consumer_group_lag\.py'
+    violation_pattern: "Field 'group_id' should use UUID"
+    reason: >
+      group_id is a Kafka consumer group ID which is a free-text string, not a UUID. Infrastructure-specific, follows Kafka naming conventions (same as model_log_context.py exemption OMN-1002).
+
+    documentation:
+      - CLAUDE.md (Kafka consumer group conventions)
+    ticket: OMN-12623
   - file_pattern: 'health_checker.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'

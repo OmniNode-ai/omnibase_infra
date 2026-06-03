@@ -9,7 +9,7 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=a1e73fff25a05ccb37cbb92d9c91754c59d808c0" },
     { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
 ]
 
@@ -1981,7 +1981,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.43.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454#4ffca7643294fcad4f9654f4d1839ca8002b4454" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=a1e73fff25a05ccb37cbb92d9c91754c59d808c0#a1e73fff25a05ccb37cbb92d9c91754c59d808c0" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2052,6 +2052,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "deepdiff" },
     { name = "hypothesis" },
     { name = "kafka-python" },
     { name = "locust" },
@@ -2093,7 +2094,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=4ffca7643294fcad4f9654f4d1839ca8002b4454" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=a1e73fff25a05ccb37cbb92d9c91754c59d808c0" },
     { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
@@ -2125,6 +2126,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "deepdiff", specifier = ">=8.0.0,<9.0.0" },
     { name = "hypothesis", specifier = ">=6.148.7,<7.0.0" },
     { name = "kafka-python", specifier = ">=2.0.2,<3.0.0" },
     { name = "locust", specifier = ">=2.31.8,<3.0.0" },
