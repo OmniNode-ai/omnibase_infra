@@ -34,7 +34,7 @@ CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
-CHECKOUT_V6_SHA = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+CHECKOUT_V6_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 
 
