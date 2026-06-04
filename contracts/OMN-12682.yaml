@@ -1,0 +1,55 @@
+# OMN-12682 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-12682
+title: "Derive ServiceTopicRegistry defaults from the topic catalog"
+summary: >
+  Replaces ServiceTopicRegistry.from_defaults() embedded onex.* topic
+  literals with references to the provisioned topic suffix catalog. Missing
+  registry topics are promoted into named catalog constants and topic specs so
+  runtime topic resolution and broker provisioning share one authority.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Full topic unit slice proves registry, suffix exports, and topic specs remain coherent."
+    command: "PYTHONPATH=$PWD/src uv run pytest tests/unit/topics -q"
+  - kind: tests
+    description: "Contract extractor and generated topic enum coverage remain compatible with the expanded catalog."
+    command: "PYTHONPATH=$PWD/src uv run pytest tests/unit/tools/test_topic_constants_enum_coverage.py tests/unit/tools/test_contract_topic_extractor.py tests/unit/tools/test_contract_topic_extractor_yaml.py -q"
+  - kind: manual
+    description: "Topic package type check resolves all catalog symbols used by ServiceTopicRegistry."
+    command: "PYTHONPATH=$PWD/src uv run pyright src/omnibase_infra/topics"
+  - kind: manual
+    description: "Touched topic modules and tests pass ruff checks."
+    command: "uv run ruff check src/omnibase_infra/topics/platform_topic_suffixes.py src/omnibase_infra/topics/service_topic_registry.py src/omnibase_infra/topics/__init__.py tests/unit/topics/test_service_topic_registry.py tests/unit/topics/test_platform_topic_suffixes.py"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-topic-unit-slice
+    description: "Full topic unit slice passes from the OMN-12682 worktree source path."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src uv run pytest tests/unit/topics -q"
+  - id: dod-topic-extractor-enum-coverage
+    description: "Contract extractor and topic enum coverage tests pass from the OMN-12682 worktree source path."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src uv run pytest tests/unit/tools/test_topic_constants_enum_coverage.py tests/unit/tools/test_contract_topic_extractor.py tests/unit/tools/test_contract_topic_extractor_yaml.py -q"
+  - id: dod-topic-pyright
+    description: "Pyright resolves all topic package catalog symbols."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "PYTHONPATH=$PWD/src uv run pyright src/omnibase_infra/topics"
+  - id: dod-topic-ruff
+    description: "Ruff check passes for touched topic modules and tests."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run ruff check src/omnibase_infra/topics/platform_topic_suffixes.py src/omnibase_infra/topics/service_topic_registry.py src/omnibase_infra/topics/__init__.py tests/unit/topics/test_service_topic_registry.py tests/unit/topics/test_platform_topic_suffixes.py"
