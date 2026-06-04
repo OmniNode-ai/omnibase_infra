@@ -115,17 +115,6 @@ logger = logging.getLogger(__name__)
 # HMAC header name for outbound request authentication.
 _HMAC_HEADER_NAME = "X-ONEX-Signature"
 
-# Path suffixes that mark a configured base_url as an already-complete chat
-# endpoint. When a backend's base_url already terminates in one of these, the
-# OpenAI-compatible path must NOT be appended again (doing so produces a
-# double-versioned 404 like ``…/v1beta/openai/v1/chat/completions``). Such a
-# URL is routed through ``endpoint_url`` so the inference handler posts it
-# as-is. This is a structural check on the URL shape — not a provider sniff.
-_FULL_CHAT_ENDPOINT_SUFFIXES: tuple[str, ...] = (
-    "/chat/completions",
-    "/completions",
-)
-
 
 def _safe_invoke_callback(
     callback: Callable[[ModelBifrostResponse], None] | None,
@@ -779,22 +768,8 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
                 correlation_id=str(correlation_id),
             )
 
-        # When the backend's configured base_url is already a complete chat
-        # endpoint (e.g. a cloud Gemini OpenAI-compatible URL that ends in
-        # ``/chat/completions``), route it through endpoint_url so the inference
-        # handler posts it verbatim instead of appending the OpenAI path again.
-        # Otherwise keep the legacy base_url path, where the handler appends the
-        # operation-type path exactly once.
-        configured_url = backend_cfg.base_url
-        endpoint_url: str | None = None
-        base_url = configured_url
-        if configured_url.rstrip("/").endswith(_FULL_CHAT_ENDPOINT_SUFFIXES):
-            endpoint_url = configured_url
-            base_url = configured_url
-
         return ModelLlmInferenceRequest(
-            endpoint_url=endpoint_url,
-            base_url=base_url,
+            base_url=backend_cfg.base_url,
             operation_type=request.operation_type,
             model=model_name,
             messages=request.messages,
