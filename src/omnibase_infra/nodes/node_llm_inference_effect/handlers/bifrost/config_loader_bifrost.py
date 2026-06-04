@@ -75,13 +75,21 @@ def load_bifrost_config_from_env() -> ModelBifrostConfig:
 
     # External backends (only added when API key is configured)
     _add_backend_if_set(backends, "glm", "GLM_BASE_URL")
-    # Gemini uses a well-known base URL; only add when API key is present
+    # Gemini's OpenAI-compatible chat endpoint lives at
+    # /v1beta/openai/chat/completions. The bare origin (or a /v1beta/openai base)
+    # would make the inference handler append /v1/chat/completions and 404. Default
+    # to the complete registered endpoint so the resolved URL carries
+    # /v1beta/openai/chat/completions and is posted verbatim (the gateway routes
+    # full endpoints through endpoint_url). Only add when the API key is present.
     if os.environ.get("GEMINI_API_KEY", "").strip():
         _add_backend_if_set(
             backends,
             "gemini",
             "GEMINI_BASE_URL",
-            default_url="https://generativelanguage.googleapis.com",
+            default_url=(
+                "https://generativelanguage.googleapis.com"
+                "/v1beta/openai/chat/completions"
+            ),
         )
 
     if not backends:
