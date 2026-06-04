@@ -25,6 +25,7 @@ Related:
 
 from __future__ import annotations
 
+from omnibase_infra.topics import platform_topic_suffixes as topic_suffixes
 from omnibase_infra.topics import topic_keys
 
 
@@ -52,7 +53,7 @@ class ServiceTopicRegistry:
     def from_defaults(cls) -> ServiceTopicRegistry:
         """Build registry with all canonical topic strings.
 
-        Values match the current ``topic_constants.py`` TOPIC_* constants.
+        Values are derived from the provisioned topic suffix catalog.
 
         Returns:
             A fully populated ServiceTopicRegistry.
@@ -62,154 +63,140 @@ class ServiceTopicRegistry:
         topics = {
             # Session
             topic_keys.SESSION_OUTCOME_CURRENT: (
-                "onex.cmd.omniintelligence.session-outcome.v1"
+                topic_suffixes.SUFFIX_INTELLIGENCE_SESSION_OUTCOME
             ),
             topic_keys.SESSION_OUTCOME_CANONICAL: (
-                "onex.evt.omniclaude.session-outcome.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_SESSION_OUTCOME
             ),
             # Injection effectiveness
             topic_keys.INJECTION_CONTEXT_UTILIZATION: (
-                "onex.evt.omniclaude.context-utilization.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION
             ),
-            topic_keys.INJECTION_AGENT_MATCH: ("onex.evt.omniclaude.agent-match.v1"),
+            topic_keys.INJECTION_AGENT_MATCH: (
+                topic_suffixes.SUFFIX_OMNICLAUDE_AGENT_MATCH
+            ),
             topic_keys.INJECTION_LATENCY_BREAKDOWN: (
-                "onex.evt.omniclaude.latency-breakdown.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN
             ),
             topic_keys.INJECTION_CONTEXT_ENRICHMENT: (
-                "onex.evt.omniclaude.context-enrichment.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_CONTEXT_ENRICHMENT
             ),
             topic_keys.INJECTION_RECORDED: (
-                "onex.evt.omniclaude.injection-recorded.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_INJECTION_RECORDED
             ),
             # Manifest injection lifecycle (OMN-1888)
             topic_keys.MANIFEST_INJECTION_STARTED: (
-                "onex.evt.omniclaude.manifest-injection-started.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED
             ),
-            topic_keys.MANIFEST_INJECTED: ("onex.evt.omniclaude.manifest-injected.v1"),
+            topic_keys.MANIFEST_INJECTED: (
+                topic_suffixes.SUFFIX_OMNICLAUDE_MANIFEST_INJECTED
+            ),
             topic_keys.MANIFEST_INJECTION_FAILED: (
-                "onex.evt.omniclaude.manifest-injection-failed.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED
             ),
             # LLM
             topic_keys.LLM_CALL_COMPLETED: (
-                "onex.evt.omniintelligence.llm-call-completed.v1"
+                topic_suffixes.SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED
             ),
             topic_keys.DISPATCH_OUTCOME_EVALUATED: (
-                "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
+                topic_suffixes.SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED
             ),
             topic_keys.LLM_CALL_COMPLETED_INFRA: (
-                "onex.evt.omnibase-infra.llm-call-completed.v1"
+                topic_suffixes.SUFFIX_LLM_CALL_COMPLETED_INFRA
             ),
-            topic_keys.LLM_ENDPOINT_HEALTH: (
-                "onex.evt.omnibase-infra.llm-endpoint-health.v1"
-            ),
+            topic_keys.LLM_ENDPOINT_HEALTH: (topic_suffixes.SUFFIX_LLM_ENDPOINT_HEALTH),
             topic_keys.LLM_INFERENCE_REQUEST: (
-                "onex.cmd.omnibase-infra.llm-inference-request.v1"
+                topic_suffixes.SUFFIX_LLM_INFERENCE_REQUEST
             ),
             topic_keys.LLM_EMBEDDING_REQUEST: (
-                "onex.cmd.omnibase-infra.llm-embedding-request.v1"
+                topic_suffixes.SUFFIX_LLM_EMBEDDING_REQUEST
             ),
-            topic_keys.EVAL_COMPLETED: ("onex.evt.omnibase-infra.eval-completed.v1"),
+            topic_keys.EVAL_COMPLETED: topic_suffixes.SUFFIX_EVAL_COMPLETED,
             # Effectiveness
             topic_keys.EFFECTIVENESS_INVALIDATION: (
-                "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
+                topic_suffixes.SUFFIX_EFFECTIVENESS_INVALIDATION
             ),
             # Agent
-            topic_keys.AGENT_STATUS: "onex.evt.omniclaude.agent-status.v1",
+            topic_keys.AGENT_STATUS: topic_suffixes.SUFFIX_OMNICLAUDE_AGENT_STATUS,
             # Reward
-            topic_keys.REWARD_ASSIGNED: ("onex.evt.omnimemory.reward-assigned.v1"),
+            topic_keys.REWARD_ASSIGNED: topic_suffixes.SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
             # Resolution
-            topic_keys.RESOLUTION_DECIDED: ("onex.evt.platform.resolution-decided.v1"),
+            topic_keys.RESOLUTION_DECIDED: topic_suffixes.SUFFIX_RESOLUTION_DECIDED,
             # Circuit breaker
             topic_keys.CIRCUIT_BREAKER_STATE: (
-                "onex.evt.omnibase-infra.circuit-breaker-state.v1"
+                topic_suffixes.SUFFIX_CIRCUIT_BREAKER_STATE
             ),
             # Wiring health
             topic_keys.WIRING_HEALTH_SNAPSHOT: (
-                "onex.evt.omnibase-infra.wiring-health-snapshot.v1"
+                topic_suffixes.SUFFIX_WIRING_HEALTH_SNAPSHOT
             ),
             # Savings estimation
-            topic_keys.SAVINGS_ESTIMATED: (
-                "onex.evt.omnibase-infra.savings-estimated.v1"
-            ),
+            topic_keys.SAVINGS_ESTIMATED: topic_suffixes.SUFFIX_SAVINGS_ESTIMATED,
             topic_keys.RUNNER_USAGE_RECORDED: (
-                "onex.evt.omninode.runner-usage-recorded.v1"
+                topic_suffixes.SUFFIX_RUNNER_USAGE_RECORDED
             ),
-            topic_keys.VALIDATOR_CATCH: ("onex.evt.omniclaude.validator-catch.v1"),
+            topic_keys.VALIDATOR_CATCH: (
+                topic_suffixes.SUFFIX_OMNICLAUDE_VALIDATOR_CATCH
+            ),
             topic_keys.PATTERN_ENFORCEMENT: (
-                "onex.evt.omniclaude.pattern-enforcement.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT
             ),
             topic_keys.HOOK_CONTEXT_INJECTED: (
-                "onex.evt.omniclaude.hook-context-injected.v1"
+                topic_suffixes.SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED
             ),
             # Consumer health
-            topic_keys.CONSUMER_HEALTH: ("onex.evt.omnibase-infra.consumer-health.v1"),
+            topic_keys.CONSUMER_HEALTH: topic_suffixes.SUFFIX_CONSUMER_HEALTH,
             topic_keys.CONSUMER_RESTART_CMD: (
-                "onex.cmd.omnibase-infra.consumer-restart.v1"
+                topic_suffixes.SUFFIX_CONSUMER_RESTART_CMD
             ),
             # Runtime health check
             topic_keys.RUNTIME_HEALTH_CHECK: (
-                "onex.evt.omnibase-infra.runtime-health-check.v1"
+                topic_suffixes.SUFFIX_RUNTIME_HEALTH_CHECK
             ),
             # Projection freshness SLA monitoring
             topic_keys.PROJECTION_FRESHNESS_DEGRADED: (
-                "onex.evt.omnibase-infra.projection-freshness-degraded.v1"
+                topic_suffixes.SUFFIX_PROJECTION_FRESHNESS_DEGRADED
             ),
             topic_keys.PROJECTION_FRESHNESS_RECOVERED: (
-                "onex.evt.omnibase-infra.projection-freshness-recovered.v1"
+                topic_suffixes.SUFFIX_PROJECTION_FRESHNESS_RECOVERED
             ),
             # Runtime error
-            topic_keys.RUNTIME_ERROR: ("onex.evt.omnibase-infra.runtime-error.v1"),
-            topic_keys.ERROR_TRIAGED: ("onex.evt.omnibase-infra.error-triaged.v1"),
+            topic_keys.RUNTIME_ERROR: topic_suffixes.SUFFIX_RUNTIME_ERROR,
+            topic_keys.ERROR_TRIAGED: topic_suffixes.TOPIC_ERROR_TRIAGED_V1,
             # Routing
-            topic_keys.ROUTING_DECIDED: ("onex.evt.omnibase-infra.routing-decided.v1"),
+            topic_keys.ROUTING_DECIDED: topic_suffixes.SUFFIX_ROUTING_DECIDED,
             # Baselines
-            topic_keys.BASELINES_COMPUTED: (
-                "onex.evt.omnibase-infra.baselines-computed.v1"
-            ),
+            topic_keys.BASELINES_COMPUTED: topic_suffixes.SUFFIX_BASELINES_COMPUTED,
             # Waitlist
-            topic_keys.WAITLIST_SIGNUP: ("onex.evt.omniweb.waitlist-signup.v1"),
+            topic_keys.WAITLIST_SIGNUP: topic_suffixes.SUFFIX_WAITLIST_SIGNUP,
             # Build Loop commands (OMN-5113)
-            topic_keys.BUILD_LOOP_START: (
-                "onex.cmd.omnibase-infra.build-loop-start.v1"
-            ),
-            topic_keys.BUILD_LOOP_CLOSEOUT: (
-                "onex.cmd.omnibase-infra.build-loop-closeout.v1"
-            ),
-            topic_keys.BUILD_LOOP_VERIFY: (
-                "onex.cmd.omnibase-infra.build-loop-verify.v1"
-            ),
-            topic_keys.BUILD_LOOP_FILL: ("onex.cmd.omnibase-infra.build-loop-fill.v1"),
-            topic_keys.BUILD_LOOP_CLASSIFY: (
-                "onex.cmd.omnibase-infra.build-loop-classify.v1"
-            ),
-            topic_keys.BUILD_LOOP_BUILD: (
-                "onex.cmd.omnibase-infra.build-loop-build.v1"
-            ),
+            topic_keys.BUILD_LOOP_START: topic_suffixes.SUFFIX_BUILD_LOOP_START,
+            topic_keys.BUILD_LOOP_CLOSEOUT: (topic_suffixes.SUFFIX_BUILD_LOOP_CLOSEOUT),
+            topic_keys.BUILD_LOOP_VERIFY: topic_suffixes.SUFFIX_BUILD_LOOP_VERIFY,
+            topic_keys.BUILD_LOOP_FILL: topic_suffixes.SUFFIX_BUILD_LOOP_FILL,
+            topic_keys.BUILD_LOOP_CLASSIFY: (topic_suffixes.SUFFIX_BUILD_LOOP_CLASSIFY),
+            topic_keys.BUILD_LOOP_BUILD: topic_suffixes.SUFFIX_BUILD_LOOP_BUILD,
             # Build Loop events (OMN-5113)
-            topic_keys.BUILD_LOOP_STARTED: (
-                "onex.evt.omnibase-infra.build-loop-started.v1"
-            ),
+            topic_keys.BUILD_LOOP_STARTED: topic_suffixes.SUFFIX_BUILD_LOOP_STARTED,
             topic_keys.BUILD_LOOP_CLOSEOUT_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-closeout-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_CLOSEOUT_COMPLETED
             ),
             topic_keys.BUILD_LOOP_VERIFY_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-verify-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_VERIFY_COMPLETED
             ),
             topic_keys.BUILD_LOOP_FILL_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-fill-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_FILL_COMPLETED
             ),
             topic_keys.BUILD_LOOP_CLASSIFY_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-classify-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_CLASSIFY_COMPLETED
             ),
             topic_keys.BUILD_LOOP_BUILD_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-build-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_BUILD_COMPLETED
             ),
             topic_keys.BUILD_LOOP_CYCLE_COMPLETED: (
-                "onex.evt.omnibase-infra.build-loop-cycle-completed.v1"
+                topic_suffixes.SUFFIX_BUILD_LOOP_CYCLE_COMPLETED
             ),
-            topic_keys.BUILD_LOOP_FAILED: (
-                "onex.evt.omnibase-infra.build-loop-failed.v1"
-            ),
+            topic_keys.BUILD_LOOP_FAILED: topic_suffixes.SUFFIX_BUILD_LOOP_FAILED,
         }
 
         # Wiring health monitored topics (matches WIRING_HEALTH_MONITORED_TOPICS)
