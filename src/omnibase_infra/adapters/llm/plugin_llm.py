@@ -108,7 +108,6 @@ class PluginLlm:
         self._router: AdapterModelRouter | None = None
         self._health_service: ServiceLlmEndpointHealth | None = None
         self._health_task: asyncio.Task[None] | None = None
-        self._inference_consumer_task: asyncio.Task[None] | None = None
         self._endpoints: dict[str, str] = {}
 
     @property
@@ -239,36 +238,9 @@ class PluginLlm:
             config.correlation_id,
         )
 
-        # --- LLM inference command consumer (new — OMN-7104) ---
-        # Subscribe to the LLM inference request topic declared in
-        # node_llm_inference_effect/contract.yaml so the node can receive
-        # Kafka commands and route them to HandlerLlmOpenaiCompatible.
-        if event_bus is not None:
-            from omnibase_infra.adapters.llm.consumer_llm_inference import (
-                start_llm_inference_consumer,
-            )
-
-            self._inference_consumer_task = asyncio.create_task(
-                start_llm_inference_consumer(
-                    event_bus=event_bus,
-                    endpoints=self._endpoints,
-                    correlation_id=str(config.correlation_id),
-                ),
-                name="llm-inference-consumer",
-            )
-            logger.info(
-                "PluginLlm: started LLM inference command consumer (correlation_id=%s)",
-                config.correlation_id,
-            )
-        else:
-            logger.debug(
-                "PluginLlm: no event_bus available, skipping inference consumer (correlation_id=%s)",
-                config.correlation_id,
-            )
-
         return ModelDomainPluginResult.succeeded(
             plugin_id=self.plugin_id,
-            message=f"Health probes + inference consumer started for {len(friendly_endpoints)} endpoints",
+            message=f"Health probes started for {len(friendly_endpoints)} endpoints",
         )
 
     async def shutdown(
