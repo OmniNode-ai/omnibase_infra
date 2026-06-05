@@ -89,6 +89,8 @@ services:
     container_name: omninode-stability-test-runtime
     restart: unless-stopped
     depends_on:
+      migration-gate:
+        condition: service_healthy
       intelligence-migration:
         condition: service_completed_successfully
       redpanda-partition-cap:
@@ -130,6 +132,9 @@ services:
   runtime-effects:
     container_name: omninode-stability-test-runtime-effects
     restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
     environment:
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
@@ -179,6 +184,9 @@ services:
   runtime-worker:
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
     environment:
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}

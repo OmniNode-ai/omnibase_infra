@@ -80,6 +80,20 @@ def test_generated_compose_preserves_one_shot_semantics() -> None:
     fm = compose["services"]["forward-migration"]
     assert fm["restart"] == "no"
     assert "healthcheck" not in fm  # one-shot entries have no healthcheck
+    assert fm["environment"]["NODE_POSTGRES_DB"] == "omnidash_analytics"
+
+
+@pytest.mark.unit
+def test_generated_migration_gate_requires_projection_tables() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    gate = compose["services"]["migration-gate"]
+    assert gate["environment"]["NODE_POSTGRES_DB"] == "omnidash_analytics"
+    assert (
+        gate["environment"]["REQUIRED_PROJECTION_TABLES"]
+        == "delegation_events node_service_registry"
+    )
 
 
 @pytest.mark.unit

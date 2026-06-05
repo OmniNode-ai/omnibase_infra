@@ -9,6 +9,8 @@ hardcoded_env:
   POSTGRES_HOST: postgres
   POSTGRES_PORT: '5432'
   POSTGRES_DB: omnibase_infra
+  NODE_POSTGRES_DB: omnidash_analytics
+  REQUIRED_PROJECTION_TABLES: delegation_events node_service_registry
 operational_defaults:
   POSTGRES_USER: postgres
 ports: null

@@ -276,6 +276,11 @@ def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> Non
         ]
         == "service_completed_successfully"
     )
+    for service_name in RUNTIME_SERVICES:
+        assert (
+            services[service_name]["depends_on"]["migration-gate"]["condition"]
+            == "service_healthy"
+        )
     assert (
         services["omninode-runtime"]["depends_on"]["intelligence-migration"][
             "condition"

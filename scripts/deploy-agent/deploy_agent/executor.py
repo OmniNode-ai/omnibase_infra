@@ -64,6 +64,14 @@ RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
     ("omninode-runtime", 8085),
     ("runtime-effects", 8086),
 )
+RUNTIME_MIGRATION_SERVICES: tuple[str, ...] = (
+    "forward-migration",
+    "migration-gate",
+)
+REQUIRED_PROJECTION_TABLES: tuple[str, ...] = (
+    "delegation_events",
+    "node_service_registry",
+)
 
 _BUILD_SOURCE_ALLOWED = ", ".join(source.value for source in BuildSource)
 
@@ -1104,6 +1112,8 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services)
+        if scope == Scope.RUNTIME:
+            self._ensure_runtime_migrations_ready(lane=lane, timeout=timeout)
         cmd = [
             "docker",
             "compose",
@@ -1189,6 +1199,68 @@ class DeployExecutor:
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 
+    def _ensure_runtime_migrations_ready(
+        self,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        timeout: int = 300,
+    ) -> None:
+        """Run bounded migration services before a runtime-only restart.
+
+        Runtime deploys intentionally use ``--no-deps`` so compose cannot walk
+        into core infra and recreate Postgres/Redpanda/Valkey. The migration
+        one-shots are not core infra; they are the boot-order contract that
+        applies pending projection DDL and exposes the migration health gate.
+        """
+        config = lane_config_for(lane)
+        base_cmd = [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "--profile",
+            "runtime",
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+        ]
+        for service in RUNTIME_MIGRATION_SERVICES:
+            cmd = [*base_cmd, service]
+            result = _run(cmd, timeout=timeout, env=_compose_env())
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Runtime migration preflight failed for {service}: "
+                    f"{result.stderr.strip() or result.stdout.strip()}"
+                )
+            ok, stuck = verify_containers_up([service], timeout_s=120, lane=lane)
+            if not ok:
+                raise RuntimeError(
+                    f"Runtime migration preflight did not satisfy {service}: {stuck}"
+                )
+        for table_name in REQUIRED_PROJECTION_TABLES:
+            result = _run(
+                [
+                    "docker",
+                    "exec",
+                    config.postgres_container,
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "omnidash_analytics",
+                    "-tAc",
+                    f"SELECT to_regclass('public.{table_name}') IS NOT NULL",
+                ],
+                timeout=timeout,
+            )
+            if result.stdout.strip() != "t":
+                raise RuntimeError(
+                    "Runtime migration preflight failed: missing "
+                    f"omnidash_analytics.{table_name}"
+                )
+
     def verify(
         self,
         on_phase_update: PhaseCallback,
@@ -1249,30 +1321,31 @@ class DeployExecutor:
                 )
             )
 
-        # Check psql registration count
-        result = _run(
-            [
-                "docker",
-                "exec",
-                lane_config_for(lane).postgres_container,
-                "psql",
-                "-U",
-                "postgres",
-                "-d",
-                "omnibase_infra",
-                "-tAc",
-                "SELECT to_regclass('public.node_service_registry') IS NOT NULL",
-            ],
-            timeout=timeout,
-        )
-        checks.append(
-            ModelHealthCheck(
-                service="postgres",
-                endpoint="node_service_registry exists",
-                status="pass" if result.stdout.strip() == "t" else "fail",
-                latency_ms=0,
+        # Check projection tables in the database used by runtime DB injection.
+        for table_name in REQUIRED_PROJECTION_TABLES:
+            result = _run(
+                [
+                    "docker",
+                    "exec",
+                    lane_config_for(lane).postgres_container,
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "omnidash_analytics",
+                    "-tAc",
+                    f"SELECT to_regclass('public.{table_name}') IS NOT NULL",
+                ],
+                timeout=timeout,
             )
-        )
+            checks.append(
+                ModelHealthCheck(
+                    service="postgres",
+                    endpoint=f"omnidash_analytics.{table_name} exists",
+                    status="pass" if result.stdout.strip() == "t" else "fail",
+                    latency_ms=0,
+                )
+            )
 
         # Runtime health endpoint checks.
         #

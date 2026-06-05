@@ -65,6 +65,14 @@ readonly RUNTIME_SERVICES=(
     intelligence-api
     omninode-contract-resolver
 )
+readonly RUNTIME_MIGRATION_SERVICES=(
+    forward-migration
+    migration-gate
+)
+readonly REQUIRED_PROJECTION_TABLES=(
+    delegation_events
+    node_service_registry
+)
 
 # Minimum Docker Compose version (nested variable expansion support)
 readonly MIN_COMPOSE_VERSION="2.20"
@@ -1299,6 +1307,54 @@ build_images() {
 # Restart -- bring up runtime services only
 # =============================================================================
 
+run_runtime_migration_preflight() {
+    # Run bounded migration services before --no-deps runtime restarts.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+
+    log_step "Runtime Migration Preflight"
+
+    for service in "${RUNTIME_MIGRATION_SERVICES[@]}"; do
+        local cmd=(
+            docker compose
+            -p "${compose_project}"
+            -f "${compose_file}"
+            --profile "${COMPOSE_PROFILE}"
+            up -d --no-deps --force-recreate
+            "${service}"
+        )
+        log_info "Refreshing migration service: ${service}"
+        log_cmd "${cmd[*]}"
+        "${cmd[@]}"
+        if [[ "${service}" == "forward-migration" ]]; then
+            local wait_cmd=(docker wait omnibase-forward-migration)
+            log_cmd "${wait_cmd[*]}"
+            if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
+                log_error "forward-migration did not complete successfully."
+                return 1
+            fi
+        fi
+    done
+
+    for table_name in "${REQUIRED_PROJECTION_TABLES[@]}"; do
+        local check_cmd=(
+            docker exec omnibase-infra-postgres
+            psql
+            -U postgres
+            -d omnidash_analytics
+            -tAc
+            "SELECT to_regclass('public.${table_name}') IS NOT NULL"
+        )
+        log_info "Checking projection table: omnidash_analytics.${table_name}"
+        log_cmd "${check_cmd[*]}"
+        if [[ "$("${check_cmd[@]}")" != "t" ]]; then
+            log_error "Missing projection table omnidash_analytics.${table_name}; aborting runtime restart."
+            return 1
+        fi
+    done
+}
+
 restart_services() {
     # Restart runtime containers via docker compose up --force-recreate.
     local deploy_target="$1"
@@ -1640,6 +1696,7 @@ main() {
 
     # Phase 11: Restart (optional)
     if [[ "${RESTART}" == true ]]; then
+        run_runtime_migration_preflight "${deploy_target}" "${compose_project}"
         restart_services "${deploy_target}" "${compose_project}"
     fi
 

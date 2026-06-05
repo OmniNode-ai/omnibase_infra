@@ -9,6 +9,7 @@ hardcoded_env:
   POSTGRES_HOST: postgres
   POSTGRES_PORT: '5432'
   POSTGRES_DB: omnibase_infra
+  NODE_POSTGRES_DB: omnidash_analytics
   MIGRATIONS_DIR: /migrations/forward
 operational_defaults:
   POSTGRES_USER: postgres

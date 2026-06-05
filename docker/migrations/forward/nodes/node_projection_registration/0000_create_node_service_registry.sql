@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS node_service_registry (
   health_status TEXT DEFAULT 'unknown',
   last_health_check TIMESTAMPTZ,
   last_heartbeat_at TIMESTAMPTZ,
-  uptime_seconds BIGINT NOT NULL DEFAULT 0,
+  uptime_seconds BIGINT DEFAULT 0,
   health_check_interval_seconds INT DEFAULT 60,
   metadata JSONB DEFAULT '{}'::jsonb,
   is_active BOOLEAN DEFAULT true,

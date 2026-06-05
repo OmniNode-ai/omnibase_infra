@@ -48,6 +48,16 @@ def _health_payload(
     )
 
 
+def _is_projection_table_check(cmd: list[str]) -> bool:
+    return (
+        "omnidash_analytics" in cmd
+        and any(
+            f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
+            for table in ("delegation_events", "node_service_registry")
+        )
+    )
+
+
 def test_verify_probes_runtime_health_ports_only() -> None:
     executor = DeployExecutor()
     captured_cmds: list[list[str]] = []
@@ -58,7 +68,7 @@ def test_verify_probes_runtime_health_ports_only() -> None:
         captured_cmds.append(cmd)
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+        if _is_projection_table_check(cmd):
             return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload())
@@ -100,7 +110,7 @@ def test_verify_accepts_runtime_health_when_config_prefetch_skipped() -> None:
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+        if _is_projection_table_check(cmd):
             return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(
@@ -134,7 +144,7 @@ def test_verify_fails_postgres_check_when_node_service_registry_missing() -> Non
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+        if _is_projection_table_check(cmd):
             return _completed(cmd, stdout="f\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload())
@@ -146,7 +156,7 @@ def test_verify_fails_postgres_check_when_node_service_registry_missing() -> Non
         checks = executor.verify(on_phase_update=_noop_phase_update)
 
     status_by_endpoint = {check.endpoint: check.status for check in checks}
-    assert status_by_endpoint["node_service_registry exists"] == "fail"
+    assert status_by_endpoint["omnidash_analytics.node_service_registry exists"] == "fail"
 
 
 def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
@@ -157,7 +167,7 @@ def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+        if _is_projection_table_check(cmd):
             return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload())
@@ -184,7 +194,7 @@ def test_verify_fails_runtime_health_when_process_not_running() -> None:
     ) -> subprocess.CompletedProcess:
         if cmd[:2] == ["docker", "ps"]:
             return _completed(cmd)
-        if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+        if _is_projection_table_check(cmd):
             return _completed(cmd, stdout="t\n")
         if "http://localhost:8085/health" in cmd:
             return _completed(cmd, stdout=_health_payload(is_running=False))
