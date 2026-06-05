@@ -253,6 +253,82 @@ class TestPackageNodeSubscriptionWiring:
         assert skipped_no_topics == 2
 
     @pytest.mark.asyncio
+    async def test_package_wiring_respects_runtime_profile_ownership(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """Secondary runtimes must not subscribe to main-owned delegation workflow topics."""
+        orchestrator = (
+            tmp_path / "nodes" / "node_delegation_orchestrator" / "contract.yaml"
+        )
+        orchestrator.parent.mkdir(parents=True)
+        orchestrator.write_text(
+            textwrap.dedent("""\
+            name: "node_delegation_orchestrator"
+            node_type: "ORCHESTRATOR_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.delegation-request.v1"
+            """)
+        )
+
+        effect = tmp_path / "nodes" / "node_llm_inference_effect" / "contract.yaml"
+        effect.parent.mkdir(parents=True)
+        effect.write_text(
+            textwrap.dedent("""\
+            name: "node_llm_inference_effect"
+            node_type: "EFFECT_GENERIC"
+            runtime_profiles:
+              - effects
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.cmd.omnibase-infra.llm-inference-request.v1"
+            """)
+        )
+
+        from omnibase_infra.runtime.runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+        wired, _, skipped_no_topics = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+            runtime_profile="effects",
+        )
+
+        assert wired == 1
+        assert skipped_no_topics == 1
+        wired_names = {c["node_name"] for c in mock_event_bus_wiring._wire_calls}
+        assert "node_delegation_orchestrator" not in wired_names
+        assert "node_llm_inference_effect" in wired_names
+
+        mock_event_bus_wiring._wire_calls.clear()
+        mock_event_bus_wiring.wire_subscriptions.reset_mock()
+
+        wired, _, skipped_no_topics = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+            runtime_profile="main",
+        )
+
+        assert wired == 1
+        assert skipped_no_topics == 1
+        wired_names = {c["node_name"] for c in mock_event_bus_wiring._wire_calls}
+        assert "node_delegation_orchestrator" in wired_names
+        assert "node_llm_inference_effect" not in wired_names
+
+    @pytest.mark.asyncio
     async def test_raw_projection_consumer_purpose_not_wired(
         self, tmp_path: Path, mock_event_bus_wiring: MagicMock
     ) -> None:
