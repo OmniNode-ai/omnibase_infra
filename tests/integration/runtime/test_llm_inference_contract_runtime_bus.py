@@ -166,7 +166,7 @@ def _install_fake_http(
         }
 
     monkeypatch.setattr(
-        command_handler_module._LlmInferenceCommandTransport,
+        command_handler_module.LlmInferenceCommandTransport,
         "_execute_llm_http_call",
         fake_execute,
     )

@@ -15,8 +15,10 @@ from omnibase_infra.models.llm import ModelLlmInferenceResponse
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
-from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_events import (
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_event import (
     ModelLlmCallCompletedEvent,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_infra_event import (
     ModelLlmCallCompletedInfraEvent,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_command import (
@@ -27,7 +29,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 )
 
 
-class _LlmInferenceCommandTransport(MixinLlmHttpTransport):
+class LlmInferenceCommandTransport(MixinLlmHttpTransport):
     """HTTP transport owned by the effect-node command handler."""
 
     def __init__(self) -> None:
@@ -45,7 +47,7 @@ class HandlerLlmInferenceCommand:
         inference_handler: HandlerLlmOpenaiCompatible | None = None,
     ) -> None:
         self._inference_handler = inference_handler or HandlerLlmOpenaiCompatible(
-            _LlmInferenceCommandTransport()
+            LlmInferenceCommandTransport()
         )
 
     async def handle(

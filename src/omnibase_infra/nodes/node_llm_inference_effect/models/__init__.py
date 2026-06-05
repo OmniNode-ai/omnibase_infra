@@ -42,8 +42,10 @@ from omnibase_infra.models.llm import (
     ModelLlmToolDefinition,
     ModelLlmUsage,
 )
-from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_events import (
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_event import (
     ModelLlmCallCompletedEvent,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_infra_event import (
     ModelLlmCallCompletedInfraEvent,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_command import (

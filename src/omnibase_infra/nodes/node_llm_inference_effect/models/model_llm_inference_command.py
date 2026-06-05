@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,7 +36,7 @@ class ModelLlmInferenceCommand(BaseModel):
     gpu_count: int | None = Field(default=None, ge=1, le=32767)
     compute_usage_source: str | None = None
 
-    def provider_value(self, key: str) -> Any:
+    def provider_value(self, key: str) -> JsonType | None:
         """Return a provider_config value using a validated command key."""
         return self.provider_config.get(key)
 
