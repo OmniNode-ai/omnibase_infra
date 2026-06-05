@@ -33,6 +33,7 @@ import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -108,6 +109,9 @@ _SENSITIVE_PATTERN = re.compile(
 )
 _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
+_DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
+_DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
+_DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -189,6 +193,26 @@ def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
 def _is_protocol_handler_class(handler_cls: type) -> bool:
     """Return True when a handler routing entry points at a Protocol class."""
     return bool(getattr(handler_cls, "_is_protocol", False))
+
+
+def _is_delegation_inference_intent_ref(event_model: ModelHandlerRef) -> bool:
+    """Return True for the canonical delegation inference-intent wire model."""
+    return (
+        event_model.module == _DELEGATION_INFERENCE_INTENT_MODULE
+        and event_model.name == _DELEGATION_INFERENCE_INTENT_NAME
+    )
+
+
+def _payload_value(payload: object, key: str) -> object:
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _payload_claims_delegation_inference_intent(payload: object) -> bool:
+    """Return True when a raw payload declares the inference-intent discriminator."""
+    intent = _payload_value(payload, "intent")
+    return intent == _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR
 
 
 async def _async_resolve_from_container(
@@ -413,12 +437,23 @@ def _make_dispatch_callback(
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
-        model_cls = _import_event_model_class(event_model)
-        typed_payload = (
-            payload
-            if isinstance(payload, model_cls)
-            else model_cls.model_validate(payload)
-        )
+        try:
+            model_cls = _import_event_model_class(event_model)
+            typed_payload = (
+                payload
+                if isinstance(payload, model_cls)
+                else model_cls.model_validate(payload)
+            )
+        except Exception as exc:
+            failure_result = _build_inference_intent_validation_failure_result(
+                event_model=event_model,
+                envelope=envelope,
+                payload=payload,
+                exc=exc,
+            )
+            if failure_result is not None:
+                return failure_result
+            raise
         if _handler_accepts_event_envelope(
             cast("Callable[..., object]", handle_method)
         ):
@@ -464,17 +499,88 @@ def _make_payload_type_matcher(
 
     def _matches(payload: object) -> bool:
         if not cached_model_cls:
-            cached_model_cls.append(_import_event_model_class(event_model))
+            try:
+                cached_model_cls.append(_import_event_model_class(event_model))
+            except Exception:
+                if _is_delegation_inference_intent_ref(
+                    event_model
+                ) and _payload_claims_delegation_inference_intent(payload):
+                    return True
+                raise
         model_cls = cached_model_cls[0]
         if isinstance(payload, model_cls):
             return True
         try:
             model_cls.model_validate(payload)
         except Exception:  # noqa: BLE001 — validation failure means "not my type"
+            if _is_delegation_inference_intent_ref(
+                event_model
+            ) and _payload_claims_delegation_inference_intent(payload):
+                return True
             return False
         return True
 
     return _matches
+
+
+def _build_inference_intent_validation_failure_result(
+    *,
+    event_model: ModelHandlerRef,
+    envelope: object,
+    payload: object,
+    exc: BaseException,
+) -> ModelDispatchResult | None:
+    """Build a correlated inference-response error for pre-handler validation misses.
+
+    Delegation's inference effect publishes ``ModelInferenceResponseData`` for
+    provider/runtime failures inside ``HandlerInferenceIntent.handle()``. Payload
+    validation and event-model import happen before that handler is called, so
+    this boundary maps only canonical ``ModelInferenceIntent`` load/validation
+    failures to the same response shape. The delegation orchestrator then handles
+    it through its normal inference-error path instead of leaving the caller to
+    wait for a timeout.
+    """
+    if not _is_delegation_inference_intent_ref(event_model):
+        return None
+    if not _payload_claims_delegation_inference_intent(payload):
+        return None
+
+    from omnibase_core.models.delegation.wire import ModelInferenceResponseData
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    correlation_candidate = _extract_dispatch_correlation_id(envelope, payload)
+    correlation_id = _coerce_uuid_or_none(correlation_candidate)
+    if correlation_id is None:
+        return None
+
+    model_value = _payload_value(payload, "model")
+    model_used = model_value if isinstance(model_value, str) else ""
+    error_message = (
+        "ModelInferenceIntent validation failed before "
+        f"HandlerInferenceIntent.handle(): {_sanitize_exc(exc)}"
+    )
+    response = ModelInferenceResponseData(
+        correlation_id=correlation_id,
+        content="",
+        model_used=model_used,
+        llm_call_id="",
+        latency_ms=0,
+        error_message=error_message,
+    )
+    now = datetime.now(UTC)
+    return ModelDispatchResult(
+        status=EnumDispatchStatus.SUCCESS,
+        topic=_extract_dispatch_topic(envelope),
+        message_type=event_model.name,
+        started_at=now,
+        completed_at=now,
+        output_count=1,
+        output_events=[response],
+        correlation_id=correlation_id,
+    )
 
 
 def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
