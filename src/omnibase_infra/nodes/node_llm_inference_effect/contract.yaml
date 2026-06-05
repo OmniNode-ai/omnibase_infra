@@ -48,7 +48,8 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     # OpenAI-Compatible Inference Handler (vLLM, OpenAI, GLM/Z.AI)
-    - event_model:
+    - operation: "inference.command"
+      event_model:
         name: "ModelLlmInferenceCommand"
         module: "omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_command"
       event_type: "omnibase-infra.llm-inference-request"

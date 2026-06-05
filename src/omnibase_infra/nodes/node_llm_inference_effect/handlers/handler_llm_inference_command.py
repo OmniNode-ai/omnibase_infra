@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.llm import ModelLlmInferenceResponse
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
@@ -49,6 +50,14 @@ class HandlerLlmInferenceCommand:
         self._inference_handler = inference_handler or HandlerLlmOpenaiCompatible(
             LlmInferenceCommandTransport()
         )
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,
