@@ -109,6 +109,7 @@ src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifros
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_response.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_routing_rule.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_cli_subprocess.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_inference_command.py  # OMN-12700: infra-owned runtime command adapter for the LLM inference effect; business routing remains outside this handler.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_merge_gate_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_merge_gate_effect/handlers/handler_upsert_merge_gate.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.

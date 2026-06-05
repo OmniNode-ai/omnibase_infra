@@ -48,6 +48,16 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     # OpenAI-Compatible Inference Handler (vLLM, OpenAI, GLM/Z.AI)
+    - event_model:
+        name: "ModelLlmInferenceCommand"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_command"
+      event_type: "omnibase-infra.llm-inference-request"
+      message_category: "COMMAND"
+      handler:
+        name: "HandlerLlmInferenceCommand"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_inference_command"
+        handler_type: "HTTP"
+      description: "Execute contract-wired LLM inference commands from the event bus"
     - operation: "inference.openai_compatible"
       handler:
         name: "HandlerLlmOpenaiCompatible"
@@ -125,6 +135,7 @@ event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.llm-inference-request.v1"
   publish_topics:
+    - "onex.evt.omnibase-infra.inference-response.v1"
     - "onex.evt.omniintelligence.llm-call-completed.v1"
     - "onex.evt.omnibase-infra.llm-call-completed.v1"
 consumed_events:
@@ -133,6 +144,9 @@ consumed_events:
     message_category: "COMMAND"
     description: "Inbound LLM inference request routed to handler via bifrost"
 published_events:
+  - topic: "onex.evt.omnibase-infra.inference-response.v1"
+    event_type: "LlmInferenceResponse"
+    description: "Content-bearing successful LLM inference response emitted directly from the effect node"
   - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
     event_type: "LlmCallCompletedEvent"
     description: "Per-call metrics emitted after each inference call; may include gpu_seconds, gpu_type, gpu_count, and EnumUsageSource-backed compute_usage_source when the request declares GPU configuration"
@@ -160,9 +174,10 @@ capabilities:
     description: "When gpu_type and gpu_count are provided together, emits measured gpu_seconds and shared EnumUsageSource compute_usage_source values on both LLM metric events"
   - name: "direct_endpoint_url"
     description: "When endpoint_url is provided on ModelLlmInferenceRequest, the OpenAI-compatible handler posts to that full URL directly instead of appending an operation path to base_url."
-# Golden path: llm_cost chain (llm-call-completed -> llm_cost_aggregates table)
+# Golden paths: typed inference response and llm_cost projection chain
 golden_path:
   - "Complete LLM inference via provider-specific handler"
+  - "Emit content-bearing ModelLlmInferenceResponse to onex.evt.omnibase-infra.inference-response.v1"
   - "Emit llm-call-completed event to onex.evt.omniintelligence.llm-call-completed.v1"
   - "Event consumed by node_projection_llm_cost in omnimarket"
   - "Projection handler upserts row into llm_cost_aggregates table"

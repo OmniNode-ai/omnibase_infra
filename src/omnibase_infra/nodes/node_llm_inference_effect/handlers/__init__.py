@@ -11,12 +11,16 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost import (
     ModelBifrostResponse,
     ModelBifrostRoutingRule,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_inference_command import (
+    HandlerLlmInferenceCommand,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
 
 __all__ = [
     "HandlerBifrostGateway",
+    "HandlerLlmInferenceCommand",
     "HandlerLlmOpenaiCompatible",
     "ModelBifrostConfig",
     "ModelBifrostRequest",
