@@ -57,7 +57,7 @@ def _invalid_inference_payload(correlation_id: UUID) -> dict[str, object]:
         "system_prompt": "",
         "prompt": "produce a short result",
         "max_tokens": 128,
-        "temperature": 0.3,
+        "temperature": 99.0,
         "timeout_seconds": 30.0,
         "correlation_id": str(correlation_id),
         "api_key": None,
@@ -119,7 +119,7 @@ async def test_invalid_inference_intent_returns_correlated_error_response() -> N
     assert response.model_used == "qwen-test"
     assert response.content == ""
     assert "ModelInferenceIntent validation failed" in response.error_message
-    assert "api_key" in response.error_message
+    assert "temperature" in response.error_message
 
 
 @pytest.mark.asyncio
