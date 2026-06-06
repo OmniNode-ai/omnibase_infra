@@ -904,6 +904,8 @@ show_preview() {
     log_info "  src/omnibase_infra/  $(count_files "${repo_root}/src/omnibase_infra") files"
     log_info "  contracts/           $(count_files "${repo_root}/contracts") files"
     log_info "  docker/              $(count_files "${repo_root}/docker") files"
+    log_info "  scripts/runtime_build/ $(count_files "${repo_root}/scripts/runtime_build") files"
+    log_info "  workspace/sibling-repos/ $(count_files "${repo_root}/workspace/sibling-repos") files"
 
     # .env strategy
     if [[ -d "${deploy_target}" && -f "${deploy_target}/docker/.env" ]]; then
@@ -1022,7 +1024,19 @@ if spec and spec.origin:
         --exclude='/overrides/' \
         "${repo_root}/docker/" "${deploy_target}/docker/"
 
-    # 5. Migration scripts (bind-mounted by docker-compose.infra.yml)
+    # 5. Runtime build context paths required by docker/Dockerfile.runtime.
+    # Release-mode builds still COPY these paths, even when sibling repos are
+    # represented only by the committed .gitkeep placeholder.
+    log_info "Syncing runtime build context..."
+    mkdir -p "${deploy_target}/scripts" "${deploy_target}/workspace"
+    log_cmd "rsync -a --delete scripts/runtime_build/ -> deployed"
+    rsync -a --delete \
+        "${repo_root}/scripts/runtime_build/" "${deploy_target}/scripts/runtime_build/"
+    log_cmd "rsync -a --delete workspace/sibling-repos/ -> deployed"
+    rsync -a --delete \
+        "${repo_root}/workspace/sibling-repos/" "${deploy_target}/workspace/sibling-repos/"
+
+    # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
     rsync -a \
