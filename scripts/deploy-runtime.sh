@@ -31,10 +31,15 @@ set -euo pipefail
 # shellcheck source=/dev/null
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
+OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 set -a
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
 source "${HOME}/.omnibase/.env"
 set +a
+if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
+    export OMNI_HOME="${OPERATOR_OMNI_HOME}"
+fi
+unset OPERATOR_OMNI_HOME
 
 # =============================================================================
 # Constants
@@ -486,6 +491,76 @@ read_repo_ref_or_main() {
     else
         echo "main"
     fi
+}
+
+resolve_build_source() {
+    # Resolve the selected Dockerfile dependency source.
+    echo "${BUILD_SOURCE:-release}"
+}
+
+resolve_expected_build_source() {
+    # Default the Dockerfile assertion to the selected source. This preserves
+    # release-mode behavior while allowing BUILD_SOURCE=workspace without
+    # requiring operators to set a second env var by hand.
+    local build_source="$1"
+    echo "${EXPECTED_BUILD_SOURCE:-${build_source}}"
+}
+
+validate_build_source_config() {
+    # Validate build-source selector agreement before staging or Docker build.
+    local build_source expected_build_source omni_home
+    build_source="$(resolve_build_source)"
+    expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    omni_home="${OMNI_HOME:-}"
+
+    case "${build_source}" in
+        workspace|release) ;;
+        *)
+            log_error "Invalid BUILD_SOURCE='${build_source}'; expected workspace or release."
+            exit 64
+            ;;
+    esac
+
+    case "${expected_build_source}" in
+        workspace|release) ;;
+        *)
+            log_error "Invalid EXPECTED_BUILD_SOURCE='${expected_build_source}'; expected workspace or release."
+            exit 64
+            ;;
+    esac
+
+    if [[ "${build_source}" != "${expected_build_source}" ]]; then
+        log_error "BUILD_SOURCE selector mismatch: BUILD_SOURCE='${build_source}' EXPECTED_BUILD_SOURCE='${expected_build_source}'."
+        exit 64
+    fi
+
+    if [[ "${build_source}" == "workspace" && -z "${omni_home}" ]]; then
+        log_error "BUILD_SOURCE=workspace requires OMNI_HOME before staging or build."
+        exit 64
+    fi
+}
+
+stage_workspace_if_needed() {
+    # Populate workspace/sibling-repos/ from the operator-selected OMNI_HOME so
+    # Dockerfile.runtime can install exact local sibling repo contents.
+    local repo_root="$1"
+    local build_source omni_home stage_script
+    build_source="$(resolve_build_source)"
+    if [[ "${build_source}" != "workspace" ]]; then
+        return 0
+    fi
+
+    omni_home="${OMNI_HOME:-}"
+    stage_script="${repo_root}/scripts/runtime_build/stage_workspace.sh"
+    if [[ ! -f "${stage_script}" ]]; then
+        log_error "Workspace staging script not found: ${stage_script}"
+        log_error "Cannot proceed with BUILD_SOURCE=workspace."
+        exit 1
+    fi
+
+    log_step "Stage Workspace Sibling Repos"
+    log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
+    (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
 }
 
 check_git_dirty() {
@@ -1027,6 +1102,8 @@ if spec and spec.origin:
     # 5. Runtime build context paths required by docker/Dockerfile.runtime.
     # Release-mode builds still COPY these paths, even when sibling repos are
     # represented only by the committed .gitkeep placeholder.
+    stage_workspace_if_needed "${repo_root}"
+
     log_info "Syncing runtime build context..."
     mkdir -p "${deploy_target}/scripts" "${deploy_target}/workspace"
     log_cmd "rsync -a --delete scripts/runtime_build/ -> deployed"
@@ -1270,6 +1347,10 @@ build_images() {
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     local omni_home="${OMNI_HOME:-}"
+    local build_source
+    build_source="$(resolve_build_source)"
+    local expected_build_source
+    expected_build_source="$(resolve_expected_build_source "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
     local occ_ref="main"
@@ -1295,12 +1376,16 @@ build_images() {
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
         --build-arg "COMPOSE_PROJECT=${compose_project}"
+        --build-arg "BUILD_SOURCE=${build_source}"
+        --build-arg "EXPECTED_BUILD_SOURCE=${expected_build_source}"
+        --build-arg "OMNI_HOME=${omni_home}"
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
@@ -1487,6 +1572,19 @@ print_compose_commands() {
     local compose_project="$2"
     local git_sha="$3"
     local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local omni_home="${OMNI_HOME:-}"
+    local build_source
+    build_source="$(resolve_build_source)"
+    local expected_build_source
+    expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    local compat_ref="main"
+    local omnimarket_ref="dev"
+    local occ_ref="main"
+    if [[ -n "${omni_home}" ]]; then
+        compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
+        omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
+        occ_ref="$(read_repo_ref_or_main "${omni_home}/onex_change_control")"
+    fi
 
     log_step "Compose Commands"
 
@@ -1503,9 +1601,12 @@ print_compose_commands() {
     log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\") \\"
     log_info "    --build-arg RUNTIME_SOURCE_HASH=${git_sha} \\"
     log_info "    --build-arg COMPOSE_PROJECT=${compose_project} \\"
-    log_info "    --build-arg OMNIBASE_COMPAT_REF=\${OMNIBASE_COMPAT_REF:-main} \\"
-    log_info "    --build-arg OMNIMARKET_REF=\${OMNIMARKET_REF:-dev} \\"
-    log_info "    --build-arg ONEX_CHANGE_CONTROL_REF=\${ONEX_CHANGE_CONTROL_REF:-main}"
+    log_info "    --build-arg BUILD_SOURCE=${build_source} \\"
+    log_info "    --build-arg EXPECTED_BUILD_SOURCE=${expected_build_source} \\"
+    log_info "    --build-arg OMNI_HOME=${omni_home} \\"
+    log_info "    --build-arg OMNIBASE_COMPAT_REF=${compat_ref} \\"
+    log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref} \\"
+    log_info "    --build-arg ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info ""
     log_info "Restart runtime services:"
     log_info "  docker compose \\"
@@ -1638,6 +1739,7 @@ main() {
     log_info "Version: ${version}"
     log_info "Git SHA: ${git_sha}"
     check_git_dirty "${repo_root}"
+    validate_build_source_config
 
     # Prod lane: hard-fail on dirty/non-promoted source before any build/deploy.
     # Runs in both dry-run and execute modes so operators see the rejection
