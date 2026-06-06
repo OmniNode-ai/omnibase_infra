@@ -481,6 +481,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # SSH supports runtime-owned host/session probes.
     git \
     openssh-client \
+    # gosu lets the entrypoint repair fresh root-owned Docker volumes before
+    # dropping to the non-root runtime user.
+    gosu \
     # CA certificates for HTTPS connections
     ca-certificates \
     # Tini - minimal init system for proper signal handling as PID 1
@@ -550,8 +553,10 @@ RUN chmod +x /app/entrypoint-runtime.sh
 # builds on the large runtime image.
 RUN install -d -o omniinfra -g omniinfra /app/logs /app/data /app/tmp
 
-# Switch to non-root user for security
-USER omniinfra
+# Start as root only for entrypoint volume bootstrap. The entrypoint repairs
+# mounted runtime volumes, then re-execs itself as omniinfra before schema
+# stamping, Bifrost render, or runtime launch.
+USER root
 
 # Default port for ONEX runtime
 # This should match the port your runtime listens on for health checks
