@@ -281,10 +281,10 @@ class TestDockerSecurity:
         docker_available: bool,
         built_test_image: str,
     ) -> None:
-        """Verify container runs as non-root user.
+        """Verify entrypoint drops to the non-root runtime user.
 
-        Security best practice: containers should never run as root.
-        The Dockerfile creates and switches to 'omniinfra' user.
+        The image starts as root only long enough to repair fresh Docker volume
+        ownership, then the entrypoint re-execs itself as 'omniinfra'.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
@@ -294,7 +294,6 @@ class TestDockerSecurity:
                 "docker",
                 "run",
                 "--rm",
-                "--entrypoint",
                 "whoami",
                 built_test_image,
             ],
@@ -307,7 +306,10 @@ class TestDockerSecurity:
 
         assert result.returncode == 0, f"whoami failed: {result.stderr}"
 
-        username = result.stdout.strip()
+        stdout_lines = [
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        ]
+        username = stdout_lines[-1]
         assert username != "root", "Container should not run as root user"
         assert username == "omniinfra", f"Expected 'omniinfra' user, got '{username}'"
 
@@ -330,7 +332,6 @@ class TestDockerSecurity:
                 "docker",
                 "run",
                 "--rm",
-                "--entrypoint",
                 "id",
                 built_test_image,
                 "-u",
@@ -344,7 +345,10 @@ class TestDockerSecurity:
 
         assert result.returncode == 0, f"id command failed: {result.stderr}"
 
-        uid = int(result.stdout.strip())
+        stdout_lines = [
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        ]
+        uid = int(stdout_lines[-1])
         assert uid == 1000, f"Expected UID 1000, got {uid}"
 
     @pytest.mark.slow
