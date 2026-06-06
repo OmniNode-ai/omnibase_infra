@@ -1989,6 +1989,7 @@ async def bootstrap() -> int:
             dispatch_engine=dispatch_engine,
             node_identity=plugin_node_identity,
             kafka_bootstrap_servers=kafka_bootstrap_servers,
+            runtime_profile=kernel_profile.name,
         )
 
         # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)

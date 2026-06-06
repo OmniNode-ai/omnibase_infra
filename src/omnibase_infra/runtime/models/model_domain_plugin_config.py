@@ -69,6 +69,7 @@ class ModelDomainPluginConfig:
             this from runtime config (service name, environment, version).
         kafka_bootstrap_servers: Kafka bootstrap servers string. Used by plugins
             that need direct Kafka access (e.g., snapshot publishing).
+        runtime_profile: Runtime profile selected during kernel bootstrap.
 
     Example:
         ```python
@@ -105,6 +106,10 @@ class ModelDomainPluginConfig:
     # Optional: Kafka bootstrap servers for plugins needing direct Kafka access
     # (e.g., SnapshotPublisher). None when using inmemory event bus.
     kafka_bootstrap_servers: str | None = None
+
+    # Runtime profile selected by the kernel during bootstrap. Domain plugins use
+    # this typed value instead of reading process environment directly.
+    runtime_profile: str = "main"
 
     # Optional: Per-event-type topic routing from contract published_events.
     output_topic_map: dict[str, str] | None = None
