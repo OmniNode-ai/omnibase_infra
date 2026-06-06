@@ -7,6 +7,7 @@ from __future__ import annotations
 __all__ = ["LocalRuntimeBusAdapter"]
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -31,7 +32,9 @@ logger = logging.getLogger(__name__)
 class LocalRuntimeBusAdapter:
     """Wraps an ONEX handler with event bus serialization/deserialization.
 
-    Handlers are invoked with **model.model_dump() as kwargs.
+    Typed handlers are invoked with the validated input model as the sole
+    request object. Legacy handlers that explicitly accept **kwargs are invoked
+    with model.model_dump() as kwargs.
     Results are serialized to JSON and published to the output topic.
     Correlation IDs are preserved across input -> output.
 
@@ -88,15 +91,14 @@ class LocalRuntimeBusAdapter:
         start = time.monotonic()
         try:
             handle_method = self.handler.handle
-            model_kwargs = input_model.model_dump(mode="json")
-            if asyncio.iscoroutinefunction(handle_method):
-                maybe_result = handle_method(**model_kwargs)
+            maybe_result = _invoke_handle_method(handle_method, input_model)
+            if inspect.isawaitable(maybe_result):
                 awaitable_result: Awaitable[object] = cast(
                     "Awaitable[object]", maybe_result
                 )
                 result = await awaitable_result
             else:
-                result = handle_method(**model_kwargs)
+                result = maybe_result
         except Exception:  # fallback-ok: local runtime adapter records handler failure and continues shutdown
             elapsed = time.monotonic() - start
             logger.exception(
@@ -151,3 +153,54 @@ class LocalRuntimeBusAdapter:
             )
             if self.on_error:
                 self.on_error()
+
+
+def _invoke_handle_method(
+    handle_method: Callable[..., object],
+    input_model: BaseModel,
+) -> object:
+    """Invoke a local-runtime handler using its declared calling convention."""
+    try:
+        signature = inspect.signature(handle_method)
+    except (TypeError, ValueError):
+        return handle_method(input_model)
+
+    parameters = tuple(signature.parameters.values())
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
+        return handle_method(**input_model.model_dump(mode="json"))
+
+    positional_parameters = tuple(
+        param
+        for param in parameters
+        if param.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    )
+    if len(positional_parameters) == 0:
+        return handle_method()
+
+    if len(positional_parameters) == 1 and _parameter_expects_model(
+        positional_parameters[0],
+        type(input_model),
+    ):
+        return handle_method(input_model)
+
+    return handle_method(**input_model.model_dump(mode="json"))
+
+
+def _parameter_expects_model(
+    parameter: inspect.Parameter,
+    input_model_cls: type[BaseModel],
+) -> bool:
+    """Return True when a single handle parameter expects the request model."""
+    if parameter.name in {"request", "payload", "event", "input_model"}:
+        return True
+
+    annotation = parameter.annotation
+    return (
+        isinstance(annotation, type)
+        and issubclass(annotation, BaseModel)
+        and issubclass(input_model_cls, annotation)
+    )
