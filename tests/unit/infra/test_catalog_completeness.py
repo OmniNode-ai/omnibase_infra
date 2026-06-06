@@ -18,6 +18,7 @@ COMPOSE_FILE = (
 BUNDLES_FILE = (
     Path(__file__).resolve().parents[3] / "docker" / "catalog" / "bundles.yaml"
 )
+CONTRACT_RESOLVER_MANIFEST = CATALOG_DIR / "contract-resolver.yaml"
 
 # The compose uses 'omninode-contract-resolver' but the manifest is named
 # 'contract-resolver' for brevity. This mapping handles that.
@@ -68,6 +69,31 @@ def test_no_entry_has_empty_default_env() -> None:
             assert var, f"{manifest['name']}: empty string in required_env"
         for var, val in manifest.get("hardcoded_env", {}).items():
             assert val != "", f"{manifest['name']}: {var} has empty hardcoded value"
+
+
+@pytest.mark.unit
+def test_contract_resolver_catalog_clears_bifrost_contract_path() -> None:
+    with open(CONTRACT_RESOLVER_MANIFEST) as f:
+        manifest = yaml.safe_load(f)
+
+    assert manifest["catalog_env"]["BIFROST_CONTRACT_PATH"] == ""
+
+
+@pytest.mark.unit
+def test_no_data_http_runtime_services_clear_bifrost_contract_path() -> None:
+    content = COMPOSE_FILE.read_text().replace("!!merge ", "")
+    compose = yaml.safe_load(content)
+    services = compose["services"]
+
+    for service_name in ("projection-api", "omninode-contract-resolver"):
+        service = services[service_name]
+        volume_targets = {
+            volume.split(":")[1]
+            for volume in service.get("volumes", [])
+            if isinstance(volume, str) and ":" in volume
+        }
+        assert "/app/data" not in volume_targets
+        assert service["environment"]["BIFROST_CONTRACT_PATH"] == ""
 
 
 @pytest.mark.unit
