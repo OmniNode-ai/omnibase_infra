@@ -19,6 +19,17 @@ env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.6.0"
+  # OMN-12564 canary: trusted self-hosted CI reuses an immutable host-local
+  # dependency environment keyed by uv.lock/tool versions instead of resolving
+  # dependencies independently in every job. Public fork PRs keep isolated setup.
+  OMNI_CI_SHARED_ENV_ENABLED: >-
+    ${{
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+      && 'false'
+      || 'true'
+    }}
+  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
   # uv resolves several pinned git dependencies during CI.  The self-hosted
   # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
   # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.
@@ -48,7 +59,7 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@296431f68a7431b9a98cd3661c6a2e05d1a18e45
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@a1e73fff25a05ccb37cbb92d9c91754c59d808c0
     with:
       python-version: "3.12"
 
@@ -68,7 +79,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -126,9 +137,9 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -203,7 +214,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 5
 
@@ -224,7 +235,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
 
@@ -256,7 +267,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -289,7 +300,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 5
 
@@ -297,7 +308,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Check migration freeze
         run: ./scripts/check_migration_freeze.sh --ci
@@ -312,9 +323,9 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -345,7 +356,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -389,7 +400,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     # The drift scan is short, but self-hosted post-job cache/archive cleanup
     # has exceeded 5 minutes under runner pressure.
@@ -431,11 +442,7 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-topic-drift
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
-
-      - name: Install omnibase_infra dependencies
-        working-directory: omnibase_infra
-        run: uv sync --no-cache
+          working-directory: omnibase_infra
 
       - name: Check topic drift (cross-repo)
         working-directory: omnibase_infra
@@ -463,9 +470,9 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     steps:
       - name: Checkout omnibase_infra
@@ -504,11 +511,27 @@ jobs:
           cache-enabled: "false"
           cache-key-prefix: uv-handshake
           lock-file-path: 'omnibase_infra/**/uv.lock'
-          skip-install: 'true'
+          working-directory: omnibase_infra
+          shared-env-enabled: "false"
 
-      - name: Install omnibase_infra dev dependencies
+      - name: Preinstall CPU-only torch for sibling deps
         working-directory: omnibase_infra
-        run: uv sync --no-cache
+        run: |
+          set -eu
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=5
+          until uv pip install "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install schema-handshake torch CPU wheel failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install schema-handshake torch CPU wheel attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
 
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
@@ -520,10 +543,24 @@ jobs:
         # Prior approach (--no-deps) skipped transitive deps entirely, causing
         # ModuleNotFoundError for packages like adaptive_classifier at collection time.
         run: |
+          set -eu
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
           echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
-          uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=5
+          until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install schema-handshake sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
 
       - name: Run schema handshake validation (changed-only)
         working-directory: omnibase_infra
@@ -545,7 +582,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
 
@@ -577,7 +614,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
 
@@ -609,7 +646,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -641,7 +678,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
       - uses: actions/checkout@v6
@@ -687,7 +724,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     steps:
@@ -726,7 +763,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     outputs:
       is_full_suite: ${{ steps.detect.outputs.is_full_suite }}
@@ -810,7 +847,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 15
     strategy:
@@ -892,7 +929,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -954,7 +991,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
 
@@ -969,9 +1006,6 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
-
-      - name: Install dependencies
-        run: uv sync --no-cache
 
       - name: Check if onex compliance command exists
         id: check-command
@@ -1016,7 +1050,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     needs: [test-parallel, detect-changes]
     if: always()
@@ -1048,7 +1082,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
       - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
@@ -1057,6 +1091,7 @@ jobs:
           OMNI_REPO_CLONE_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         with:
           checks: "migration-conflicts"
+          repos: "omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory"
           warn-only: "false"
 
 
@@ -1067,8 +1102,9 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
+    timeout-minutes: 20
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@v6
@@ -1077,15 +1113,30 @@ jobs:
         with:
           repository: OmniNode-ai/onex_change_control
           path: onex_change_control
+          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-dependency-glob: 'onex_change_control/uv.lock'
+          enable-cache: false
 
       - name: Install onex_change_control
         working-directory: onex_change_control
-        run: uv sync --no-cache --all-extras
+        run: |
+          set -euo pipefail
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=3
+          delay=10
+          until uv sync --no-cache --all-extras; do
+            status=$?
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "::error::uv sync onex_change_control failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+            echo "::warning::uv sync onex_change_control attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Validate contract YAML files
         working-directory: onex_change_control
@@ -1122,7 +1173,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     # OMN-9120: runtime-boot-smoke runs as an advisory check during the compose-mode
     # boot stabilization period. It is intentionally NOT in `needs` so a smoke-test
@@ -1222,9 +1273,9 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     steps:
       - name: Checkout omnibase_infra
@@ -1263,6 +1314,26 @@ jobs:
           cache-key-prefix: uv-boundary
           lock-file-path: 'omnibase_infra/**/uv.lock'
           working-directory: omnibase_infra
+          shared-env-enabled: "false"
+
+      - name: Preinstall CPU-only torch for sibling deps
+        working-directory: omnibase_infra
+        run: |
+          set -eu
+          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
+          attempt=1
+          max_attempts=5
+          until uv pip install "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install kafka-boundary torch CPU wheel failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::uv pip install kafka-boundary torch CPU wheel attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            attempt=$((attempt + 1))
+            sleep "${delay}"
+          done
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
@@ -1273,7 +1344,18 @@ jobs:
           INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
           echo "omnibase-compat @ file://$(pwd)/../omnibase_compat" >> /tmp/sibling-overrides.txt
-          uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence
+          attempt=1
+          max_attempts=5
+          until uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence; do
+            status=$?
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"
+              exit "${status}"
+            fi
+            echo "::warning::uv pip install sibling deps attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in 10s"
+            attempt=$((attempt + 1))
+            sleep 10
+          done
 
       - name: Run Kafka boundary compatibility tests
         working-directory: omnibase_infra
@@ -1294,7 +1376,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
       - uses: actions/checkout@v6
@@ -1324,7 +1406,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 10
     services:
@@ -1491,16 +1573,19 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: '3.12'
+          skip-install: "true"
+          cache-enabled: "false"
+          shared-env-enabled: "true"
       - name: Compute changed Python/Markdown files vs PR base
         id: changed
         run: |

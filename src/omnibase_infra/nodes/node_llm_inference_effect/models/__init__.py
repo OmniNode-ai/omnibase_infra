@@ -42,14 +42,26 @@ from omnibase_infra.models.llm import (
     ModelLlmToolDefinition,
     ModelLlmUsage,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_event import (
+    ModelLlmCallCompletedEvent,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_call_completed_infra_event import (
+    ModelLlmCallCompletedInfraEvent,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_command import (
+    ModelLlmInferenceCommand,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
 
 __all__: list[str] = [
     "ModelBackendResult",
+    "ModelLlmCallCompletedEvent",
+    "ModelLlmCallCompletedInfraEvent",
     "ModelLlmFunctionCall",
     "ModelLlmFunctionDef",
+    "ModelLlmInferenceCommand",
     "ModelLlmInferenceRequest",
     "ModelLlmInferenceResponse",
     "ModelLlmMessage",

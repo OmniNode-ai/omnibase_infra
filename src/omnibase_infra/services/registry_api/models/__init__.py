@@ -43,9 +43,6 @@ from omnibase_infra.services.registry_api.models.model_registry_discovery_respon
 from omnibase_infra.services.registry_api.models.model_registry_health_response import (
     ModelRegistryHealthResponse,
 )
-from omnibase_infra.services.registry_api.models.model_registry_instance_view import (
-    ModelRegistryInstanceView,
-)
 from omnibase_infra.services.registry_api.models.model_registry_node_detail_view import (
     ModelRegistryNodeDetailView,
 )
@@ -57,9 +54,6 @@ from omnibase_infra.services.registry_api.models.model_registry_summary import (
 )
 from omnibase_infra.services.registry_api.models.model_response_contracts import (
     ModelResponseListContracts,
-)
-from omnibase_infra.services.registry_api.models.model_response_list_instances import (
-    ModelResponseListInstances,
 )
 from omnibase_infra.services.registry_api.models.model_response_list_nodes import (
     ModelResponseListNodes,
@@ -92,11 +86,9 @@ __all__ = [
     "ModelRegistryDiscoveryResponse",
     "ModelRegistryHealthResponse",
     "ModelRegistryNodeDetailView",
-    "ModelRegistryInstanceView",
     "ModelRegistryNodeView",
     "ModelRegistrySummary",
     "ModelResponseListContracts",
-    "ModelResponseListInstances",
     "ModelResponseListNodes",
     "ModelResponseListTopics",
     "ModelTopicSummary",

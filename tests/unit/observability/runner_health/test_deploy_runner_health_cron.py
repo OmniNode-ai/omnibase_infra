@@ -78,3 +78,58 @@ def test_install_health_cron_called_in_deploy_with_retry() -> None:
     assert in_retry_fn is not None, (
         "install_health_cron not called in deploy_with_retry()"
     )
+
+
+@pytest.mark.unit
+def test_install_network_janitor_cron_function_present() -> None:
+    content = _read_script()
+    assert "install_network_janitor_cron()" in content
+
+
+@pytest.mark.unit
+def test_network_janitor_cron_runs_every_fifteen_minutes() -> None:
+    content = _read_script()
+    match = re.search(r"\*/15 \* \* \* \*.*cli_runner_health", content)
+    assert match is not None, (
+        "Cron schedule '*/15 * * * *' with cli_runner_health not found"
+    )
+
+
+@pytest.mark.unit
+def test_network_janitor_cron_uses_network_flag() -> None:
+    content = _read_script()
+    match = re.search(
+        r"cli_runner_health --network --emit --alert.*network-janitor-check",
+        content,
+    )
+    assert match is not None, (
+        "cli_runner_health --network --emit --alert (dry-run) not found"
+    )
+
+
+@pytest.mark.unit
+def test_network_janitor_cron_does_not_auto_reclaim() -> None:
+    # Live destructive reclaim is gated — the deploy-installed cron must NOT
+    # pass --reclaim. Steady state is observe-and-alert only.
+    content = _read_script()
+    janitor_line = next(
+        (line for line in content.splitlines() if "network-janitor-check" in line),
+        "",
+    )
+    assert janitor_line, "network-janitor-check cron line not found"
+    assert "--reclaim" not in janitor_line, (
+        "deploy-installed janitor cron must not auto-reclaim (--reclaim is gated)"
+    )
+
+
+@pytest.mark.unit
+def test_install_network_janitor_cron_called_in_deploy_with_retry() -> None:
+    content = _read_script()
+    in_retry_fn = re.search(
+        r"deploy_with_retry\(\).*?install_network_janitor_cron",
+        content,
+        re.DOTALL,
+    )
+    assert in_retry_fn is not None, (
+        "install_network_janitor_cron not called in deploy_with_retry()"
+    )

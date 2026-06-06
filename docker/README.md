@@ -522,6 +522,9 @@ These variables must be set explicitly. The runtime will fail to start if they a
 |------------------------------|------------------------------------|----------------------------------------|
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:19092`                  | Kafka/Redpanda broker addresses (host); containers use `redpanda:9092` |
+| `DEV_REDPANDA_ADVERTISE_HOST` | `localhost`                       | Dev lane external Redpanda advertise host |
+| `STABILITY_TEST_REDPANDA_ADVERTISE_HOST` | Required for stability-test overlay | Stability-test external Redpanda advertise host |
+| `PROD_REDPANDA_ADVERTISE_HOST` | Required for prod overlay         | Prod external Redpanda advertise host |
 | **PostgreSQL**               |                                    |                                        |
 | `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname (legacy fallback)  |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port (legacy fallback)      |

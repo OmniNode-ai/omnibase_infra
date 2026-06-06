@@ -24,6 +24,21 @@
 set -e
 
 # =============================================================================
+# Fresh Volume Bootstrap
+# =============================================================================
+# Docker named volumes mounted at /app/data or /app/logs hide the image-owned
+# directories created during build. Fresh named volumes are commonly root-owned,
+# so the non-root runtime user cannot write Bifrost contracts or runtime state
+# unless ownership is repaired before dropping privileges.
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "[entrypoint] Bootstrapping runtime volume ownership..."
+  install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
+  chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
+  exec gosu omniinfra "$0" "$@"
+fi
+
+# =============================================================================
 # Deployment Identity Banner
 # =============================================================================
 # Print before any service initialization so operators can immediately verify

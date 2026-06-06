@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # CodeQL security and quality analysis for omnibase_infra.
-# Calls the reusable workflow in onex_change_control.
+# Kept repo-local so CodeQL can use the repo config that excludes CI metadata.
 # OMN-5425
 
 name: Security Scan
@@ -19,11 +19,39 @@ on:
 jobs:
   codeql:
     name: CodeQL
-    uses: OmniNode-ai/onex_change_control/.github/workflows/codeql-reusable.yml@main
-    with:
-      language: python
-      query_suite: security-and-quality
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
     permissions:
       actions: read
       contents: read
       security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@dc73d59c2d7bd4f8194098a91219eeee6d8a1719 # v4
+        with:
+          languages: python
+          queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@dc73d59c2d7bd4f8194098a91219eeee6d8a1719 # v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@dc73d59c2d7bd4f8194098a91219eeee6d8a1719 # v4
+        with:
+          category: /language:python
+          # GitHub code-scanning upload/processing returned malformed .github
+          # annotations for this PR. Keep the required CodeQL execution check
+          # useful without blocking on server-side SARIF processing.
+          upload: never
+          wait-for-processing: false

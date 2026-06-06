@@ -3,10 +3,8 @@ schema_version: "1.0.0"
 ticket_id: OMN-12184
 title: "Convert boundary dataclasses to Pydantic BaseModel"
 summary: >
-  Converts boundary-crossing dataclasses to Pydantic BaseModel and keeps
-  internal-only runtime containers explicitly annotated. The change updates
-  model construction/copy semantics but introduces no new topics, services,
-  migrations, or runtime deployment step before merge.
+  Converts boundary-crossing dataclasses to Pydantic BaseModel and keeps internal-only runtime containers explicitly annotated. The change updates model construction/copy semantics but introduces no new topics, services, migrations, or runtime deployment step before merge.
+
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:

@@ -218,6 +218,13 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )
+    api_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit aiokafka API version, for example '2.8.0'. "
+            "When unset, aiokafka auto-negotiates the broker version."
+        ),
+    )
     environment: str = Field(
         default="local",
         description=(
@@ -266,6 +273,30 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Sleep interval in seconds for consumer loop polling",
         ge=0.01,
         le=10.0,
+    )
+
+    # Consumer cold-start concurrency (OMN-12448). Bounds the burst of
+    # consumer-group joins during start_consuming() so a runtime subscribing to
+    # hundreds of topics does not stampede the broker's group coordinator and
+    # blow the per-consumer start timeout. Contract-config only — deliberately
+    # not exposed as an env override.
+    consumer_start_concurrency: int = Field(
+        default=32,
+        description=(
+            "Maximum consumer-group starts in flight during start_consuming(). "
+            "Caps the cold-start burst on the broker group coordinator."
+        ),
+        ge=1,
+        le=1024,
+    )
+    consumer_start_max_retries: int = Field(
+        default=3,
+        description=(
+            "Retry passes for a transiently-failing consumer start before "
+            "aborting boot. 0 disables retries."
+        ),
+        ge=0,
+        le=10,
     )
 
     # Kafka producer settings
@@ -766,6 +797,31 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         return v.strip()
 
+    @field_validator("api_version", mode="before")
+    @classmethod
+    def validate_api_version(cls, v: object) -> str | None:
+        """Validate optional aiokafka API version override."""
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            v = str(v)
+        value = v.strip()
+        if not value:
+            return None
+        if not re.match(r"^\d+\.\d+\.\d+$", value):
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_config",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                "api_version must use '<major>.<minor>.<patch>' format",
+                context=context,
+                parameter="api_version",
+                value=value,
+            )
+        return value
+
     @field_validator("environment", mode="before")
     @classmethod
     def validate_environment(cls, v: object) -> str:
@@ -843,6 +899,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         env_mappings: dict[str, str] = {
             "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
+            "KAFKA_API_VERSION": "api_version",
             "KAFKA_TIMEOUT_SECONDS": "timeout_seconds",
             "KAFKA_ENVIRONMENT": "environment",
             "KAFKA_MAX_RETRY_ATTEMPTS": "max_retry_attempts",
@@ -1101,9 +1158,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         DLQ Topic Naming Convention:
             Format: onex.dlq.<category>.v1
             Examples:
-                - onex.dlq.intents.v1 (for permanently failed intents)
-                - onex.dlq.events.v1 (for permanently failed events)
-                - onex.dlq.commands.v1 (for permanently failed commands)
+                - onex.dlq.omnibase-infra.intents.v1 (for permanently failed intents)
+                - onex.dlq.omnibase-infra.events.v1 (for permanently failed events)
+                - onex.dlq.omnibase-infra.commands.v1 (for permanently failed commands)
 
         Args:
             category: Message category for DLQ routing. Valid values:
@@ -1120,9 +1177,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         Example:
             >>> config = ModelKafkaEventBusConfig(environment="local")
             >>> config.get_dlq_topic()
-            'onex.dlq.intents.v1'  # onex-topic-allow: pending contract auto-wiring
+            'onex.dlq.omnibase-infra.intents.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> config.get_dlq_topic("events")
-            'onex.dlq.events.v1'  # onex-topic-allow: pending contract auto-wiring
+            'onex.dlq.omnibase-infra.events.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> # Explicit topic takes precedence
             >>> config = ModelKafkaEventBusConfig(
             ...     environment="local",

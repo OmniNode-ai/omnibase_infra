@@ -91,7 +91,15 @@ class ModelBaselineIntent(BaseModel):
 class ModelDelegationResult(BaseModel):
     """Stub terminal delegation result payload."""
 
+    correlation_id: str = "cid-123"
     content: str = "done"
+
+
+class ModelDelegationEventEnvelope(BaseModel):
+    """Stub topic-bearing delegation event envelope."""
+
+    topic: str
+    payload: ModelDelegationResult
 
 
 def _make_result(**overrides: object) -> ModelDispatchResult:
@@ -394,6 +402,33 @@ class TestDelegationIntentTopicRouting:
         call_kwargs = mock_bus.publish_envelope.call_args.kwargs
         assert call_kwargs["topic"] == completed_topic
         assert isinstance(call_kwargs["envelope"].payload, ModelDelegationResult)
+
+    @pytest.mark.asyncio
+    async def test_delegation_topic_envelope_publishes_inner_terminal_payload(
+        self,
+    ) -> None:
+        mock_bus = AsyncMock()
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        terminal_payload = ModelDelegationResult(correlation_id="cid-456")
+        result = _make_result(
+            output_events=[
+                ModelDelegationEventEnvelope(
+                    topic=completed_topic,
+                    payload=terminal_payload,
+                )
+            ],
+        )
+
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == completed_topic
+        assert call_kwargs["envelope"].payload == terminal_payload
 
 
 # ---------------------------------------------------------------------------

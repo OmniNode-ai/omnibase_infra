@@ -188,6 +188,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 import random
@@ -202,6 +203,7 @@ import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
 from aiokafka.errors import (
+    BrokerNotAvailableError,
     InvalidPartitionsError,
     KafkaError,
     UnknownTopicOrPartitionError,
@@ -638,6 +640,20 @@ class EventBusKafka(
 
         return kwargs
 
+    def _build_client_version_kwargs(
+        self, client_cls: type[object]
+    ) -> dict[str, object]:
+        """Build optional aiokafka client-version kwargs."""
+        if self._config.api_version is None:
+            return {}
+        try:
+            parameters = inspect.signature(client_cls.__init__).parameters
+        except (TypeError, ValueError):
+            return {}
+        if "api_version" not in parameters:
+            return {}
+        return {"api_version": self._config.api_version}
+
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -675,6 +691,7 @@ class EventBusKafka(
                     enable_idempotence=self._config.enable_idempotence,
                     max_request_size=self._config.max_request_size,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._build_client_version_kwargs(AIOKafkaProducer),
                     **self._build_auth_kwargs(),
                 )
 
@@ -1011,6 +1028,7 @@ class EventBusKafka(
                 enable_idempotence=self._config.enable_idempotence,
                 max_request_size=self._config.max_request_size,
                 retry_backoff_ms=self._config.reconnect_backoff_ms,
+                **self._build_client_version_kwargs(AIOKafkaProducer),
                 **self._build_auth_kwargs(),
             )
 
@@ -1513,45 +1531,21 @@ class EventBusKafka(
         self._pending_consumer_keys.add(consumer_key)
         await self._start_consumer_for_topic_unlocked(topic, group_id)
 
-    async def _start_consumer_for_topic_unlocked(
-        self, topic: str, group_id: str
-    ) -> None:
-        """Start a Kafka consumer without holding the shared lock.
+    def _resolve_effective_group_id(
+        self,
+        group_id: str,
+        topic: str,
+        correlation_id: UUID,
+        consumer_key: tuple[str, str],
+    ) -> str:
+        """Compute the effective Kafka consumer group ID for a topic subscription.
 
-        The caller MUST have already added ``(topic, group_id)`` to
-        ``_pending_consumer_keys`` before calling this method.  This invariant
-        is what prevents duplicate consumers from being created by concurrent
-        ``subscribe()`` calls.
-
-        This method performs the slow part of consumer startup (Kafka
-        group-join, partition assignment) outside ``self._lock`` so that many
-        topics can be subscribed concurrently via ``asyncio.gather``.
-
-        Args:
-            topic: Topic to consume from
-            group_id: Base consumer group ID. This should be derived
-                from ``compute_consumer_group_id()`` or an explicit override.
-                The topic name is appended as a ``.__t.{topic}`` suffix to
-                create per-topic consumer groups and prevent rebalance storms.
-
-                The suffix is **idempotent**: if ``group_id`` already ends with
-                ``.__t.{topic}``, the suffix is not appended again.  This
-                prevents double-suffixing when callers pass a pre-scoped
-                group ID (e.g. ``"my-group.__t.events"`` with
-                ``topic="events"``).
+        Validates group_id, applies the per-topic suffix, applies the instance
+        discriminator, and enforces the 255-char Kafka limit via hash truncation.
 
         Raises:
-            ProtocolConfigurationError: If group_id is empty or contains only
-                whitespace (must be derived from compute_consumer_group_id or
-                provided as explicit override)
-            InfraTimeoutError: If consumer startup times out after timeout_seconds
-            InfraConnectionError: If consumer fails to connect to Kafka brokers
+            ProtocolConfigurationError: on empty/whitespace group_id or invalid instance_id
         """
-        consumer_key = (topic, group_id)
-
-        correlation_id = uuid4()
-        sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
-
         # Validate group_id before any processing — reject whitespace-only IDs
         # immediately so callers get a clear error.
         stripped_group_id = group_id.strip()
@@ -1679,46 +1673,86 @@ class EventBusKafka(
                     f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
                 )
 
-        # Derive static group membership ID (OMN-7601).
-        # Use explicit override from contract config if provided; otherwise
-        # auto-derive from effective_group_id + hostname so each consumer on
-        # each host gets a stable identity without requiring an env var.
-        # Hostname characters outside [a-zA-Z0-9._-] are replaced with '-' to
-        # stay within Kafka's allowed character set.
-        #
-        # When truncation is required, a hash suffix derived from both the group
-        # ID and hostname preserves host uniqueness — plain slicing would drop the
-        # hostname and cause FencedInstanceIdException when multiple hosts share a
-        # long group ID prefix.
+        return effective_group_id
+
+    def _resolve_group_instance_id(self, effective_group_id: str) -> str:
+        """Derive or return the static Kafka group.instance.id for this consumer.
+
+        Uses the configured override when available; otherwise auto-derives from
+        effective_group_id + hostname with hash-based truncation to stay within
+        the 255-char limit. (OMN-7601)
+        """
         if self._config.group_instance_id is not None:
-            resolved_group_instance_id = self._config.group_instance_id
-        else:
-            raw_hostname = socket.gethostname()
-            safe_hostname = "".join(
-                c if c.isalnum() or c in "._-" else "-" for c in raw_hostname
-            )
-            candidate = f"{effective_group_id}.{safe_hostname}"
-            if len(candidate) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH:
-                resolved_group_instance_id = candidate
-            else:
-                host_hash = hashlib.sha256(
-                    f"{effective_group_id}|{safe_hostname}".encode()
-                ).hexdigest()[:8]
-                # Reserve room for separator + hash (9 chars: "." + 8 hex digits).
-                host_budget = (
-                    KAFKA_CONSUMER_GROUP_MAX_LENGTH
-                    - len(effective_group_id)
-                    - len(host_hash)
-                    - 2  # "." separator + "-" before hash
-                )
-                if host_budget > 0:
-                    resolved_group_instance_id = f"{effective_group_id}.{safe_hostname[:host_budget]}-{host_hash}"
-                else:
-                    # No room for any hostname characters — use group prefix + hash.
-                    prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
-                    resolved_group_instance_id = (
-                        f"{effective_group_id[:prefix_budget]}-{host_hash}"
-                    )
+            return self._config.group_instance_id
+
+        raw_hostname = socket.gethostname()
+        safe_hostname = "".join(
+            c if c.isalnum() or c in "._-" else "-" for c in raw_hostname
+        )
+        candidate = f"{effective_group_id}.{safe_hostname}"
+        if len(candidate) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+            return candidate
+
+        host_hash = hashlib.sha256(
+            f"{effective_group_id}|{safe_hostname}".encode()
+        ).hexdigest()[:8]
+        # Reserve room for separator + hash (9 chars: "." + 8 hex digits).
+        host_budget = (
+            KAFKA_CONSUMER_GROUP_MAX_LENGTH
+            - len(effective_group_id)
+            - len(host_hash)
+            - 2  # "." separator + "-" before hash
+        )
+        if host_budget > 0:
+            return f"{effective_group_id}.{safe_hostname[:host_budget]}-{host_hash}"
+
+        # No room for any hostname characters — use group prefix + hash.
+        prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
+        return f"{effective_group_id[:prefix_budget]}-{host_hash}"
+
+    async def _start_consumer_for_topic_unlocked(
+        self, topic: str, group_id: str
+    ) -> None:
+        """Start a Kafka consumer without holding the shared lock.
+
+        The caller MUST have already added ``(topic, group_id)`` to
+        ``_pending_consumer_keys`` before calling this method.  This invariant
+        is what prevents duplicate consumers from being created by concurrent
+        ``subscribe()`` calls.
+
+        This method performs the slow part of consumer startup (Kafka
+        group-join, partition assignment) outside ``self._lock`` so that many
+        topics can be subscribed concurrently via ``asyncio.gather``.
+
+        Args:
+            topic: Topic to consume from
+            group_id: Base consumer group ID. This should be derived
+                from ``compute_consumer_group_id()`` or an explicit override.
+                The topic name is appended as a ``.__t.{topic}`` suffix to
+                create per-topic consumer groups and prevent rebalance storms.
+
+                The suffix is **idempotent**: if ``group_id`` already ends with
+                ``.__t.{topic}``, the suffix is not appended again.  This
+                prevents double-suffixing when callers pass a pre-scoped
+                group ID (e.g. ``"my-group.__t.events"`` with
+                ``topic="events"``).
+
+        Raises:
+            ProtocolConfigurationError: If group_id is empty or contains only
+                whitespace (must be derived from compute_consumer_group_id or
+                provided as explicit override)
+            InfraTimeoutError: If consumer startup times out after timeout_seconds
+            InfraConnectionError: If consumer fails to connect to Kafka brokers
+        """
+        consumer_key = (topic, group_id)
+
+        correlation_id = uuid4()
+        sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
+
+        effective_group_id = self._resolve_effective_group_id(
+            group_id, topic, correlation_id, consumer_key
+        )
+        resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1732,25 +1766,29 @@ class EventBusKafka(
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
 
-        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError or
-        # InvalidPartitionsError during consumer.start() when partition metadata
-        # has not yet propagated after topic creation. Both errors are transient
-        # in Redpanda --smp 1 --mode dev-container: UnknownTopicOrPartitionError
-        # appears when metadata hasn't propagated yet; InvalidPartitionsError
+        # Redpanda (and Kafka) can return UnknownTopicOrPartitionError,
+        # InvalidPartitionsError, or BrokerNotAvailableError during
+        # consumer.start() when topic or partition metadata has not yet
+        # propagated after topic creation. These are transient in Redpanda
+        # --smp 1 --mode dev-container: UnknownTopicOrPartitionError appears
+        # when metadata has not propagated yet; InvalidPartitionsError
         # (Kafka error 37) appears when the broker acknowledges the topic exists
-        # but hasn't finalized partition metadata. Neither error is permanent —
-        # both resolve once Redpanda stabilizes the topic state.
+        # but has not finalized partition metadata; BrokerNotAvailableError
+        # appears while the broker cannot yet serve metadata for the topic.
+        # None is permanent when topic provisioning is still converging.
         #
         # aiokafka raises these from _wait_topics() inside consumer.start(). They
         # propagate out of asyncio.wait_for before the timeout fires, so
         # KAFKA_TIMEOUT_SECONDS alone does not help.
         #
-        # Fix: retry both errors with exponential backoff within the timeout
-        # budget. Each failed attempt stops and discards the consumer; a fresh
-        # AIOKafkaConsumer is created for each retry to avoid stale state.
+        # Fix: retry metadata errors with exponential backoff within the
+        # timeout budget. Each failed attempt stops and discards the consumer;
+        # a fresh AIOKafkaConsumer is created for each retry to avoid stale
+        # state.
         metadata_retry_deadline = (
             asyncio.get_event_loop().time() + self._timeout_seconds
         )
@@ -1777,7 +1815,11 @@ class EventBusKafka(
                     )
                 raise
 
-            except (UnknownTopicOrPartitionError, InvalidPartitionsError) as e:
+            except (
+                UnknownTopicOrPartitionError,
+                InvalidPartitionsError,
+                BrokerNotAvailableError,
+            ) as e:
                 # Transient metadata propagation lag — stop the failed consumer,
                 # wait briefly, and retry if still within the timeout budget.
                 error_type = type(e).__name__
@@ -1851,6 +1893,7 @@ class EventBusKafka(
                     heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                     max_poll_interval_ms=self._config.max_poll_interval_ms,
                     retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._build_client_version_kwargs(AIOKafkaConsumer),
                     **self._build_auth_kwargs(),
                 )
 
@@ -2031,6 +2074,114 @@ class EventBusKafka(
 
         self._refresh_topic_consumer_views(topic)
 
+    @staticmethod
+    def _extract_event_type_from_msg(msg: object) -> str:
+        """Best-effort extraction of event_type from a raw Kafka message's headers."""
+        try:
+            raw_headers = getattr(msg, "headers", None) or []
+            for hdr_key, hdr_val in raw_headers:
+                if hdr_key == "event_type" and hdr_val is not None:
+                    return hdr_val.decode("utf-8")
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            pass
+        return "unknown"
+
+    async def _dispatch_to_subscriber(
+        self,
+        callback: Callable[[ModelEventMessage], Awaitable[None]],
+        subscription_id: str,
+        event_message: ModelEventMessage,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Invoke a single subscriber callback, routing to DLQ on exhausted retries."""
+        try:
+            await callback(event_message)
+        except Exception as e:
+            retry_count = event_message.headers.retry_count
+            max_retries = event_message.headers.max_retries
+            retries_exhausted = retry_count >= max_retries
+
+            logger.exception(
+                "Subscriber callback failed",
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "subscription_id": subscription_id,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "retries_exhausted": retries_exhausted,
+                },
+            )
+
+            if retries_exhausted:
+                await self._publish_to_dlq(
+                    original_topic=topic,
+                    failed_message=event_message,
+                    error=e,
+                    correlation_id=correlation_id,
+                    consumer_group=group_id,
+                )
+            else:
+                logger.warning(
+                    f"Handler failed but retries available ({retry_count}/{max_retries})",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "retry_count": retry_count,
+                        "max_retries": max_retries,
+                    },
+                )
+
+    async def _emit_consume_loop_error_health_event(
+        self,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        e: Exception,
+    ) -> None:
+        """Emit a consumer health event for an unexpected consume-loop error."""
+        if self._health_emitter is None:
+            return
+        error_type_name = type(e).__name__
+        is_session_timeout = (
+            "session" in error_type_name.lower() or "timeout" in str(e).lower()
+        )
+        event_type = (
+            EnumConsumerHealthEventType.SESSION_TIMEOUT
+            if is_session_timeout
+            else EnumConsumerHealthEventType.CONNECTION_LOST
+        )
+        severity = (
+            EnumConsumerHealthSeverity.CRITICAL
+            if is_session_timeout
+            else EnumConsumerHealthSeverity.ERROR
+        )
+        try:
+            _subs = self._subscribers.get(topic, [])
+            _consumer_group = group_id if _subs else "unknown"
+            await self._health_emitter.emit_event(
+                consumer_identity=f"eventbus.{topic}",
+                consumer_group=_consumer_group,
+                topic=topic,
+                event_type=event_type,
+                severity=severity,
+                correlation_id=correlation_id,
+                error_message=str(e)[:500],
+                error_type=error_type_name,
+                hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
+                service_label="EventBusKafka",
+            )
+        except Exception:  # noqa: BLE001 - best-effort emission must not propagate
+            logger.debug(
+                "Failed to emit health event for consumer loop error",
+                exc_info=True,
+            )
+
     async def _consume_loop(
         self,
         topic: str,
@@ -2095,15 +2246,7 @@ class EventBusKafka(
                 # is no handler to fail. This typically indicates a race between
                 # unsubscribe and the consumer loop, or a misconfigured topic.
                 if not subscribers:
-                    event_type = "unknown"
-                    try:
-                        raw_headers = getattr(msg, "headers", None) or []
-                        for hdr_key, hdr_val in raw_headers:
-                            if hdr_key == "event_type" and hdr_val is not None:
-                                event_type = hdr_val.decode("utf-8")
-                                break
-                    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                        pass
+                    event_type = self._extract_event_type_from_msg(msg)
                     logger.warning(
                         "Message received on topic '%s' with event_type='%s' "
                         "for consumer_group='%s' but no subscribers are registered; "
@@ -2146,52 +2289,14 @@ class EventBusKafka(
 
                 # Dispatch to all subscribers
                 for _sub_group_id, subscription_id, callback in subscribers:
-                    try:
-                        await callback(event_message)
-                    except Exception as e:
-                        # Check if message-level retries are exhausted
-                        retry_count = event_message.headers.retry_count
-                        max_retries = event_message.headers.max_retries
-                        retries_exhausted = retry_count >= max_retries
-
-                        logger.exception(
-                            "Subscriber callback failed",
-                            extra={
-                                "topic": topic,
-                                "group_id": group_id,
-                                "subscription_id": subscription_id,
-                                "correlation_id": str(correlation_id),
-                                "error": str(e),
-                                "error_type": type(e).__name__,
-                                "retry_count": retry_count,
-                                "max_retries": max_retries,
-                                "retries_exhausted": retries_exhausted,
-                            },
-                        )
-
-                        # Route to DLQ when retries exhausted (permanent failure)
-                        # Per ModelEventHeaders: "When retry_count >= max_retries, message should go to DLQ"
-                        if retries_exhausted:
-                            await self._publish_to_dlq(
-                                original_topic=topic,
-                                failed_message=event_message,
-                                error=e,
-                                correlation_id=correlation_id,
-                                consumer_group=group_id,
-                            )
-                        else:
-                            # Message still has retries available - log for potential republish
-                            # Note: Republishing logic is the responsibility of the caller/handler
-                            logger.warning(
-                                f"Handler failed but retries available ({retry_count}/{max_retries})",
-                                extra={
-                                    "topic": topic,
-                                    "correlation_id": str(correlation_id),
-                                    "retry_count": retry_count,
-                                    "max_retries": max_retries,
-                                },
-                            )
-                        # Continue dispatching to other subscribers even if one fails
+                    await self._dispatch_to_subscriber(
+                        callback,
+                        subscription_id,
+                        event_message,
+                        topic,
+                        group_id,
+                        correlation_id,
+                    )
 
         except asyncio.CancelledError:
             # Graceful cancellation - this is expected during shutdown
@@ -2205,7 +2310,6 @@ class EventBusKafka(
             raise  # Re-raise to properly handle task cancellation
 
         except Exception as e:
-            # Unexpected error in consumer loop - log with full context
             logger.exception(
                 f"Consumer loop error for topic {topic}: {e}",
                 extra={
@@ -2215,46 +2319,9 @@ class EventBusKafka(
                     "error_type": type(e).__name__,
                 },
             )
-
-            # Emit consumer health event if emitter is available (OMN-5518)
-            if self._health_emitter is not None:
-                # Classify error type for severity
-                error_type_name = type(e).__name__
-                is_session_timeout = (
-                    "session" in error_type_name.lower() or "timeout" in str(e).lower()
-                )
-                event_type = (
-                    EnumConsumerHealthEventType.SESSION_TIMEOUT
-                    if is_session_timeout
-                    else EnumConsumerHealthEventType.CONNECTION_LOST
-                )
-                severity = (
-                    EnumConsumerHealthSeverity.CRITICAL
-                    if is_session_timeout
-                    else EnumConsumerHealthSeverity.ERROR
-                )
-                try:
-                    # Derive consumer group from subscriber registry
-                    _subs = self._subscribers.get(topic, [])
-                    _consumer_group = group_id if _subs else "unknown"
-                    await self._health_emitter.emit_event(
-                        consumer_identity=f"eventbus.{topic}",
-                        consumer_group=_consumer_group,
-                        topic=topic,
-                        event_type=event_type,
-                        severity=severity,
-                        correlation_id=correlation_id,
-                        error_message=str(e)[:500],
-                        error_type=error_type_name,
-                        hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
-                        service_label="EventBusKafka",
-                    )
-                except Exception:  # noqa: BLE001 - best-effort emission must not propagate
-                    logger.debug(
-                        "Failed to emit health event for consumer loop error",
-                        exc_info=True,
-                    )
-
+            await self._emit_consume_loop_error_health_event(
+                topic, group_id, correlation_id, e
+            )
             # Don't raise - allow task to complete and cleanup to proceed
 
         finally:
@@ -2296,20 +2363,51 @@ class EventBusKafka(
                         self._pending_consumer_keys.add(consumer_key)
                         topics_to_start.append((topic, group_id))
 
-        # Start all consumers concurrently — wall-clock time becomes the
-        # slowest single consumer rather than the sum of all N consumers.
-        # return_exceptions=True lets every consumer attempt to start; we
-        # collect failures and re-raise the first one after all have settled
-        # so a single bad topic does not starve the rest.
+        # Start consumers concurrently but bounded (OMN-12448). An unbounded
+        # gather over hundreds of group-joins stampedes the broker group
+        # coordinator on cold start; tail latency then blows the per-consumer
+        # start timeout. A single failure aborting the whole boot crash-loops
+        # the runtime — and each failed boot leaves half-formed groups that make
+        # the next boot slower. So: cap in-flight starts at
+        # consumer_start_concurrency and retry a transiently-failing start up to
+        # consumer_start_max_retries times before letting it fail the boot.
         if topics_to_start:
+            semaphore = asyncio.Semaphore(self._config.consumer_start_concurrency)
+            max_retries = self._config.consumer_start_max_retries
+
+            async def _start_bounded(topic: str, group_id: str) -> Exception | None:
+                async with semaphore:
+                    last_error: Exception | None = None
+                    for attempt in range(max_retries + 1):
+                        try:
+                            await self._start_consumer_for_topic_unlocked(
+                                topic, group_id
+                            )
+                            return None
+                        except (
+                            InfraConnectionError,
+                            InfraTimeoutError,
+                            InfraUnavailableError,
+                        ) as exc:
+                            last_error = exc
+                            if attempt >= max_retries:
+                                break
+                            # Every failure path discards the pending-key
+                            # reservation; re-reserve it before retrying so the
+                            # next attempt is not treated as a duplicate.
+                            self._pending_consumer_keys.add((topic, group_id))
+                            # Yield so other in-flight starts make progress and
+                            # the coordinator settles before we retry.
+                            await asyncio.sleep(0)
+                    return last_error
+
             results = await asyncio.gather(
                 *[
-                    self._start_consumer_for_topic_unlocked(topic, group_id)
+                    _start_bounded(topic, group_id)
                     for topic, group_id in topics_to_start
-                ],
-                return_exceptions=True,
+                ]
             )
-            errors = [r for r in results if isinstance(r, BaseException)]
+            errors = [r for r in results if isinstance(r, Exception)]
             if errors:
                 raise errors[0]
 
@@ -2627,6 +2725,31 @@ class EventBusKafka(
 
         return kafka_headers
 
+    @staticmethod
+    def _parse_uuid_header(value: str | None) -> UUID:
+        """Parse a UUID header value, falling back to a new UUID on failure."""
+        if value:
+            try:
+                return UUID(value)
+            except (ValueError, AttributeError):
+                pass
+        return uuid4()
+
+    @staticmethod
+    def _parse_int_header(value: str | None, default: int, field_name: str) -> int:
+        """Parse an integer header value, logging a warning and returning default on failure."""
+        if value:
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed %s header %r, defaulting to %d",
+                    field_name,
+                    value,
+                    default,
+                )
+        return default
+
     def _kafka_headers_to_model(
         self, kafka_headers: list[tuple[str, bytes]] | None
     ) -> ModelEventHeaders:
@@ -2650,27 +2773,8 @@ class EventBusKafka(
             if value is not None:
                 headers_dict[key] = value.decode("utf-8")
 
-        # Parse correlation_id from string to UUID (with fallback to new UUID)
-        correlation_id_str = headers_dict.get("correlation_id")
-        if correlation_id_str:
-            try:
-                correlation_id = UUID(correlation_id_str)
-            except (ValueError, AttributeError):
-                # Invalid UUID format - generate new one
-                correlation_id = uuid4()
-        else:
-            correlation_id = uuid4()
-
-        # Parse message_id from string to UUID (with fallback to new UUID)
-        message_id_str = headers_dict.get("message_id")
-        if message_id_str:
-            try:
-                message_id = UUID(message_id_str)
-            except (ValueError, AttributeError):
-                # Invalid UUID format - generate new one
-                message_id = uuid4()
-        else:
-            message_id = uuid4()
+        correlation_id = self._parse_uuid_header(headers_dict.get("correlation_id"))
+        message_id = self._parse_uuid_header(headers_dict.get("message_id"))
 
         # Parse timestamp from ISO format string to datetime (with fallback to now)
         timestamp_str = headers_dict.get("timestamp")
@@ -2691,28 +2795,12 @@ class EventBusKafka(
         # Parse integer fields with fallback defaults.
         # Kafka headers are byte strings; malformed values (e.g. "abc", "1.5")
         # must not crash the consume loop, so each int() call is guarded.
-        retry_count_str = headers_dict.get("retry_count")
-        retry_count = 0
-        if retry_count_str:
-            try:
-                retry_count = int(retry_count_str)
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Malformed retry_count header %r, defaulting to 0",
-                    retry_count_str,
-                )
-
-        max_retries_str = headers_dict.get("max_retries")
-        max_retries = 3
-        if max_retries_str:
-            try:
-                max_retries = int(max_retries_str)
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Malformed max_retries header %r, defaulting to 3",
-                    max_retries_str,
-                )
-
+        retry_count = self._parse_int_header(
+            headers_dict.get("retry_count"), 0, "retry_count"
+        )
+        max_retries = self._parse_int_header(
+            headers_dict.get("max_retries"), 3, "max_retries"
+        )
         ttl_seconds_str = headers_dict.get("ttl_seconds")
         ttl_seconds: int | None = None
         if ttl_seconds_str:

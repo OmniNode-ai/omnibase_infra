@@ -92,6 +92,8 @@ adjacency:
     reverse_deps: []
   dlq:
     reverse_deps: [runtime]
+  migration:
+    reverse_deps: [nodes, runtime]
   backends:
     reverse_deps: [runtime]
   capabilities:

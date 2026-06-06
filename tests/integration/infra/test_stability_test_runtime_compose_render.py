@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -109,7 +110,7 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
-    "INFISICAL_REDIS_URL": "redis://valkey:6379",
+    "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
     "GITHUB_TOKEN": "render-only-github-token",
     "LINEAR_API_KEY": "render-only-linear-api-key",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
@@ -118,10 +119,14 @@ COMPOSE_RENDER_ENV = {
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
+    "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
+    "ONEX_INFRA_HOST": "192.168.86.201",
+    "ONEX_INFRA_USER": "jonah",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
-    "REDPANDA_ADVERTISE_HOST": "localhost",
+    "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
+    "STABILITY_TEST_REDPANDA_ADVERTISE_HOST": "100.109.203.94",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
@@ -179,19 +184,20 @@ def _run_compose_config(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _compose_config_json() -> dict:
+def _compose_config_json() -> dict[str, Any]:
     result = _run_compose_config("--format", "json")
 
     rendered_config = json.loads(result.stdout)
     assert isinstance(rendered_config, dict)
-    return rendered_config
+    return cast("dict[str, Any]", rendered_config)
 
 
-def _published_ports(service_config: dict) -> set[str]:
-    return {str(port["published"]) for port in service_config.get("ports", [])}
+def _published_ports(service_config: dict[str, Any]) -> set[str]:
+    ports = cast("list[dict[str, Any]]", service_config.get("ports", []))
+    return {str(port["published"]) for port in ports}
 
 
-def _label_value(service_config: dict, key: str) -> str | None:
+def _label_value(service_config: dict[str, Any], key: str) -> str | None:
     labels = service_config.get("labels", {})
     if isinstance(labels, dict):
         value = labels.get(key)
@@ -243,6 +249,9 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
         assert environment["ONEX_ENVIRONMENT"] == "stability-test"
         assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
+        assert environment["ONEX_INFRA_HOST"] == "192.168.86.201"
+        assert environment["ONEX_INFRA_USER"] == "jonah"
+        assert environment["ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
         assert "image" not in services[service_name]
@@ -251,6 +260,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
             "runtime://omninode-pc/stability-test/"
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
+        assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
         assert (
             _label_value(
                 services[service_name],
@@ -290,6 +300,11 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         ]
         == "service_completed_successfully"
     )
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        assert (
+            services[service_name]["depends_on"]["migration-gate"]["condition"]
+            == "service_healthy"
+        )
     assert services["redpanda-partition-cap"]["depends_on"]["redpanda"][
         "condition"
     ] == ("service_healthy")
@@ -322,6 +337,17 @@ def test_stability_lane_runtime_socket_uses_owned_tmpfs() -> None:
         if isinstance(volume, dict) and "target" in volume
     }
     assert "/run/onex-runtime" not in volume_targets
+
+
+@pytest.mark.integration
+def test_stability_projection_api_has_separate_infra_and_analytics_dsns() -> None:
+    rendered_config = _compose_config_json()
+    environment = rendered_config["services"]["projection-api"]["environment"]
+
+    assert environment["ONEX_ENVIRONMENT"] == "stability-test"
+    assert environment["KAFKA_ENVIRONMENT"] == "stability-test"
+    assert environment["OMNIBASE_INFRA_DB_URL"].endswith("/omnibase_infra")
+    assert environment["OMNIDASH_ANALYTICS_DB_URL"].endswith("/omnidash_analytics")
 
 
 @pytest.mark.integration
@@ -371,7 +397,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         assert published_ports.isdisjoint(PRODUCTION_PUBLISHED_PORTS)
 
     redpanda_command = " ".join(services["redpanda"]["command"])
-    assert "localhost:39092" in redpanda_command
+    assert "100.109.203.94:39092" in redpanda_command
+    assert "100.109.203.94:28082" in redpanda_command
+    assert "192.168.86.201:39092" not in redpanda_command
     assert "localhost:19092" not in redpanda_command
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
@@ -388,3 +416,17 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         }
         assert "/app/contracts" not in volume_targets, service_name
         assert "/app/skills" in volume_targets, service_name
+        assert "/data/omninode/omni_home" in volume_targets, service_name
+
+
+@pytest.mark.integration
+def test_stability_lane_render_exposes_session_health_contract() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment["ONEX_INFRA_HOST"] == "192.168.86.201"
+        assert environment["ONEX_INFRA_USER"] == "jonah"
+        assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
+        assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"

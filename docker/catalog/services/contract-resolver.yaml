@@ -24,6 +24,8 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-contract-resolver
   CONTRACT_RESOLVER_PORT: '8091'
+catalog_env:
+  BIFROST_CONTRACT_PATH: ''
 operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO

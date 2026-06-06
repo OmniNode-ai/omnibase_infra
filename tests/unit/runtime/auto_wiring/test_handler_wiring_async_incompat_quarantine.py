@@ -34,6 +34,7 @@ These tests cover:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -213,6 +214,13 @@ class _HandlerAsyncIncompatInInitWithWrap:
         return None
 
 
+class _HandlerProtocolDeclaration(Protocol):
+    """Invalid handler_routing target: interface, not concrete handler."""
+
+    async def handle(self, envelope: object) -> None:
+        raise NotImplementedError
+
+
 # ---------------------------------------------------------------------------
 # wire_from_manifest quarantine tests
 # ---------------------------------------------------------------------------
@@ -315,6 +323,43 @@ async def test_wrapped_async_incompat_is_quarantined() -> None:
     assert (
         report.quarantined_handlers[0].reason is EnumQuarantineReason.ASYNC_INCOMPATIBLE
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_handler_declaration_is_quarantined_not_boot_fatal() -> None:
+    """A Protocol handler reference is invalid contract wiring, not Step-6 exhaustion."""
+    contract = _make_contract(
+        node_name="node_protocol_handler",
+        handler_entries=(("fake.module", "_HandlerProtocolDeclaration"),),
+    )
+    manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+        return_value=_HandlerProtocolDeclaration,
+    ):
+        report = await wire_from_manifest(
+            manifest=manifest,
+            dispatch_engine=_make_dispatch_engine(),
+            event_bus=_make_event_bus(),
+            container=None,
+        )
+
+    assert report.total_failed == 0
+    assert report.total_wired == 0
+    assert report.total_skipped == 1
+    assert report.total_quarantined == 1
+    q = report.quarantined_handlers[0]
+    assert q.handler_name == "_HandlerProtocolDeclaration"
+    assert q.handler_module == "fake.module"
+    assert q.contract_name == "node_protocol_handler"
+    assert q.reason is EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION
+    assert "Protocol" in q.detail
+
+    result = report.results[0]
+    assert result.outcome is EnumWiringOutcome.SKIPPED
+    assert result.reason == "all handlers quarantined"
 
 
 @pytest.mark.unit

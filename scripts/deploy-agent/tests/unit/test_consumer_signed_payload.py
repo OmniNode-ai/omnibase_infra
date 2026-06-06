@@ -24,6 +24,7 @@ def test_signed_payload_strips_signature_before_command_validation() -> None:
         "git_ref": "origin/main",
         "requested_by": "operator-manual",
         "scope": "runtime",
+        "runtime_lane": "dev",
         "services": [],
         "_signature": "a" * 64,
     }

@@ -11,6 +11,11 @@ across local-dev / staging / production.
 Profiles:
     local-dev  -- No external dependencies assumed; all optional subsystems
                   disabled by default so the runtime boots offline.
+    main       -- Primary event-orchestration runtime.
+    effects    -- Effect-lane runtime for effect-owned contracts and consumers.
+    workers    -- Worker runtime profile used by the runtime-worker service.
+    projection-api -- Projection API runtime profile.
+    canary     -- Canary runtime profile for isolated contract experiments.
     staging    -- Best-effort mode; prefetcher runs but missing secrets are
                   logged as warnings and boot continues.
     production -- Strict mode; missing required secrets cause a hard failure.
@@ -73,6 +78,25 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
     # "main" matches the auto-wiring RUNTIME_PROFILE default.
     "main": ModelRuntimeProfile(
         name="main",
+        prefetch_policy="disabled",
+    ),
+    # Runtime lane profiles must preserve identity. Consumers use the resolved
+    # profile name to decide ownership; falling back to "default" can subscribe
+    # secondary runtimes to main-owned workflow topics.
+    "effects": ModelRuntimeProfile(
+        name="effects",
+        prefetch_policy="disabled",
+    ),
+    "workers": ModelRuntimeProfile(
+        name="workers",
+        prefetch_policy="disabled",
+    ),
+    "projection-api": ModelRuntimeProfile(
+        name="projection-api",
+        prefetch_policy="disabled",
+    ),
+    "canary": ModelRuntimeProfile(
+        name="canary",
         prefetch_policy="disabled",
     ),
     "staging": ModelRuntimeProfile(

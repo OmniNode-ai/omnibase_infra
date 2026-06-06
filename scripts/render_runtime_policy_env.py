@@ -79,6 +79,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         env[f"{profile_prefix}_COMPOSE_PROJECT"] = profile.compose_project
         env[f"{profile_prefix}_RUNTIME_MAIN_PORT"] = str(profile.main_port)
         env[f"{profile_prefix}_RUNTIME_EFFECTS_PORT"] = str(profile.effects_port)
+        env[f"{profile_prefix}_TOPIC_PROVISIONER_MAX_PARTITIONS"] = str(
+            profile.topic_provisioner_max_partitions
+        )
 
         for process_name, process in profile.processes.items():
             process_prefix = _PROCESS_ENV_PREFIX[process_name]

@@ -1,0 +1,57 @@
+# OMN-12631 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-12631
+title: "Decouple per-lane Redpanda advertise hosts before prod redeploy"
+summary: >
+  Replaces shared REDPANDA_ADVERTISE_HOST interpolation in runtime lane compose
+  with lane-specific advertise host variables. Dev uses
+  DEV_REDPANDA_ADVERTISE_HOST with a local default; stability-test and prod
+  require explicit STABILITY_TEST_REDPANDA_ADVERTISE_HOST and
+  PROD_REDPANDA_ADVERTISE_HOST values so a future prod broker recreate cannot
+  inherit Bret's tailnet stability advertise address.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Static runtime lane checks prove Redpanda advertise host interpolation is lane-specific."
+    command: "uv run pytest tests/unit/infra/test_runtime_lane_kafka_environment.py -q"
+  - kind: tests
+    description: "Non-mutating compose render proves prod ignores the shared REDPANDA_ADVERTISE_HOST value."
+    command: "uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q"
+  - kind: tests
+    description: "Non-mutating stability render proves the stability lane uses its own advertise host."
+    command: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_does_not_expose_production_ports_or_services -q"
+  - kind: manual
+    description: "No runtime redeploy, broker recreate, or prod mutation is performed by this PR."
+    command: "deploy-gate: code-only compose and tests; live lane env/deploy validation happens in the approved runtime sync window"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-lane-advertise-static-test
+    description: "Focused unit test verifies dev, stability-test, and prod compose use lane-specific Redpanda advertise host variables."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/infra/test_runtime_lane_kafka_environment.py -q"
+  - id: dod-prod-render-isolated-host
+    description: "Prod compose render uses PROD_REDPANDA_ADVERTISE_HOST even when REDPANDA_ADVERTISE_HOST is set to Bret's tailnet address."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q"
+  - id: dod-stability-render-isolated-host
+    description: "Stability compose render uses STABILITY_TEST_REDPANDA_ADVERTISE_HOST and does not inherit the shared Redpanda advertise host."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_does_not_expose_production_ports_or_services -q"
+  - id: dod-no-runtime-mutation
+    description: "This PR changes compose/docs/tests only and does not recreate live brokers or mutate prod."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy-gate: no runtime redeploy, broker recreate, or prod DB mutation performed by this PR"

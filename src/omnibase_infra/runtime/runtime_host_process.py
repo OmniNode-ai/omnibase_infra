@@ -102,7 +102,13 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    runtime_profile_owns_contract,
+)
 from omnibase_infra.runtime.batch_response_publisher import BatchResponsePublisher
+from omnibase_infra.runtime.constants_security import (
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
@@ -592,6 +598,18 @@ def _baseline_subscription_wiring_disabled(runtime_profile: str | None = None) -
     return runtime_profile.strip().lower() != "main"
 
 
+def _raw_contract_owned_by_runtime_profile(
+    raw_contract: object,
+    runtime_profile: str | None = None,
+) -> bool:
+    """Return whether raw contract subscriptions are owned by runtime_profile."""
+    if not isinstance(raw_contract, dict):
+        return True
+    if runtime_profile is None:
+        runtime_profile = os.environ.get("RUNTIME_PROFILE", "main")
+    return runtime_profile_owns_contract(raw_contract, runtime_profile)
+
+
 def _discover_package_node_contracts(package_root: Path) -> list[dict[str, object]]:
     """Discover node contracts from the installed package tree.
 
@@ -630,6 +648,7 @@ async def _wire_package_node_subscriptions(
     contracts: list[dict[str, object]],
     event_bus_wiring: EventBusSubcontractWiring,
     already_wired_names: set[str],
+    runtime_profile: str | None = None,
 ) -> tuple[int, int, int]:
     """Wire Kafka subscriptions for package-discovered node contracts.
 
@@ -668,6 +687,16 @@ async def _wire_package_node_subscriptions(
                 "node=%s consumer_purpose=%s",
                 node_name,
                 event_bus_section.get("consumer_purpose"),
+            )
+            continue
+
+        if not _raw_contract_owned_by_runtime_profile(contract, runtime_profile):
+            skipped_no_topics += 1
+            logger.info(
+                "RuntimeHostProcess: skipping Kafka subscription for "
+                "runtime-profile-owned contract node=%s profile=%s",
+                node_name,
+                runtime_profile or os.environ.get("RUNTIME_PROFILE", "main"),
             )
             continue
 
@@ -3390,16 +3419,20 @@ class RuntimeHostProcess:
                 return True
 
             # Step 4: Namespace validation (security boundary)
+            # Use the shared trusted-namespace policy (constants_security) so the
+            # live materializer matches the already-approved allowlist that the
+            # caching gate enforces. This includes "omnimarket." so first-party
+            # market nodes can hot-load via contract on the bus.
             handler_class_path = descriptor.handler_class
-            allowed_namespaces = ("omnibase_infra.", "omnibase_core.")
+            allowed_namespaces = TRUSTED_HANDLER_NAMESPACE_PREFIXES
             if not handler_class_path.startswith(allowed_namespaces):
                 logger.warning(
                     "Rejected live materialization: handler_class outside "
                     "allowed namespaces",
                     extra={
                         "node_name": node_name,
-                        "handler_class": handler_class_path,
-                        "allowed_namespaces": list(allowed_namespaces),
+                        "allowed_namespace_count": len(allowed_namespaces),
+                        "handler_class_redacted": True,
                         "correlation_id": str(correlation_id),
                     },
                 )
@@ -3584,6 +3617,14 @@ class RuntimeHostProcess:
 
         event_bus_data = descriptor.contract_config.get("event_bus")
         if not event_bus_data or not isinstance(event_bus_data, dict):
+            return
+        if not _raw_contract_owned_by_runtime_profile(descriptor.contract_config):
+            logger.info(
+                "Skipping live handler subscription for runtime-profile-owned "
+                "contract: node=%s profile=%s",
+                node_name,
+                os.environ.get("RUNTIME_PROFILE", "main"),
+            )
             return
         if _requires_raw_event_projection_wiring(event_bus_data):
             logger.info(
@@ -5749,6 +5790,14 @@ class RuntimeHostProcess:
                 if isinstance(raw_contract, dict)
                 else None
             )
+            if not _raw_contract_owned_by_runtime_profile(raw_contract):
+                logger.info(
+                    "Skipping event_bus subcontract wiring for "
+                    "runtime-profile-owned contract: handler=%s profile=%s",
+                    descriptor.name or handler_type,
+                    os.environ.get("RUNTIME_PROFILE", "main"),
+                )
+                continue
             if _requires_raw_event_projection_wiring(raw_event_bus):
                 logger.info(
                     "Skipping event_bus subcontract wiring for raw projection consumer: "
@@ -5864,6 +5913,7 @@ class RuntimeHostProcess:
             contracts=contracts,
             event_bus_wiring=self._event_bus_wiring,
             already_wired_names=already_wired,
+            runtime_profile=os.environ.get("RUNTIME_PROFILE", "main"),
         )
 
         logger.info(

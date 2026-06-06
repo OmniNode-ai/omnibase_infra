@@ -34,11 +34,11 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://redpanda:9092,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_EXTERNAL_PORT:-49092}
+      - internal://redpanda:9092,external://${PROD_REDPANDA_ADVERTISE_HOST:?PROD_REDPANDA_ADVERTISE_HOST required}:${PROD_REDPANDA_EXTERNAL_PORT:-49092}
       - --pandaproxy-addr
       - internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr
-      - internal://redpanda:8082,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${PROD_REDPANDA_PANDAPROXY_PORT:-48082}
+      - internal://redpanda:8082,external://${PROD_REDPANDA_ADVERTISE_HOST:?PROD_REDPANDA_ADVERTISE_HOST required}:${PROD_REDPANDA_PANDAPROXY_PORT:-48082}
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr
@@ -108,6 +108,8 @@ services:
     container_name: omninode-prod-runtime
     restart: unless-stopped
     depends_on:
+      migration-gate:
+        condition: service_healthy
       intelligence-migration:
         condition: service_completed_successfully
       redpanda-partition-cap:
@@ -142,6 +144,9 @@ services:
   runtime-effects:
     container_name: omninode-prod-runtime-effects
     restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
     environment:
       OMNIMEMORY_ENABLED: ${PROD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set PROD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${PROD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set PROD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
@@ -184,6 +189,9 @@ services:
   runtime-worker:
     container_name: omninode-prod-runtime-worker
     restart: unless-stopped
+    depends_on:
+      migration-gate:
+        condition: service_healthy
     environment:
       OMNIMEMORY_ENABLED: ${PROD_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set PROD_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${PROD_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set PROD_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}

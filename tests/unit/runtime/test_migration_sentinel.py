@@ -91,6 +91,15 @@ class TestHealthcheckScript:
             "Healthcheck must query db_metadata.migrations_complete"
         )
 
+    def test_healthcheck_requires_projection_tables(self) -> None:
+        """Runtime gate must prove projection tables in omnidash_analytics."""
+        content = HEALTHCHECK_SCRIPT.read_text()
+        assert "NODE_POSTGRES_DB" in content
+        assert "REQUIRED_PROJECTION_TABLES" in content
+        assert "delegation_events" in content
+        assert "node_service_registry" in content
+        assert "to_regclass" in content
+
     def test_healthcheck_uses_psql(self) -> None:
         """Script must use psql to query PostgreSQL."""
         content = HEALTHCHECK_SCRIPT.read_text()
@@ -140,4 +149,12 @@ class TestDockerComposeIntegration:
         content = COMPOSE_FILE.read_text()
         assert "check_migrations_complete.sh" in content, (
             "migration-gate must mount check_migrations_complete.sh"
+        )
+
+    def test_forward_migration_targets_projection_database(self) -> None:
+        content = COMPOSE_FILE.read_text()
+        assert "NODE_POSTGRES_DB: omnidash_analytics" in content
+        assert (
+            'REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"'
+            in content
         )

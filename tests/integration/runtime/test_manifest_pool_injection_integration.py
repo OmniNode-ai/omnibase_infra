@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration tests for runtime manifest postgres_pool injection (OMN-11247).
+"""Integration tests for runtime-owned handler dependency injection.
 
 Verifies that the service_kernel bootstrap path correctly threads a postgres_pool
 into HandlerPostgresRuntimeManifestInsert via materialized_explicit_dependencies
@@ -196,3 +196,77 @@ def test_runtime_handler_dependencies_include_pool_backed_handlers() -> None:
     assert "HandlerBaselinesBatchCompute" in result
     assert result["HandlerPostgresRuntimeManifestInsert"]["pool"] is fake_pool
     assert result["HandlerBaselinesBatchCompute"]["pool"] is fake_pool
+
+
+@pytest.mark.integration
+def test_runtime_handler_dependencies_include_dlq_replay_when_kafka_configured() -> (
+    None
+):
+    """Kernel exposes explicit Kafka deps for the DLQ replay handler."""
+    from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
+        DLQConsumer,
+        DLQProducer,
+        DLQQuarantineProducer,
+    )
+
+    result = _build_runtime_handler_dependencies(
+        None, kafka_bootstrap_servers="redpanda:9092"
+    )
+
+    assert result is not None
+    dlq_deps = result["HandlerDlqReplay"]
+    assert isinstance(dlq_deps["consumer"], DLQConsumer)
+    assert isinstance(dlq_deps["producer"], DLQProducer)
+    assert isinstance(dlq_deps["quarantine_producer"], DLQQuarantineProducer)
+    consumer = dlq_deps["consumer"]
+    assert consumer.config.bootstrap_servers == "redpanda:9092"
+    assert consumer.config.dlq_topic == "onex.dlq.omnibase-infra.events.v1"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_kernel_runtime_dependencies_cover_dlq_replay_handler() -> None:
+    """The runtime dependency map satisfies HandlerDlqReplay constructor deps."""
+    from omnibase_infra.runtime.message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
+
+    class HandlerDlqReplay:
+        def __init__(
+            self,
+            *,
+            consumer: object,
+            producer: object,
+            quarantine_producer: object,
+        ) -> None:
+            self.consumer = consumer
+            self.producer = producer
+            self.quarantine_producer = quarantine_producer
+
+        async def handle(self, envelope: object) -> None:
+            return None
+
+    manifest = ModelAutoWiringManifest(
+        contracts=(
+            _make_pool_backed_contract(
+                name="node_dlq_replay_effect",
+                handler_name="HandlerDlqReplay",
+            ),
+        )
+    )
+    engine = MessageDispatchEngine()
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+        return_value=HandlerDlqReplay,
+    ):
+        report = await wire_from_manifest(
+            manifest,
+            engine,
+            materialized_explicit_dependencies=_build_runtime_handler_dependencies(
+                None, kafka_bootstrap_servers="redpanda:9092"
+            ),
+        )
+
+    assert report.total_failed == 0
+    assert report.total_wired == 1

@@ -11,6 +11,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+REPO_ROOT_COMPOSE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 
 
 def _construct_compose_value(
@@ -55,3 +56,26 @@ def test_non_local_runtime_lanes_set_kafka_environment(
         environment = overlay["services"][service_name]["environment"]
         assert environment["ONEX_ENVIRONMENT"] == expected_environment
         assert environment["KAFKA_ENVIRONMENT"] == expected_environment
+
+
+def test_runtime_lanes_use_lane_specific_redpanda_advertise_hosts() -> None:
+    dev = _load_compose_yaml(REPO_ROOT_COMPOSE)
+    stability = _load_compose_yaml(
+        REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
+    )
+    prod = _load_compose_yaml(REPO_ROOT / "docker" / "docker-compose.prod.yml")
+
+    assert "DEV_REDPANDA_ADVERTISE_HOST" in " ".join(
+        dev["services"]["redpanda"]["command"]
+    )
+    assert "${REDPANDA_ADVERTISE_HOST" not in " ".join(
+        dev["services"]["redpanda"]["command"]
+    )
+
+    stability_redpanda_command = " ".join(stability["services"]["redpanda"]["command"])
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" in stability_redpanda_command
+    assert "${REDPANDA_ADVERTISE_HOST" not in stability_redpanda_command
+
+    prod_redpanda_command = " ".join(prod["services"]["redpanda"]["command"])
+    assert "PROD_REDPANDA_ADVERTISE_HOST" in prod_redpanda_command
+    assert "${REDPANDA_ADVERTISE_HOST" not in prod_redpanda_command

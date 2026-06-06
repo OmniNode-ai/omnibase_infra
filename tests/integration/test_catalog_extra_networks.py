@@ -117,6 +117,7 @@ def test_generate_compose_default_network_not_overwritten_as_external() -> None:
         ports=None,
         healthcheck=None,
         volumes=[],
+        tmpfs=[],
         depends_on=[],
         extra_networks=["omnibase-infra-network"],  # reserved name in extra_networks
     )

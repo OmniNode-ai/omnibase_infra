@@ -10,10 +10,15 @@
 # All migrations (001+) live in docker/migrations/forward/ and
 # docker/migrations/rollback/. There is a single canonical source.
 #
+# Node-owned migrations (OMN-12559): omnimarket projection node migrations are
+# vendored under docker/migrations/forward/nodes/<node>/ and applied by
+# run-forward-migrations.sh under namespaced node:<node>:<file> ids. The COPY
+# below is recursive, so the nodes/ subtree ships in the image automatically.
+#
 # Build context: repo root (docker build -f docker/Dockerfile.migrate .)
 
 FROM alpine:3.19
 
-# Copy all migrations from the canonical location
+# Copy all migrations from the canonical location (recursive — includes nodes/).
 COPY docker/migrations/forward/ /migrations/forward/
 COPY docker/migrations/rollback/ /migrations/rollback/

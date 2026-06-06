@@ -62,6 +62,28 @@ class TestCacheBust:
             f"Expected --build-arg GIT_SHA={git_sha}, got {git_sha_arg!r}"
         )
 
+    def test_runtime_build_does_not_retag_from_project_image(self) -> None:
+        """Runtime build must not overwrite runtime:latest from a stale project tag."""
+        executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return _make_ok_result()
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            executor._compose_build(Scope.RUNTIME, "abc1234", _noop_phase_update)
+
+        assert ["docker", "tag"] not in [cmd[:2] for cmd in captured_cmds]
+        assert not any(
+            cmd[:2] == ["docker", "tag"]
+            and "omnibase-infra-omninode-runtime:latest" in cmd
+            and "runtime:latest" in cmd
+            for cmd in captured_cmds
+        )
+
     def test_compose_build_called_before_compose_up_in_rebuild_scope(self) -> None:
         """rebuild_scope must call _compose_build before _compose_up so images are fresh."""
         executor = DeployExecutor()
@@ -71,7 +93,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             call_order.append("build")
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             call_order.append("up")
 
         executor._compose_build = fake_build  # type: ignore[method-assign]
@@ -93,7 +117,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             build_scopes.append(scope)
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             pass
 
         executor._compose_build = fake_build  # type: ignore[method-assign]
@@ -112,7 +138,9 @@ class TestCacheBust:
         def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             git_sha_seen_in_build.append(sha)
 
-        def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
+        def fake_up(
+            phase: Phase, scope: Scope, services: list[str], cb, **kwargs
+        ) -> None:
             pass
 
         executor._compose_build = fake_build  # type: ignore[method-assign]

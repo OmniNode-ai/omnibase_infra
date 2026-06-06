@@ -338,11 +338,17 @@ class TestTopicProvisioner:
         assert len(result["created"]) == 0
         assert len(result["failed"]) == 0
 
-    async def test_ensure_single_topic_success(self, contracts_root: Path) -> None:
+    async def test_ensure_single_topic_success(
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Single topic creation returns True on success."""
+        monkeypatch.setenv("ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS", "1")
         manager = _make_provisioner(contracts_root)
 
         mock_admin_cls = MagicMock()
+        mock_new_topic_cls = MagicMock()
         mock_admin_instance = AsyncMock()
         mock_admin_instance.start = AsyncMock()
         mock_admin_instance.close = AsyncMock()
@@ -355,7 +361,7 @@ class TestTopicProvisioner:
                 "aiokafka": MagicMock(),
                 "aiokafka.admin": MagicMock(
                     AIOKafkaAdminClient=mock_admin_cls,
-                    NewTopic=MagicMock(),
+                    NewTopic=mock_new_topic_cls,
                 ),
                 "aiokafka.errors": MagicMock(
                     TopicAlreadyExistsError=type(
@@ -367,6 +373,11 @@ class TestTopicProvisioner:
             result = await manager.ensure_topic_exists("test.topic")
 
         assert result is True
+        mock_new_topic_cls.assert_called_once_with(
+            name="test.topic",
+            num_partitions=1,
+            replication_factor=1,
+        )
 
     async def test_ensure_single_topic_failure(self, contracts_root: Path) -> None:
         """Single topic creation returns False on failure."""

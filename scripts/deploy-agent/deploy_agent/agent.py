@@ -17,6 +17,7 @@ from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     DeployInProgressError,
+    EnumRuntimeLane,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -191,7 +192,8 @@ class DeployAgent:
             if cmd.scope in (Scope.RUNTIME, Scope.FULL):
                 self.executor.validate_llm_endpoint_env_contract()
 
-            # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer cache
+            # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
+            # cache. prod pulls the pinned digest instead of rebuilding from a ref.
             self.executor.rebuild_scope(
                 cmd.scope,
                 cmd.services,
@@ -199,10 +201,23 @@ class DeployAgent:
                 git_sha=self._current_git_sha,
                 build_source=cmd.build_source,
                 skip_self_update=self._skip_self_update,
+                lane=cmd.runtime_lane,
+                image_digest=cmd.image_digest,
             )
 
-            # Verify
-            health_checks = self.executor.verify(on_phase_update=on_phase_update)
+            # prod must serve exactly the pinned digest: verify the running
+            # container image digest equals the requested digest BEFORE any
+            # health check, failing closed on mismatch.
+            if cmd.runtime_lane == EnumRuntimeLane.PROD and cmd.image_digest:
+                health_checks = self.executor.deploy_and_verify(
+                    lane=cmd.runtime_lane,
+                    expected_digest=cmd.image_digest,
+                    on_phase_update=on_phase_update,
+                )
+            else:
+                health_checks = self.executor.verify(
+                    on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                )
 
             # Complete
             self.job_store.complete(cid, status="success")

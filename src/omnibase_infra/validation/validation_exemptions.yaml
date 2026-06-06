@@ -91,6 +91,32 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
+  # LLM Metrics Event Model Exemptions (OMN-12700)
+  # ==========================================================================
+  # These event payloads preserve the existing llm-call-completed wire contract.
+  # Here model_id is an LLM model name such as "gemini-2.5-pro", not an ONEX
+  # entity identifier. Cost/projection consumers already read this field by key.
+  - file_pattern: 'model_llm_call_completed_event\.py'
+    violation_pattern: "Field 'model_id' should use UUID type instead of str"
+    reason: >
+      The omniintelligence llm-call-completed metrics event uses model_id for the
+      provider/model name. Changing this field to UUID would break the existing
+      metrics payload contract and downstream cost aggregation consumers.
+
+    documentation:
+      - OMN-12700 PR description
+    ticket: OMN-12700
+  - file_pattern: 'model_llm_call_completed_infra_event\.py'
+    violation_pattern: "Field 'model_id' should use UUID type instead of str"
+    reason: >
+      The infra-local llm-call-completed event mirrors the metrics model_id as an
+      LLM provider/model name. It is not an ONEX entity identifier and must stay a
+      string for compatibility with existing infra projections.
+
+    documentation:
+      - OMN-12700 PR description
+    ticket: OMN-12700
+  # ==========================================================================
   # ContractLinter Exemptions (OMN-517)
   # ==========================================================================
   # Contract linter with cohesive validation methods, each validating a
@@ -551,6 +577,24 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_register_dispatcher_unlocked'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Unlocked variant of register_dispatcher; carries the identical routing-configuration fields (dispatcher_id, dispatcher, category, message_types, node_kind, operation_bindings, payload_type_matcher). Same coordinator pattern as register_dispatcher (already exempt) — splitting would fragment a single registration operation.
+
+    documentation:
+      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+    ticket: OMN-12416
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_register_dispatcher_dynamic'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Post-freeze dynamic variant of register_dispatcher for contract materialization; carries the same routing-configuration fields including payload_type_matcher so dynamically materialized multi-handler contracts stay type-scoped (OMN-12416). Same coordinator pattern as register_dispatcher (already exempt).
+
+    documentation:
+      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
+    ticket: OMN-12416
   # ==========================================================================
   # RegistryDispatcher Exemptions (OMN-934)
   # ==========================================================================
@@ -824,6 +868,38 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1246
+  # ==========================================================================
+  # Topic Migration Service Exemptions (OMN-12623)
+  # ==========================================================================
+  # Lag observation + drain-proof gate are infrastructure services mirroring
+  # ServiceTopicManager / ServiceRuntimeHealthMonitor; they follow the
+  # Service<Name> file/class naming convention.
+  - file_pattern: 'service_consumer_lag_observer\.py'
+    class_pattern: "Class name 'ServiceConsumerLagObserver'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. Infrastructure service computing Kafka consumer-group lag from committed vs log-end offsets, mirroring ServiceTopicManager / ServiceRuntimeHealthMonitor.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-12623
+  - file_pattern: 'service_drain_proof_gate\.py'
+    class_pattern: "Class name 'ServiceDrainProofGate'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. Infrastructure service gating old-consumer-group retirement on a zero-lag drain proof for topic migrations.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-12623
+  - file_pattern: 'model_consumer_group_lag\.py'
+    violation_pattern: "Field 'group_id' should use UUID"
+    reason: >
+      group_id is a Kafka consumer group ID which is a free-text string, not a UUID. Infrastructure-specific, follows Kafka naming conventions (same as model_log_context.py exemption OMN-1002).
+
+    documentation:
+      - CLAUDE.md (Kafka consumer group conventions)
+    ticket: OMN-12623
   - file_pattern: 'health_checker.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
