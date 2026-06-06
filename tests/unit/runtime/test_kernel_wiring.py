@@ -71,6 +71,29 @@ class TestKernelDispatchEngineWiring:
         )
 
         assert config.dispatch_engine is engine
+        assert config.runtime_profile == "main"
+
+    @pytest.mark.asyncio
+    async def test_runtime_profile_can_be_set_on_plugin_config(self) -> None:
+        """Verify runtime_profile is passed through typed plugin config."""
+        from uuid import uuid4
+
+        from omnibase_infra.runtime.models import ModelDomainPluginConfig
+
+        bus = EventBusInmemory(environment="test", group="test-kernel")
+        container = MagicMock()
+
+        config = ModelDomainPluginConfig(
+            container=container,
+            event_bus=bus,
+            correlation_id=uuid4(),
+            input_topic="requests",
+            output_topic="responses",
+            consumer_group="onex-test",
+            runtime_profile="effects",
+        )
+
+        assert config.runtime_profile == "effects"
 
 
 @pytest.mark.unit
