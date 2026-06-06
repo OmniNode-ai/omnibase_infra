@@ -1136,6 +1136,9 @@ services:
     environment:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-contract-resolver
+      # Contract resolver does not mount /app/data, so it must not render the
+      # Bifrost delegation contract into the shared runtime data path.
+      BIFROST_CONTRACT_PATH: ""
       CORS_ORIGINS: ${CONTRACT_RESOLVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8085}
       CONTRACT_RESOLVER_PORT: "8091"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
