@@ -96,6 +96,7 @@ class TestRuntimeScopeComposeUp:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(executor, "_ensure_runtime_migrations_ready"),
             patch(
                 "deploy_agent.executor.verify_containers_up",
                 return_value=(True, []),
@@ -147,6 +148,7 @@ class TestRuntimeScopeComposeUp:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(executor, "_ensure_runtime_migrations_ready"),
             patch(
                 "deploy_agent.executor.verify_containers_up",
                 return_value=(True, []),
@@ -251,3 +253,60 @@ class TestCoreAndFullScopeComposeUp:
         mock_verify.assert_called_once_with(
             requested, timeout_s=120, lane=EnumRuntimeLane.DEV
         )
+
+    def test_runtime_scope_runs_migration_preflight_before_runtime_services(
+        self,
+    ) -> None:
+        executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
+        verified: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs: object
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            if "SELECT to_regclass('public.delegation_events') IS NOT NULL" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="t\n", stderr=""
+                )
+            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="t\n", stderr=""
+                )
+            return _ok()
+
+        def fake_verify(
+            services: list[str], timeout_s: int = 120, **kwargs: object
+        ) -> tuple[bool, list[str]]:
+            verified.append(services)
+            return True, []
+
+        with (
+            patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch("deploy_agent.executor.verify_containers_up", side_effect=fake_verify),
+        ):
+            executor._compose_up(
+                Phase.RUNTIME,
+                Scope.RUNTIME,
+                [],
+                _noop_phase_update,
+            )
+
+        assert captured_cmds[0][-1] == "forward-migration"
+        assert "--no-deps" in captured_cmds[0]
+        assert captured_cmds[1][-1] == "migration-gate"
+        assert "--no-deps" in captured_cmds[1]
+        assert any(
+            "SELECT to_regclass('public.delegation_events') IS NOT NULL" in cmd
+            and "omnidash_analytics" in cmd
+            for cmd in captured_cmds
+        )
+        assert any(
+            "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd
+            and "omnidash_analytics" in cmd
+            for cmd in captured_cmds
+        )
+        assert captured_cmds[-1][-len(services_for_scope(Scope.RUNTIME)) :] == (
+            services_for_scope(Scope.RUNTIME)
+        )
+        assert verified[:2] == [["forward-migration"], ["migration-gate"]]

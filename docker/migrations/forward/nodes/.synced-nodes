@@ -15,9 +15,10 @@
 # generation_events), additive columns, and the dashboard read views (0010).
 node_projection_delegation
 
-# Savings dashboard read view only. The savings_estimates base table is already
-# owned by infra's flat migration 074; we vendor just the OMN-12489 view here.
-node_projection_savings:076_*
+# Savings dashboard projection: base table, additive columns, and the
+# OMN-12489 read view. Node-owned migrations apply to omnidash_analytics,
+# not the infra database that carries the historical flat 074 migration.
+node_projection_savings
 
 # Registration projection read model. Prod currently lacks node_service_registry;
 # vendor the node-owned, idempotent migrations so the forward runner owns the fix.

@@ -36,6 +36,16 @@ def _ok() -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
 
+def _is_projection_table_check(cmd: list[str]) -> bool:
+    return (
+        "omnidash_analytics" in cmd
+        and any(
+            f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
+            for table in ("delegation_events", "node_service_registry")
+        )
+    )
+
+
 class TestLaneConfig:
     def test_dev_lane_matches_legacy_module_constants(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
@@ -85,6 +95,7 @@ class TestComposeUpLaneSelection:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(executor, "_ensure_runtime_migrations_ready"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),
@@ -117,6 +128,7 @@ class TestComposeUpLaneSelection:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(executor, "_ensure_runtime_migrations_ready"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),
@@ -146,6 +158,7 @@ class TestComposeUpLaneSelection:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
+            patch.object(executor, "_ensure_runtime_migrations_ready"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),
@@ -184,7 +197,7 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            if _is_projection_table_check(cmd):
                 assert "omnibase-infra-stability-test-postgres" in cmd
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="t\n", stderr=""
@@ -218,7 +231,7 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            if _is_projection_table_check(cmd):
                 assert "omnibase-infra-prod-postgres" in cmd
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="t\n", stderr=""
@@ -253,7 +266,7 @@ class TestVerifyLaneHealthTargets:
         ) -> subprocess.CompletedProcess:
             if cmd[:2] == ["docker", "ps"]:
                 return _ok()
-            if "SELECT to_regclass('public.node_service_registry') IS NOT NULL" in cmd:
+            if _is_projection_table_check(cmd):
                 assert "omnibase-infra-postgres" in cmd
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="t\n", stderr=""

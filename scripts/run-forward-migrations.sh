@@ -39,6 +39,7 @@
 #   POSTGRES_DB       (default: omnibase_infra)
 #   MIGRATIONS_DIR    (default: /migrations/forward)
 #   NODE_MIGRATIONS_DIR (default: ${MIGRATIONS_DIR}/nodes)
+#   NODE_POSTGRES_DB  (default: POSTGRES_DB; compose sets omnidash_analytics)
 
 set -e
 
@@ -48,6 +49,7 @@ PGPORT="${POSTGRES_PORT:-5432}"
 PGDB="${POSTGRES_DB:-omnibase_infra}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 NODE_MIGRATIONS_DIR="${NODE_MIGRATIONS_DIR:-${MIGRATIONS_DIR}/nodes}"
+NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
@@ -113,7 +115,18 @@ NODE_APPLIED=0
 NODE_SKIPPED=0
 
 if [ -d "${NODE_MIGRATIONS_DIR}" ]; then
-  echo "[forward-migration] Scanning ${NODE_MIGRATIONS_DIR} for node-owned migrations..."
+  echo "[forward-migration] Ensuring schema_migrations table exists in node projection database ${NODE_PGDB}..."
+
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" -c "
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+    migration_id TEXT PRIMARY KEY,
+    applied_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    checksum     TEXT NOT NULL,
+    source_set   TEXT NOT NULL
+);
+"
+
+  echo "[forward-migration] Scanning ${NODE_MIGRATIONS_DIR} for node-owned migrations in ${NODE_PGDB}..."
 
   # Iterate node directories in sorted order for deterministic application.
   for node_dir in $(ls -d "${NODE_MIGRATIONS_DIR}"/*/ 2>/dev/null | sort); do
@@ -128,7 +141,7 @@ if [ -d "${NODE_MIGRATIONS_DIR}" ]; then
       filename=$(basename "$migration_file")
       migration_id="node:${node_name}:${filename}"
 
-      already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
         -tAc "SELECT 1 FROM public.schema_migrations WHERE migration_id = '${migration_id}'" 2>/dev/null || true)
 
       if [ "$already_applied" = "1" ]; then
@@ -139,10 +152,10 @@ if [ -d "${NODE_MIGRATIONS_DIR}" ]; then
 
       echo "[forward-migration]   apply ${migration_id}..."
 
-      psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
         -v ON_ERROR_STOP=1 -f "$migration_file"
 
-      psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$NODE_PGDB" \
         -c "INSERT INTO public.schema_migrations (migration_id, checksum, source_set)
             VALUES ('${migration_id}', 'applied-by-runner', 'node')
             ON CONFLICT (migration_id) DO NOTHING;"

@@ -573,6 +573,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
       MIGRATIONS_DIR: /migrations/forward
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
@@ -617,6 +618,8 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
     # Stay alive so healthcheck can run; no actual workload.
     entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
     volumes:

@@ -300,6 +300,11 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         ]
         == "service_completed_successfully"
     )
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        assert (
+            services[service_name]["depends_on"]["migration-gate"]["condition"]
+            == "service_healthy"
+        )
     assert services["redpanda-partition-cap"]["depends_on"]["redpanda"][
         "condition"
     ] == ("service_healthy")

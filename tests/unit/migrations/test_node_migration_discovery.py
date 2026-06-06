@@ -44,6 +44,12 @@ SAVINGS_VIEW = (
     / "node_projection_savings"
     / "076_create_delegation_savings_projection_view.sql"
 )
+SAVINGS_CREATE = (
+    NODES_DIR / "node_projection_savings" / "074_create_savings_estimates.sql"
+)
+SAVINGS_UPDATED_AT = (
+    NODES_DIR / "node_projection_savings" / "075_add_savings_estimates_updated_at.sql"
+)
 REGISTRATION_CREATE = (
     NODES_DIR / "node_projection_registration" / "0000_create_node_service_registry.sql"
 )
@@ -71,6 +77,13 @@ class TestVendoredViewMigrations:
         assert SAVINGS_VIEW.is_file(), (
             "savings projection view must be vendored under "
             "docker/migrations/forward/nodes/node_projection_savings/"
+        )
+        assert SAVINGS_CREATE.is_file(), (
+            "savings_estimates base table must be vendored with the savings view "
+            "because node-owned migrations apply to omnidash_analytics"
+        )
+        assert SAVINGS_UPDATED_AT.is_file(), (
+            "savings_estimates additive columns must be vendored with the savings view"
         )
         sql = SAVINGS_VIEW.read_text(encoding="utf-8")
         assert "CREATE OR REPLACE VIEW projection_delegation_savings" in sql
@@ -101,7 +114,7 @@ class TestVendoredViewMigrations:
         create_sql = REGISTRATION_CREATE.read_text(encoding="utf-8")
         heartbeat_sql = REGISTRATION_HEARTBEAT.read_text(encoding="utf-8")
         assert "CREATE TABLE IF NOT EXISTS node_service_registry" in create_sql
-        assert "uptime_seconds BIGINT NOT NULL DEFAULT 0" in create_sql
+        assert "uptime_seconds BIGINT DEFAULT 0" in create_sql
         assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in heartbeat_sql
         assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in heartbeat_sql
 
@@ -121,6 +134,11 @@ class TestNamespacedDiscoveryWiring:
         # numeric collision with the flat docker/<filename> sequence.
         assert 'migration_id="node:${node_name}:${filename}"' in script
         assert "source_set" in script
+
+    def test_runner_applies_node_migrations_to_projection_database(self) -> None:
+        script = RUNNER.read_text(encoding="utf-8")
+        assert 'NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"' in script
+        assert '-d "$NODE_PGDB"' in script
 
     def test_runner_flat_and_node_ids_are_distinct_namespaces(self) -> None:
         """The flat sequence and node sequence use different id prefixes."""
