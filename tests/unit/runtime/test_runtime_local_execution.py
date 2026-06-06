@@ -188,6 +188,42 @@ def _make_sync_handler(
     return _Handler()
 
 
+def _make_async_typed_handler(
+    output: MockOutput | None = None,
+    error: Exception | None = None,
+) -> Any:
+    """Return an object with an async typed ``handle(request)`` method."""
+
+    class _Handler:
+        calls: list[MockInput] = []
+
+        async def handle(self, request: MockInput) -> MockOutput | None:
+            self.calls.append(request)
+            if error is not None:
+                raise error
+            return output
+
+    return _Handler()
+
+
+def _make_sync_typed_handler(
+    output: MockOutput | None = None,
+    error: Exception | None = None,
+) -> Any:
+    """Return an object with a sync typed ``handle(request)`` method."""
+
+    class _Handler:
+        calls: list[MockInput] = []
+
+        def handle(self, request: MockInput) -> MockOutput | None:
+            self.calls.append(request)
+            if error is not None:
+                raise error
+            return output
+
+    return _Handler()
+
+
 def _input_bytes(correlation_id: str = "cid-1", name: str = "alice") -> bytes:
     return (
         MockInput(correlation_id=correlation_id, name=name).model_dump_json().encode()
@@ -196,8 +232,8 @@ def _input_bytes(correlation_id: str = "cid-1", name: str = "alice") -> bytes:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_adapter_async_handler() -> None:
-    """Adapter deserializes message, calls async handler, publishes result."""
+async def test_adapter_async_kwargs_handler() -> None:
+    """Adapter deserializes message, calls legacy async kwargs handler."""
     expected_output = MockOutput(correlation_id="cid-1", result="ok")
     handler = _make_async_handler(output=expected_output)
     bus = MockBus()
@@ -212,7 +248,6 @@ async def test_adapter_async_handler() -> None:
     msg = MockMessage(value=_input_bytes())
     await adapter.on_message(msg)
 
-    # Handler was called with deserialized kwargs
     assert len(handler.calls) == 1
     assert handler.calls[0]["correlation_id"] == "cid-1"
     assert handler.calls[0]["name"] == "alice"
@@ -228,8 +263,8 @@ async def test_adapter_async_handler() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_adapter_sync_handler() -> None:
-    """Adapter works with sync handlers too."""
+async def test_adapter_sync_kwargs_handler() -> None:
+    """Adapter works with legacy sync kwargs handlers too."""
     expected_output = MockOutput(correlation_id="cid-2", result="sync-ok")
     handler = _make_sync_handler(output=expected_output)
     bus = MockBus()
@@ -249,6 +284,60 @@ async def test_adapter_sync_handler() -> None:
     assert len(bus.published) == 1
     published_data = json.loads(bus.published[0][2])
     assert published_data["result"] == "sync-ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adapter_async_typed_handler() -> None:
+    """Adapter calls async typed handlers with the validated request model."""
+    expected_output = MockOutput(correlation_id="cid-typed", result="typed-ok")
+    handler = _make_async_typed_handler(output=expected_output)
+    bus = MockBus()
+    adapter = LocalRuntimeBusAdapter(
+        handler=handler,
+        handler_name="test-async-typed",
+        input_model_cls=MockInput,
+        output_topic="out.topic",
+        bus=bus,
+    )
+
+    msg = MockMessage(value=_input_bytes(correlation_id="cid-typed", name="ada"))
+    await adapter.on_message(msg)
+
+    assert len(handler.calls) == 1
+    assert isinstance(handler.calls[0], MockInput)
+    assert handler.calls[0].correlation_id == "cid-typed"
+    assert handler.calls[0].name == "ada"
+    assert len(bus.published) == 1
+    published_data = json.loads(bus.published[0][2])
+    assert published_data["result"] == "typed-ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adapter_sync_typed_handler() -> None:
+    """Adapter calls sync typed handlers with the validated request model."""
+    expected_output = MockOutput(correlation_id="cid-sync-typed", result="typed-sync")
+    handler = _make_sync_typed_handler(output=expected_output)
+    bus = MockBus()
+    adapter = LocalRuntimeBusAdapter(
+        handler=handler,
+        handler_name="test-sync-typed",
+        input_model_cls=MockInput,
+        output_topic="out.topic",
+        bus=bus,
+    )
+
+    msg = MockMessage(value=_input_bytes(correlation_id="cid-sync-typed", name="grace"))
+    await adapter.on_message(msg)
+
+    assert len(handler.calls) == 1
+    assert isinstance(handler.calls[0], MockInput)
+    assert handler.calls[0].correlation_id == "cid-sync-typed"
+    assert handler.calls[0].name == "grace"
+    assert len(bus.published) == 1
+    published_data = json.loads(bus.published[0][2])
+    assert published_data["result"] == "typed-sync"
 
 
 @pytest.mark.unit
