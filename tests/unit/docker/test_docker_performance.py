@@ -355,14 +355,17 @@ class TestDockerSecurityBestPractices:
     """Tests for Docker security best practices that impact performance."""
 
     def test_non_root_user_configured(self) -> None:
-        """Verify Dockerfile uses non-root user."""
+        """Verify runtime drops from bootstrap root to non-root user."""
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
         content = dockerfile.read_text()
+        entrypoint = DOCKER_DIR / "entrypoint-runtime.sh"
+        entrypoint_content = entrypoint.read_text()
 
-        # Should have USER instruction
         assert "USER" in content
-        # Should not be root
-        assert "USER root" not in content
+        user_directives = re.findall(r"^USER\s+(.+)$", content, re.MULTILINE)
+        assert user_directives
+        assert user_directives[-1] == "root"
+        assert 'exec gosu omniinfra "$0" "$@"' in entrypoint_content
 
     def test_minimal_base_image(self) -> None:
         """Verify Dockerfile uses minimal base image."""

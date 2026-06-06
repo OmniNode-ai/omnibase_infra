@@ -249,53 +249,65 @@ class TestDockerfileSecurity:
             "Dockerfile must create a non-root user with useradd/adduser"
         )
 
-    def test_switches_to_non_root_user(self) -> None:
-        """Verify Dockerfile switches to non-root user before running application.
+    def test_runtime_entrypoint_drops_to_non_root_user(self) -> None:
+        """Verify runtime entrypoint drops privileges before running application.
 
-        After creating a non-root user, the Dockerfile must use the USER
-        directive to switch to that user.
+        The runtime image starts as root only to repair fresh Docker volume
+        ownership, then re-execs the entrypoint as omniinfra with gosu before
+        schema stamping, Bifrost rendering, or launching the application.
         """
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
-        content = dockerfile.read_text()
+        dockerfile_content = dockerfile.read_text()
+        entrypoint = DOCKER_DIR / "entrypoint-runtime.sh"
+        entrypoint_content = entrypoint.read_text()
 
-        # Should have USER directive for non-root user
-        user_directive_pattern = r"^USER\s+(?!root\b)\w+"
-        found_user_directive = re.search(user_directive_pattern, content, re.MULTILINE)
-
-        assert found_user_directive, (
-            "Dockerfile must switch to non-root user with USER directive"
+        assert re.search(r"^\s*USER\s+root\b", dockerfile_content, re.MULTILINE), (
+            "Runtime image should start as root only for entrypoint volume bootstrap"
+        )
+        assert "gosu" in dockerfile_content, (
+            "Runtime image must install gosu for privilege drop"
+        )
+        assert 'exec gosu omniinfra "$0" "$@"' in entrypoint_content, (
+            "Entrypoint must re-exec itself as omniinfra after volume bootstrap"
         )
 
-    def test_does_not_run_as_root(self) -> None:
-        """Verify Dockerfile does not explicitly run as root user.
+        gosu_pos = entrypoint_content.index('exec gosu omniinfra "$0" "$@"')
+        for marker in (
+            "stamp_fingerprint",
+            "render_bifrost_delegation_contract",
+            'exec "$@"',
+        ):
+            assert gosu_pos < entrypoint_content.index(marker), (
+                f"Privilege drop must happen before {marker}"
+            )
 
-        The final USER directive should not be 'USER root'.
+    def test_root_user_is_entrypoint_bootstrap_only(self) -> None:
+        """Verify root user is documented as bootstrap-only.
 
-        SECURITY: This test MUST fail if no USER directive exists, because
-        Docker containers run as root by default when no USER is specified.
-        A missing USER directive is a security vulnerability.
+        The final Docker USER may be root for volume repair, but the entrypoint
+        must make root a bounded bootstrap phase and must drop privileges before
+        the application process starts.
         """
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
         content = dockerfile.read_text()
+        entrypoint_content = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
 
-        # Split into lines and find last USER directive
         lines = content.split("\n")
         user_lines = [line for line in lines if re.match(r"^\s*USER\s+", line)]
 
-        # SECURITY CHECK: Ensure at least one USER directive exists.
-        # Without a USER directive, Docker runs containers as root by default,
-        # which is a serious security vulnerability. This test MUST fail if
-        # no USER directive is found - it should never silently pass.
         assert user_lines, (
             "SECURITY FAILURE: Dockerfile has no USER directive. "
-            "Containers will run as root by default, which is a security risk. "
-            "Add 'USER <non-root-user>' directive to the Dockerfile."
+            "Root bootstrap must be explicit and paired with entrypoint gosu."
         )
 
         last_user_directive = user_lines[-1]
-        assert "root" not in last_user_directive.lower(), (
-            f"SECURITY FAILURE: Final USER directive sets root user: "
-            f"'{last_user_directive.strip()}'. Container must not run as root."
+        assert last_user_directive.strip() == "USER root", (
+            "Runtime image should use explicit root bootstrap, not implicit "
+            f"default or unexpected USER directive: {last_user_directive.strip()}"
+        )
+        assert "Start as root only for entrypoint volume bootstrap" in content
+        assert 'exec gosu omniinfra "$0" "$@"' in entrypoint_content, (
+            "Root bootstrap is only acceptable when entrypoint drops to omniinfra"
         )
 
     def test_no_hardcoded_passwords(self) -> None:
