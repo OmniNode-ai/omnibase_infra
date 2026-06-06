@@ -302,13 +302,18 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 5
+    # OMN-12736: merge_group queue refs can spend several minutes in checkout on
+    # self-hosted runners. Keep the freeze gate strict, but give checkout enough
+    # room to finish before the script runs.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
+        timeout-minutes: 10
         uses: actions/checkout@v6
         with:
           fetch-depth: 2
+          fetch-tags: false
 
       - name: Check migration freeze
         run: ./scripts/check_migration_freeze.sh --ci
