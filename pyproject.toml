@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.43.0,<0.44.0",
+    "omnibase-core>=0.44.0,<0.45.0",
     "omnibase-spi>=0.22.0,<0.23.0",
     # ============================================================================
     # External Dependency Security Guidance
@@ -164,14 +164,14 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.43.0,<0.44.0",
+    "omnibase-core>=0.44.0,<0.45.0",
     "omnibase-spi>=0.22.0,<0.23.0",
 ]
 
 [tool.uv.sources]
-# OMN-12623: bump core pin to dev HEAD (a1e73fff, OMN-12621 #1191) which adds
-# ModelTopicMigrationContract/ModelTopicSchemaBinding consumed by the migration executor.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "a1e73fff25a05ccb37cbb92d9c91754c59d808c0" }
+# OMN-12727: bump core pin to dev HEAD (f587bbb4, OMN-12663/OMN-12676)
+# which widens bifrost delegation tier literals and carries inference API key refs.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "f587bbb4bd7f8db10a178dab546bdcef5c7136fd" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
