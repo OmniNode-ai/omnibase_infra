@@ -1,0 +1,48 @@
+# OMN-12723 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control;
+# this repo-local contract carries deploy-gate evidence for the runtime fresh
+# volume ownership bootstrap.
+schema_version: "1.0.0"
+ticket_id: "OMN-12723"
+title: "Bootstrap runtime volume ownership"
+summary: >
+  Starts the runtime image with a bounded root bootstrap phase that repairs
+  fresh Docker named volume ownership for /app/data, /app/data/delegation,
+  /app/logs, and /app/tmp, then re-execs the entrypoint as omniinfra with gosu
+  before schema fingerprinting, Bifrost rendering, or runtime launch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused Docker security and fresh-volume bootstrap unit tests pass."
+    command: "uv run pytest tests/unit/docker/test_docker_security.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py -q"
+  - kind: "tests"
+    description: "Docker integration security tests execute through the real entrypoint and prove UID 1000."
+    command: "uv run pytest tests/integration/docker/test_docker_integration.py::TestDockerSecurity::test_container_runs_as_non_root_user tests/integration/docker/test_docker_integration.py::TestDockerSecurity::test_container_user_has_correct_uid -q"
+  - kind: "manual"
+    description: "Deploy-gate proof: the next runtime image build carries the root bootstrap and gosu privilege drop; dev redeploy must prove Bifrost rendering no longer fails on fresh named volumes before release."
+    command: "deploy-gate: no live deploy performed pre-merge; next runtime image build carries fresh-volume ownership bootstrap and post-merge dev deploy validates writable /app/data/delegation"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-focused-tests"
+    description: "Focused Docker security and fresh-volume bootstrap unit tests pass."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/docker/test_docker_security.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py -q"
+  - id: "dod-integration-security-tests"
+    description: "Docker integration security tests execute through the runtime entrypoint and prove the command runs as omniinfra UID 1000."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/docker/test_docker_integration.py::TestDockerSecurity::test_container_runs_as_non_root_user tests/integration/docker/test_docker_integration.py::TestDockerSecurity::test_container_user_has_correct_uid -q"
+  - id: "dod-deploy-assessment"
+    description: "No pre-merge live deploy required; the next runtime image build carries the bootstrap, and clean release remains gated on post-merge dev deploy validation."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy-gate: no live deploy performed pre-merge; next runtime image build carries fresh-volume ownership bootstrap and post-merge dev deploy validates writable /app/data/delegation"
