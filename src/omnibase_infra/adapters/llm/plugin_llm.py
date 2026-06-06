@@ -108,7 +108,6 @@ class PluginLlm:
         self._router: AdapterModelRouter | None = None
         self._health_service: ServiceLlmEndpointHealth | None = None
         self._health_task: asyncio.Task[None] | None = None
-        self._inference_consumer_task: asyncio.Task[None] | None = None
         self._endpoints: dict[str, str] = {}
 
     @property
@@ -183,53 +182,19 @@ class PluginLlm:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Register LLM adapter and DelegationIntentBridge in the container."""
+        """Register the LLM model router in the container.
+
+        The delegation chain runs as a pure Kafka chain (OMN-12294): the LLM
+        call effect consumes inference intents directly off the bus, so there is
+        no in-process bridge or LLM caller to register here.
+        """
         from omnibase_infra.runtime.models import ModelDomainPluginResult
-
-        services: list[str] = ["AdapterModelRouter"]
-
-        event_bus = getattr(config, "event_bus", None)
-        if event_bus is not None and config.container is not None:
-            from omnimarket.adapters.llm.adapter_llm_caller_delegation import (
-                LlmCallerDelegation,
-            )
-            from omnimarket.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
-                DelegationIntentBridge,
-            )
-
-            from omnibase_core.enums import EnumInjectionScope
-
-            bridge = DelegationIntentBridge(
-                event_bus=event_bus,
-                llm_caller=LlmCallerDelegation(),
-            )
-            if config.container.service_registry is not None:
-                await config.container.service_registry.register_instance(
-                    interface=DelegationIntentBridge,
-                    instance=bridge,
-                    scope=EnumInjectionScope.GLOBAL,
-                    metadata={
-                        "description": "Delegation intent bridge with local-model LLM caller",
-                    },
-                )
-            services.append("DelegationIntentBridge")
-            logger.info(
-                "PluginLlm: DelegationIntentBridge registered with LlmCallerDelegation "
-                "(correlation_id=%s)",
-                config.correlation_id,
-            )
-        else:
-            logger.debug(
-                "PluginLlm: skipping DelegationIntentBridge registration — "
-                "no event_bus or container (correlation_id=%s)",
-                config.correlation_id,
-            )
 
         return ModelDomainPluginResult(
             plugin_id=self.plugin_id,
             success=True,
             message="LLM handlers wired",
-            services_registered=services,
+            services_registered=["AdapterModelRouter"],
         )
 
     async def wire_dispatchers(
@@ -273,36 +238,9 @@ class PluginLlm:
             config.correlation_id,
         )
 
-        # --- LLM inference command consumer (new — OMN-7104) ---
-        # Subscribe to the LLM inference request topic declared in
-        # node_llm_inference_effect/contract.yaml so the node can receive
-        # Kafka commands and route them to HandlerLlmOpenaiCompatible.
-        if event_bus is not None:
-            from omnibase_infra.adapters.llm.consumer_llm_inference import (
-                start_llm_inference_consumer,
-            )
-
-            self._inference_consumer_task = asyncio.create_task(
-                start_llm_inference_consumer(
-                    event_bus=event_bus,
-                    endpoints=self._endpoints,
-                    correlation_id=str(config.correlation_id),
-                ),
-                name="llm-inference-consumer",
-            )
-            logger.info(
-                "PluginLlm: started LLM inference command consumer (correlation_id=%s)",
-                config.correlation_id,
-            )
-        else:
-            logger.debug(
-                "PluginLlm: no event_bus available, skipping inference consumer (correlation_id=%s)",
-                config.correlation_id,
-            )
-
         return ModelDomainPluginResult.succeeded(
             plugin_id=self.plugin_id,
-            message=f"Health probes + inference consumer started for {len(friendly_endpoints)} endpoints",
+            message=f"Health probes started for {len(friendly_endpoints)} endpoints",
         )
 
     async def shutdown(

@@ -156,7 +156,7 @@ class TestRegistryApiProjectionTail:
         projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
-        """Discovery should explicitly mark post-Consul instance unavailability."""
+        """Discovery should omit removed post-Consul instance fields."""
         projection = _make_projection()
 
         projection.last_applied_offset = _make_sequence(101).offset or 101
@@ -170,13 +170,11 @@ class TestRegistryApiProjectionTail:
 
         discovery = await service.get_discovery(limit=10, offset=0)
 
-        assert discovery.instance_discovery_status == "unavailable"
-        assert discovery.instance_discovery_message == (
-            "Service discovery not available (Consul removed)"
-        )
-        assert discovery.live_instances == []
+        assert not hasattr(discovery, "instance_discovery_status")
+        assert not hasattr(discovery, "instance_discovery_message")
+        assert not hasattr(discovery, "live_instances")
         assert discovery.summary.total_nodes == 1
         assert discovery.summary.active_nodes == 1
-        assert discovery.summary.healthy_instances == 0
-        assert discovery.summary.unhealthy_instances == 0
-        assert any(w.code == "NO_CONSUL_HANDLER" for w in discovery.warnings)
+        assert not hasattr(discovery.summary, "healthy_instances")
+        assert not hasattr(discovery.summary, "unhealthy_instances")
+        assert not any(w.code == "NO_CONSUL_HANDLER" for w in discovery.warnings)

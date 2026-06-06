@@ -1,0 +1,171 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDlqReplayEffect
+#
+# Contract-native replacement for the manual DLQ replay CLI
+# (scripts/dlq_replay.py). Consumes onex.dlq.omnibase-infra.<category>.v1 from a persistent
+# consumer group (onex-dlq-replay), replays eligible messages to their original
+# topic, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1
+# instead of the legacy skip-and-drop path that silently lost messages.
+#
+# Related Tickets:
+#   - OMN-12619: contract-native DLQ replay node + quarantine
+#   - OMN-12618: Divergent Transport & Runtime Convergence (epic)
+name: "node_dlq_replay_effect"
+contract_name: "node_dlq_replay_effect"
+node_name: "node_dlq_replay_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
+
+# Event bus subscription/publication
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.dlq.omnibase-infra.events.v1"
+    - "onex.dlq.omnibase-infra.intents.v1"
+    - "onex.dlq.omnibase-infra.commands.v1"
+  publish_topics:
+    - "onex.dlq.omnibase-infra.quarantine.v1"
+# I/O models
+input_model:
+  name: "ModelDlqReplayCommand"
+  module: "omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_command"
+  description: "Typed command describing a single replay run."
+output_model:
+  name: "ModelDlqReplayRunResult"
+  module: "omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result"
+  description: "Aggregate outcome of one replay run (counts + per-message results)."
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "replay_dlq"
+      handler:
+        name: "HandlerDlqReplay"
+        module: "omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay"
+      description: >
+        Replay eligible DLQ messages to their original topic; quarantine non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1.
+
+      output_fields:
+        - dlq_topic
+        - total_processed
+        - completed
+        - quarantined
+        - failed
+        - pending
+        - dry_run
+# IO operations
+io_operations:
+  - operation: "replay_dlq"
+    description: "Drain a DLQ topic, replaying or quarantining each message"
+    input_fields:
+      - dlq_topic
+      - max_replay_count
+      - rate_limit_per_second
+      - dry_run
+      - filter_type
+      - limit
+    output_fields:
+      - dlq_topic
+      - total_processed
+      - completed
+      - quarantined
+      - failed
+      - pending
+      - dry_run
+# Dependencies
+dependencies:
+  - name: "consumer"
+    type: "service"
+    description: "Runtime-materialized persistent DLQ consumer (group onex-dlq-replay), lazy-started by HandlerDlqReplay when a replay run executes"
+    required: true
+  - name: "producer"
+    type: "service"
+    description: "Runtime-materialized replay producer to original topics, lazy-started by HandlerDlqReplay when a replay run executes"
+    required: true
+  - name: "quarantine_producer"
+    type: "service"
+    description: "Runtime-materialized quarantine producer to onex.dlq.omnibase-infra.quarantine.v1, lazy-started by HandlerDlqReplay when a replay run executes"
+    required: true
+  - name: "tracking"
+    type: "service"
+    description: "ServiceDlqTracking for dlq_replay_history persistence"
+    required: false
+# Error handling
+error_handling:
+  error_types:
+    - name: "REPLAY_PUBLISH_FAILED"
+      description: "send_and_wait to the original topic failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "QUARANTINE_PUBLISH_FAILED"
+      description: "send_and_wait to the quarantine topic failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+# ============================================================================
+# Quarantine ownership semantics (OMN-12619) — net-new, no prior pattern.
+# These are authored here AND in docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
+# ============================================================================
+quarantine:
+  topic: "onex.dlq.omnibase-infra.quarantine.v1"
+  purpose: >
+    Durable terminal landing zone for DLQ messages the replay node classified as non-replayable (max-retry-exceeded, non-retryable error type, or out-of-filter). Quarantine exists to END SILENT MESSAGE LOSS: messages are retained for reclassification rather than dropped.
+
+  ownership:
+    retention_owner:
+      role: "Platform infrastructure team"
+      responsibility: >
+        Owns the onex.dlq.omnibase-infra.quarantine.v1 topic retention policy. Quarantine is a long-retention topic; retention MUST exceed the replay topics so a message is never aged out before reclassification. Default retention: 90 days (set at topic-config time, not by this node).
+
+    reclassification_owner:
+      role: "Service team that owns the original_topic"
+      responsibility: >
+        Owns deciding whether a quarantined message is genuinely terminal (discard after audit) or was misclassified (e.g. a transient error was mis-tagged non-retryable). Reclassification is a human/automated review of the quarantine record, keyed by original_correlation_id.
+
+    replay_eligibility_change_owner:
+      role: "Service team that owns the original_topic, with platform review"
+      responsibility: >
+        Owns changes to what counts as replay-eligible — i.e. edits to EnumNonRetryableErrorCategory or max_replay_count. Such changes alter which messages quarantine vs replay and require platform review because they affect every DLQ consumer.
+
+  re_entry_path:
+    description: >
+      A quarantined message re-enters replay by being republished to its source DLQ topic (source_dlq_topic in the quarantine record) with a retry_count reset below max_replay_count and/or after the offending error_type is removed from EnumNonRetryableErrorCategory. The replay node then treats it as a normal DLQ message; should_replay() decides afresh.
+
+    steps:
+      - "Audit the quarantine record (keyed by original_correlation_id)."
+      - "Reclassify: confirm the message should be replayable now."
+      - "Republish the original_payload to source_dlq_topic with retry_count reset."
+      - "The persistent onex-dlq-replay group picks it up and replays it."
+    invariant: >
+      Re-entry is explicit and owner-driven. The replay node never auto-promotes quarantined messages back into replay.
+
+# Metadata
+metadata:
+  description: >
+    Contract-native DLQ replay + quarantine node. Persistent consumer group onex-dlq-replay; quarantine to onex.dlq.omnibase-infra.quarantine.v1 ends silent loss.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-06-02"
+  updated: "2026-06-03"
+  tags:
+    - effect
+    - dlq
+    - replay
+    - quarantine
+    - kafka

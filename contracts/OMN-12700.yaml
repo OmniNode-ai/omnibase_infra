@@ -1,0 +1,52 @@
+# OMN-12700 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control;
+# this repo-local contract carries deploy-gate evidence for the runtime bus
+# LLM inference response event wiring.
+schema_version: "1.0.0"
+ticket_id: OMN-12700
+title: "Emit typed LLM inference response events on the runtime bus"
+summary: >
+  Adds the infra-owned runtime command adapter for
+  onex.cmd.omnibase-infra.llm-inference-request.v1 and emits
+  ModelLlmInferenceResponse as the first-class response event on
+  onex.evt.omnibase-infra.inference-response.v1. Existing llm-call-completed
+  metrics events remain in place for their current consumers.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - events
+  - topics
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: "Focused handler and in-memory runtime bus integration tests prove generated_text is emitted on the typed response event."
+    command: "uv run pytest tests/unit/nodes/node_llm_inference_effect/test_handler_llm_inference_command.py tests/integration/runtime/test_llm_inference_contract_runtime_bus.py -q"
+  - kind: ci
+    description: "Repo validation, topic literal checks, and lint pass after adding the command adapter and response event models."
+    command: "uv run python scripts/validate.py all --verbose && uv run python scripts/validation/check_topic_literals.py --baseline scripts/validation/topic_literal_baseline.txt && uv run ruff format --check src/ tests/ && uv run ruff check src/ tests/"
+  - kind: manual
+    description: "Post-merge deploy proof: dev runtime should consume the command topic and produce ModelLlmInferenceResponse with useful generated_text on the typed response topic."
+    command: "deploy: produce a fresh prompt to onex.cmd.omnibase-infra.llm-inference-request.v1 on the dev broker and consume matching generated_text from onex.evt.omnibase-infra.inference-response.v1"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-focused-tests
+    description: "Focused unit and integration tests pass for the command handler and typed response event path."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/node_llm_inference_effect/test_handler_llm_inference_command.py tests/integration/runtime/test_llm_inference_contract_runtime_bus.py -q"
+  - id: dod-validation
+    description: "Full repo validator suite, topic literal invariant, and ruff checks pass from the OMN-12700 infra worktree."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run python scripts/validate.py all --verbose && uv run python scripts/validation/check_topic_literals.py --baseline scripts/validation/topic_literal_baseline.txt && uv run ruff format --check src/ tests/ && uv run ruff check src/ tests/"
+  - id: dod-deploy-proof
+    description: "Post-merge dev-lane proof required before release: the deployed runtime must produce a useful ModelLlmInferenceResponse event for a fresh inference request correlation."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: produce a fresh prompt to onex.cmd.omnibase-infra.llm-inference-request.v1 on the dev broker and consume matching generated_text from onex.evt.omnibase-infra.inference-response.v1"

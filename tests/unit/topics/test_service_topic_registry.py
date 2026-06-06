@@ -11,10 +11,14 @@ monitored topics.
 
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
+
 import pytest
 
 from omnibase_infra.protocols import ProtocolTopicRegistry
-from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics import platform_topic_suffixes, topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 
@@ -88,7 +92,7 @@ class TestServiceTopicRegistryResolve:
         registry = ServiceTopicRegistry.from_defaults()
         assert (
             registry.resolve(topic_keys.CIRCUIT_BREAKER_STATE)
-            == "onex.evt.omnibase-infra.circuit-breaker-state.v1"
+            == platform_topic_suffixes.SUFFIX_CIRCUIT_BREAKER_STATE
         )
 
     def test_resolve_consumer_health(self) -> None:
@@ -196,6 +200,44 @@ class TestServiceTopicRegistryAllKeys:
             assert topic.startswith("onex."), (
                 f"Topic for key {key!r} doesn't match naming: {topic}"
             )
+
+    def test_from_defaults_has_no_embedded_topic_literals(self) -> None:
+        """from_defaults must resolve via catalog symbols, not own topic strings."""
+        source = inspect.getsource(ServiceTopicRegistry.from_defaults)
+        tree = ast.parse(textwrap.dedent(source))
+        literals = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.startswith("onex.")
+        ]
+        assert literals == []
+
+    def test_all_resolved_topics_are_registered_in_topic_spec_catalog(self) -> None:
+        """Every default registry topic must be backed by a topic spec catalog entry."""
+        catalog_topics = {
+            spec.suffix
+            for group in (
+                platform_topic_suffixes.ALL_PLATFORM_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_INTELLIGENCE_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_OMNIBASE_INFRA_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_VALIDATION_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_OMNINODE_ROUTING_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_OMNICLAUDE_TOPIC_SPECS,
+                platform_topic_suffixes.ALL_OMNIMEMORY_TOPIC_SPECS,
+            )
+            for spec in group
+        }
+        registry = ServiceTopicRegistry.from_defaults()
+
+        missing = {
+            key: registry.resolve(key)
+            for key in registry.all_keys()
+            if registry.resolve(key) not in catalog_topics
+        }
+
+        assert missing == {}
 
 
 @pytest.mark.unit

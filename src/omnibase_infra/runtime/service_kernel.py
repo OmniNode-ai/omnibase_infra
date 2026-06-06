@@ -350,14 +350,40 @@ def _get_contracts_dir() -> Path:
 
 def _build_runtime_handler_dependencies(
     postgres_pool: object | None,
+    kafka_bootstrap_servers: str | None = None,
 ) -> dict[str, dict[str, object]] | None:
-    """Build constructor dependencies for runtime-owned Postgres handlers."""
-    if postgres_pool is None:
+    """Build constructor dependencies for runtime-owned handlers."""
+    dependencies: dict[str, dict[str, object]] = {}
+    if postgres_pool is not None:
+        dependencies.update(
+            {
+                "HandlerPostgresRuntimeManifestInsert": {"pool": postgres_pool},
+                "HandlerBaselinesBatchCompute": {"pool": postgres_pool},
+            }
+        )
+
+    if kafka_bootstrap_servers:
+        from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+        from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
+            DLQConsumer,
+            DLQProducer,
+            DLQQuarantineProducer,
+            ModelDlqReplayEngineConfig,
+        )
+
+        dlq_replay_config = ModelDlqReplayEngineConfig(
+            bootstrap_servers=kafka_bootstrap_servers,
+            dlq_topic=build_dlq_topic("events"),
+        )
+        dependencies["HandlerDlqReplay"] = {
+            "consumer": DLQConsumer(dlq_replay_config),
+            "producer": DLQProducer(dlq_replay_config),
+            "quarantine_producer": DLQQuarantineProducer(dlq_replay_config),
+        }
+
+    if not dependencies:
         return None
-    return {
-        "HandlerPostgresRuntimeManifestInsert": {"pool": postgres_pool},
-        "HandlerBaselinesBatchCompute": {"pool": postgres_pool},
-    }
+    return dependencies
 
 
 def load_runtime_config(
@@ -1963,6 +1989,7 @@ async def bootstrap() -> int:
             dispatch_engine=dispatch_engine,
             node_identity=plugin_node_identity,
             kafka_bootstrap_servers=kafka_bootstrap_servers,
+            runtime_profile=kernel_profile.name,
         )
 
         # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)
@@ -2436,7 +2463,8 @@ async def bootstrap() -> int:
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
 
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
-                    registration_service.postgres_pool
+                    registration_service.postgres_pool,
+                    kafka_bootstrap_servers if use_kafka else None,
                 )
 
                 # 5. Wire handlers into dispatch engine

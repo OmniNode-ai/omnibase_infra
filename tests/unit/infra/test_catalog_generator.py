@@ -46,6 +46,23 @@ def test_generated_compose_preserves_depends_on_conditions() -> None:
 
 
 @pytest.mark.unit
+def test_generated_runtime_compose_preserves_runtime_image_build() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+
+    build = compose["services"]["omninode-runtime"]["build"]
+    assert build["context"] == ".."
+    assert build["dockerfile"] == "docker/Dockerfile.runtime"
+    assert build["args"]["BUILD_SOURCE"] == "${BUILD_SOURCE:-release}"
+    assert build["args"]["EXPECTED_BUILD_SOURCE"] == "${EXPECTED_BUILD_SOURCE:-release}"
+    assert build["args"]["OMNI_HOME"] == "${OMNI_HOME:-}"
+    assert build["args"]["GIT_SHA"] == "${GIT_SHA:-unknown}"
+    assert build["args"]["VCS_REF"] == "${VCS_REF:-}"
+    assert build["args"]["BUILD_DATE"] == "${BUILD_DATE:-}"
+
+
+@pytest.mark.unit
 def test_generated_compose_preserves_redpanda_ulimits() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["core"])
@@ -63,6 +80,20 @@ def test_generated_compose_preserves_one_shot_semantics() -> None:
     fm = compose["services"]["forward-migration"]
     assert fm["restart"] == "no"
     assert "healthcheck" not in fm  # one-shot entries have no healthcheck
+    assert fm["environment"]["NODE_POSTGRES_DB"] == "omnidash_analytics"
+
+
+@pytest.mark.unit
+def test_generated_migration_gate_requires_projection_tables() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    gate = compose["services"]["migration-gate"]
+    assert gate["environment"]["NODE_POSTGRES_DB"] == "omnidash_analytics"
+    assert (
+        gate["environment"]["REQUIRED_PROJECTION_TABLES"]
+        == "delegation_events node_service_registry"
+    )
 
 
 @pytest.mark.unit
@@ -81,6 +112,18 @@ def test_generated_compose_omits_bundle_env_when_unselected() -> None:
     compose = generate_compose(resolved)
     rt_env = compose["services"]["omninode-runtime"]["environment"]
     assert "OMNIMEMORY_ENABLED" not in rt_env
+
+
+@pytest.mark.unit
+def test_generated_runtime_services_export_onex_state_dir() -> None:
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        runtime_env = compose["services"][service_name]["environment"]
+        assert runtime_env["ONEX_STATE_ROOT"] == "/app/data/.onex_state"
+        assert runtime_env["ONEX_STATE_DIR"] == runtime_env["ONEX_STATE_ROOT"]
 
 
 @pytest.mark.unit

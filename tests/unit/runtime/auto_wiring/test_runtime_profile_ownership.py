@@ -18,6 +18,10 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelContractVersion,
     ModelDiscoveredContract,
 )
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    extract_runtime_profiles_from_contract,
+    runtime_profile_owns_contract,
+)
 
 
 def _contract(
@@ -68,6 +72,37 @@ def test_contract_runtime_profiles_select_single_owner() -> None:
         "main_only"
     ]
     assert main_result.skipped_contracts == ("effects_only",)
+
+
+def test_raw_contract_runtime_profile_ownership_defaults_to_main() -> None:
+    raw_contract = {
+        "name": "node_delegation_orchestrator",
+        "event_bus": {
+            "subscribe_topics": [
+                "onex.cmd.omnibase-infra.delegation-request.v1",
+            ],
+        },
+    }
+
+    assert extract_runtime_profiles_from_contract(raw_contract) == ()
+    assert runtime_profile_owns_contract(raw_contract, "main") is True
+    assert runtime_profile_owns_contract(raw_contract, "effects") is False
+
+
+def test_raw_contract_runtime_profile_ownership_reads_descriptor_metadata() -> None:
+    raw_contract = {
+        "name": "node_delegation_quality_gate_effect",
+        "descriptor": {"runtime_profiles": [" Effects ", "effects"]},
+        "event_bus": {
+            "subscribe_topics": [
+                "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1",
+            ],
+        },
+    }
+
+    assert extract_runtime_profiles_from_contract(raw_contract) == ("effects",)
+    assert runtime_profile_owns_contract(raw_contract, "effects") is True
+    assert runtime_profile_owns_contract(raw_contract, "main") is False
 
 
 def test_runtime_profiles_are_normalized_and_deduplicated() -> None:
@@ -145,3 +180,34 @@ def test_github_pr_poller_is_owned_by_effects_runtime_profile() -> None:
     ]
     assert main_result.manifest.contracts == ()
     assert main_result.skipped_contracts == ("node_github_pr_poller_effect",)
+
+
+def test_llm_inference_effect_is_owned_by_effects_runtime_profile() -> None:
+    contract_path = (
+        Path(__file__).resolve().parents[4]
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_llm_inference_effect"
+        / "contract.yaml"
+    )
+
+    manifest = discover_contracts_from_paths([contract_path])
+
+    assert manifest.total_errors == 0
+    contract = manifest.contracts[0]
+    assert contract.name == "node_llm_inference_effect"
+    assert contract.runtime_profiles == ("effects",)
+    assert contract.event_bus is not None
+    assert contract.event_bus.subscribe_topics == (
+        "onex.cmd.omnibase-infra.llm-inference-request.v1",
+    )
+
+    effects_result = filter_manifest_for_runtime_profile(manifest, "effects")
+    main_result = filter_manifest_for_runtime_profile(manifest, "main")
+
+    assert [item.name for item in effects_result.manifest.contracts] == [
+        "node_llm_inference_effect"
+    ]
+    assert main_result.manifest.contracts == ()
+    assert main_result.skipped_contracts == ("node_llm_inference_effect",)

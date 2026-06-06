@@ -63,13 +63,20 @@ def _run_cli(
     args: list[str], *, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Invoke the catalog CLI with the given args and return the CompletedProcess."""
+    run_env = dict(os.environ if env is None else env)
+    existing_pythonpath = run_env.get("PYTHONPATH", "")
+    pythonpath_parts = [str(REPO_ROOT / "src"), str(REPO_ROOT)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    run_env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+
     return subprocess.run(
         [*_CLI, *args],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
         check=False,
-        env=env,
+        env=run_env,
     )
 
 
@@ -111,6 +118,25 @@ def test_generate_runtime_core_declares_seven_services(tmp_path: Path) -> None:
         f"runtime-core compose is missing services: {sorted(missing)}. "
         f"Full service set: {sorted(services)}"
     )
+
+
+@pytest.mark.integration
+def test_generate_runtime_core_clears_contract_resolver_bifrost_path(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "runtime-core.yml"
+    result = _generate_to("runtime-core", output)
+    assert result.returncode == 0, f"generate failed: {result.stderr}"
+
+    compose = _load_compose(output)
+    services = compose["services"]
+    assert isinstance(services, dict)
+    contract_resolver = services["omninode-contract-resolver"]
+    assert isinstance(contract_resolver, dict)
+    environment = contract_resolver["environment"]
+    assert isinstance(environment, dict)
+
+    assert environment["BIFROST_CONTRACT_PATH"] == ""
 
 
 @pytest.mark.integration

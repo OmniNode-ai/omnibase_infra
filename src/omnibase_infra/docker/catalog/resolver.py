@@ -101,6 +101,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
         ports=ports,
         healthcheck=healthcheck,
         volumes=raw.get("volumes", []),
+        tmpfs=raw.get("tmpfs", []),
         depends_on=depends_on,
         container_name=raw.get("container_name"),
         command=raw.get("command"),

@@ -13,13 +13,14 @@
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
 #   2. Base64-encode token for safe SSH passing
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
-#   4. Deploy via SSH: docker compose up -d --build --force-recreate --remove-orphans
-#   5. Install docker prune cron idempotently (build cache + untagged images, tee)
-#   6. Install runner health monitor cron (Slack alerts on state transitions)
-#   7. Poll GitHub API until the configured runner fleet is online
+#   4. Build the versioned runner image via scripts/ci/build_runner_image.sh
+#   5. Deploy via SSH: docker compose up -d --force-recreate --remove-orphans
+#   6. Install docker prune cron idempotently (build cache + untagged images, tee)
+#   7. Install runner health monitor cron (Slack alerts on state transitions)
+#   8. Poll GitHub API until the configured runner fleet is online
 #      (max 5 min, 15s interval)
-#   8. Retry once with fresh token if poll times out
-#   9. Print stale runner report (offline runners with no host container)
+#   9. Retry once with fresh token if poll times out
+#   10. Print stale runner report (offline runners with no host container)
 #
 # --soft mode (entrypoint-only update, no recreate):
 #   1. Rsync runner artifacts to host
@@ -34,7 +35,8 @@
 #   - SSH access to 192.168.86.201 (key-based, no password prompts)
 #   - rsync installed locally
 #
-# See also: docker/runners/Dockerfile, docker/docker-compose.runners.yml
+# See also: docker/runners/Dockerfile, docker/docker-compose.runners.yml,
+# scripts/ci/build_runner_image.sh
 
 set -euo pipefail
 
@@ -81,11 +83,20 @@ POLL_INTERVAL_SECONDS=15
 # Artifacts to sync to the host (relative to repo root)
 SYNC_PATHS=(
     "${RUNNER_FLEET_CONFIG}"
+    ".github/actions/setup-python-uv/action.yml"
+    "pyproject.toml"
+    "uv.lock"
     "docker/runners/Dockerfile"
+    "docker/runners/runner-image.lock.json"
     "docker/runners/entrypoint.sh"
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
+    "docker/runners/healthcheck.sh"
     "docker/docker-compose.runners.yml"
+    "scripts/ci/build_runner_image.sh"
+    "scripts/ci/ci_env_digest.py"
+    "scripts/ci/ensure_ci_env.sh"
+    "scripts/ci/runner_image_identity.py"
 )
 
 # ---------------------------------------------------------------------------
@@ -177,24 +188,44 @@ rsync_artifacts() {
     log "Rsyncing runner artifacts to ${RUNNER_HOST}:${RUNNER_HOST_DIR}/ ..."
 
     # Ensure remote directory structure exists
-    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/config ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker"
+    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/config ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker ${RUNNER_HOST_DIR}/scripts/ci ${RUNNER_HOST_DIR}/.github/actions/setup-python-uv"
 
     if "${DRY_RUN}"; then
         log "[DRY RUN] rsync ${SYNC_PATHS[*]} -> ${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
         return 0
     fi
 
-    # Sync fleet config, Dockerfile, entrypoint, and monitor.
+    # Sync fleet config, versioned image contract inputs, Dockerfile, entrypoint,
+    # and monitor. The runner image build is contract-bound; do not rely on
+    # whatever files happen to be present on the host from an earlier deploy.
     rsync -av --checksum \
         "${RUNNER_FLEET_CONFIG}" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/config/runner_fleet.yaml"
 
     rsync -av --checksum \
+        "${REPO_ROOT}/pyproject.toml" \
+        "${REPO_ROOT}/uv.lock" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
+
+    rsync -av --checksum \
+        "${REPO_ROOT}/.github/actions/setup-python-uv/action.yml" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/.github/actions/setup-python-uv/action.yml"
+
+    rsync -av --checksum \
         "${REPO_ROOT}/docker/runners/Dockerfile" \
+        "${REPO_ROOT}/docker/runners/runner-image.lock.json" \
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
+        "${REPO_ROOT}/docker/runners/healthcheck.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
+
+    rsync -av --checksum \
+        "${REPO_ROOT}/scripts/ci/build_runner_image.sh" \
+        "${REPO_ROOT}/scripts/ci/ci_env_digest.py" \
+        "${REPO_ROOT}/scripts/ci/ensure_ci_env.sh" \
+        "${REPO_ROOT}/scripts/ci/runner_image_identity.py" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/scripts/ci/"
 
     # Sync compose file into docker/
     rsync -av --checksum \
@@ -214,11 +245,7 @@ deploy_runners() {
 
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml"
 
-    if "${SKIP_BUILD}"; then
-        local up_flags="--force-recreate --remove-orphans"
-    else
-        local up_flags="--build --force-recreate --remove-orphans"
-    fi
+    local up_flags="--force-recreate --remove-orphans"
 
     log "Deploying runners on ${RUNNER_HOST} (force-recreate ensures fresh env)..."
 
@@ -232,6 +259,9 @@ deploy_runners() {
         RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
         export RUNNER_TOKEN
         cd ${RUNNER_HOST_DIR}
+        if [ '${SKIP_BUILD}' = 'false' ]; then
+            bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest
+        fi
         ${compose_cmd} up -d ${up_flags}
     "
 
@@ -386,9 +416,9 @@ soft_deploy() {
 
     rsync_artifacts
 
-    # Rebuild the image so future containers (from force-recreate deploys) use it
-    log "Rebuilding runner image on ${RUNNER_HOST}..."
-    run_ssh "cd ${RUNNER_HOST_DIR} && docker build -t omninode-runner:latest docker/runners/"
+    # Rebuild the image so future containers (from force-recreate deploys) use it.
+    log "Rebuilding versioned runner image on ${RUNNER_HOST}..."
+    run_ssh "cd ${RUNNER_HOST_DIR} && bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest"
 
     # Ensure entrypoint is executable on host (docker cp preserves source permissions)
     run_ssh "chmod +x ${RUNNER_HOST_DIR}/docker/runners/entrypoint.sh"
@@ -419,7 +449,11 @@ deploy_with_retry() {
         log "=== Deploy attempt ${attempt} ==="
 
         local token
-        token=$(fetch_registration_token)
+        if "${DRY_RUN}"; then
+            token="dry-run-token"
+        else
+            token=$(fetch_registration_token)
+        fi
         local token_b64
         token_b64=$(encode_token "${token}")
 
@@ -428,6 +462,7 @@ deploy_with_retry() {
         install_prune_cron
         install_monitor_cron
         install_health_cron
+        install_network_janitor_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -534,6 +569,43 @@ install_health_cron() {
     echo "${existing}" | grep -v 'runner-health-check' | { cat; echo "${cron_line}"; } | crontab -
 
     log "Runner health check cron installed locally (every 3 minutes)."
+}
+
+# ---------------------------------------------------------------------------
+# Step 11: Install bounded Docker network janitor cron (OMN-12566)
+# ---------------------------------------------------------------------------
+# Installs a LOCAL cron (on this dev machine) that runs the bounded Docker
+# network janitor + subnet-pool collection every 15 minutes. The CLI SSHes to
+# RUNNER_HOST to inspect networks, classify them against the declared
+# ownership contract, emit pool occupancy to the durable network-pool-status
+# topic, and alert before subnet-pool exhaustion.
+#
+# Reclaim default: DRY-RUN. The cron runs WITHOUT --reclaim so the steady
+# state is observe-and-alert only. Enabling destructive reclaim on the live
+# fleet (adding --reclaim) is a deliberate, separately-approved live step —
+# not flipped on automatically by deploy.
+#
+# Marker-based idempotence via '# network-janitor-check'.
+
+install_network_janitor_cron() {
+    log "Installing LOCAL Docker network janitor cron (dry-run)..."
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would install local network-janitor-check cron (every 15 min, dry-run)."
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    # NOTE: no --reclaim — observe + alert only. Live reclaim is gated.
+    local cron_line="*/15 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --network --emit --alert >> /tmp/network-janitor.log 2>&1 # network-janitor-check"
+
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    echo "${existing}" | grep -v 'network-janitor-check' | { cat; echo "${cron_line}"; } | crontab -
+
+    log "Network janitor cron installed locally (every 15 minutes, dry-run)."
 }
 
 # ---------------------------------------------------------------------------

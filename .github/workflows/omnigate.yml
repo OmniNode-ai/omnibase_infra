@@ -13,7 +13,7 @@ jobs:
     if: github.event.pull_request.head.repo.fork == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload decision artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omnigate-decision
           path: /tmp/omnigate-decision.json

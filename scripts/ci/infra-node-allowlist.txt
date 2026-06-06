@@ -64,6 +64,8 @@ src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_confl
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_decision.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_query_compute/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_decision_store_query_compute/handlers/handler_query_decisions.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_dlq_replay_effect/handlers/__init__.py  # OMN-12619: infra-only DLQ replay/quarantine node — Kafka dead-letter transport concern, not a business-domain node.
+src/omnibase_infra/nodes/node_dlq_replay_effect/handlers/handler_dlq_replay.py  # OMN-12619: infra-only DLQ replay/quarantine node — Kafka dead-letter transport concern, not a business-domain node.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_update_outcome.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_write_bundle.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -107,6 +109,7 @@ src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifros
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_response.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_routing_rule.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_cli_subprocess.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_inference_command.py  # OMN-12700: infra-owned runtime command adapter for the LLM inference effect; business routing remains outside this handler.
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_merge_gate_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_merge_gate_effect/handlers/handler_upsert_merge_gate.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -144,7 +147,6 @@ src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_get_topic.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_get_widget_mapping.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_contracts.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
-src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_instances.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_nodes.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_api_effect/handlers/handler_registry_api_list_topics.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
@@ -231,3 +233,7 @@ src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/__init__.p
 src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/handler_source_attestation.py  # OMN-9139: infra-owned attestation node — verifies RUNTIME_SOURCE_HASH provenance, not a business-domain node.
 src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/__init__.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
 src/omnibase_infra/nodes/node_runtime_manifest_reducer/handlers/handler_postgres_runtime_manifest_insert.py  # OMN-11197: infra-only PostgreSQL projection handler for runtime startup manifests; not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/__init__.py  # OMN-12623: infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py  # OMN-12623: infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_projection/handlers/__init__.py  # OMN-12623: infra-only topic-migration FSM projection handler, not business-domain.
+src/omnibase_infra/nodes/node_topic_migration_projection/handlers/handler_topic_migration_projection.py  # OMN-12623: infra-only topic-migration FSM projection handler, not business-domain.

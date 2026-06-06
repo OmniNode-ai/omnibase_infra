@@ -144,6 +144,7 @@ x-runtime-env: &runtime-env
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
+  ONEX_STATE_DIR: /app/data/.onex_state
   BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
   BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
@@ -153,9 +154,10 @@ x-runtime-env: &runtime-env
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
-  # Local Docker Redpanda can cap contract topic partitions on constrained laptops.
-  # Use 0 to keep contract-declared partition counts.
-  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-0}
+  # Local Docker Redpanda uses a bounded single-shard broker. Cap default topic
+  # creation to one partition unless an operator explicitly opts into wider
+  # contract-declared partition counts.
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
   # Linear API for build loop ticket fetching
   LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # GitHub API/CLI auth for runtime-owned PR lifecycle inventory and merge gates.
@@ -294,9 +296,9 @@ services:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_EXTERNAL_PORT:-19092}
+      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_EXTERNAL_PORT:-19092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145
@@ -571,6 +573,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
       MIGRATIONS_DIR: /migrations/forward
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
@@ -615,6 +618,8 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
     # Stay alive so healthcheck can run; no actual workload.
     entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
     volumes:
@@ -774,6 +779,9 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omnimarket-projection-api
       RUNTIME_PROFILE: projection-api
+      # Projection API serves materialized read models and has no runtime data
+      # volume for the rendered Bifrost delegation contract.
+      BIFROST_CONTRACT_PATH: ""
     ports:
       - "${PROJECTION_API_PORT:-3002}:3002"
     healthcheck:
@@ -1128,6 +1136,9 @@ services:
     environment:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-contract-resolver
+      # Contract resolver does not mount /app/data, so it must not render the
+      # Bifrost delegation contract into the shared runtime data path.
+      BIFROST_CONTRACT_PATH: ""
       CORS_ORIGINS: ${CONTRACT_RESOLVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8085}
       CONTRACT_RESOLVER_PORT: "8091"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}

@@ -132,6 +132,15 @@ repos:
         pass_filenames: false
         always_run: false
         stages: [pre-commit]
+      # OMN-12559: vendored omnimarket node migrations must stay in sync with
+      # source. Skips silently when omnimarket source is not checked out.
+      - id: onex-check-node-migration-sync
+        name: ONEX Node Migration Vendor Sync Check
+        entry: bash scripts/sync-node-migrations.sh --check
+        language: system
+        pass_filenames: false
+        files: ^(docker/migrations/forward/nodes/|scripts/sync-node-migrations\.sh)
+        stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
       # .env_local, .env_production, .env-secret, etc. (dot-separated, underscore-separated, and
@@ -299,6 +308,17 @@ repos:
         types: [python]
         files: ^src/omnibase_infra/nodes/reducers/
         pass_filenames: false
+        stages: [pre-commit]
+      # Prod promotion-lineage guard tests (OMN-12626, R1)
+      # Runs the guard's unit tests whenever the guard or the prod build/deploy
+      # tooling changes, so the clean-tree + ancestor-of-origin/main + image
+      # revision rules cannot silently regress. Timeout protects against hangs.
+      - id: prod-promotion-lineage-guard
+        name: Prod promotion-lineage guard tests (OMN-12626)
+        entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=thread
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
         stages: [pre-commit]
       # Markdown link validation (PR #172)
       # Ensures all internal markdown links point to existing files and anchors

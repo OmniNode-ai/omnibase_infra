@@ -1,8 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for scripts/trigger_rebuild_on_merge.py [OMN-8917].
+"""Unit tests for scripts/trigger_rebuild_on_merge.py [OMN-8917, OMN-12573].
 
 Tests assert path-based and label-based trigger logic with mocked Kafka publish.
+OMN-12573 re-points the script to publish the node_redeploy start command
+(onex.cmd.omnimarket.redeploy-start.v1) carrying the triggering lane + ref,
+instead of the deploy-agent rebuild command with a hardcoded origin/main.
 """
 
 from __future__ import annotations
@@ -98,43 +101,40 @@ class TestRebuildTriggerLogic:
 
 
 @pytest.mark.unit
-class TestRebuildTriggerPublish:
-    """Unit tests for publish_rebuild_event() Kafka call shape."""
+class TestRedeployStartPublish:
+    """Unit tests for publish_redeploy_start_event() Kafka call shape (OMN-12573).
+
+    CI publishes the node_redeploy start command, not the deploy-agent rebuild
+    command directly.
+    """
 
     def setup_method(self) -> None:
         self.mod = _import_trigger_module()
 
-    def test_publish_calls_producer_with_correct_topic(self) -> None:
-        """publish_rebuild_event should produce to onex.cmd.deploy.rebuild-requested.v1."""
+    def test_publish_calls_producer_with_redeploy_start_topic(self) -> None:
+        """publish_redeploy_start_event publishes onex.cmd.omnimarket.redeploy-start.v1."""
         mock_producer = MagicMock()
         mock_producer.flush.return_value = None
 
-        with patch.dict(
-            "os.environ",
-            {
-                "KAFKA_BOOTSTRAP_SERVERS": "broker:9092",
-                "KAFKA_SASL_USERNAME": "user",
-                "KAFKA_SASL_PASSWORD": "pass",
-                "DEPLOY_AGENT_HMAC_SECRET": "testsecret",
-            },
-        ):
-            with patch("confluent_kafka.Producer", return_value=mock_producer):
-                self.mod.publish_rebuild_event(
-                    bootstrap_servers="broker:9092",
-                    username="user",
-                    password="pass",
-                    hmac_secret="testsecret",
-                    git_ref="origin/main",
-                    correlation_id="test-corr-id",
-                    requested_by="gha-trigger",
-                )
+        with patch("confluent_kafka.Producer", return_value=mock_producer):
+            self.mod.publish_redeploy_start_event(
+                bootstrap_servers="broker:9092",
+                username="user",
+                password="pass",
+                hmac_secret="testsecret",
+                runtime_lane="dev",
+                source_branch="dev",
+                source_sha="abc123",
+                correlation_id="test-corr-id",
+                requested_by="gha-trigger",
+            )
 
         mock_producer.produce.assert_called_once()
         call_kwargs = mock_producer.produce.call_args
-        assert call_kwargs.kwargs["topic"] == "onex.cmd.deploy.rebuild-requested.v1"
+        assert call_kwargs.kwargs["topic"] == "onex.cmd.omnimarket.redeploy-start.v1"
 
     def test_publish_event_payload_shape(self) -> None:
-        """Published payload must include scope=runtime and git_ref."""
+        """Payload carries the triggering lane + ref, never a hardcoded origin/main."""
         import json
 
         mock_producer = MagicMock()
@@ -147,27 +147,32 @@ class TestRebuildTriggerPublish:
         mock_producer.flush.return_value = None
 
         with patch("confluent_kafka.Producer", return_value=mock_producer):
-            self.mod.publish_rebuild_event(
+            self.mod.publish_redeploy_start_event(
                 bootstrap_servers="broker:9092",
                 username="user",
                 password="pass",
                 hmac_secret="testsecret",
-                git_ref="origin/main",
+                runtime_lane="stability-test",
+                source_branch="main",
+                source_sha="deadbeef",
                 correlation_id="test-corr-id",
                 requested_by="gha-trigger",
             )
 
         assert captured_value, "produce was not called"
         payload = json.loads(captured_value[0])
-        assert payload["scope"] == "runtime"
-        assert payload["git_ref"] == "origin/main"
+        assert payload["runtime_lane"] == "stability-test"
+        assert payload["source_branch"] == "main"
+        assert payload["source_sha"] == "deadbeef"
+        assert payload["requires_readiness_gate"] is True
+        assert "origin/main" not in json.dumps(payload)
         assert "correlation_id" in payload
         assert "_signature" in payload
 
 
 @pytest.mark.unit
-class TestRebuildTriggerCLI:
-    """CLI integration tests using --dry-run flag."""
+class TestRedeployStartCLI:
+    """CLI integration tests using --dry-run flag (OMN-12573)."""
 
     def test_dry_run_no_trigger_exits_zero(self) -> None:
         """--dry-run with no matching files or labels should exit 0 without publishing."""
@@ -179,8 +184,10 @@ class TestRebuildTriggerCLI:
                 "README.md,docs/plans/foo.md",
                 "--labels",
                 "",
-                "--git-ref",
-                "origin/main",
+                "--base-branch",
+                "dev",
+                "--source-sha",
+                "abc123",
                 "--dry-run",
             ],
             capture_output=True,
@@ -191,8 +198,8 @@ class TestRebuildTriggerCLI:
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "no rebuild trigger" in result.stdout.lower()
 
-    def test_dry_run_with_runtime_change_label(self) -> None:
-        """--dry-run with runtime_change label should report trigger without publishing."""
+    def test_dry_run_with_runtime_change_label_reports_dev_lane(self) -> None:
+        """--dry-run with runtime_change label reports the dev lane and ref."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -201,8 +208,10 @@ class TestRebuildTriggerCLI:
                 "",
                 "--labels",
                 "runtime_change",
-                "--git-ref",
-                "origin/main",
+                "--base-branch",
+                "dev",
+                "--source-sha",
+                "abc123",
                 "--dry-run",
             ],
             capture_output=True,
@@ -211,13 +220,11 @@ class TestRebuildTriggerCLI:
             check=False,
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
-        assert (
-            "rebuild triggered" in result.stdout.lower()
-            or "dry-run" in result.stdout.lower()
-        )
+        assert "runtime_lane=dev" in result.stdout
+        assert "source_sha=abc123" in result.stdout
 
-    def test_dry_run_with_omnimarket_path(self) -> None:
-        """--dry-run with omnimarket src path should report trigger."""
+    def test_dry_run_with_main_base_reports_stability_lane(self) -> None:
+        """--dry-run with omnimarket src path and main base reports the stability lane."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -226,8 +233,10 @@ class TestRebuildTriggerCLI:
                 "src/omnimarket/nodes/foo/handler.py",
                 "--labels",
                 "",
-                "--git-ref",
-                "origin/main",
+                "--base-branch",
+                "main",
+                "--source-sha",
+                "deadbeef",
                 "--dry-run",
             ],
             capture_output=True,
@@ -236,7 +245,29 @@ class TestRebuildTriggerCLI:
             check=False,
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
-        assert (
-            "rebuild triggered" in result.stdout.lower()
-            or "dry-run" in result.stdout.lower()
+        assert "runtime_lane=stability-test" in result.stdout
+        assert "source_sha=deadbeef" in result.stdout
+
+    def test_unknown_base_branch_fails(self) -> None:
+        """An unmapped base branch must fail closed (no silent default lane)."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--changed-files",
+                "src/omnimarket/nodes/foo/handler.py",
+                "--labels",
+                "",
+                "--base-branch",
+                "release",
+                "--source-sha",
+                "abc123",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
+        assert result.returncode != 0
+        assert "release" in (result.stdout + result.stderr)

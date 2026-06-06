@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# vllm-gpu0-qwen-coder.service — Qwen coder model-serving unit for .201.
+#
+# Install on the model-serving host:
+#   sudo cp deploy/systemd/vllm-gpu0-qwen-coder.service /etc/systemd/system/vllm-gpu0.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vllm-gpu0.service
+#
+# The auto-tool-choice and qwen3_coder parser flags are required for SEA ADK
+# tool-calling runs. Without them, local OpenAI-compatible ADK calls can fail
+# with HTTP 400 even though plain chat completions pass.
+
+[Unit]
+Description=vLLM API - Qwen3.6-35B-A3B GPTQ-Int4 (RTX 5090, 128K)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jonah
+Group=jonah
+Environment=CUDA_DEVICE_ORDER=PCI_BUS_ID
+Environment=CUDA_VISIBLE_DEVICES=0
+EnvironmentFile=-/etc/vllm/env
+WorkingDirectory=/opt/vllm
+ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --model /data/inference/hf-cache/Qwen3.6-35B-A3B-GPTQ-Int4 \
+    --served-model-name Qwen3.6-35B-A3B \
+    --tensor-parallel-size 1 \
+    --max-model-len 131072 \
+    --max-num-seqs 4 \
+    --gpu-memory-utilization 0.92 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --trust-remote-code
+Restart=on-failure
+RestartSec=10
+LimitMEMLOCK=infinity
+LimitNOFILE=65535
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

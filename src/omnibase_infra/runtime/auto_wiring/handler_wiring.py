@@ -33,6 +33,7 @@ import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -107,6 +108,10 @@ _SENSITIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
+_TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
+_DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
+_DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
+_DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -185,6 +190,31 @@ def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
     return False
 
 
+def _is_protocol_handler_class(handler_cls: type) -> bool:
+    """Return True when a handler routing entry points at a Protocol class."""
+    return bool(getattr(handler_cls, "_is_protocol", False))
+
+
+def _is_delegation_inference_intent_ref(event_model: ModelHandlerRef) -> bool:
+    """Return True for the canonical delegation inference-intent wire model."""
+    return (
+        event_model.module == _DELEGATION_INFERENCE_INTENT_MODULE
+        and event_model.name == _DELEGATION_INFERENCE_INTENT_NAME
+    )
+
+
+def _payload_value(payload: object, key: str) -> object:
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _payload_claims_delegation_inference_intent(payload: object) -> bool:
+    """Return True when a raw payload declares the inference-intent discriminator."""
+    intent = _payload_value(payload, "intent")
+    return intent == _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR
+
+
 async def _async_resolve_from_container(
     container: object,
     handler_cls: type,
@@ -253,6 +283,11 @@ class PreparedWiring:
     quarantine_detail: str = ""
     route_ids: list[str] = field(default_factory=list)
     routes: list[ModelDispatchRoute] = field(default_factory=list)
+    # Type-scoping predicate built from the entry's contract-declared
+    # ``event_model``. When set, the dispatch engine selects this dispatcher
+    # only for payloads that match the event_model, so sibling handlers on a
+    # multi-handler contract are not all invoked for one message (OMN-12416).
+    payload_type_matcher: Callable[[object], bool] | None = None
 
     @property
     def is_skip(self) -> bool:
@@ -402,12 +437,23 @@ def _make_dispatch_callback(
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
-        model_cls = _import_event_model_class(event_model)
-        typed_payload = (
-            payload
-            if isinstance(payload, model_cls)
-            else model_cls.model_validate(payload)
-        )
+        try:
+            model_cls = _import_event_model_class(event_model)
+            typed_payload = (
+                payload
+                if isinstance(payload, model_cls)
+                else model_cls.model_validate(payload)
+            )
+        except Exception as exc:
+            failure_result = _build_inference_intent_validation_failure_result(
+                event_model=event_model,
+                envelope=envelope,
+                payload=payload,
+                exc=exc,
+            )
+            if failure_result is not None:
+                return failure_result
+            raise
         if _handler_accepts_event_envelope(
             cast("Callable[..., object]", handle_method)
         ):
@@ -429,6 +475,112 @@ def _make_dispatch_callback(
         return _normalize_handler_result(typed_result, envelope, event_model.name)
 
     return _callback
+
+
+def _make_payload_type_matcher(
+    event_model: ModelHandlerRef,
+) -> Callable[[object], bool]:
+    """Build a payload-type predicate from a contract-declared ``event_model``.
+
+    The returned predicate answers "does this payload match the handler's
+    declared event_model?" — True when the payload is already an instance of
+    the model, or when it validates against the model (e.g. a dict / raw
+    envelope payload). It is used by the dispatch engine to type-scope routing
+    so a multi-handler contract delivers each message only to the handler whose
+    event_model matches the payload (OMN-12416).
+
+    The event_model class is imported lazily on first match and then cached, so
+    wiring stays consistent with ``_make_dispatch_callback`` (which also defers
+    the event_model import to the per-message path) and a declared-but-not-yet-
+    importable model does not change failure timing. A payload that does not
+    validate yields False (not an exception): "not this handler's type".
+    """
+    cached_model_cls: list[type[BaseModel]] = []
+
+    def _matches(payload: object) -> bool:
+        if not cached_model_cls:
+            try:
+                cached_model_cls.append(_import_event_model_class(event_model))
+            except Exception:
+                if _is_delegation_inference_intent_ref(
+                    event_model
+                ) and _payload_claims_delegation_inference_intent(payload):
+                    return True
+                raise
+        model_cls = cached_model_cls[0]
+        if isinstance(payload, model_cls):
+            return True
+        try:
+            model_cls.model_validate(payload)
+        except Exception:  # noqa: BLE001 — validation failure means "not my type"
+            if _is_delegation_inference_intent_ref(
+                event_model
+            ) and _payload_claims_delegation_inference_intent(payload):
+                return True
+            return False
+        return True
+
+    return _matches
+
+
+def _build_inference_intent_validation_failure_result(
+    *,
+    event_model: ModelHandlerRef,
+    envelope: object,
+    payload: object,
+    exc: BaseException,
+) -> ModelDispatchResult | None:
+    """Build a correlated inference-response error for pre-handler validation misses.
+
+    Delegation's inference effect publishes ``ModelInferenceResponseData`` for
+    provider/runtime failures inside ``HandlerInferenceIntent.handle()``. Payload
+    validation and event-model import happen before that handler is called, so
+    this boundary maps only canonical ``ModelInferenceIntent`` load/validation
+    failures to the same response shape. The delegation orchestrator then handles
+    it through its normal inference-error path instead of leaving the caller to
+    wait for a timeout.
+    """
+    if not _is_delegation_inference_intent_ref(event_model):
+        return None
+    if not _payload_claims_delegation_inference_intent(payload):
+        return None
+
+    from omnibase_core.models.delegation.wire import ModelInferenceResponseData
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    correlation_candidate = _extract_dispatch_correlation_id(envelope, payload)
+    correlation_id = _coerce_uuid_or_none(correlation_candidate)
+    if correlation_id is None:
+        return None
+
+    model_value = _payload_value(payload, "model")
+    model_used = model_value if isinstance(model_value, str) else ""
+    error_message = (
+        "ModelInferenceIntent validation failed before "
+        f"HandlerInferenceIntent.handle(): {_sanitize_exc(exc)}"
+    )
+    response = ModelInferenceResponseData(
+        correlation_id=correlation_id,
+        content="",
+        model_used=model_used,
+        llm_call_id="",
+        latency_ms=0,
+        error_message=error_message,
+    )
+    now = datetime.now(UTC)
+    return ModelDispatchResult(
+        status=EnumDispatchStatus.SUCCESS,
+        topic=_extract_dispatch_topic(envelope),
+        message_type=event_model.name,
+        started_at=now,
+        completed_at=now,
+        output_count=1,
+        output_events=[response],
+        correlation_id=correlation_id,
+    )
 
 
 def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
@@ -1342,8 +1494,46 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """
     required_params = _required_handler_init_params(handler_cls)
     return not required_params or required_params <= frozenset(
-        {"event_bus", "dispatch_port"}
+        {"event_bus", "dispatch_port", "provisioner", "drain_proof_gate"}
     )
+
+
+def _contracts_root_for_runtime_dependencies() -> Path:
+    raw = os.environ.get("ONEX_CONTRACTS_DIR")
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parents[2] / "nodes"
+
+
+def _build_topic_migration_executor_dependencies() -> dict[str, object]:
+    """Build concrete collaborators for HandlerTopicMigrationExecutor.
+
+    The handler declares these as required constructor services. Materializing
+    them here keeps generic resolver Step 2 deterministic while preserving the
+    handler's strict constructor contract.
+    """
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+    from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
+    from omnibase_infra.migration.service_consumer_lag_observer import (
+        ServiceConsumerLagObserver,
+    )
+    from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
+
+    bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE: env
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers)
+    lag_admin = AdapterKafkaAdminLag(admin, consumer)
+    observer = ServiceConsumerLagObserver(lag_admin)
+    return {
+        "provisioner": TopicProvisioner(
+            bootstrap_servers=bootstrap_servers,
+            contracts_root=_contracts_root_for_runtime_dependencies(),
+        ),
+        "drain_proof_gate": ServiceDrainProofGate(observer),
+    }
 
 
 def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:
@@ -1392,11 +1582,6 @@ def _materialize_known_handler_dependencies(
     required_params = _required_handler_init_params(handler_cls)
     if not required_params and not requires_delegation_port:
         return materialized_explicit_dependencies
-    if not (
-        required_params.intersection({"container", "ownership_query", "dispatch_port"})
-        or ("dispatch_port" in constructor_params and requires_delegation_port)
-    ):
-        return materialized_explicit_dependencies
     available = {
         name: value
         for name, value in (
@@ -1406,26 +1591,21 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
+    if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
+        available.update(_build_topic_migration_executor_dependencies())
+    if not (
+        required_params.intersection({"container", "ownership_query", "dispatch_port"})
+        or ("dispatch_port" in constructor_params and requires_delegation_port)
+        or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
+    ):
+        return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
-        # When container is available, inject ContainerBackedDelegationDispatchPort
-        # which lazy-resolves the DirectBridgeDelegationDispatchPort registered by
-        # PluginDelegation at start_consumers() time. This avoids the asyncio stall
-        # that occurs when the Kafka-backed RuntimeDelegationDispatchPort subscribes
-        # to delegation-completed and awaits while the delegation orchestrator runs
-        # in the same event loop.
-        if container is not None:
-            from omnibase_infra.runtime.service_delegation_dispatch_port import (
-                ContainerBackedDelegationDispatchPort,
-                RuntimeDelegationDispatchPort,
-            )
-
-            available["dispatch_port"] = ContainerBackedDelegationDispatchPort(
-                container=container,
-                fallback_event_bus=cast(
-                    "ProtocolPatternBBrokerTransport | None", event_bus
-                ),
-            )
-        elif event_bus is not None:
+        # Pure Kafka delegation chain (OMN-12294): the delegate-skill handler
+        # dispatches via the Kafka-backed RuntimeDelegationDispatchPort. The
+        # delegation orchestrator consumes the command on its own bus
+        # subscription and emits the terminal event the broker awaits — there is
+        # no in-process bridge.
+        if event_bus is not None:
             from omnibase_infra.runtime.service_delegation_dispatch_port import (
                 RuntimeDelegationDispatchPort,
             )
@@ -1492,17 +1672,6 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
-def _message_type_keys_from_topic(topic: str) -> tuple[str, ...]:
-    """Return dispatch message-type keys accepted for a contract topic."""
-    keys: list[str] = []
-    alias = _derive_event_type_alias_from_topic(topic)
-    if alias is not None:
-        keys.append(alias)
-    if topic.startswith("onex."):
-        keys.append(topic)
-    return tuple(dict.fromkeys(keys))
-
-
 def _topics_for_handler_entry(
     contract: ModelDiscoveredContract,
     entry: ModelHandlerRoutingEntry,
@@ -1531,15 +1700,11 @@ def _topics_for_handler_entry(
     return ()
 
 
-def _message_type_keys_for_handler_entry(
-    contract: ModelDiscoveredContract,
-    entry: ModelHandlerRoutingEntry,
-) -> tuple[str, ...]:
-    """Return topic-derived dispatcher keys scoped to one handler entry."""
-    keys: list[str] = []
-    for topic in _topics_for_handler_entry(contract, entry):
-        keys.extend(_message_type_keys_from_topic(topic))
-    return tuple(dict.fromkeys(keys))
+def _literal_event_type_aliases_from_topics(
+    subscribe_topics: tuple[str, ...],
+) -> set[str]:
+    """Return literal wire-topic aliases accepted as envelope event_type keys."""
+    return {topic.strip() for topic in subscribe_topics if topic.strip()}
 
 
 def _strict_dispatcher_coverage_enabled() -> bool:
@@ -2258,6 +2423,9 @@ async def _subscribe_contract_topics(
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        load_published_events_map,
+    )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
     )
@@ -2280,9 +2448,19 @@ async def _subscribe_contract_topics(
         assert isinstance(event_bus, ProtocolEventBusLike), (
             f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
         )
+        # Route each returned model to ITS declared topic via the contract's
+        # published_events map (event_type short-name -> topic). Without this,
+        # a multi-publish-topic contract (e.g. the LLM call effect publishing
+        # both delegation-call-completed and inference-response) would route
+        # every returned model to the single ``output_topic`` fallback (the
+        # first publish topic), mis-routing the inference response (OMN-12416).
+        # Resolved from the contract's own discovered path, so the map is read
+        # from the installed contract regardless of cwd.
+        output_topic_map = load_published_events_map(contract.contract_path)
         effective_result_applier = DispatchResultApplier(
             event_bus=event_bus,
             output_topic=output_topic,
+            output_topic_map=output_topic_map,
             allowed_output_topics=contract.event_bus.publish_topics,
         )
     node_identity = ModelNodeIdentity(
@@ -2464,11 +2642,20 @@ def _prepare_handler_wiring(
     # Strip surrounding whitespace so registration matches the dispatch-engine
     # normalization (message_dispatch_engine.py normalizes via .strip()).
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    subscribe_topics = contract.event_bus.subscribe_topics if contract.event_bus else ()
+    literal_topic_aliases = _literal_event_type_aliases_from_topics(subscribe_topics)
+    if literal_topic_aliases:
+        message_types = (message_types or set()).union(literal_topic_aliases)
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
-    topic_message_types = set(_message_type_keys_for_handler_entry(contract, entry))
-    if topic_message_types:
-        message_types = (message_types or set()).union(topic_message_types)
+    elif contract.event_bus:
+        topic_aliases = {
+            alias
+            for topic in subscribe_topics
+            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+        }
+        if topic_aliases:
+            message_types = (message_types or set()).union(topic_aliases)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
@@ -2496,25 +2683,27 @@ def _prepare_handler_wiring(
         ownership_query=ownership_query,
     )
 
-    def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
-        """Return a containment-only PreparedWiring for an async-incompat handler.
+    def _quarantine_prepared(
+        *,
+        reason: EnumQuarantineReason,
+        detail: str,
+    ) -> PreparedWiring:
+        """Return a containment-only PreparedWiring for a known bad handler.
 
-        OMN-9457: the handler's constructor raised ``RuntimeError: asyncio.run()
-        cannot be called from a running event loop``. We deterministically
-        contain it — no dispatcher / route registration — and surface it on the
-        wiring report so follow-up migration is visible rather than
-        partially-broken runtime state.
+        Known containment-worthy declaration/construction failures are
+        surfaced in the wiring report instead of partially registering a broken
+        dispatcher. Resolver Step-6 constructor exhaustion TypeError remains
+        boot-fatal outside these explicit reasons.
         """
-        detail = _sanitize_exc(exc)
         logger.warning(
-            "Auto-wiring: quarantining async-incompatible handler %s.%s "
-            "(contract=%s, package=%s): %s. Runtime-effects boot will "
-            "continue; convert the handler to async-safe construction to "
-            "re-enable it.",
+            "Auto-wiring: quarantining handler %s.%s "
+            "(contract=%s, package=%s, reason=%s): %s. Runtime-effects boot "
+            "will continue; follow-up migration required.",
             handler_ref.module,
             handler_ref.name,
             contract.name,
             contract.package_name,
+            reason.value,
             detail,
         )
         return PreparedWiring(
@@ -2525,8 +2714,8 @@ def _prepare_handler_wiring(
             handler_name=handler_ref.name,
             handler_module=handler_ref.module,
             resolution_outcome=EnumHandlerResolutionOutcome.UNRESOLVABLE,
-            skip_reason=f"quarantined:{EnumQuarantineReason.ASYNC_INCOMPATIBLE.value}",
-            quarantine_reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+            skip_reason=f"quarantined:{reason.value}",
+            quarantine_reason=reason,
             quarantine_detail=detail,
         )
 
@@ -2558,12 +2747,26 @@ def _prepare_handler_wiring(
         )
         try:
             resolution = resolver.resolve(ctx)
+        except TypeError as exc:
+            # OMN-12501: Protocol interfaces are non-instantiable by design.
+            # They are invalid as handler_routing targets, but should be
+            # reported as contract migration work rather than crashing
+            # runtime-effects boot under the generic resolver TypeError path.
+            if _is_protocol_handler_class(handler_cls):
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION,
+                    detail=_sanitize_exc(exc),
+                )
+            raise
         except RuntimeError as exc:
             # OMN-9457: deterministic containment for handlers whose
             # construction path calls asyncio.run() inside runtime-managed
             # async boot. Any other RuntimeError propagates unchanged.
             if _is_async_incompat_runtime_error(exc):
-                return _quarantine_prepared(exc)
+                return _quarantine_prepared(
+                    reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+                    detail=_sanitize_exc(exc),
+                )
             raise
 
     # _early_category was computed up-front so the quarantine sentinel could
@@ -2620,8 +2823,20 @@ def _prepare_handler_wiring(
             [t.get("name") for t in db_tables],
             projection_terminal_event,
         )
+        # Projection handlers route by topic/db_io, not event_model; leave
+        # them untyped so the projection dispatch path is unchanged.
+        payload_type_matcher: Callable[[object], bool] | None = None
     else:
         callback = _make_dispatch_callback(handler_instance, entry.event_model)
+        # Type-scope the dispatcher on its declared event_model so a
+        # multi-handler contract routes each message to the single handler
+        # whose event_model matches the payload (OMN-12416). Untyped
+        # (operation-only) handlers stay un-scoped — legacy matching applies.
+        payload_type_matcher = (
+            _make_payload_type_matcher(entry.event_model)
+            if entry.event_model is not None
+            else None
+        )
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_key)
 
     # Pre-compute routes (no engine calls yet)
@@ -2651,6 +2866,7 @@ def _prepare_handler_wiring(
         resolution_outcome=resolution.outcome,
         route_ids=route_ids,
         routes=routes,
+        payload_type_matcher=payload_type_matcher,
     )
 
 
@@ -2704,6 +2920,7 @@ def _commit_handler_wiring(
                 dispatcher=prepared.dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
+                payload_type_matcher=prepared.payload_type_matcher,
             )
             for route in prepared.routes:
                 engine._register_route_dynamic(route)
@@ -2713,6 +2930,7 @@ def _commit_handler_wiring(
                 dispatcher=prepared.dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
+                payload_type_matcher=prepared.payload_type_matcher,
             )
             for route in prepared.routes:
                 engine.register_route(route)

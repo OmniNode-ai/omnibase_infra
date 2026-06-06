@@ -4845,11 +4845,11 @@ class TestDispatchDlqRouting:
         )
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "onex.dlq.intelligence.v1"
+        assert result.dlq_topic == "onex.dlq.omnibase-infra.intelligence.v1"
 
     @pytest.mark.asyncio
     async def test_no_dispatcher_with_platform_event_type(self) -> None:
-        """platform.* event_type routes to onex.dlq.platform.v1."""
+        """platform.* event_type routes to onex.dlq.omnibase-infra.platform.v1."""
         engine = MessageDispatchEngine()
         engine.freeze()
 
@@ -4864,7 +4864,7 @@ class TestDispatchDlqRouting:
         )
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "onex.dlq.platform.v1"
+        assert result.dlq_topic == "onex.dlq.omnibase-infra.platform.v1"
 
     @pytest.mark.asyncio
     async def test_no_dispatcher_without_event_type_uses_topic_based_dlq(self) -> None:
@@ -4881,7 +4881,7 @@ class TestDispatchDlqRouting:
         result = await engine.dispatch("dev.user.events.v1", envelope)
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "onex.dlq.events.v1"
+        assert result.dlq_topic == "onex.dlq.omnibase-infra.events.v1"
 
     @pytest.mark.asyncio
     async def test_no_dispatcher_without_event_type_command_topic(self) -> None:
@@ -4897,7 +4897,7 @@ class TestDispatchDlqRouting:
         result = await engine.dispatch("dev.user.commands.v1", envelope)
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "onex.dlq.commands.v1"
+        assert result.dlq_topic == "onex.dlq.omnibase-infra.commands.v1"
 
     @pytest.mark.asyncio
     async def test_successful_dispatch_has_no_dlq_topic(self) -> None:
@@ -4934,7 +4934,7 @@ class TestDispatchDlqRouting:
 
     @pytest.mark.asyncio
     async def test_no_dispatcher_agent_event_type_routes_to_agent_dlq(self) -> None:
-        """agent.* event_type routes to onex.dlq.agent.v1."""
+        """agent.* event_type routes to onex.dlq.omnibase-infra.agent.v1."""
         engine = MessageDispatchEngine()
         engine.freeze()
 
@@ -4949,7 +4949,7 @@ class TestDispatchDlqRouting:
         )
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "onex.dlq.agent.v1"
+        assert result.dlq_topic == "onex.dlq.omnibase-infra.agent.v1"
 
     @pytest.mark.asyncio
     async def test_derive_dlq_topic_exception_returns_none(self) -> None:

@@ -10,6 +10,8 @@ from the primary runtime.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.runtime.auto_wiring.models import (
@@ -25,6 +27,47 @@ def _normalize_runtime_profile(value: object) -> str:
     if not profile:
         raise ValueError("runtime_profile cannot be blank")
     return profile
+
+
+def extract_runtime_profiles_from_contract(
+    raw_contract: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Return normalized runtime-profile ownership declared by raw contract YAML."""
+    profiles_raw = raw_contract.get("runtime_profiles")
+    descriptor_raw = raw_contract.get("descriptor")
+    if profiles_raw is None and isinstance(descriptor_raw, Mapping):
+        profiles_raw = descriptor_raw.get("runtime_profiles")
+
+    if profiles_raw is None:
+        return ()
+    if isinstance(profiles_raw, str):
+        raw_values = (profiles_raw,)
+    elif isinstance(profiles_raw, (list, tuple)):
+        raw_values = tuple(profiles_raw)
+    else:
+        raise TypeError("runtime_profiles must be a string or sequence of strings")
+
+    profiles: list[str] = []
+    for raw in raw_values:
+        profiles.append(_normalize_runtime_profile(raw))
+    return tuple(dict.fromkeys(profiles))
+
+
+def runtime_profile_owns_contract(
+    raw_contract: Mapping[str, object],
+    runtime_profile: str,
+) -> bool:
+    """Return whether runtime_profile owns a raw contract's subscriptions.
+
+    Contracts without ``runtime_profiles`` default to ``main`` ownership. This
+    mirrors auto-wiring ownership filtering for legacy runtime-host subscription
+    paths that operate on raw contract dictionaries.
+    """
+    normalized_profile = _normalize_runtime_profile(runtime_profile)
+    runtime_profiles = extract_runtime_profiles_from_contract(raw_contract)
+    if runtime_profiles:
+        return normalized_profile in runtime_profiles
+    return normalized_profile == "main"
 
 
 class ModelRuntimeProfileOwnershipResult(BaseModel):
@@ -81,5 +124,7 @@ def filter_manifest_for_runtime_profile(
 
 __all__ = [
     "ModelRuntimeProfileOwnershipResult",
+    "extract_runtime_profiles_from_contract",
     "filter_manifest_for_runtime_profile",
+    "runtime_profile_owns_contract",
 ]

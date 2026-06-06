@@ -42,6 +42,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _assert_is_ownership_query,
+    _build_topic_migration_executor_dependencies,
     _prepare_handler_wiring,
     wire_from_manifest,
 )
@@ -307,6 +308,76 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             prepared.resolution_outcome
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
         )
+
+    @pytest.mark.unit
+    def test_topic_migration_executor_deps_materialized(self) -> None:
+        """Runtime materializes topic-migration executor collaborators."""
+        contract = _make_contract(handler_name="HandlerTopicMigrationExecutor")
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class HandlerTopicMigrationExecutor:
+            def __init__(self, provisioner: object, drain_proof_gate: object) -> None:
+                self.provisioner = provisioner
+                self.drain_proof_gate = drain_proof_gate
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        fake_provisioner = object()
+        fake_gate = object()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring."
+                "_import_handler_class",
+                return_value=HandlerTopicMigrationExecutor,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring."
+                "_build_topic_migration_executor_dependencies",
+                return_value={
+                    "provisioner": fake_provisioner,
+                    "drain_proof_gate": fake_gate,
+                },
+            ),
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        assert prepared.is_skip is False
+        assert (
+            prepared.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_NODE_REGISTRY
+        )
+        assert prepared.dispatcher is not None
+
+    @pytest.mark.unit
+    def test_topic_migration_executor_builder_uses_admin_namespace(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pinned aiokafka exposes AIOKafkaAdminClient from aiokafka.admin."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+        with (
+            patch("aiokafka.admin.AIOKafkaAdminClient") as admin_cls,
+            patch("aiokafka.AIOKafkaConsumer") as consumer_cls,
+        ):
+            deps = _build_topic_migration_executor_dependencies()
+
+        admin_cls.assert_called_once_with(bootstrap_servers="localhost:9092")
+        consumer_cls.assert_called_once_with(bootstrap_servers="localhost:9092")
+        assert set(deps) == {"provisioner", "drain_proof_gate"}
 
     @pytest.mark.unit
     @pytest.mark.asyncio

@@ -246,6 +246,11 @@ Published by LLM inference handlers after each call. Contains per-call
 token counts, cost, and latency for the cost aggregation pipeline.
 """
 
+SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED: str = (
+    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
+)
+"""Topic for dispatch worker outcome evaluation events."""
+
 SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
@@ -550,6 +555,17 @@ Producer: ServiceAutoEvalRunner (OMN-6796)
 Consumer: omnidash /eval-results dashboard (future)
 """
 
+SUFFIX_LLM_CALL_COMPLETED_INFRA: str = "onex.evt.omnibase-infra.llm-call-completed.v1"
+"""Topic suffix for omnibase_infra LLM call completion events."""
+
+SUFFIX_LLM_ENDPOINT_HEALTH: str = "onex.evt.omnibase-infra.llm-endpoint-health.v1"
+"""Topic suffix for LLM endpoint health events."""
+
+SUFFIX_EFFECTIVENESS_INVALIDATION: str = (
+    "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
+)
+"""Topic suffix for effectiveness data invalidation events."""
+
 SUFFIX_WIRING_HEALTH_SNAPSHOT: str = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"
 """Topic suffix for wiring health snapshot events.
 
@@ -585,6 +601,56 @@ Each event carries service_name, state, failure_count, threshold, and timestamp.
 Producer: CircuitBreakerEventPublisher (MixinAsyncCircuitBreaker integrations)
 Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
 """
+
+SUFFIX_SAVINGS_ESTIMATED: str = "onex.evt.omnibase-infra.savings-estimated.v1"
+"""Topic suffix for savings estimation projection events."""
+
+SUFFIX_RUNNER_USAGE_RECORDED: str = "onex.evt.omninode.runner-usage-recorded.v1"
+"""Topic suffix for self-hosted runner usage accounting events."""
+
+SUFFIX_PROJECTION_FRESHNESS_DEGRADED: str = (
+    "onex.evt.omnibase-infra.projection-freshness-degraded.v1"
+)
+"""Topic suffix for projection freshness SLA degradation events."""
+
+SUFFIX_PROJECTION_FRESHNESS_RECOVERED: str = (
+    "onex.evt.omnibase-infra.projection-freshness-recovered.v1"
+)
+"""Topic suffix for projection freshness SLA recovery events."""
+
+SUFFIX_ROUTING_DECIDED: str = "onex.evt.omnibase-infra.routing-decided.v1"
+"""Topic suffix for omnibase_infra routing decision events."""
+
+SUFFIX_WAITLIST_SIGNUP: str = "onex.evt.omniweb.waitlist-signup.v1"
+"""Topic suffix for omniweb waitlist signup events consumed by omnibase_infra."""
+
+SUFFIX_BUILD_LOOP_START: str = "onex.cmd.omnibase-infra.build-loop-start.v1"
+SUFFIX_BUILD_LOOP_CLOSEOUT: str = "onex.cmd.omnibase-infra.build-loop-closeout.v1"
+SUFFIX_BUILD_LOOP_VERIFY: str = "onex.cmd.omnibase-infra.build-loop-verify.v1"
+SUFFIX_BUILD_LOOP_FILL: str = "onex.cmd.omnibase-infra.build-loop-fill.v1"
+SUFFIX_BUILD_LOOP_CLASSIFY: str = "onex.cmd.omnibase-infra.build-loop-classify.v1"
+SUFFIX_BUILD_LOOP_BUILD: str = "onex.cmd.omnibase-infra.build-loop-build.v1"
+SUFFIX_BUILD_LOOP_STARTED: str = "onex.evt.omnibase-infra.build-loop-started.v1"
+SUFFIX_BUILD_LOOP_CLOSEOUT_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-closeout-completed.v1"
+)
+SUFFIX_BUILD_LOOP_VERIFY_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-verify-completed.v1"
+)
+SUFFIX_BUILD_LOOP_FILL_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-fill-completed.v1"
+)
+SUFFIX_BUILD_LOOP_CLASSIFY_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-classify-completed.v1"
+)
+SUFFIX_BUILD_LOOP_BUILD_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-build-completed.v1"
+)
+SUFFIX_BUILD_LOOP_CYCLE_COMPLETED: str = (
+    "onex.evt.omnibase-infra.build-loop-cycle-completed.v1"
+)
+SUFFIX_BUILD_LOOP_FAILED: str = "onex.evt.omnibase-infra.build-loop-failed.v1"
+"""Build loop command and lifecycle event topic suffixes."""
 
 # =============================================================================
 # PLATFORM DLQ AGGREGATION TOPIC SUFFIX (OMN-6136)
@@ -707,6 +773,18 @@ Published by the runner health CLI (cli_runner_health.py) every collection
 cycle. Each event carries a ``ModelRunnerHealthSnapshot`` payload.
 
 Producer: cli_runner_health.py (cron-scheduled)
+Consumer: omnidash (future)
+"""
+
+SUFFIX_NETWORK_POOL_STATUS: str = "onex.evt.omnibase-infra.network-pool-status.v1"
+"""Topic suffix for Docker subnet-pool occupancy events (OMN-12566).
+
+Published by the runner health CLI (cli_runner_health.py) on each network
+collection cycle. Each event carries a ``ModelNetworkPoolStatus`` payload so
+subnet-pool occupancy history is durable, not ephemeral, and alerting can
+trigger before the address pool is exhausted.
+
+Producer: cli_runner_health.py (cron-scheduled, --network)
 Consumer: omnidash (future)
 """
 
@@ -900,6 +978,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # Docker subnet-pool occupancy events (1 partition — low-throughput, OMN-12566)
+    ModelTopicSpec(
+        suffix=SUFFIX_NETWORK_POOL_STATUS,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
     # Row count diagnostic events (1 partition — low-throughput, OMN-5653)
     ModelTopicSpec(
         suffix=SUFFIX_ROW_COUNT_DIAGNOSTIC,
@@ -954,6 +1041,23 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # LLM completion and endpoint health events
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_CALL_COMPLETED_INFRA,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_ENDPOINT_HEALTH,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
     # LLM inference request commands (3 partitions — Plan D WS1)
     ModelTopicSpec(
         suffix=SUFFIX_LLM_INFERENCE_REQUEST,
@@ -971,6 +1075,114 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "86400000",
             "cleanup.policy": "delete",
         },  # 1 day — commands are short-lived
+    ),
+    # Observability and projection events resolved by ServiceTopicRegistry
+    ModelTopicSpec(
+        suffix=SUFFIX_EFFECTIVENESS_INVALIDATION,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_SAVINGS_ESTIMATED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNNER_USAGE_RECORDED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_PROJECTION_FRESHNESS_DEGRADED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_PROJECTION_FRESHNESS_RECOVERED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_ROUTING_DECIDED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_WAITLIST_SIGNUP,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    # Build loop command topics
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_START,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_CLOSEOUT,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_VERIFY,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_FILL,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_CLASSIFY,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_BUILD,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    # Build loop lifecycle events
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_STARTED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_CLOSEOUT_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_VERIFY_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_FILL_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_CLASSIFY_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_BUILD_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_CYCLE_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_BUILD_LOOP_FAILED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
     # Git hook relay events (3 partitions — low-throughput, OMN-8605)
     ModelTopicSpec(
@@ -1188,6 +1400,15 @@ SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN: str = "onex.evt.omniclaude.latency-breakdow
 Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
 """
 
+SUFFIX_OMNICLAUDE_SESSION_OUTCOME: str = "onex.evt.omniclaude.session-outcome.v1"
+"""Session outcome event topic emitted by omniclaude session hooks."""
+
+SUFFIX_OMNICLAUDE_CONTEXT_ENRICHMENT: str = "onex.evt.omniclaude.context-enrichment.v1"
+"""Context enrichment injection effectiveness topic."""
+
+SUFFIX_OMNICLAUDE_INJECTION_RECORDED: str = "onex.evt.omniclaude.injection-recorded.v1"
+"""Injection recorded effectiveness topic."""
+
 SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED: str = (
     "onex.evt.omniclaude.manifest-injection-started.v1"
 )
@@ -1233,6 +1454,19 @@ SUFFIX_OMNICLAUDE_TOOL_EXECUTED: str = "onex.evt.omniclaude.tool-executed.v1"
 
 Consumed by omnibase_infra agent learning extraction consumer (OMN-7242).
 """
+
+SUFFIX_OMNICLAUDE_VALIDATOR_CATCH: str = "onex.evt.omniclaude.validator-catch.v1"
+"""Validator catch event topic emitted by omniclaude hooks."""
+
+SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT: str = (
+    "onex.evt.omniclaude.pattern-enforcement.v1"
+)
+"""Pattern enforcement event topic emitted by omniclaude hooks."""
+
+SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED: str = (
+    "onex.evt.omniclaude.hook-context-injected.v1"
+)
+"""Hook context injection event topic emitted by omniclaude hooks."""
 
 # =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
@@ -1314,12 +1548,18 @@ _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_STATUS,
     SUFFIX_OMNICLAUDE_SESSION_ENDED,
     SUFFIX_OMNICLAUDE_TOOL_EXECUTED,
+    SUFFIX_OMNICLAUDE_SESSION_OUTCOME,
     SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION,
     SUFFIX_OMNICLAUDE_AGENT_MATCH,
     SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN,
+    SUFFIX_OMNICLAUDE_CONTEXT_ENRICHMENT,
+    SUFFIX_OMNICLAUDE_INJECTION_RECORDED,
     SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
     SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
     SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
+    SUFFIX_OMNICLAUDE_VALIDATOR_CATCH,
+    SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
+    SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
 )
 """Agent observability topic suffixes consumed by ServiceAgentActionsConsumer,
 injection effectiveness consumer (OMN-1889, OMN-2942), and agent learning
@@ -1761,6 +2001,7 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED, partitions=3),
     # Decision recording topics (OMN-2943 — previously unprovisioned gap)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD, partitions=3),

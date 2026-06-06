@@ -160,6 +160,10 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     assert "compose service endpoints reachable by docker dns" in compose_text
     assert "compose service endpoints reachable by host-published ports" in compose_text
     assert "unreachable from the runner by docker dns or localhost" in compose_text
+    assert "capture_compose_infra_diagnostics" in compose_text
+    assert "redpanda logs tail" in compose_text
+    assert "rpk topic list --brokers redpanda:9092" in compose_text
+    assert "compose services not healthy after 150s" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
     assert "kafka_bootstrap_servers=localhost:${kafka_port}" in compose_text
     assert "postgres:5432" in compose_text
@@ -235,6 +239,35 @@ def test_boot_has_uv_setup_step(workflow: Workflow) -> None:
     )
 
 
+def test_boot_disables_uv_cache_cleanup(workflow: Workflow) -> None:
+    steps = _boot_steps(workflow)
+    setup_step = next(
+        s for s in steps if "astral-sh/setup-uv" in str(s.get("uses", ""))
+    )
+    assert setup_step["with"]["enable-cache"] is False
+
+
+def test_compose_mode_installs_docker_compose_plugin(workflow: Workflow) -> None:
+    job = _boot_job(workflow)
+    assert job["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
+
+    steps = _boot_steps(workflow)
+    install_steps = [
+        s for s in steps if "install docker compose plugin" in _step_text(s)
+    ]
+    assert install_steps, "Docker Compose plugin install step missing"
+    install_step = install_steps[0]
+    assert str(install_step.get("if", "")) == "inputs.mode == 'compose'"
+    install_text = _step_text(install_step)
+    assert "docker compose version" in install_text
+    assert "docker_compose_version" in install_text
+    assert "docker-compose-linux-x86_64" in install_text
+
+    compose_steps = [s for s in steps if "bring up compose stack" in _step_text(s)]
+    assert compose_steps, "compose bring-up step missing"
+    assert steps.index(install_step) < steps.index(compose_steps[0])
+
+
 def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
     steps = _boot_steps(workflow)
     matched = [
@@ -248,6 +281,72 @@ def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
         assert "inputs.mode" in cond and "compose" in cond, (
             f"compose step must be gated on mode=='compose': {step}"
         )
+
+
+def test_boot_resolves_compose_frontend_for_runner_variants(
+    workflow: Workflow,
+) -> None:
+    """Self-hosted runners may expose Compose as either docker compose or docker-compose."""
+    steps = _boot_steps(workflow)
+    all_text = "\n".join(_step_text(s) for s in steps)
+    assert "docker_compose_cmd" in all_text
+    assert "docker compose version" in all_text
+    assert "docker-compose" in all_text
+    assert "runtime_boot_skip_reason" in all_text
+    assert "compose runtime boot smoke skipped" in all_text
+    assert 'read -r -a compose_cmd <<< "${docker_compose_cmd}"' in all_text
+    assert '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project}"' in all_text
+    assert (
+        '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project:-omnibase-infra}"'
+        in all_text
+    )
+    assert '"${docker_compose_cmd:-docker compose}"' not in all_text
+
+
+def test_compose_runtime_boot_skip_gates_compose_dependent_steps(
+    workflow: Workflow,
+) -> None:
+    """Missing runner Compose tooling must skip the smoke, not fail the PR."""
+    steps = _boot_steps(workflow)
+    compose_dependent_steps = [
+        step
+        for step in steps
+        if step.get("name")
+        in {
+            "Bring up compose stack (postgres + redpanda)",
+            "Run database migrations (compose mode)",
+            "Pre-warm Redpanda metadata (compose mode)",
+            "Stage contracts outside /home (compose mode)",
+            "Launch runtime (compose mode)",
+            "Launch runtime-effects (compose mode)",
+        }
+    ]
+    assert compose_dependent_steps, "compose-dependent steps missing"
+    for step in compose_dependent_steps:
+        assert "env.RUNTIME_BOOT_SKIP_REASON == ''" in str(step.get("if", ""))
+
+    hard_gate_steps = [
+        step
+        for step in steps
+        if step.get("name")
+        in {
+            "Wait for runtime and runtime-effects health (hard gate)",
+            "Hold 60s — runtime and runtime-effects stability",
+            "Fail on startup auto-wiring or registration errors",
+            "Query registration_projections for active/fresh rows",
+            "Assert runtime consumer groups are active",
+        }
+    ]
+    assert hard_gate_steps, "runtime hard-gate steps missing"
+    for step in hard_gate_steps:
+        assert step.get("if") == "env.RUNTIME_BOOT_SKIP_REASON == ''"
+
+    artifact_step = next(
+        step for step in steps if step.get("name") == "Emit smoke-result.json artifact"
+    )
+    artifact_text = _step_text(artifact_step)
+    assert "skipped:" in artifact_text
+    assert "skip_reason:" in artifact_text
 
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
@@ -376,7 +475,9 @@ def test_boot_uploads_smoke_result_artifact(workflow: Workflow) -> None:
     assert matched, "smoke-result.json artifact output missing"
     # OMN-9458: artifact payload must include effects_health so downstream
     # tooling can discriminate runtime vs runtime-effects startup regressions.
-    assert "effects_health" in WORKFLOW_PATH.read_text()
+    raw = WORKFLOW_PATH.read_text()
+    assert "effects_health" in raw
+    assert "compose_infra_diagnostics" in raw
 
 
 def test_boot_has_nine_steps_minimum(workflow: Workflow) -> None:
@@ -390,3 +491,23 @@ def test_no_hardcoded_user_paths(workflow: Workflow) -> None:
     raw = WORKFLOW_PATH.read_text()
     assert "/Users/" not in raw, "no /Users/ absolute paths in workflow YAML"
     assert "/Volumes/" not in raw, "no /Volumes/ absolute paths in workflow YAML"
+
+
+def test_boot_teardown_is_unconditional_and_removes_network(
+    workflow: Workflow,
+) -> None:
+    """OMN-12566: the compose teardown must run on success AND failure, and
+    must explicitly remove the per-run network so it never leaks into the
+    runner's address pool — `compose down` alone is insufficient when the
+    network survives partial bring-up."""
+    steps = _boot_steps(workflow)
+    teardown = [s for s in steps if "tear down compose network" in _step_text(s)]
+    assert teardown, "missing unconditional compose-network teardown step"
+    step = teardown[0]
+    # always() so it fires even when an earlier hard gate failed.
+    assert "always()" in str(step.get("if", "")), "teardown must use always()"
+    text = str(step.get("run", ""))
+    assert "down -v --remove-orphans" in text, "teardown must run compose down -v"
+    # Bounded explicit removal fallback — never a blanket prune.
+    assert "docker network rm" in text, "teardown must explicitly remove the network"
+    assert "network prune" not in text, "teardown must NOT blanket-prune networks"

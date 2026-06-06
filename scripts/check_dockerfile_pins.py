@@ -50,10 +50,7 @@ class PinEntry(NamedTuple):
 # Parsing
 # ---------------------------------------------------------------------------
 
-_INSTALL_LINE_RE = re.compile(
-    r"^\s*uv pip install\b(.+)$",
-    re.MULTILINE,
-)
+_INSTALL_LINE_RE = re.compile(r"(?:^|\s)(?:uv|uv-with-retry)\s+pip\s+install\b(.+)$")
 # Matches a package specifier such as "omninode-claude>=0.3.0,<0.5.0" (with or
 # without surrounding quotes).
 _PACKAGE_SPEC_RE = re.compile(
@@ -66,10 +63,27 @@ def _parse_dockerfile(path: Path) -> list[PinEntry]:
     text = path.read_text()
     entries: list[PinEntry] = []
 
-    for m in _INSTALL_LINE_RE.finditer(text):
+    logical_lines: list[tuple[int, str]] = []
+    pending = ""
+    start_line = 1
+    for line_no, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.rstrip()
+        if pending == "":
+            start_line = line_no
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        logical_lines.append((start_line, pending + stripped))
+        pending = ""
+    if pending:
+        logical_lines.append((start_line, pending))
+
+    for line_no, logical_line in logical_lines:
+        m = _INSTALL_LINE_RE.search(logical_line)
+        if not m:
+            continue
         args = m.group(1)
         no_deps = "--no-deps" in args
-        line_no = text[: m.start()].count("\n") + 1
 
         for pkg_m in _PACKAGE_SPEC_RE.finditer(args):
             package = pkg_m.group(1)

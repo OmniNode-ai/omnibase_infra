@@ -42,8 +42,19 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
+  # OMN-12626 (R1): refuse to build the prod-bound runtime image unless the
+  # source tree is clean AND HEAD is a promoted origin/main commit. This runs
+  # on push to main (the promoted ref), so a real main build passes and a
+  # dirty/dev-only build fails closed before any image is built or pushed.
+  lineage-guard:
+    name: Prod promotion lineage guard
+    uses: ./.github/workflows/prod-promotion-lineage.yml
+    with:
+      enforce_lineage: true
+
   build-and-push:
     name: Build and push runtime image
+    needs: lineage-guard
     permissions:
       id-token: write
       contents: read
