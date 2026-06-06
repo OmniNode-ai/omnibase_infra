@@ -354,11 +354,14 @@ validate_prerequisites() {
     # Check that all required external commands and Docker Compose version are available.
     log_step "Validate Prerequisites"
 
-    check_command rsync   "file synchronization"
     check_command docker  "container runtime"
-    check_command jq      "JSON processing"
     check_command git     "version control"
-    check_command curl    "deployment verification"
+
+    if [[ "${PRINT_COMPOSE_CMD}" == false ]]; then
+        check_command rsync   "file synchronization"
+        check_command jq      "JSON processing"
+        check_command curl    "deployment verification"
+    fi
 
     check_compose_version
 }
