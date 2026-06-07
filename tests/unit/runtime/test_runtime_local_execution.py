@@ -188,6 +188,42 @@ def _make_sync_handler(
     return _Handler()
 
 
+def _make_async_typed_handler(
+    output: MockOutput | None = None,
+    error: Exception | None = None,
+) -> Any:
+    """Return an object with an async typed ``handle(request)`` method."""
+
+    class _Handler:
+        calls: list[MockInput] = []
+
+        async def handle(self, request: MockInput) -> MockOutput | None:
+            self.calls.append(request)
+            if error is not None:
+                raise error
+            return output
+
+    return _Handler()
+
+
+def _make_sync_typed_handler(
+    output: MockOutput | None = None,
+    error: Exception | None = None,
+) -> Any:
+    """Return an object with a sync typed ``handle(request)`` method."""
+
+    class _Handler:
+        calls: list[MockInput] = []
+
+        def handle(self, request: MockInput) -> MockOutput | None:
+            self.calls.append(request)
+            if error is not None:
+                raise error
+            return output
+
+    return _Handler()
+
+
 def _input_bytes(correlation_id: str = "cid-1", name: str = "alice") -> bytes:
     return (
         MockInput(correlation_id=correlation_id, name=name).model_dump_json().encode()
@@ -196,8 +232,8 @@ def _input_bytes(correlation_id: str = "cid-1", name: str = "alice") -> bytes:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_adapter_async_handler() -> None:
-    """Adapter deserializes message, calls async handler, publishes result."""
+async def test_adapter_async_kwargs_handler() -> None:
+    """Adapter deserializes message, calls legacy async kwargs handler."""
     expected_output = MockOutput(correlation_id="cid-1", result="ok")
     handler = _make_async_handler(output=expected_output)
     bus = MockBus()
@@ -212,7 +248,6 @@ async def test_adapter_async_handler() -> None:
     msg = MockMessage(value=_input_bytes())
     await adapter.on_message(msg)
 
-    # Handler was called with deserialized kwargs
     assert len(handler.calls) == 1
     assert handler.calls[0]["correlation_id"] == "cid-1"
     assert handler.calls[0]["name"] == "alice"
@@ -228,8 +263,8 @@ async def test_adapter_async_handler() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_adapter_sync_handler() -> None:
-    """Adapter works with sync handlers too."""
+async def test_adapter_sync_kwargs_handler() -> None:
+    """Adapter works with legacy sync kwargs handlers too."""
     expected_output = MockOutput(correlation_id="cid-2", result="sync-ok")
     handler = _make_sync_handler(output=expected_output)
     bus = MockBus()
@@ -249,6 +284,60 @@ async def test_adapter_sync_handler() -> None:
     assert len(bus.published) == 1
     published_data = json.loads(bus.published[0][2])
     assert published_data["result"] == "sync-ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adapter_async_typed_handler() -> None:
+    """Adapter calls async typed handlers with the validated request model."""
+    expected_output = MockOutput(correlation_id="cid-typed", result="typed-ok")
+    handler = _make_async_typed_handler(output=expected_output)
+    bus = MockBus()
+    adapter = LocalRuntimeBusAdapter(
+        handler=handler,
+        handler_name="test-async-typed",
+        input_model_cls=MockInput,
+        output_topic="out.topic",
+        bus=bus,
+    )
+
+    msg = MockMessage(value=_input_bytes(correlation_id="cid-typed", name="ada"))
+    await adapter.on_message(msg)
+
+    assert len(handler.calls) == 1
+    assert isinstance(handler.calls[0], MockInput)
+    assert handler.calls[0].correlation_id == "cid-typed"
+    assert handler.calls[0].name == "ada"
+    assert len(bus.published) == 1
+    published_data = json.loads(bus.published[0][2])
+    assert published_data["result"] == "typed-ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adapter_sync_typed_handler() -> None:
+    """Adapter calls sync typed handlers with the validated request model."""
+    expected_output = MockOutput(correlation_id="cid-sync-typed", result="typed-sync")
+    handler = _make_sync_typed_handler(output=expected_output)
+    bus = MockBus()
+    adapter = LocalRuntimeBusAdapter(
+        handler=handler,
+        handler_name="test-sync-typed",
+        input_model_cls=MockInput,
+        output_topic="out.topic",
+        bus=bus,
+    )
+
+    msg = MockMessage(value=_input_bytes(correlation_id="cid-sync-typed", name="grace"))
+    await adapter.on_message(msg)
+
+    assert len(handler.calls) == 1
+    assert isinstance(handler.calls[0], MockInput)
+    assert handler.calls[0].correlation_id == "cid-sync-typed"
+    assert handler.calls[0].name == "grace"
+    assert len(bus.published) == 1
+    published_data = json.loads(bus.published[0][2])
+    assert published_data["result"] == "typed-sync"
 
 
 @pytest.mark.unit
@@ -915,6 +1004,87 @@ async def test_two_handler_chain_end_to_end(tmp_path: Path) -> None:
             "_test_chain_mid",
             "_test_chain_handler_a",
             "_test_chain_handler_b",
+        ]:
+            sys.modules.pop(mod_name, None)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_single_event_handler_publishes_result_to_terminal_topic(
+    tmp_path: Path,
+) -> None:
+    """A one-handler event-driven contract publishes its result as terminal output."""
+    import sys
+    import types
+
+    class TerminalResult(BaseModel):
+        correlation_id: str
+        status: str = "success"
+        response_text: str
+
+    class TerminalHandler:
+        async def handle(self, request: MockInput) -> TerminalResult:
+            return TerminalResult(
+                correlation_id=request.correlation_id,
+                response_text=f"processed {request.name}",
+            )
+
+    mod_input = types.ModuleType("_test_single_terminal_input")
+    mod_input.MockInput = MockInput  # type: ignore[attr-defined]
+    mod_handler = types.ModuleType("_test_single_terminal_handler")
+    mod_handler.TerminalHandler = TerminalHandler  # type: ignore[attr-defined]
+
+    sys.modules["_test_single_terminal_input"] = mod_input
+    sys.modules["_test_single_terminal_handler"] = mod_handler
+
+    try:
+        contract_yaml = (
+            "workflow_id: test_single_terminal\n"
+            "contract_version: {major: 1, minor: 0, patch: 0}\n"
+            "node_type: workflow\n"
+            "description: Single handler terminal output test\n"
+            "initial_command: cmd.start.v1\n"
+            "terminal_event: evt.done.v1\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - cmd.start.v1\n"
+            "  publish_topics:\n"
+            "    - evt.done.v1\n"
+            "input_model:\n"
+            "  module: _test_single_terminal_input\n"
+            "  class: MockInput\n"
+            "handler_routing:\n"
+            "  routing_strategy: payload_type_match\n"
+            "  handlers:\n"
+            "    - event_model:\n"
+            "        name: MockInput\n"
+            "        module: _test_single_terminal_input\n"
+            "      handler:\n"
+            "        name: TerminalHandler\n"
+            "        module: _test_single_terminal_handler\n"
+        )
+
+        workflow = tmp_path / "single_terminal.yaml"
+        workflow.write_text(contract_yaml)
+
+        runtime = RuntimeLocal(
+            workflow_path=workflow,
+            state_root=tmp_path / "state",
+            timeout=10,
+        )
+        result = await runtime.run_async()
+
+        assert result == EnumWorkflowResult.COMPLETED
+        state_data = json.loads(
+            (tmp_path / "state" / "workflow_result.json").read_text()
+        )
+        assert state_data["result"] == "completed"
+        assert state_data["terminal_payload"]["status"] == "success"
+        assert state_data["terminal_payload"]["response_text"].startswith("processed")
+    finally:
+        for mod_name in [
+            "_test_single_terminal_input",
+            "_test_single_terminal_handler",
         ]:
             sys.modules.pop(mod_name, None)
 

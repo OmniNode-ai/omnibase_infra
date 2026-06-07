@@ -1,0 +1,59 @@
+# OMN-12755 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-12755"
+title: "Fix deploy-runtime workspace OMNI_HOME propagation"
+summary: >-
+  deploy-runtime.sh preserves an operator-supplied OMNI_HOME across
+  ~/.omnibase/.env sourcing, stages workspace sibling repos from that root when
+  BUILD_SOURCE=workspace, and passes BUILD_SOURCE, EXPECTED_BUILD_SOURCE, and
+  OMNI_HOME as explicit Dockerfile build args.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused deploy-runtime workspace build command and env precedence regressions pass"
+    command: >-
+      uv run pytest tests/scripts/test_deploy_runtime_build_context.py tests/scripts/test_deploy_runtime_no_env_file.py -q
+  - kind: "tests"
+    description: "deploy-runtime shell syntax is valid"
+    command: "bash -n scripts/deploy-runtime.sh"
+  - kind: "tests"
+    description: "Touched Python test file passes ruff"
+    command: "uv run ruff check tests/scripts/test_deploy_runtime_build_context.py"
+  - kind: "manual"
+    description: "Post-merge runtime deployment should be run with BUILD_SOURCE=workspace to verify staging and image provenance"
+    command: >-
+      BUILD_SOURCE=workspace OMNI_HOME=/data/omninode/omni_home bash scripts/deploy-runtime.sh --execute --force
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-focused-tests"
+    description: "Focused deploy-runtime workspace build command and env precedence regressions pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/scripts/test_deploy_runtime_build_context.py tests/scripts/test_deploy_runtime_no_env_file.py -q
+  - id: "dod-shell-syntax"
+    description: "deploy-runtime shell syntax is valid"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "bash -n scripts/deploy-runtime.sh"
+  - id: "dod-ruff"
+    description: "Touched Python test file passes ruff"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run ruff check tests/scripts/test_deploy_runtime_build_context.py"
+  - id: "dod-post-merge-deploy"
+    description: "Post-merge workspace-mode runtime deploy validates staging and image provenance"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          BUILD_SOURCE=workspace OMNI_HOME=/data/omninode/omni_home bash scripts/deploy-runtime.sh --execute --force, then inspect image build args/provenance for the operator workspace root
