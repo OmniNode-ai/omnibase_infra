@@ -695,6 +695,9 @@ class RuntimeLocal:
             em = self._as_workflow_map(entry.get("event_model", {}))
             hd = self._as_workflow_map(entry.get("handler", {}))
             output_events = self._as_string_list(entry.get("output_events", []))
+            input_topic = (
+                self._resolve_handler_input_topic(entry, i, subscribe_topics) or ""
+            )
 
             # Determine output topic
             output_topic = ""
@@ -709,12 +712,14 @@ class RuntimeLocal:
                     output_topic = downstream_topic or ""
                 elif publish_topics:
                     output_topic = publish_topics[0]
-
-            # Terminal reducers may have no input topic (no positional slot and
-            # no explicit subscribe_topic) — use empty string to skip bus wiring.
-            input_topic = (
-                self._resolve_handler_input_topic(entry, i, subscribe_topics) or ""
-            )
+            elif input_topic and publish_topics:
+                terminal_topic = self._contract.get("terminal_event")
+                output_topic = (
+                    terminal_topic
+                    if isinstance(terminal_topic, str)
+                    and terminal_topic in publish_topics
+                    else publish_topics[0]
+                )
 
             resolved.append(
                 ResolvedRoutingEntry(

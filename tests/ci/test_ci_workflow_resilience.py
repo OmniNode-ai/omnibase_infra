@@ -53,15 +53,19 @@ def _runs_on_expression(job: dict[str, Any]) -> str:
     return str(runs_on)
 
 
-def test_migration_freeze_uses_shallow_checkout_for_merge_group() -> None:
+def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
     workflow = _load_yaml(CI_WORKFLOW)
     job = workflow["jobs"]["migration-freeze"]
     steps = job["steps"]
 
+    assert job["timeout-minutes"] == 15
+
     checkout_step = next(
         step for step in steps if step.get("uses") == "actions/checkout@v6"
     )
+    assert checkout_step["timeout-minutes"] == 10
     assert checkout_step["with"]["fetch-depth"] == 2
+    assert checkout_step["with"]["fetch-tags"] is False
 
     freeze_step = next(
         step for step in steps if step.get("name") == "Check migration freeze"
