@@ -2815,7 +2815,7 @@ def _prepare_handler_wiring(
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
-        for topic in contract.event_bus.subscribe_topics:
+        for topic in _topics_for_handler_entry(contract, entry):
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 

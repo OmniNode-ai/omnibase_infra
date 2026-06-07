@@ -51,6 +51,7 @@ def _make_contract_with_event_type_alias(
     event_type_alias: str | None,
     message_category: str | None = None,
     node_name: str = "node_local",
+    subscribe_topic: str = "onex.cmd.platform.foo-start.v1",
 ) -> ModelDiscoveredContract:
     event_model = ModelHandlerRef(name=event_model_name, module="fake.models")
     entry_kwargs: dict[str, object] = {
@@ -71,7 +72,7 @@ def _make_contract_with_event_type_alias(
         entry_point_name=node_name,
         package_name="test-pkg",
         event_bus=ModelEventBusWiring(
-            subscribe_topics=("onex.cmd.platform.foo-start.v1",),
+            subscribe_topics=(subscribe_topic,),
             publish_topics=(),
         ),
         handler_routing=ModelHandlerRouting(
@@ -280,6 +281,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
             event_type_alias="platform.node-heartbeat",
             message_category="EVENT",
             node_name="node_registration_orchestrator",
+            subscribe_topic="onex.evt.platform.node-heartbeat.v1",
         )
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
         handler_cls = _make_zero_arg_handler_cls()
