@@ -309,7 +309,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {
             "ModelNodeHeartbeatEvent",
             "platform.node-heartbeat",
-            "onex.evt.platform.node-heartbeat.v1",
+            "onex.cmd.platform.foo-start.v1",
         }
         assert (
             prepared.resolution_outcome

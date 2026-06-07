@@ -169,9 +169,9 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-12727: bump core pin to dev HEAD (f587bbb4, OMN-12663/OMN-12676)
-# which widens bifrost delegation tier literals and carries inference API key refs.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "f587bbb4bd7f8db10a178dab546bdcef5c7136fd" }
+# OMN-12763: bump core pin to dev HEAD (c7d6b5ec, OMN-12762)
+# which accepts quality-gate DoD overlay criteria in delegation wire requests.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c7d6b5ec010692b6724de1d49a0ee5a599d7ee06" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
