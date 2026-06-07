@@ -1672,6 +1672,34 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
+def _topics_for_handler_entry(
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+) -> tuple[str, ...]:
+    """Return subscribe topics that can be deterministically assigned to entry."""
+    if contract.event_bus is None:
+        return ()
+
+    topics = contract.event_bus.subscribe_topics
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        matched = tuple(
+            topic
+            for topic in topics
+            if topic == event_type_alias
+            or _derive_event_type_alias_from_topic(topic) == event_type_alias
+        )
+        return matched
+
+    if entry.event_model is None:
+        return topics
+
+    if len(topics) == 1:
+        return topics
+
+    return ()
+
+
 def _literal_event_type_aliases_from_topics(
     subscribe_topics: tuple[str, ...],
 ) -> set[str]:
@@ -2815,7 +2843,7 @@ def _prepare_handler_wiring(
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
-        for topic in contract.event_bus.subscribe_topics:
+        for topic in _topics_for_handler_entry(contract, entry):
             route_id = _derive_route_id(contract.name, handler_key, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 

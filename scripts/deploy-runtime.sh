@@ -1749,6 +1749,11 @@ main() {
     # during preview, not after a build starts (OMN-12626, R1).
     guard_prod_promotion_lineage "${repo_root}"
 
+    # Prod lane: hard-fail on dirty/non-promoted source before any build/deploy.
+    # Runs in both dry-run and execute modes so operators see the rejection
+    # during preview, not after a build starts (OMN-12626, R1).
+    guard_prod_promotion_lineage "${repo_root}"
+
     # Compute paths
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
