@@ -1008,6 +1008,87 @@ async def test_two_handler_chain_end_to_end(tmp_path: Path) -> None:
             sys.modules.pop(mod_name, None)
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_single_event_handler_publishes_result_to_terminal_topic(
+    tmp_path: Path,
+) -> None:
+    """A one-handler event-driven contract publishes its result as terminal output."""
+    import sys
+    import types
+
+    class TerminalResult(BaseModel):
+        correlation_id: str
+        status: str = "success"
+        response_text: str
+
+    class TerminalHandler:
+        async def handle(self, request: MockInput) -> TerminalResult:
+            return TerminalResult(
+                correlation_id=request.correlation_id,
+                response_text=f"processed {request.name}",
+            )
+
+    mod_input = types.ModuleType("_test_single_terminal_input")
+    mod_input.MockInput = MockInput  # type: ignore[attr-defined]
+    mod_handler = types.ModuleType("_test_single_terminal_handler")
+    mod_handler.TerminalHandler = TerminalHandler  # type: ignore[attr-defined]
+
+    sys.modules["_test_single_terminal_input"] = mod_input
+    sys.modules["_test_single_terminal_handler"] = mod_handler
+
+    try:
+        contract_yaml = (
+            "workflow_id: test_single_terminal\n"
+            "contract_version: {major: 1, minor: 0, patch: 0}\n"
+            "node_type: workflow\n"
+            "description: Single handler terminal output test\n"
+            "initial_command: cmd.start.v1\n"
+            "terminal_event: evt.done.v1\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - cmd.start.v1\n"
+            "  publish_topics:\n"
+            "    - evt.done.v1\n"
+            "input_model:\n"
+            "  module: _test_single_terminal_input\n"
+            "  class: MockInput\n"
+            "handler_routing:\n"
+            "  routing_strategy: payload_type_match\n"
+            "  handlers:\n"
+            "    - event_model:\n"
+            "        name: MockInput\n"
+            "        module: _test_single_terminal_input\n"
+            "      handler:\n"
+            "        name: TerminalHandler\n"
+            "        module: _test_single_terminal_handler\n"
+        )
+
+        workflow = tmp_path / "single_terminal.yaml"
+        workflow.write_text(contract_yaml)
+
+        runtime = RuntimeLocal(
+            workflow_path=workflow,
+            state_root=tmp_path / "state",
+            timeout=10,
+        )
+        result = await runtime.run_async()
+
+        assert result == EnumWorkflowResult.COMPLETED
+        state_data = json.loads(
+            (tmp_path / "state" / "workflow_result.json").read_text()
+        )
+        assert state_data["result"] == "completed"
+        assert state_data["terminal_payload"]["status"] == "success"
+        assert state_data["terminal_payload"]["response_text"].startswith("processed")
+    finally:
+        for mod_name in [
+            "_test_single_terminal_input",
+            "_test_single_terminal_handler",
+        ]:
+            sys.modules.pop(mod_name, None)
+
+
 # ===================================================================
 # Fallback method resolution tests (OMN-7788, OMN-7789)
 # ===================================================================
