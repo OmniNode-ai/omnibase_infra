@@ -17,7 +17,7 @@ Architecture:
     - Builds ContractLlmCallMetrics for caller to publish
 
 Handler Responsibilities:
-    - Build URL: use endpoint_url directly when set; fall back to base_url + path
+    - Build URL: post the contract endpoint_url verbatim; no URL construction (OMN-12815)
     - Serialize request fields to OpenAI JSON payload
     - Translate ModelLlmToolChoice to wire format
     - Serialize ModelLlmToolDefinition to wire format
@@ -118,12 +118,6 @@ _FINISH_REASON_MAP: dict[str, EnumLlmFinishReason] = {
     "content_filter": EnumLlmFinishReason.CONTENT_FILTER,
     "tool_calls": EnumLlmFinishReason.TOOL_CALLS,
     "function_call": EnumLlmFinishReason.TOOL_CALLS,
-}
-
-# URL path suffixes for each operation type.
-_OPERATION_PATHS: dict[EnumLlmOperationType, str] = {
-    EnumLlmOperationType.CHAT_COMPLETION: "/v1/chat/completions",
-    EnumLlmOperationType.COMPLETION: "/v1/completions",
 }
 
 # Default connection limits for auth-injected httpx clients.
@@ -465,41 +459,35 @@ class HandlerLlmOpenaiCompatible:
 
     @staticmethod
     def _build_url(request: ModelLlmInferenceRequest) -> str:
-        """Return the URL to POST to for this inference request.
+        """Return the contract ``endpoint_url`` verbatim as the POST URL.
 
-        When ``request.endpoint_url`` is set, it is returned directly — no
-        path is appended. This is the preferred path for contracts that declare
-        the full endpoint URL (e.g. z.ai GLM, Google Gemini).
-
-        When only ``request.base_url`` is set (legacy path), the appropriate
-        path suffix is appended based on ``operation_type``. This preserves
-        backwards compatibility with callers that pre-date ``endpoint_url``.
+        OMN-12815: endpoints are specified COMPLETELY in the contract and are
+        used VERBATIM. The handler performs NO URL construction — no operation
+        path is appended, no base_url is split, no path resolver runs. The
+        POST URL equals ``request.endpoint_url`` exactly. In-code URL
+        construction hardcodes provider path logic in code and is flaky and
+        error-prone; the contract is the single source of the full URL.
 
         Args:
             request: The inference request.
 
         Returns:
-            Full URL string to POST to.
+            ``request.endpoint_url`` unchanged.
 
         Raises:
-            ValueError: If operation_type is not CHAT_COMPLETION or COMPLETION
-                and ``endpoint_url`` is not set (legacy path only).
+            ValueError: If ``endpoint_url`` is empty/missing. Fail-closed —
+                there is no base_url fallback or path construction.
         """
-        # Fast path: contract provides the full URL — use it as-is.
-        if request.endpoint_url is not None:
-            return request.endpoint_url
-
-        # Legacy path: construct URL from base_url + operation type path.
-        path = _OPERATION_PATHS.get(request.operation_type)
-        if path is None:
+        if not request.endpoint_url:
             msg = (
-                f"Unsupported operation type for OpenAI handler: "
-                f"{request.operation_type.value}"
+                "endpoint_url is required and must be the COMPLETE contract "
+                "endpoint URL (OMN-12815). The OpenAI-compatible effect posts "
+                "it verbatim and performs no URL construction; populate the "
+                "complete endpoint_url in the routing authority — there is no "
+                "base_url + path fallback."
             )
             raise ValueError(msg)
-
-        base = request.base_url.rstrip("/")
-        return f"{base}{path}"
+        return request.endpoint_url
 
     # ── Payload building ─────────────────────────────────────────────────
 

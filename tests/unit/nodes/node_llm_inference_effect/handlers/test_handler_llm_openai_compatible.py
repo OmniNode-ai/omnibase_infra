@@ -98,9 +98,15 @@ def _make_handler(transport: MagicMock | None = None) -> HandlerLlmOpenaiCompati
 
 
 def _make_chat_request(**overrides: Any) -> ModelLlmInferenceRequest:
-    """Build a valid CHAT_COMPLETION request with sensible defaults."""
+    """Build a valid CHAT_COMPLETION request with sensible defaults.
+
+    OMN-12815: ``endpoint_url`` is the COMPLETE contract endpoint, posted
+    verbatim. The default supplies the full chat-completions URL; ``base_url``
+    is retained only as the required routing/metrics field.
+    """
     defaults: dict[str, Any] = {
         "base_url": _BASE_URL,
+        "endpoint_url": f"{_BASE_URL}/v1/chat/completions",
         "model": _MODEL,
         "operation_type": EnumLlmOperationType.CHAT_COMPLETION,
         "messages": ({"role": "user", "content": "Hello"},),
@@ -110,9 +116,14 @@ def _make_chat_request(**overrides: Any) -> ModelLlmInferenceRequest:
 
 
 def _make_completion_request(**overrides: Any) -> ModelLlmInferenceRequest:
-    """Build a valid COMPLETION request with sensible defaults."""
+    """Build a valid COMPLETION request with sensible defaults.
+
+    OMN-12815: ``endpoint_url`` is the COMPLETE contract endpoint, posted
+    verbatim.
+    """
     defaults: dict[str, Any] = {
         "base_url": _BASE_URL,
+        "endpoint_url": f"{_BASE_URL}/v1/completions",
         "model": _MODEL,
         "operation_type": EnumLlmOperationType.COMPLETION,
         "prompt": "Once upon a time",
@@ -224,73 +235,54 @@ def _make_error_context() -> ModelInfraErrorContext:
 
 @pytest.mark.unit
 class TestBuildUrl:
-    """Tests for HandlerLlmOpenaiCompatible._build_url()."""
+    """Tests for HandlerLlmOpenaiCompatible._build_url() (OMN-12815).
 
-    def test_chat_completion_url(self) -> None:
-        """CHAT_COMPLETION appends /v1/chat/completions."""
-        request = _make_chat_request()
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == f"{_BASE_URL}/v1/chat/completions"
+    Endpoints are COMPLETE in the contract and posted VERBATIM. The handler
+    performs no URL construction: the POST URL equals ``endpoint_url`` exactly
+    for every provider, and a missing ``endpoint_url`` fails closed.
+    """
 
-    def test_completion_url(self) -> None:
-        """COMPLETION appends /v1/completions."""
-        request = _make_completion_request()
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == f"{_BASE_URL}/v1/completions"
-
-    def test_trailing_slash_stripped(self) -> None:
-        """Trailing slash on base_url does not produce double slash."""
-        request = _make_chat_request(base_url="http://host:8000/")
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == "http://host:8000/v1/chat/completions"
-        assert "//" not in url.split("://")[1]
-
-    def test_unsupported_operation_type_raises_value_error(self) -> None:
-        """Unsupported operation_type raises ValueError (legacy path, no endpoint_url)."""
-        # EMBEDDING is not supported by the OpenAI handler
-        # We can't construct a request with EMBEDDING and messages, so test
-        # the static method directly with a mock request.
-        # endpoint_url=None forces the legacy base_url + path construction path.
-        mock_request = MagicMock()
-        mock_request.endpoint_url = None
-        mock_request.operation_type = EnumLlmOperationType.EMBEDDING
-        mock_request.base_url = _BASE_URL
-
-        with pytest.raises(ValueError, match="Unsupported operation type"):
-            HandlerLlmOpenaiCompatible._build_url(mock_request)
-
-    def test_endpoint_url_returned_directly(self) -> None:
-        """When endpoint_url is set, _build_url returns it verbatim — no path appended."""
-        full_url = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+    def test_endpoint_url_returned_verbatim_local(self) -> None:
+        """A complete local endpoint_url is returned exactly — no append/split."""
+        full_url = "http://192.168.86.201:8000/v1/chat/completions"
         request = _make_chat_request(endpoint_url=full_url)
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == full_url
+        assert HandlerLlmOpenaiCompatible._build_url(request) == full_url
 
-    def test_endpoint_url_takes_precedence_over_base_url(self) -> None:
-        """endpoint_url wins even when base_url is also set."""
+    def test_endpoint_url_returned_verbatim_gemini(self) -> None:
+        """A complete Gemini endpoint_url is returned exactly — no append/split."""
         full_url = (
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         )
-        request = _make_chat_request(
-            endpoint_url=full_url,
-            base_url="http://192.168.86.201:8000",
-        )
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == full_url
-        assert "192.168.86.201" not in url
-
-    def test_endpoint_url_none_falls_back_to_base_url_path(self) -> None:
-        """When endpoint_url is None, legacy base_url + path construction is used."""
-        request = _make_chat_request(endpoint_url=None)
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == f"{_BASE_URL}/v1/chat/completions"
-
-    def test_endpoint_url_local_model_full_url(self) -> None:
-        """Full URL for a local model is returned unchanged."""
-        full_url = "http://192.168.86.201:8000/v1/chat/completions"
         request = _make_chat_request(endpoint_url=full_url)
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-        assert url == full_url
+        assert HandlerLlmOpenaiCompatible._build_url(request) == full_url
+
+    def test_endpoint_url_returned_verbatim_openrouter(self) -> None:
+        """A complete OpenRouter endpoint_url is returned exactly — no append/split."""
+        full_url = "https://openrouter.ai/api/v1/chat/completions"
+        request = _make_chat_request(endpoint_url=full_url)
+        assert HandlerLlmOpenaiCompatible._build_url(request) == full_url
+
+    def test_endpoint_url_returned_verbatim_zai(self) -> None:
+        """A complete z.ai endpoint_url is returned exactly — no double-versioning."""
+        full_url = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        request = _make_chat_request(endpoint_url=full_url)
+        assert HandlerLlmOpenaiCompatible._build_url(request) == full_url
+
+    def test_no_path_appended_to_endpoint_url(self) -> None:
+        """Even a bare base posted as endpoint_url is returned untouched (no append).
+
+        The handler never appends an operation path; completeness is the
+        contract's responsibility, enforced at the routing authority.
+        """
+        bare = "http://host:8000"
+        request = _make_chat_request(endpoint_url=bare)
+        assert HandlerLlmOpenaiCompatible._build_url(request) == bare
+
+    def test_missing_endpoint_url_fails_closed(self) -> None:
+        """A request without endpoint_url fails closed — no base_url fallback."""
+        request = _make_chat_request(endpoint_url=None)
+        with pytest.raises(ValueError, match="endpoint_url is required"):
+            HandlerLlmOpenaiCompatible._build_url(request)
 
 
 # ---------------------------------------------------------------------------

@@ -6,10 +6,8 @@ schema_version: "1.0.0"
 ticket_id: "OMN-12723"
 title: "Bootstrap runtime volume ownership"
 summary: >
-  Starts the runtime image with a bounded root bootstrap phase that repairs
-  fresh Docker named volume ownership for /app/data, /app/data/delegation,
-  /app/logs, and /app/tmp, then re-execs the entrypoint as omniinfra with gosu
-  before schema fingerprinting, Bifrost rendering, or runtime launch.
+  Starts the runtime image with a bounded root bootstrap phase that repairs fresh Docker named volume ownership for /app/data, /app/data/delegation, /app/logs, and /app/tmp, then re-execs the entrypoint as omniinfra with gosu before schema fingerprinting, Bifrost rendering, or runtime launch.
+
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

@@ -3,12 +3,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-12627
 title: "Vendor node_service_registry owner migrations into the infra forward set"
 summary: >
-  Adds omnimarket node_projection_registration to the node-owned migration
-  allowlist and vendors its idempotent node_service_registry migrations into
-  docker/migrations/forward/nodes/. The forward migration runner applies these
-  under canonical namespaced ids node:node_projection_registration:<file>, so a
-  clean runtime/migration image can create the missing prod table without an
-  undocumented hand-created table.
+  Adds omnimarket node_projection_registration to the node-owned migration allowlist and vendors its idempotent node_service_registry migrations into docker/migrations/forward/nodes/. The forward migration runner applies these under canonical namespaced ids node:node_projection_registration:<file>, so a clean runtime/migration image can create the missing prod table without an undocumented hand-created table.
 
 is_seam_ticket: false
 interface_change: false

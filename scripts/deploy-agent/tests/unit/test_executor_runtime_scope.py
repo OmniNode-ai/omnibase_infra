@@ -283,7 +283,9 @@ class TestCoreAndFullScopeComposeUp:
 
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
-            patch("deploy_agent.executor.verify_containers_up", side_effect=fake_verify),
+            patch(
+                "deploy_agent.executor.verify_containers_up", side_effect=fake_verify
+            ),
         ):
             executor._compose_up(
                 Phase.RUNTIME,

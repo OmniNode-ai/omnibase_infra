@@ -6,11 +6,8 @@ schema_version: "1.0.0"
 ticket_id: OMN-12700
 title: "Emit typed LLM inference response events on the runtime bus"
 summary: >
-  Adds the infra-owned runtime command adapter for
-  onex.cmd.omnibase-infra.llm-inference-request.v1 and emits
-  ModelLlmInferenceResponse as the first-class response event on
-  onex.evt.omnibase-infra.inference-response.v1. Existing llm-call-completed
-  metrics events remain in place for their current consumers.
+  Adds the infra-owned runtime command adapter for onex.cmd.omnibase-infra.llm-inference-request.v1 and emits ModelLlmInferenceResponse as the first-class response event on onex.evt.omnibase-infra.inference-response.v1. Existing llm-call-completed metrics events remain in place for their current consumers.
+
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:

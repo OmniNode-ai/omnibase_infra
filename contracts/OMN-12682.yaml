@@ -3,10 +3,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-12682
 title: "Derive ServiceTopicRegistry defaults from the topic catalog"
 summary: >
-  Replaces ServiceTopicRegistry.from_defaults() embedded onex.* topic
-  literals with references to the provisioned topic suffix catalog. Missing
-  registry topics are promoted into named catalog constants and topic specs so
-  runtime topic resolution and broker provisioning share one authority.
+  Replaces ServiceTopicRegistry.from_defaults() embedded onex.* topic literals with references to the provisioned topic suffix catalog. Missing registry topics are promoted into named catalog constants and topic specs so runtime topic resolution and broker provisioning share one authority.
 
 is_seam_ticket: false
 interface_change: false

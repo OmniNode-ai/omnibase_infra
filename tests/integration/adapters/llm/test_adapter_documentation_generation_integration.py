@@ -38,7 +38,19 @@ from omnibase_spi.contracts.delegation.contract_delegated_response import (
 # Endpoint discovery
 # ---------------------------------------------------------------------------
 
-_ENDPOINT_URL: str = os.environ.get("LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101")
+_ENDPOINT_HOST: str = (
+    os.environ.get(  # onex-allow-internal-ip: live-integration test endpoint host
+        "LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101"
+    )
+)
+# OMN-12815: the effect posts endpoint_url VERBATIM. Configure the adapter with
+# the COMPLETE chat endpoint so the live call hits the right path; health probes
+# still use the host root.
+_ENDPOINT_URL: str = (
+    _ENDPOINT_HOST
+    if _ENDPOINT_HOST.rstrip("/").endswith("/chat/completions")
+    else f"{_ENDPOINT_HOST.rstrip('/')}/v1/chat/completions"
+)
 
 # ---------------------------------------------------------------------------
 # Session-scoped reachability check -- skip entire module if endpoint is down
@@ -55,9 +67,10 @@ def _endpoint_reachable(url: str) -> bool:
 
 
 # Evaluated once at collection time; tests are deselected if endpoint is down.
-_ENDPOINT_AVAILABLE: bool = _endpoint_reachable(_ENDPOINT_URL)
+# Health is probed on the host root, not the complete chat endpoint.
+_ENDPOINT_AVAILABLE: bool = _endpoint_reachable(_ENDPOINT_HOST)
 _SKIP_REASON: str = (
-    f"DeepSeek-R1 endpoint unreachable at {_ENDPOINT_URL} "
+    f"DeepSeek-R1 endpoint unreachable at {_ENDPOINT_HOST} "
     "(set LLM_DEEPSEEK_R1_URL to override)"
 )
 

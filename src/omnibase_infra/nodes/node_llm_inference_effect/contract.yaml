@@ -33,7 +33,6 @@ description: >
 
 runtime_profiles:
   - effects
-
 # Strongly typed I/O models
 # Note: These models live in the shared omnibase_infra.models.llm package.
 # They are shared across all LLM inference handlers (OpenAI-compatible)
