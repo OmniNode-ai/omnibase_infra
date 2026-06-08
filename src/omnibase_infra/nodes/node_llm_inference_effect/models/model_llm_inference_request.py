@@ -13,6 +13,8 @@ Related:
     - EnumLlmOperationType: Type of LLM operation (CHAT_COMPLETION, COMPLETION)
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
     - OMN-10489: endpoint_url field — full URL, bypasses base_url + path construction
+    - OMN-12815: endpoint_url is the COMPLETE contract endpoint, posted VERBATIM;
+      the handler performs no URL construction (no base_url + path append).
 """
 
 from __future__ import annotations
@@ -38,17 +40,15 @@ class ModelLlmInferenceRequest(BaseModel):
     fields into the provider-specific wire format.
 
     Attributes:
-        endpoint_url: Full URL to POST to (e.g.
+        endpoint_url: The COMPLETE endpoint URL to POST to (e.g.
             ``"https://api.z.ai/api/coding/paas/v4/chat/completions"``).
-            When set, the handler posts to this URL directly — no path is appended.
-            Takes precedence over ``base_url`` + path construction. Use this field
-            when the contract declares the complete endpoint (preferred for non-OpenAI
-            providers such as z.ai GLM, Google Gemini, etc.).
-        base_url: Base URL of the LLM endpoint (e.g. ``"http://192.168.86.201:8000"``).
-            The handler appends the appropriate path (``/v1/chat/completions`` or
-            ``/v1/completions``) based on ``operation_type``. Ignored when
-            ``endpoint_url`` is set. Retained for backwards compatibility with callers
-            that pre-date ``endpoint_url``.
+            OMN-12815: this is the contract endpoint posted VERBATIM — the handler
+            performs no URL construction and appends no path. Required for every
+            inference call; the routing authority resolves it complete.
+        base_url: Routing/observability label for the LLM endpoint host (e.g.
+            ``"http://192.168.86.201:8000"``). It is NOT used to construct the POST
+            URL — the handler posts ``endpoint_url`` verbatim. Retained as the
+            required routing/metrics field consumed by the metrics publisher.
         operation_type: Type of LLM operation to perform.
         model: Model identifier to use for inference.
         messages: Chat messages for CHAT_COMPLETION operations.
@@ -84,19 +84,18 @@ class ModelLlmInferenceRequest(BaseModel):
         default=None,
         min_length=1,
         description=(
-            "Full URL to POST to. When set, the handler posts to this URL directly "
-            "without appending any path suffix. Takes precedence over base_url + "
-            "operation-type path construction. Use for non-OpenAI providers whose "
-            "contract declares the complete endpoint URL (e.g. z.ai GLM, Google Gemini)."
+            "The COMPLETE contract endpoint URL, posted VERBATIM (OMN-12815). The "
+            "handler performs no URL construction and appends no path. Required for "
+            "every inference call; resolved complete by the routing authority."
         ),
     )
     base_url: str = Field(
         ...,
         min_length=1,
         description=(
-            "Base URL of the LLM endpoint. The handler appends the appropriate path "
-            "(``/v1/chat/completions`` or ``/v1/completions``) based on "
-            "``operation_type``. Ignored when ``endpoint_url`` is set."
+            "Routing/observability label for the LLM endpoint host. NOT used to "
+            "construct the POST URL — the handler posts endpoint_url verbatim "
+            "(OMN-12815). Consumed by the metrics publisher as the endpoint label."
         ),
     )
     operation_type: EnumLlmOperationType = Field(

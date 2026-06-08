@@ -384,6 +384,8 @@ class AdapterCodeReviewAnalysis:
 
         request = ModelLlmInferenceRequest(
             base_url=self._base_url,
+            # OMN-12815: post the configured endpoint VERBATIM (no path append).
+            endpoint_url=self._base_url,
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             model=self._model,
             messages=({"role": "user", "content": user_message},),

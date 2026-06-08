@@ -49,12 +49,9 @@ def _health_payload(
 
 
 def _is_projection_table_check(cmd: list[str]) -> bool:
-    return (
-        "omnidash_analytics" in cmd
-        and any(
-            f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
-            for table in ("delegation_events", "node_service_registry")
-        )
+    return "omnidash_analytics" in cmd and any(
+        f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
+        for table in ("delegation_events", "node_service_registry")
     )
 
 
@@ -156,7 +153,9 @@ def test_verify_fails_postgres_check_when_node_service_registry_missing() -> Non
         checks = executor.verify(on_phase_update=_noop_phase_update)
 
     status_by_endpoint = {check.endpoint: check.status for check in checks}
-    assert status_by_endpoint["omnidash_analytics.node_service_registry exists"] == "fail"
+    assert (
+        status_by_endpoint["omnidash_analytics.node_service_registry exists"] == "fail"
+    )
 
 
 def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:

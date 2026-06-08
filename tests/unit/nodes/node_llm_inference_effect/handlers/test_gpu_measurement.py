@@ -43,6 +43,7 @@ def _make_transport() -> MagicMock:
 def _make_request(**overrides: Any) -> ModelLlmInferenceRequest:
     defaults: dict[str, Any] = {
         "base_url": "http://localhost:8000",
+        "endpoint_url": "http://localhost:8000/v1/chat/completions",
         "model": "qwen3-coder-30b-a3b",
         "operation_type": EnumLlmOperationType.CHAT_COMPLETION,
         "messages": ({"role": "user", "content": "Hello"},),

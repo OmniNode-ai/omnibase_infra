@@ -93,9 +93,14 @@ def _make_response_with_usage(
 
 
 def _make_chat_request(**overrides: Any) -> ModelLlmInferenceRequest:
-    """Build a valid CHAT_COMPLETION request."""
+    """Build a valid CHAT_COMPLETION request.
+
+    OMN-12815: ``endpoint_url`` is the COMPLETE contract endpoint posted
+    verbatim by the OpenAI-compatible effect.
+    """
     defaults: dict[str, Any] = {
         "base_url": _BASE_URL,
+        "endpoint_url": f"{_BASE_URL}/v1/chat/completions",
         "model": _MODEL,
         "operation_type": EnumLlmOperationType.CHAT_COMPLETION,
         "messages": ({"role": "user", "content": "Hello"},),

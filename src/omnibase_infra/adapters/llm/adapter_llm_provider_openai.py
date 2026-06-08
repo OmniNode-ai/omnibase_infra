@@ -742,8 +742,13 @@ class AdapterLlmProviderOpenai:
         Returns:
             Infra-layer request ready for handler dispatch.
         """
+        # OMN-12815: the effect posts endpoint_url VERBATIM with no URL
+        # construction. This adapter's configured endpoint (``_base_url``) is the
+        # COMPLETE endpoint; pass it through endpoint_url so the effect posts it
+        # unchanged. No path is appended in code.
         return ModelLlmInferenceRequest(
             base_url=self._base_url,
+            endpoint_url=self._base_url,
             model=request.model_name,
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             messages=({"role": "user", "content": request.prompt},),

@@ -3,12 +3,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-12631
 title: "Decouple per-lane Redpanda advertise hosts before prod redeploy"
 summary: >
-  Replaces shared REDPANDA_ADVERTISE_HOST interpolation in runtime lane compose
-  with lane-specific advertise host variables. Dev uses
-  DEV_REDPANDA_ADVERTISE_HOST with a local default; stability-test and prod
-  require explicit STABILITY_TEST_REDPANDA_ADVERTISE_HOST and
-  PROD_REDPANDA_ADVERTISE_HOST values so a future prod broker recreate cannot
-  inherit Bret's tailnet stability advertise address.
+  Replaces shared REDPANDA_ADVERTISE_HOST interpolation in runtime lane compose with lane-specific advertise host variables. Dev uses DEV_REDPANDA_ADVERTISE_HOST with a local default; stability-test and prod require explicit STABILITY_TEST_REDPANDA_ADVERTISE_HOST and PROD_REDPANDA_ADVERTISE_HOST values so a future prod broker recreate cannot inherit Bret's tailnet stability advertise address.
 
 is_seam_ticket: false
 interface_change: false
