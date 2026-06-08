@@ -53,15 +53,26 @@ def test_leaf_module_change_expands_to_its_reverse_deps() -> None:
 
 
 def test_services_module_expands_to_reverse_deps() -> None:
-    # services is imported by adapters, dlq, handlers, runtime
-    # (protocols removed: tests/unit/protocols/ does not exist)
+    # services is imported by adapters, dlq, handlers, runtime.
+    # `dlq` is dropped because tests/unit/dlq/ does not exist on disk — passing
+    # a missing path to pytest aborts collection with exit code 5. Only existing
+    # test directories are selected.
     changed_files = ["src/omnibase_infra/services/foo.py"]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
     expected = sorted(
-        f"tests/unit/{m}/"
-        for m in ("services", "adapters", "dlq", "handlers", "runtime")
+        f"tests/unit/{m}/" for m in ("services", "adapters", "handlers", "runtime")
     )
     assert paths == expected
+    assert "tests/unit/dlq/" not in paths
+
+
+def test_missing_test_directories_are_filtered_out() -> None:
+    # Regression: a module present in the adjacency map (e.g. `dlq`) may have
+    # source under src/ but no tests/unit/<module>/ directory. Such paths must
+    # never be emitted, or pytest exits 5 ("no tests ran") and blocks the gate.
+    changed_files = ["src/omnibase_infra/services/foo.py"]
+    paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
+    assert all((REPO_ROOT / p).is_dir() for p in paths), paths
 
 
 # ---------------------------------------------------------------------------

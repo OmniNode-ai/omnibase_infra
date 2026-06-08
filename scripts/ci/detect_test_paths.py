@@ -18,6 +18,10 @@ from scripts.ci.test_selection_models import (
 )
 
 SRC_PREFIX = "src/omnibase_infra/"
+
+# Repo root resolved relative to this file (scripts/ci/detect_test_paths.py),
+# never a hardcoded absolute path.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_UNIT_PREFIX = "tests/unit/"
 TEST_INTEGRATION_PREFIX = "tests/integration/"
 
@@ -48,7 +52,11 @@ def resolve_test_paths(
     return _resolve(changed_files, config)
 
 
-def _resolve(changed_files: list[str], config: ModelAdjacencyMap) -> list[str]:
+def _resolve(
+    changed_files: list[str],
+    config: ModelAdjacencyMap,
+    repo_root: Path = REPO_ROOT,
+) -> list[str]:
     direct_modules: set[str] = set()
     selected: set[str] = set()
 
@@ -69,7 +77,13 @@ def _resolve(changed_files: list[str], config: ModelAdjacencyMap) -> list[str]:
     for module in expanded:
         selected.add(f"{TEST_UNIT_PREFIX}{module}/")
 
-    return sorted(selected)
+    # Drop selected directories that do not exist on disk. A module in the
+    # adjacency map (e.g. `dlq`) may have source under src/ but no
+    # corresponding tests/unit/<module>/ directory; passing a missing path to
+    # pytest aborts collection with exit code 5 ("no tests ran"). Filtering to
+    # existing directories keeps the gate honest for any zone whose reverse
+    # dependents include a test-less module.
+    return sorted(p for p in selected if (repo_root / p).is_dir())
 
 
 def compute_selection(
