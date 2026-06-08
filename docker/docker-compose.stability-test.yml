@@ -15,6 +15,15 @@
 #
 # Requires Docker Compose v2.24.4 or later for !override merge semantics.
 name: omnibase-infra-stability-test
+x-omninode-contract-overlay:
+  stability-test-redpanda:
+    # OMN-12832: Kafka clients reconnect to the broker address returned in
+    # metadata. This is lane contract data, not host environment. Do not move
+    # it back to deploy-time interpolation.
+    advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092"
+    advertised_pandaproxy_addr: &stability_test_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://100.109.203.94:28082"
+    kafka_port_publish: &stability_test_redpanda_kafka_port_publish "39092:19092"
+    admin_port_publish: &stability_test_redpanda_admin_port_publish "29644:9644"
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -38,11 +47,11 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://redpanda:9092,external://${STABILITY_TEST_REDPANDA_ADVERTISE_HOST:?STABILITY_TEST_REDPANDA_ADVERTISE_HOST must be a connected-network address reachable by all stability-test operators}:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}
+      - *stability_test_redpanda_advertised_kafka_addr
       - --pandaproxy-addr
       - internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr
-      - internal://redpanda:8082,external://${STABILITY_TEST_REDPANDA_ADVERTISE_HOST:?STABILITY_TEST_REDPANDA_ADVERTISE_HOST must be a connected-network address reachable by all stability-test operators}:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT:-28082}
+      - *stability_test_redpanda_advertised_pandaproxy_addr
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr
@@ -50,8 +59,8 @@ services:
       - --advertise-rpc-addr
       - redpanda:33145
     ports: !override
-      - "${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}:19092"
-      - "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644"
+      - *stability_test_redpanda_kafka_port_publish
+      - *stability_test_redpanda_admin_port_publish
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-stability-test-redpanda-partition-cap

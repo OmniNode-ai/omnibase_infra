@@ -223,8 +223,8 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
         "${STABILITY_TEST_POSTGRES_EXTERNAL_PORT:-15436}:5432"
     ]
     assert services["redpanda"]["ports"] == [
-        "${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}:19092",
-        "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644",
+        "39092:19092",
+        "29644:9644",
     ]
     assert services["valkey"]["ports"] == [
         "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
@@ -244,11 +244,23 @@ def test_stability_lane_redpanda_requires_connected_network_advertise_host() -> 
     overlay = _load_overlay()
     redpanda_command = " ".join(overlay["services"]["redpanda"]["command"])
 
-    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" in redpanda_command
+    assert "100.109.203.94:39092" in redpanda_command
+    assert "100.109.203.94:28082" in redpanda_command
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in redpanda_command
     assert "${REDPANDA_ADVERTISE_HOST" not in redpanda_command
-    assert "localhost:${STABILITY_TEST_REDPANDA_EXTERNAL_PORT" not in redpanda_command
-    assert "localhost:${STABILITY_TEST_REDPANDA_PANDAPROXY_PORT" not in redpanda_command
-    assert "reachable by all stability-test operators" in redpanda_command
+    assert "192.168.86.201:39092" not in redpanda_command
+    assert "localhost:19092" not in redpanda_command
+
+    contract_overlay = overlay["x-omninode-contract-overlay"]
+    redpanda_contract = contract_overlay["stability-test-redpanda"]
+    assert (
+        redpanda_contract["advertised_kafka_addr"]
+        == "internal://redpanda:9092,external://100.109.203.94:39092"
+    )
+    assert (
+        redpanda_contract["advertised_pandaproxy_addr"]
+        == "internal://redpanda:8082,external://100.109.203.94:28082"
+    )
 
 
 @pytest.mark.unit

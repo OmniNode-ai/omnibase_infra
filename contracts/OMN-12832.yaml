@@ -1,0 +1,43 @@
+# OMN-12832 contract file for omnibase_infra deploy-gate.
+schema_version: "1.0.0"
+ticket_id: OMN-12832
+title: "Make stability broker advertised identity contract-owned"
+summary: >
+  Moves the stability-test Redpanda advertised Kafka/Pandaproxy identity out of host environment variables and into the stability-test compose contract overlay. The rendered stability broker must advertise the Tailscale-routable endpoint 100.109.203.94:39092 and must never render the LAN-only 192.168.86.201:39092 metadata address.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Static lane checks prove stability Redpanda advertise identity is not environment-owned."
+    command: "uv run pytest tests/unit/infra/test_runtime_lane_kafka_environment.py tests/unit/infra/test_stability_test_runtime_lane.py -q"
+  - kind: tests
+    description: "Non-mutating compose render proves stability metadata address is Tailscale-routable and contract-overlay-owned."
+    command: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q"
+  - kind: manual
+    description: "Live unblock proof: kcat metadata reports broker 0 at 100.109.203.94:39092."
+    command: "kcat -L -b 100.109.203.94:39092"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-no-stability-redpanda-env
+    description: "Stability Redpanda advertised Kafka and Pandaproxy addresses are literal contract-overlay anchors, not ${STABILITY_TEST_REDPANDA_*} interpolation."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py::test_stability_lane_redpanda_requires_connected_network_advertise_host -q"
+  - id: dod-rendered-metadata-address
+    description: "Rendered stability compose contains 100.109.203.94:39092 and rejects 192.168.86.201:39092 for Redpanda metadata."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_does_not_expose_production_ports_or_services -q"
+  - id: dod-live-bret-unblock
+    description: "Live stability broker was recreated with the Tailscale advertised address; runtime/effects/projection containers were not recreated."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "kcat -L -b 100.109.203.94:39092 reports broker 0 at 100.109.203.94:39092"

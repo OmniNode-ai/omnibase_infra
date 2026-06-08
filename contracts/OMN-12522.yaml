@@ -19,11 +19,11 @@ evidence_requirements:
   - kind: "manual"
     description: "Stability compose render requires and advertises the connected-network broker host"
     command: >-
-      env STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret OMNI_HOME=/data/omninode/omni_home ONEX_INFRA_HOST=100.109.203.94 ONEX_INFRA_USER=jonah docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+      POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret OMNI_HOME=/data/omninode/omni_home ONEX_INFRA_HOST=100.109.203.94 ONEX_INFRA_USER=jonah docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
   - kind: "manual"
     description: "Post-merge .201 stability Redpanda metadata advertises the connected-network endpoint"
     command: >-
-      deploy approval required: set STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 on .201, recreate/restart the stability Redpanda lane, then verify `kcat -L -b 100.109.203.94:39092` reports broker 0 at 100.109.203.94:39092
+      deploy approval required: stability Redpanda advertised identity is owned by the compose contract overlay (see OMN-12832); recreate/restart the stability Redpanda lane, then verify `kcat -L -b 100.109.203.94:39092` reports broker 0 at 100.109.203.94:39092
 emergency_bypass:
   enabled: false
   justification: ""
@@ -49,11 +49,11 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: >-
-          env STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret OMNI_HOME=/data/omninode/omni_home ONEX_INFRA_HOST=100.109.203.94 ONEX_INFRA_USER=jonah docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
+          POSTGRES_PASSWORD=test VALKEY_PASSWORD=test LINEAR_API_KEY=test-linear-api-key GITHUB_TOKEN=test-github-token ONEX_REGISTRATION_AUTO_ACK=true ONEX_SERVICE_CLIENT_SECRET=test-service-secret LLM_CODER_URL=http://llm-coder.test:8000 LLM_CODER_FAST_URL=http://llm-coder-fast.test:8001 LLM_EMBEDDING_URL=http://llm-embed.test:8100 LLM_DEEPSEEK_R1_URL=http://llm-r1.test:8101 LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24 LOCAL_LLM_SHARED_SECRET=render-only-local-llm-secret OMNI_HOME=/data/omninode/omni_home ONEX_INFRA_HOST=100.109.203.94 ONEX_INFRA_USER=jonah docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --quiet
   - id: "dod-live-metadata"
     description: "Post-merge .201 stability Redpanda metadata advertises the connected-network endpoint"
     source: "manual"
     checks:
       - check_type: "command"
         check_value: >-
-          deploy approval required: set STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 on .201, recreate/restart the stability Redpanda lane, then verify `kcat -L -b 100.109.203.94:39092` reports broker 0 at 100.109.203.94:39092
+          deploy approval required: stability Redpanda advertised identity is owned by the compose contract overlay (see OMN-12832); recreate/restart the stability Redpanda lane, then verify `kcat -L -b 100.109.203.94:39092` reports broker 0 at 100.109.203.94:39092
