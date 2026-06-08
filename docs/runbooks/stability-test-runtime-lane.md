@@ -98,6 +98,7 @@ but fail when Kafka redirects them to the advertised broker address.
 Render the config only:
 
 ```bash
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
@@ -112,6 +113,7 @@ List the rendered services and confirm the stability-test runtime services are
 present:
 
 ```bash
+STABILITY_TEST_REDPANDA_ADVERTISE_HOST=100.109.203.94 \
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
