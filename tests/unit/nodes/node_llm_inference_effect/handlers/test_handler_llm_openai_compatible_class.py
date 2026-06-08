@@ -6,7 +6,7 @@
 
 Tests cover:
     - Initialization with transport injection
-    - Class-level constants (_FINISH_REASON_MAP, _OPERATION_PATHS)
+    - Class-level constants (_FINISH_REASON_MAP)
     - _build_url() for both operation types and unsupported types
     - _build_payload() for CHAT_COMPLETION and COMPLETION requests
     - _build_empty_response() for empty/malformed provider output
@@ -40,7 +40,6 @@ from omnibase_infra.models.llm import (
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     _FINISH_REASON_MAP,
-    _OPERATION_PATHS,
     HandlerLlmOpenaiCompatible,
     _parse_tool_calls,
     _parse_usage,
@@ -69,6 +68,7 @@ def _make_chat_request(
     *,
     model: str = "gpt-4",
     base_url: str = "http://localhost:8000",
+    endpoint_url: str | None = None,
     messages: tuple[dict[str, str], ...] | None = None,
     system_prompt: str | None = None,
     tools: tuple[ModelLlmToolDefinition, ...] | None = None,
@@ -78,11 +78,18 @@ def _make_chat_request(
     max_tokens: int | None = None,
     stop: tuple[str, ...] | None = None,
 ) -> ModelLlmInferenceRequest:
-    """Create a valid CHAT_COMPLETION request with sensible defaults."""
+    """Create a valid CHAT_COMPLETION request with sensible defaults.
+
+    OMN-12815: ``endpoint_url`` is the COMPLETE contract endpoint posted
+    verbatim; defaults to the full chat-completions URL derived from base_url.
+    """
     if messages is None:
         messages = ({"role": "user", "content": "Hello"},)
+    if endpoint_url is None:
+        endpoint_url = f"{base_url.rstrip('/')}/v1/chat/completions"
     return ModelLlmInferenceRequest(
         base_url=base_url,
+        endpoint_url=endpoint_url,
         model=model,
         operation_type=EnumLlmOperationType.CHAT_COMPLETION,
         messages=messages,
@@ -100,15 +107,23 @@ def _make_completion_request(
     *,
     model: str = "gpt-4",
     base_url: str = "http://localhost:8000",
+    endpoint_url: str | None = None,
     prompt: str = "Once upon a time",
     temperature: float | None = None,
     top_p: float | None = None,
     max_tokens: int | None = None,
     stop: tuple[str, ...] | None = None,
 ) -> ModelLlmInferenceRequest:
-    """Create a valid COMPLETION request with sensible defaults."""
+    """Create a valid COMPLETION request with sensible defaults.
+
+    OMN-12815: ``endpoint_url`` is the COMPLETE contract endpoint posted
+    verbatim; defaults to the full completions URL derived from base_url.
+    """
+    if endpoint_url is None:
+        endpoint_url = f"{base_url.rstrip('/')}/v1/completions"
     return ModelLlmInferenceRequest(
         base_url=base_url,
+        endpoint_url=endpoint_url,
         model=model,
         operation_type=EnumLlmOperationType.COMPLETION,
         prompt=prompt,
@@ -196,17 +211,6 @@ class TestClassConstants:
         result = _FINISH_REASON_MAP.get("something_else", EnumLlmFinishReason.UNKNOWN)
         assert result == EnumLlmFinishReason.UNKNOWN
 
-    def test_operation_paths_chat_completion(self) -> None:
-        """CHAT_COMPLETION maps to /v1/chat/completions."""
-        assert (
-            _OPERATION_PATHS[EnumLlmOperationType.CHAT_COMPLETION]
-            == "/v1/chat/completions"
-        )
-
-    def test_operation_paths_completion(self) -> None:
-        """COMPLETION maps to /v1/completions."""
-        assert _OPERATION_PATHS[EnumLlmOperationType.COMPLETION] == "/v1/completions"
-
 
 # ---------------------------------------------------------------------------
 # Tests: _build_url()
@@ -214,41 +218,27 @@ class TestClassConstants:
 
 
 class TestBuildUrl:
-    """Tests for HandlerLlmOpenaiCompatible._build_url()."""
+    """Tests for HandlerLlmOpenaiCompatible._build_url() (OMN-12815).
 
-    def test_chat_completion_url(self) -> None:
-        """CHAT_COMPLETION appends /v1/chat/completions."""
-        request = _make_chat_request(base_url="http://localhost:8000")
-        url = HandlerLlmOpenaiCompatible._build_url(request)
+    The POST URL is the contract ``endpoint_url`` verbatim — no construction,
+    no path append, fail-closed when absent.
+    """
 
-        assert url == "http://localhost:8000/v1/chat/completions"
+    def test_endpoint_url_returned_verbatim(self) -> None:
+        """The complete endpoint_url is returned exactly as supplied."""
+        full_url = "http://localhost:8000/v1/chat/completions"
+        request = _make_chat_request(endpoint_url=full_url)
+        assert HandlerLlmOpenaiCompatible._build_url(request) == full_url
 
-    def test_completion_url(self) -> None:
-        """COMPLETION appends /v1/completions."""
-        request = _make_completion_request(base_url="http://localhost:8000")
-        url = HandlerLlmOpenaiCompatible._build_url(request)
+    def test_no_path_appended(self) -> None:
+        """A bare endpoint_url is returned untouched — no operation path added."""
+        request = _make_chat_request(endpoint_url="http://localhost:8000")
+        assert HandlerLlmOpenaiCompatible._build_url(request) == "http://localhost:8000"
 
-        assert url == "http://localhost:8000/v1/completions"
-
-    def test_trailing_slash_stripped(self) -> None:
-        """Trailing slash on base_url is stripped before appending path."""
-        request = _make_chat_request(base_url="http://localhost:8000/")
-        url = HandlerLlmOpenaiCompatible._build_url(request)
-
-        assert url == "http://localhost:8000/v1/chat/completions"
-
-    def test_unsupported_operation_type_raises(self) -> None:
-        """Unsupported operation type raises ValueError (legacy path, no endpoint_url)."""
-        # Use SimpleNamespace to bypass model validation and provide an
-        # operation_type not in _OPERATION_PATHS (EMBEDDING).
-        # endpoint_url=None forces the legacy base_url + path construction path.
-        fake_request = SimpleNamespace(
-            endpoint_url=None,
-            operation_type=EnumLlmOperationType.EMBEDDING,
-            base_url="http://localhost:8000",
-        )
-
-        with pytest.raises(ValueError, match="Unsupported operation type"):
+    def test_missing_endpoint_url_fails_closed(self) -> None:
+        """endpoint_url missing raises ValueError — no base_url fallback."""
+        fake_request = SimpleNamespace(endpoint_url=None)
+        with pytest.raises(ValueError, match="endpoint_url is required"):
             HandlerLlmOpenaiCompatible._build_url(fake_request)  # type: ignore[arg-type]
 
 

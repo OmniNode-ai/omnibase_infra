@@ -37,12 +37,9 @@ def _ok() -> subprocess.CompletedProcess:
 
 
 def _is_projection_table_check(cmd: list[str]) -> bool:
-    return (
-        "omnidash_analytics" in cmd
-        and any(
-            f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
-            for table in ("delegation_events", "node_service_registry")
-        )
+    return "omnidash_analytics" in cmd and any(
+        f"SELECT to_regclass('public.{table}') IS NOT NULL" in cmd
+        for table in ("delegation_events", "node_service_registry")
     )
 
 

@@ -4,10 +4,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-12755"
 title: "Fix deploy-runtime workspace OMNI_HOME propagation"
 summary: >-
-  deploy-runtime.sh preserves an operator-supplied OMNI_HOME across
-  ~/.omnibase/.env sourcing, stages workspace sibling repos from that root when
-  BUILD_SOURCE=workspace, and passes BUILD_SOURCE, EXPECTED_BUILD_SOURCE, and
-  OMNI_HOME as explicit Dockerfile build args.
+  deploy-runtime.sh preserves an operator-supplied OMNI_HOME across ~/.omnibase/.env sourcing, stages workspace sibling repos from that root when BUILD_SOURCE=workspace, and passes BUILD_SOURCE, EXPECTED_BUILD_SOURCE, and OMNI_HOME as explicit Dockerfile build args.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

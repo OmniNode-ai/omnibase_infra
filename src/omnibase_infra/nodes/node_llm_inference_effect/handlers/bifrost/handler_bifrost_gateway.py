@@ -770,6 +770,9 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
 
         return ModelLlmInferenceRequest(
             base_url=backend_cfg.base_url,
+            # OMN-12815: the effect posts endpoint_url VERBATIM (no path append).
+            # The bifrost backend config URL is the complete endpoint.
+            endpoint_url=backend_cfg.base_url,
             operation_type=request.operation_type,
             model=model_name,
             messages=request.messages,

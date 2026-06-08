@@ -1,0 +1,44 @@
+# OMN-12815 per-repo evidence carrier for omnibase_infra.
+# Canonical ticket contract lives in onex_change_control
+# (contracts/OMN-12815.yaml on OnniNode-ai/onex_change_control).
+# A1 (close-the-loop plan, 2026-06-08): the OpenAI-compatible inference effect
+# posts the contract endpoint_url VERBATIM; all in-code URL construction deleted.
+schema_version: '1.0.0'
+ticket_id: OMN-12815
+title: "A1 — post contract endpoint_url VERBATIM in the OpenAI-compatible effect"
+summary: >
+  HandlerLlmOpenaiCompatible._build_url now returns request.endpoint_url verbatim and fails closed when it is empty/missing. Deleted the legacy base_url + path append branch and the _OPERATION_PATHS map. The effect performs no URL construction; the contract endpoint URL is the single source of the POST URL.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001-build-url-verbatim
+    description: >
+      _build_url returns endpoint_url verbatim and fails closed when absent; _OPERATION_PATHS is removed. Run by a verifier other than the author.
+
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >
+          cd omnibase_infra && ! grep -rn "_OPERATION_PATHS" src/
+
+  - id: dod-002-inference-effect-tests
+    description: Full node_llm_inference_effect test suite passes.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: >
+          cd omnibase_infra && uv run pytest tests/unit/nodes/node_llm_inference_effect/ -q --tb=short
+
+  - id: dod-003-contract-file
+    description: Evidence contract file present in repo.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-12815.yaml'

@@ -99,9 +99,7 @@ pattern_exemptions:
   - file_pattern: 'model_llm_call_completed_event\.py'
     violation_pattern: "Field 'model_id' should use UUID type instead of str"
     reason: >
-      The omniintelligence llm-call-completed metrics event uses model_id for the
-      provider/model name. Changing this field to UUID would break the existing
-      metrics payload contract and downstream cost aggregation consumers.
+      The omniintelligence llm-call-completed metrics event uses model_id for the provider/model name. Changing this field to UUID would break the existing metrics payload contract and downstream cost aggregation consumers.
 
     documentation:
       - OMN-12700 PR description
@@ -109,9 +107,7 @@ pattern_exemptions:
   - file_pattern: 'model_llm_call_completed_infra_event\.py'
     violation_pattern: "Field 'model_id' should use UUID type instead of str"
     reason: >
-      The infra-local llm-call-completed event mirrors the metrics model_id as an
-      LLM provider/model name. It is not an ONEX entity identifier and must stay a
-      string for compatibility with existing infra projections.
+      The infra-local llm-call-completed event mirrors the metrics model_id as an LLM provider/model name. It is not an ONEX entity identifier and must stay a string for compatibility with existing infra projections.
 
     documentation:
       - OMN-12700 PR description
