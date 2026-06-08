@@ -163,6 +163,18 @@ class ModelLlmInferenceRequest(BaseModel):
             "(e.g. ``X-ONEX-Signature``). Keys and values must be ASCII strings."
         ),
     )
+    extra_body: dict[str, JsonType] = Field(
+        default_factory=dict,
+        repr=False,
+        description=(
+            "Provider-specific JSON fields merged into the request body, for "
+            "inference parameters the typed schema does not model directly. "
+            "Example: ``{'chat_template_kwargs': {'enable_thinking': False}}`` to "
+            "suppress reasoning output on Qwen vLLM backends (OMN-12816). Default "
+            "empty so existing callers are unaffected; declared payload fields take "
+            "precedence over identically-named ``extra_body`` keys."
+        ),
+    )
     timeout_seconds: float = Field(
         default=30.0,
         ge=1.0,

@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 # OMN-8735: handler constructor compliance refactor (2026-04-15)
 # OMN-8735 follow-up: HandlerLlmCliSubprocess null-guard compliance (2026-04-16)
+# OMN-12816: additive extra_body passthrough — provider-specific request-body
+#   fields (e.g. chat_template_kwargs.enable_thinking) merged in _build_payload
+#   without overriding declared fields (2026-06-07)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -17,7 +20,7 @@ node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
   minor: 4
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
@@ -39,7 +42,7 @@ runtime_profiles:
 input_model:
   name: "ModelLlmInferenceRequest"
   module: "omnibase_infra.models.llm"
-  description: "Input model containing LLM inference parameters, routing configuration, optional direct endpoint_url override, and optional EnumUsageSource-backed compute usage provenance."
+  description: "Input model containing LLM inference parameters, routing configuration, optional direct endpoint_url override, optional EnumUsageSource-backed compute usage provenance, and an optional additive extra_body map for provider-specific request-body fields (OMN-12816, e.g. chat_template_kwargs.enable_thinking)."
 output_model:
   name: "ModelLlmInferenceResponse"
   module: "omnibase_infra.models.llm"
