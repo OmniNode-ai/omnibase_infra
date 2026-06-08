@@ -30,3 +30,16 @@ permissions:
 jobs:
   verify:
     uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@main
+    with:
+      branch-policy-mode: >-
+        ${{
+          github.event.pull_request.base.ref == 'main'
+          && 'main-release'
+          || github.event.merge_group.base_ref == 'refs/heads/main'
+          && 'main-release'
+          || github.event.pull_request.base.ref == 'dev'
+          && 'dev-preflight'
+          || github.event.merge_group.base_ref == 'refs/heads/dev'
+          && 'dev-preflight'
+          || 'legacy'
+        }}
