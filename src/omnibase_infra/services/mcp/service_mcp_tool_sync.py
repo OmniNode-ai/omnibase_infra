@@ -4,9 +4,16 @@
 
 This service subscribes to node registration events on Kafka and updates
 the MCP tool registry in real-time. It supports:
-- Hot reload: New/updated orchestrators appear as tools without restart
-- Deregistration: Removed orchestrators are removed from tool registry
+- Hot reload: New/updated MCP-exposable nodes appear as tools without restart
+- Deregistration: Removed nodes are removed from tool registry
 - Idempotency: Duplicate/out-of-order events are handled correctly
+
+MCP-exposable nodes (OMN-12827, Plan B2):
+- ORCHESTRATOR nodes tagged ``mcp-enabled`` (original behavior).
+- Generated COMPUTE nodes tagged ``mcp-enabled`` + ``node-type:compute`` +
+  ``generated`` — the SEA self-extension loop output. Generated compute nodes
+  surface as tools without being relabeled as orchestrators; non-generated
+  compute nodes are NOT exposed.
 
 Event Topic: Uses SUFFIX_NODE_REGISTRATION (onex.evt.platform.node-registration.v1)
 Event Types:
@@ -81,6 +88,8 @@ class ServiceMCPToolSync:
     # MCP tag constants
     TAG_MCP_ENABLED = "mcp-enabled"
     TAG_NODE_TYPE_ORCHESTRATOR = "node-type:orchestrator"
+    TAG_NODE_TYPE_COMPUTE = "node-type:compute"
+    TAG_GENERATED = "generated"
     TAG_PREFIX_MCP_TOOL = "mcp-tool:"
 
     # Event types
@@ -271,8 +280,9 @@ class ServiceMCPToolSync:
                     event_id_str.zfill(20) if event_id_str.isdigit() else event_id_str
                 )
 
-            # Check if this is an MCP-enabled orchestrator
-            if not self._is_mcp_orchestrator(tags):
+            # Check if this is an MCP-exposable node (orchestrator or generated
+            # compute node — OMN-12827, Plan B2).
+            if not self._is_mcp_exposable(tags):
                 logger.debug(
                     "Ignoring non-MCP event",
                     extra={
@@ -331,16 +341,31 @@ class ServiceMCPToolSync:
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
 
-    def _is_mcp_orchestrator(self, tags: Sequence[str]) -> bool:
-        """Check if event is for an MCP-enabled orchestrator.
+    def _is_mcp_exposable(self, tags: Sequence[str]) -> bool:
+        """Check if an event's node should be exposed as an MCP tool.
+
+        A node is MCP-exposable when it carries the ``mcp-enabled`` tag AND is
+        one of:
+
+        - an ORCHESTRATOR node (``node-type:orchestrator``) — original behavior; or
+        - a GENERATED COMPUTE node (``node-type:compute`` + ``generated``) — the
+          SEA self-extension loop output (OMN-12827, Plan B2).
+
+        Non-generated compute nodes are intentionally excluded: only generated
+        compute nodes surface as tools, so hand-authored compute nodes do not
+        leak into the MCP registry.
 
         Args:
             tags: List of tags from the event.
 
         Returns:
-            True if the event is for an MCP-enabled orchestrator.
+            True if the event's node should be exposed as an MCP tool.
         """
-        return self.TAG_MCP_ENABLED in tags and self.TAG_NODE_TYPE_ORCHESTRATOR in tags
+        if self.TAG_MCP_ENABLED not in tags:
+            return False
+        if self.TAG_NODE_TYPE_ORCHESTRATOR in tags:
+            return True
+        return self.TAG_NODE_TYPE_COMPUTE in tags and self.TAG_GENERATED in tags
 
     def _extract_tool_name(self, tags: Sequence[str]) -> str | None:
         """Extract the MCP tool name from tags.
@@ -508,11 +533,18 @@ class ServiceMCPToolSync:
         if not isinstance(timeout_seconds, int) or timeout_seconds < 1:
             timeout_seconds = 30
 
+        tags = self._extract_tags_list(event.get("tags", []))
+        node_kind = (
+            "generated compute node"
+            if self.TAG_NODE_TYPE_COMPUTE in tags
+            else "orchestrator"
+        )
+
         return ModelMCPToolDefinition(
             name=tool_name,
             description=str(description)
             if description
-            else f"ONEX orchestrator: {service_name}",
+            else f"ONEX {node_kind}: {service_name}",
             version="1.0.0",
             parameters=[],
             input_schema={"type": "object", "properties": {}},
@@ -522,7 +554,8 @@ class ServiceMCPToolSync:
             timeout_seconds=timeout_seconds,
             metadata={
                 "service_name": str(service_name),
-                "tags": self._extract_tags_list(event.get("tags", [])),
+                "tags": tags,
+                "node_kind": node_kind,
                 "source": "kafka_event",
             },
         )
