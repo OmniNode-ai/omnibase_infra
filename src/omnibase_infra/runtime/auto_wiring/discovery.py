@@ -57,8 +57,10 @@ def _contract_targets_active_runtime_packages(
     if contract.event_bus is None:
         return True
 
+    compatibility_publish_topics = set(contract.compatibility_publish_topics)
     return all(
         is_runtime_topic_active(topic, active_packages)
+        or topic in compatibility_publish_topics
         for topic in contract.event_bus.publish_topics
     )
 
@@ -395,6 +397,7 @@ def _parse_contract(
         package_name=package_name,
         package_version=package_version,
         runtime_profiles=runtime_profiles,
+        compatibility_publish_topics=raw.get("compatibility_publish_topics"),
         terminal_event=raw.get("terminal_event"),
         event_bus=event_bus,
         handler_routing=handler_routing,

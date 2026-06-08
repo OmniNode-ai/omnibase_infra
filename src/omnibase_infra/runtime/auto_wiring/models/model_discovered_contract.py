@@ -50,6 +50,14 @@ class ModelDiscoveredContract(BaseModel):
             "Empty means backward-compatible ownership by every runtime profile."
         ),
     )
+    compatibility_publish_topics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Contract-declared cross-package compatibility topics. These are "
+            "allowed to publish into an inactive legacy package domain without "
+            "making that package part of the active runtime surface."
+        ),
+    )
     terminal_event: str | None = Field(
         default=None,
         description="Optional contract-declared terminal event topic.",
@@ -83,3 +91,28 @@ class ModelDiscoveredContract(BaseModel):
                 raise ValueError("runtime_profiles entries cannot be blank")
             profiles.append(profile)
         return tuple(dict.fromkeys(profiles))
+
+    @field_validator("compatibility_publish_topics", mode="before")
+    @classmethod
+    def validate_compatibility_publish_topics(cls, value: object) -> tuple[str, ...]:
+        """Normalize contract-declared compatibility publish topics."""
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            raw_values = (value,)
+        elif isinstance(value, (list, tuple, set)):
+            raw_values = tuple(value)
+        else:
+            raise TypeError(
+                "compatibility_publish_topics must be a string or sequence of strings"
+            )
+
+        topics: list[str] = []
+        for raw in raw_values:
+            if not isinstance(raw, str):
+                raise TypeError("compatibility_publish_topics entries must be strings")
+            topic = raw.strip()
+            if not topic:
+                raise ValueError("compatibility_publish_topics entries cannot be blank")
+            topics.append(topic)
+        return tuple(dict.fromkeys(topics))

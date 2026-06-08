@@ -501,6 +501,46 @@ class TestDiscoverContractsFromPaths:
         assert manifest.total_errors == 0
 
     @pytest.mark.unit
+    def test_compatibility_publish_topics_do_not_block_contract_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra,omnimarket")
+        node_dir = tmp_path / "delegation_orchestrator"
+        node_dir.mkdir()
+        path = node_dir / "contract.yaml"
+        path.write_text(
+            dedent("""\
+                name: "node_delegation_orchestrator"
+                node_type: "ORCHESTRATOR_GENERIC"
+                contract_version:
+                  major: 1
+                  minor: 0
+                  patch: 0
+                node_version: "1.0.0"
+                description: "Delegation orchestrator with a legacy dashboard event"
+                compatibility_publish_topics:
+                  - "onex.evt.omniclaude.task-delegated.v1"
+                event_bus:
+                  subscribe_topics:
+                    - "onex.cmd.omnibase-infra.delegation-request.v1"
+                  publish_topics:
+                    - "onex.evt.omnibase-infra.delegation-completed.v1"
+                    - "onex.evt.omniclaude.task-delegated.v1"
+                  plugin_managed: true
+            """)
+        )
+
+        manifest = discover_contracts_from_paths([path])
+
+        assert manifest.total_discovered == 1
+        assert manifest.total_errors == 0
+        contract = manifest.contracts[0]
+        assert contract.name == "node_delegation_orchestrator"
+        assert contract.compatibility_publish_topics == (
+            "onex.evt.omniclaude.task-delegated.v1",
+        )
+
+    @pytest.mark.unit
     def test_projection_consumer_subscribing_to_inactive_package_domain_is_included(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
