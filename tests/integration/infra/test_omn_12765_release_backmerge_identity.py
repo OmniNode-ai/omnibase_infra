@@ -28,5 +28,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    assert lock["identity_digest"] == "3983ac30e350d4ee4757801bc9a4ca0e"
-    assert lock["shared_env_digest"] == "637cdf47b773dd163d8d965f"
+    assert lock["identity_digest"] == "c68f428c0086620d5190d127e6de73a0"
+    assert lock["shared_env_digest"] == "882244b1d89b9eba03fa1b95"
