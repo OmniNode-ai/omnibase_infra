@@ -73,8 +73,10 @@ def test_runtime_lanes_use_lane_specific_redpanda_advertise_hosts() -> None:
     )
 
     stability_redpanda_command = " ".join(stability["services"]["redpanda"]["command"])
-    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" in stability_redpanda_command
+    assert "100.109.203.94:39092" in stability_redpanda_command
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in stability_redpanda_command
     assert "${REDPANDA_ADVERTISE_HOST" not in stability_redpanda_command
+    assert "192.168.86.201:39092" not in stability_redpanda_command
 
     prod_redpanda_command = " ".join(prod["services"]["redpanda"]["command"])
     assert "PROD_REDPANDA_ADVERTISE_HOST" in prod_redpanda_command

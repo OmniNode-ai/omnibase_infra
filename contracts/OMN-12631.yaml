@@ -3,7 +3,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-12631
 title: "Decouple per-lane Redpanda advertise hosts before prod redeploy"
 summary: >
-  Replaces shared REDPANDA_ADVERTISE_HOST interpolation in runtime lane compose with lane-specific advertise host variables. Dev uses DEV_REDPANDA_ADVERTISE_HOST with a local default; stability-test and prod require explicit STABILITY_TEST_REDPANDA_ADVERTISE_HOST and PROD_REDPANDA_ADVERTISE_HOST values so a future prod broker recreate cannot inherit Bret's tailnet stability advertise address.
+  Replaces shared REDPANDA_ADVERTISE_HOST interpolation in runtime lane compose with lane-scoped advertise authority. Dev uses DEV_REDPANDA_ADVERTISE_HOST with a local default; prod requires PROD_REDPANDA_ADVERTISE_HOST; and the stability-test lane now owns its Tailscale advertised broker identity in the compose contract overlay so a future broker recreate cannot inherit host env.
 
 is_seam_ticket: false
 interface_change: false
@@ -16,7 +16,7 @@ evidence_requirements:
     description: "Non-mutating compose render proves prod ignores the shared REDPANDA_ADVERTISE_HOST value."
     command: "uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q"
   - kind: tests
-    description: "Non-mutating stability render proves the stability lane uses its own advertise host."
+    description: "Non-mutating stability render proves the stability lane uses the contract-overlay advertise identity."
     command: "uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py::test_stability_lane_render_does_not_expose_production_ports_or_services -q"
   - kind: manual
     description: "No runtime redeploy, broker recreate, or prod mutation is performed by this PR."
@@ -39,7 +39,7 @@ dod_evidence:
       - check_type: command
         check_value: "uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q"
   - id: dod-stability-render-isolated-host
-    description: "Stability compose render uses STABILITY_TEST_REDPANDA_ADVERTISE_HOST and does not inherit the shared Redpanda advertise host."
+    description: "Stability compose render uses its contract-overlay advertised broker address and does not inherit Redpanda advertise host env."
     source: manual
     checks:
       - check_type: command

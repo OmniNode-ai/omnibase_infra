@@ -126,12 +126,8 @@ COMPOSE_RENDER_ENV = {
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
     "POSTGRES_PASSWORD": "postgres",
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
-    "STABILITY_TEST_REDPANDA_ADVERTISE_HOST": "100.109.203.94",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
-    "STABILITY_TEST_REDPANDA_ADMIN_PORT": "29644",
-    "STABILITY_TEST_REDPANDA_EXTERNAL_PORT": "39092",
-    "STABILITY_TEST_REDPANDA_PANDAPROXY_PORT": "28082",
     "STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT": "38080",
 }
 
@@ -401,6 +397,8 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     assert "100.109.203.94:28082" in redpanda_command
     assert "192.168.86.201:39092" not in redpanda_command
     assert "localhost:19092" not in redpanda_command
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in redpanda_command
+    assert "REDPANDA_ADVERTISE_HOST" not in redpanda_command
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
     assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
@@ -417,6 +415,19 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         assert "/app/contracts" not in volume_targets, service_name
         assert "/app/skills" in volume_targets, service_name
         assert "/data/omninode/omni_home" in volume_targets, service_name
+
+
+@pytest.mark.integration
+def test_stability_redpanda_advertise_identity_is_contract_overlay_owned() -> None:
+    overlay_text = (REPO_ROOT / COMPOSE_FILES[1]).read_text(encoding="utf-8")
+
+    assert "x-omninode-contract-overlay:" in overlay_text
+    assert "100.109.203.94:39092" in overlay_text
+    assert "100.109.203.94:28082" in overlay_text
+    assert "STABILITY_TEST_REDPANDA_ADVERTISE_HOST" not in overlay_text
+    assert "STABILITY_TEST_REDPANDA_EXTERNAL_PORT" not in overlay_text
+    assert "STABILITY_TEST_REDPANDA_PANDAPROXY_PORT" not in overlay_text
+    assert "STABILITY_TEST_REDPANDA_ADMIN_PORT" not in overlay_text
 
 
 @pytest.mark.integration
