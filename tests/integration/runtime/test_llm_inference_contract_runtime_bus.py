@@ -69,7 +69,7 @@ def _contract(
     return ModelDiscoveredContract(
         name="node_llm_inference_effect",
         node_type="EFFECT_GENERIC",
-        contract_version=ModelContractVersion(major=1, minor=4, patch=0),
+        contract_version=ModelContractVersion(major=1, minor=4, patch=1),
         contract_path=effective_contract_path,
         entry_point_name="node_llm_inference_effect",
         package_name="omnibase_infra",

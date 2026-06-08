@@ -562,6 +562,14 @@ class HandlerLlmOpenaiCompatible:
         if request.tool_choice is not None:
             payload["tool_choice"] = _serialize_tool_choice(request.tool_choice)
 
+        # OMN-12816: provider-specific body fields (e.g. chat_template_kwargs to
+        # disable Qwen reasoning). Declared payload fields win — extra_body only
+        # fills keys the typed schema did not already set, so it can never
+        # silently override model/messages/max_tokens/etc.
+        for key, value in request.extra_body.items():
+            if key not in payload:
+                payload[key] = value
+
         return payload
 
     # ── HTTP execution with auth ─────────────────────────────────────────
