@@ -281,6 +281,40 @@ class TestBuildPayload:
         assert "tools" not in payload
         assert "tool_choice" not in payload
 
+    def test_extra_body_default_adds_nothing(self) -> None:
+        """OMN-12816: default empty extra_body adds no keys (no behavior change)."""
+        request = _make_chat_request()
+        payload = HandlerLlmOpenaiCompatible._build_payload(request)
+        assert "chat_template_kwargs" not in payload
+        # Only the expected base keys are present for a minimal request.
+        assert set(payload.keys()) == {"model", "messages"}
+
+    def test_extra_body_merged_into_payload(self) -> None:
+        """OMN-12816: extra_body fields are merged into the POST body verbatim."""
+        request = ModelLlmInferenceRequest(
+            base_url="http://localhost:8000",
+            model="Qwen3.6-35B-A3B",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+            messages=({"role": "user", "content": "Hello"},),
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        payload = HandlerLlmOpenaiCompatible._build_payload(request)
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+
+    def test_extra_body_cannot_override_declared_fields(self) -> None:
+        """OMN-12816: declared payload fields win over identically-named extra_body keys."""
+        request = ModelLlmInferenceRequest(
+            base_url="http://localhost:8000",
+            model="real-model",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+            messages=({"role": "user", "content": "Hello"},),
+            max_tokens=128,
+            extra_body={"model": "spoofed", "max_tokens": 1},
+        )
+        payload = HandlerLlmOpenaiCompatible._build_payload(request)
+        assert payload["model"] == "real-model"
+        assert payload["max_tokens"] == 128
+
     def test_chat_payload_with_system_prompt(self) -> None:
         """system_prompt is prepended as a system message."""
         request = _make_chat_request(system_prompt="You are a helpful assistant.")
