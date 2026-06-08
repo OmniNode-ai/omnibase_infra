@@ -72,6 +72,19 @@ class TestCallReceiptGateDelegation:
         assert perms.get("contents") == "read"
         assert perms.get("pull-requests") == "read"
 
+    def test_caller_sets_branch_aware_policy_mode(self) -> None:
+        workflow = _load_yaml(CALL_RECEIPT_GATE)
+        verify_job = workflow["jobs"]["verify"]
+        with_block = verify_job.get("with", {})
+
+        policy_expr = with_block.get("branch-policy-mode", "")
+        assert "main-release" in policy_expr
+        assert "dev-preflight" in policy_expr
+        assert "github.event.pull_request.base.ref == 'main'" in policy_expr
+        assert "github.event.merge_group.base_ref == 'refs/heads/main'" in policy_expr
+        assert "github.event.pull_request.base.ref == 'dev'" in policy_expr
+        assert "github.event.merge_group.base_ref == 'refs/heads/dev'" in policy_expr
+
 
 class TestReceiptGateInstallSafeguards:
     """The reusable receipt-gate.yml from omnibase_core must have install safeguards.
