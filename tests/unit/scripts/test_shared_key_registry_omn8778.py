@@ -20,10 +20,13 @@ _REGISTRY_PATH = (
     / "shared_key_registry.yaml"
 )
 
-# Keys added by OMN-8778 and their expected Infisical paths.
+# Keys added by OMN-8778/OMN-12855 and their expected Infisical paths.
 _REQUIRED_KEYS: dict[str, str] = {
     "ANTHROPIC_API_KEY": "/shared/auth/",
     "LOCAL_LLM_SHARED_SECRET": "/shared/llm/",
+    "LLM_GLM_API_KEY": "/shared/llm/",
+    "LLM_GLM_MODEL_NAME": "/shared/llm/",
+    "LLM_GLM_URL": "/shared/llm/",
     "LINEAR_API_KEY": "/shared/env/",
     "CI_CALLBACK_TOKEN": "/shared/env/",
     "MCP_API_KEY": "/shared/env/",
