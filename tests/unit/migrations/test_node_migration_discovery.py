@@ -109,12 +109,26 @@ class TestVendoredViewMigrations:
         )
         sql = migration.read_text(encoding="utf-8")
         alter_pos = sql.index("ALTER TABLE delegation_events")
-        index_pos = sql.index("idx_delegation_events_created_at")
+        first_index_pos = min(
+            sql.index(index_name)
+            for index_name in (
+                "idx_delegation_events_timestamp",
+                "idx_delegation_events_created_at",
+            )
+        )
 
-        assert alter_pos < index_pos
-        assert "ADD COLUMN IF NOT EXISTS created_at" in sql
-        assert "ADD COLUMN IF NOT EXISTS tokens_input" in sql
-        assert "ADD COLUMN IF NOT EXISTS tokens_output" in sql
+        assert alter_pos < first_index_pos
+        expected_columns = (
+            "created_at",
+            "quality_gates_checked_jsonb",
+            "quality_gates_failed_jsonb",
+            "latency_ms",
+            "tokens_input",
+            "tokens_output",
+        )
+        assert all(
+            f"ADD COLUMN IF NOT EXISTS {column}" in sql for column in expected_columns
+        )
 
     def test_registration_projection_migrations_vendored(self) -> None:
         """The node_service_registry owner migrations are vendored durably."""
