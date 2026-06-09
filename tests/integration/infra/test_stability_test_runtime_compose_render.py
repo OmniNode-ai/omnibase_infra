@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -246,9 +247,7 @@ def test_stability_lane_catalog_generated_runtime_compose_is_valid(
     generated_compose = tmp_path / "docker-compose.generated.yml"
     generate_result = subprocess.run(
         [
-            "uv",
-            "run",
-            "python",
+            sys.executable,
             "-m",
             "omnibase_infra.docker.catalog.cli",
             "generate",
