@@ -178,9 +178,19 @@ def _docker_compose_available() -> bool:
 
 
 def _compose_render_env() -> dict[str, str]:
+    python_path = os.pathsep.join(
+        path
+        for path in (
+            str(REPO_ROOT / "src"),
+            str(REPO_ROOT),
+            os.environ.get("PYTHONPATH", ""),
+        )
+        if path
+    )
     return {
         "HOME": os.environ.get("HOME", ""),
         "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": python_path,
         "USER": os.environ.get("USER", ""),
         **COMPOSE_RENDER_ENV,
     }
