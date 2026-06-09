@@ -252,7 +252,24 @@ jobs:
 
           export E2E_REDPANDA_ADVERTISE_HOST="localhost"
           if [[ -n "$runner_container_id" ]]; then
-            docker_host_gateway="$(ip route show default 2>/dev/null | awk 'NR == 1 {print $3}')"
+            docker_host_gateway="$(
+              python - <<'PY'
+          import socket
+          import struct
+
+          try:
+              with open("/proc/net/route", encoding="utf-8") as route_file:
+                  next(route_file)
+                  for line in route_file:
+                      fields = line.split()
+                      if len(fields) >= 3 and fields[1] == "00000000":
+                          gateway = int(fields[2], 16)
+                          print(socket.inet_ntoa(struct.pack("<L", gateway)))
+                          break
+          except OSError:
+              pass
+          PY
+            )"
             if [[ -n "$docker_host_gateway" ]]; then
               export E2E_REDPANDA_ADVERTISE_HOST="${docker_host_gateway}"
             fi
