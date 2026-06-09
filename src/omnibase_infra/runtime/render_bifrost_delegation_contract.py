@@ -362,6 +362,66 @@ def _has_complete_endpoint_urls(path: Path) -> bool:
     return not _endpoint_url_completeness_errors(data, path=path)
 
 
+def _backend_index_by_id(data: dict[str, object]) -> dict[str, dict[object, object]]:
+    backends = data.get("backends", [])
+    if not isinstance(backends, list):
+        return {}
+    indexed: dict[str, dict[object, object]] = {}
+    for backend in backends:
+        if not isinstance(backend, dict):
+            continue
+        backend_id = backend.get("backend_id")
+        if isinstance(backend_id, str) and backend_id.strip():
+            indexed[backend_id] = backend
+    return indexed
+
+
+def _target_satisfies_declared_env_backends(
+    *,
+    target_data: dict[str, object],
+    source_data: dict[str, object],
+    env: Mapping[str, str],
+) -> bool:
+    source_backends = source_data.get("backends", [])
+    if not isinstance(source_backends, list):
+        return True
+
+    target_backends = _backend_index_by_id(target_data)
+    for source_backend in source_backends:
+        if not isinstance(source_backend, dict):
+            continue
+
+        backend_id = source_backend.get("backend_id")
+        env_key = source_backend.get("base_url_env")
+        if not (
+            isinstance(backend_id, str)
+            and backend_id.strip()
+            and isinstance(env_key, str)
+            and env_key.strip()
+        ):
+            continue
+
+        env_url = env.get(env_key, "").strip()
+        if not env_url:
+            continue
+
+        target_backend = target_backends.get(backend_id)
+        if target_backend is None:
+            return False
+
+        target_url = target_backend.get("endpoint_url")
+        if not isinstance(target_url, str) or target_url.strip() != env_url:
+            return False
+
+        source_model = source_backend.get("model_name")
+        if isinstance(source_model, str) and source_model.strip():
+            target_model = target_backend.get("model_name")
+            if not isinstance(target_model, str) or target_model != source_model:
+                return False
+
+    return True
+
+
 def _load_render_source(
     *,
     should_verify: bool,
@@ -450,14 +510,22 @@ def render_bifrost_delegation_contract(
         return None
 
     if not should_verify and _has_populated_endpoint(target):
-        _strip_render_hint_fields(target)
+        source_data = _load_yaml(source) if source.exists() else None
         data = _load_yaml(target)
         _validate_bifrost_delegation_data(
             data,
             path=target,
             validate_endpoint_urls=False,
         )
-        if _has_complete_endpoint_urls(target):
+        if _has_complete_endpoint_urls(target) and (
+            source_data is None
+            or _target_satisfies_declared_env_backends(
+                target_data=data,
+                source_data=source_data,
+                env=env,
+            )
+        ):
+            _strip_render_hint_fields(target)
             return target
 
     data = _load_render_source(
