@@ -1494,8 +1494,64 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """
     required_params = _required_handler_init_params(handler_cls)
     return not required_params or required_params <= frozenset(
-        {"event_bus", "dispatch_port", "provisioner", "drain_proof_gate"}
+        {
+            "event_bus",
+            "event_publisher",
+            "dispatch_port",
+            "provisioner",
+            "drain_proof_gate",
+        }
     )
+
+
+async def _await_event_bus_publish(awaitable: Awaitable[object]) -> None:
+    await awaitable
+
+
+def _make_sync_event_publisher(
+    *,
+    event_bus: object,
+    handler_name: str,
+) -> Callable[[str, bytes], None]:
+    """Adapt async runtime event-bus publish to legacy sync handler publishers."""
+    publish = getattr(event_bus, "publish", None)
+    if not callable(publish):
+        raise ModelOnexError(
+            "handler_wiring: handler "
+            f"{handler_name!r} declares event_publisher, but event_bus "
+            f"{type(event_bus).__name__!r} has no callable publish()."
+        )
+
+    def _publish(topic: str, payload: bytes) -> None:
+        result = publish(topic, None, payload)
+        if not inspect.isawaitable(result):
+            return
+
+        publish_awaitable = cast("Awaitable[object]", result)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_await_event_bus_publish(publish_awaitable))
+            return
+
+        task = loop.create_task(_await_event_bus_publish(publish_awaitable))
+
+        def _log_publish_failure(done: asyncio.Task[None]) -> None:
+            try:
+                done.result()
+            except Exception as exc:  # noqa: BLE001 — publish boundary logging
+                logger.error(
+                    "Auto-wired event_publisher publish failed: "
+                    "handler=%s topic=%s error_type=%s error=%s",
+                    handler_name,
+                    topic,
+                    type(exc).__name__,
+                    exc,
+                )
+
+        task.add_done_callback(_log_publish_failure)
+
+    return _publish
 
 
 def _contracts_root_for_runtime_dependencies() -> Path:
@@ -1580,7 +1636,12 @@ def _materialize_known_handler_dependencies(
     )
     requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
     required_params = _required_handler_init_params(handler_cls)
-    if not required_params and not requires_delegation_port:
+    requires_event_publisher = "event_publisher" in constructor_params
+    if (
+        not required_params
+        and not requires_delegation_port
+        and not requires_event_publisher
+    ):
         return materialized_explicit_dependencies
     available = {
         name: value
@@ -1591,10 +1652,18 @@ def _materialize_known_handler_dependencies(
         )
         if value is not None
     }
+    if requires_event_publisher and event_bus is not None:
+        available["event_publisher"] = _make_sync_event_publisher(
+            event_bus=event_bus,
+            handler_name=handler_name,
+        )
     if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
         available.update(_build_topic_migration_executor_dependencies())
     if not (
-        required_params.intersection({"container", "ownership_query", "dispatch_port"})
+        requires_event_publisher
+        or required_params.intersection(
+            {"container", "ownership_query", "dispatch_port"}
+        )
         or ("dispatch_port" in constructor_params and requires_delegation_port)
         or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
@@ -1615,6 +1684,8 @@ def _materialize_known_handler_dependencies(
             )
     if not required_params <= set(available):
         return materialized_explicit_dependencies
+    if requires_event_publisher and "event_publisher" not in available:
+        return materialized_explicit_dependencies
 
     merged = dict(materialized_explicit_dependencies or {})
     handler_dependencies = dict(merged.get(handler_name, {}))
@@ -1622,6 +1693,8 @@ def _materialize_known_handler_dependencies(
         handler_dependencies.setdefault(name, available[name])
     if "dispatch_port" in constructor_params and "dispatch_port" in available:
         handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
+    if requires_event_publisher and "event_publisher" in available:
+        handler_dependencies.setdefault("event_publisher", available["event_publisher"])
     merged[handler_name] = handler_dependencies
     return merged
 
@@ -2672,6 +2745,19 @@ def _prepare_handler_wiring(
             message_types = (message_types or set()).union(topic_aliases)
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
+    handler_constructor_params = inspect.signature(handler_cls).parameters
+    if (
+        "event_publisher" in handler_constructor_params
+        and event_bus is None
+        and contract.event_bus is not None
+        and contract.event_bus.publish_topics
+    ):
+        raise ModelOnexError(
+            "handler_wiring: handler "
+            f"{handler_ref.name!r} declares event_publisher for publishing "
+            f"{tuple(contract.event_bus.publish_topics)!r}, but no runtime "
+            "event_bus was provided."
+        )
 
     # Fast path: if Phase 0 pre-resolved this handler via get_service_async,
     # skip the sync resolver's container Step 3 entirely (OMN-9410).
