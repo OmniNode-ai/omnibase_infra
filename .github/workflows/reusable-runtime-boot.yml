@@ -374,6 +374,15 @@ jobs:
               echo "KAFKA_BROKER_ALLOWLIST=redpanda:"
               echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@postgres:5432/omnibase_infra"
             } >> "$GITHUB_ENV"
+          elif $runner_on_compose_network \
+            && can_connect "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" 5432 \
+            && can_connect "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" 9092; then
+            echo "compose service endpoints reachable by generated container names"
+            {
+              echo "KAFKA_BOOTSTRAP_SERVERS=${OMNIBASE_INFRA_REDPANDA_CONTAINER}:9092"
+              echo "KAFKA_BROKER_ALLOWLIST=${OMNIBASE_INFRA_REDPANDA_CONTAINER}:"
+              echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@${OMNIBASE_INFRA_POSTGRES_CONTAINER}:5432/omnibase_infra"
+            } >> "$GITHUB_ENV"
           elif can_connect localhost "${POSTGRES_PORT}" && can_connect localhost "${KAFKA_PORT}"; then
             echo "compose service endpoints reachable by host-published ports"
             {
