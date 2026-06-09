@@ -8,6 +8,7 @@ import importlib.util
 import json
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -325,8 +326,22 @@ def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        policy_env[key.strip()] = value.strip()
+        policy_env[key.strip()] = _parse_runtime_policy_env_value(value)
     return policy_env
+
+
+def _parse_runtime_policy_env_value(value: str) -> str:
+    """Parse one runtime-policy dotenv value with shell-compatible quoting."""
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    try:
+        tokens = shlex.split(f"VALUE={stripped}", posix=True)
+    except ValueError:
+        return stripped
+    if len(tokens) != 1 or not tokens[0].startswith("VALUE="):
+        return stripped
+    return tokens[0].split("=", 1)[1]
 
 
 def _compose_env() -> dict[str, str]:
