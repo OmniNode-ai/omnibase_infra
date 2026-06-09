@@ -104,7 +104,9 @@ class TestVendoredViewMigrations:
 
     def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
         """Base migration must be safe when delegation_events already exists."""
-        migration = NODES_DIR / "node_projection_delegation" / "0007_delegation_events.sql"
+        migration = (
+            NODES_DIR / "node_projection_delegation" / "0007_delegation_events.sql"
+        )
         sql = migration.read_text(encoding="utf-8")
         alter_pos = sql.index("ALTER TABLE delegation_events")
         index_pos = sql.index("idx_delegation_events_created_at")
