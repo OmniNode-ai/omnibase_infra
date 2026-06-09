@@ -25,7 +25,7 @@
 # version: increment minor when adding keys, major on breaking structural changes.
 # 1.2 (OMN-10563): adds top-level `services:` section for per-service key
 # declarations. Loader: `_services_keys()` in scripts/register-repo.py.
-version: "1.2"
+version: "1.3"
 # Keys written to /shared/<transport>/ in Infisical.
 shared:
   "/shared/db/":
@@ -76,10 +76,16 @@ shared:
     #   LLM_CODER_FAST_URL   — Qwen3-14B-AWQ (RTX 4090, 40K ctx, port 8001)
     #   LLM_EMBEDDING_URL    — Qwen3-Embedding-8B-4bit (M2 Ultra, port 8100)
     #   LLM_DEEPSEEK_R1_URL  — DeepSeek-R1-14B AWQ (RTX 4090, .201, port 8001) — .200:8101 down
+    #   LLM_GLM_URL          — Z.AI/GLM cloud-tier OpenAI-compatible endpoint
+    #   LLM_GLM_MODEL_NAME   — default GLM served model for escalation
     - LLM_CODER_URL
     - LLM_CODER_FAST_URL
     - LLM_EMBEDDING_URL
     - LLM_DEEPSEEK_R1_URL
+    - LLM_GLM_URL
+    - LLM_GLM_MODEL_NAME
+    # Cloud-tier route secret ref used by model_registry.yaml and Bifrost.
+    - LLM_GLM_API_KEY
     # - LLM_SMALL_URL  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
     # ONEX platform service URLs (not LLM models — kept here as they are co-located
     # on the same inference infrastructure and share the REMOTE_SERVER_IP base).

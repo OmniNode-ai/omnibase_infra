@@ -49,6 +49,9 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "USE_EVENT_ROUTING",
         "GITHUB_TOKEN",
         "GH_TOKEN",
+        "LLM_GLM_URL",
+        "LLM_GLM_MODEL_NAME",
+        "LLM_GLM_API_KEY",
         "VALKEY_HOST",
         "VALKEY_PORT",
     }

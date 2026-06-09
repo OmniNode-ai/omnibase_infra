@@ -175,6 +175,9 @@ class TestTransportConfigMap:
         assert "LLM_CODER_FAST_URL" in keys
         assert "LLM_EMBEDDING_URL" in keys
         assert "LLM_DEEPSEEK_R1_URL" in keys
+        assert "LLM_GLM_URL" in keys
+        assert "LLM_GLM_MODEL_NAME" in keys
+        assert "LLM_GLM_API_KEY" in keys
         assert len(keys) > 0
 
     def test_all_transport_types_have_mapping(self) -> None:

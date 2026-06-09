@@ -99,6 +99,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "GH_TOKEN",
         # Qdrant vector store API key — credential, sourced from Infisical
         "QDRANT_API_KEY",
+        # Cloud-tier LLM route secret ref — credential, sourced from Infisical/k8s secret.
+        "LLM_GLM_API_KEY",
     }
 )
 
@@ -126,6 +128,8 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
+        "LLM_GLM_URL",
+        "LLM_GLM_MODEL_NAME",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",
         # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
