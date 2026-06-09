@@ -120,6 +120,7 @@ COMPOSE_RENDER_ENV = {
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
+    "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "OMNI_HOME": "/data/omninode/omni_home",
@@ -253,6 +254,10 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
         assert environment["KAFKA_INSTANCE_ID"].startswith("stability-test-")
         assert environment["KAFKA_MAX_POLL_INTERVAL_MS"] == "1800000"
+        assert environment["ONEX_SECRET_RESOLVER_CONFIG_PATH"] == (
+            "/app/data/delegation/secret_resolver.yaml"
+        )
+        assert "ONEX_SECRET_RESOLVER_CONFIG_JSON" in environment
         assert "image" not in services[service_name]
         assert services[service_name]["restart"] == "unless-stopped"
         assert environment["ONEX_RUNTIME_ADDRESS"].startswith(
@@ -431,6 +436,44 @@ def test_stability_redpanda_advertise_identity_is_contract_overlay_owned() -> No
     assert "STABILITY_TEST_REDPANDA_EXTERNAL_PORT" not in overlay_text
     assert "STABILITY_TEST_REDPANDA_PANDAPROXY_PORT" not in overlay_text
     assert "STABILITY_TEST_REDPANDA_ADMIN_PORT" not in overlay_text
+
+
+@pytest.mark.integration
+def test_stability_secret_refs_are_contract_overlay_owned() -> None:
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+    policy_text = (
+        REPO_ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "secret_resolver_mappings:" in policy_text
+    assert "llm.openrouter.api_key" in policy_text
+    assert "llm.glm.api_key" in policy_text
+    assert "llm.gemini.api_key" in policy_text
+    assert "OPENROUTER_API_KEY" not in policy_text
+
+    for service_name in REQUIRED_RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        resolver_config = json.loads(environment["ONEX_SECRET_RESOLVER_CONFIG_JSON"])
+        mappings = {
+            mapping["logical_name"]: mapping["source"]
+            for mapping in resolver_config["mappings"]
+        }
+
+        assert resolver_config["enable_convention_fallback"] is False
+        assert mappings["llm.openrouter.api_key"] == {
+            "source_type": "env",
+            "source_path": "OPEN_ROUTER_API_KEY",
+        }
+        assert mappings["llm.glm.api_key"] == {
+            "source_type": "env",
+            "source_path": "LLM_GLM_API_KEY",
+        }
+        assert mappings["llm.gemini.api_key"] == {
+            "source_type": "env",
+            "source_path": "GEMINI_API_KEY",
+        }
+        assert "OPENROUTER_API_KEY" not in json.dumps(resolver_config)
 
 
 @pytest.mark.integration

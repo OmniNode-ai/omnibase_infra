@@ -135,6 +135,11 @@ if [ -n "${BIFROST_CONTRACT_PATH:-}" ]; then
   python -m omnibase_infra.runtime.render_bifrost_delegation_contract
 fi
 
+if [ -n "${ONEX_SECRET_RESOLVER_CONFIG_PATH:-}" ]; then
+  echo "[entrypoint] Rendering secret resolver config..."
+  python -m omnibase_infra.runtime.render_secret_resolver_config
+fi
+
 echo "[entrypoint] Starting runtime kernel..."
 
 exec "$@"

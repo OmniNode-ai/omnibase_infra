@@ -19,8 +19,10 @@ def test_entrypoint_repairs_runtime_volume_paths_before_bifrost_render() -> None
     chown_pos = entrypoint.index("chown -R omniinfra:omniinfra")
     drop_pos = entrypoint.index('exec gosu omniinfra "$0" "$@"')
     render_pos = entrypoint.index("render_bifrost_delegation_contract")
+    secret_render_pos = entrypoint.index("render_secret_resolver_config")
 
     assert bootstrap_pos < data_dir_pos < chown_pos < drop_pos < render_pos
+    assert drop_pos < secret_render_pos
     assert (
         "install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp"
         in entrypoint

@@ -47,3 +47,28 @@ def test_runtime_policy_contract_controls_all_runtime_lane_ports() -> None:
     }
 
     assert expected_ports == {key: int(rendered_env[key]) for key in expected_ports}
+
+
+def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None:
+    raw = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
+    contract = ModelRuntimePolicyContract.model_validate(raw)
+    rendered_env = _load_dotenv(POLICY_ENV_PATH)
+
+    stability_profile = contract.profiles["stability-test"]
+    logical_names = {
+        mapping.logical_name for mapping in stability_profile.secret_resolver_mappings
+    }
+
+    assert logical_names == {
+        "llm.openrouter.api_key",
+        "llm.glm.api_key",
+        "llm.gemini.api_key",
+    }
+    assert (
+        rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
+        == stability_profile.secret_resolver_config_path
+    )
+    assert (
+        "OPENROUTER_API_KEY"
+        not in rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )

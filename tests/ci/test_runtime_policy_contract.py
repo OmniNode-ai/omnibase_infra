@@ -75,6 +75,21 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
         env["STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES"]
         == "market.skill-proof,workflow.orchestration,runtime.main"
     )
+    assert (
+        env["DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
+        == "/app/data/delegation/secret_resolver.yaml"
+    )
+    assert (
+        env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
+        == "/app/data/delegation/secret_resolver.yaml"
+    )
+    assert (
+        "llm.openrouter.api_key" in env["DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPENROUTER_API_KEY"
+        not in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
 
 
 def test_compose_consumes_policy_env_instead_of_hardcoded_policy_values() -> None:
@@ -88,6 +103,8 @@ def test_compose_consumes_policy_env_instead_of_hardcoded_policy_values() -> Non
     )
     assert "OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-" not in compose_text
     assert 'OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: "true"' not in compose_text
+    assert "ONEX_SECRET_RESOLVER_CONFIG_PATH: /app/data" not in compose_text
+    assert "llm.openrouter.api_key" not in compose_text
 
     for text in (stability_text, prod_text):
         assert 'OMNIMEMORY_ENABLED: ""' not in text

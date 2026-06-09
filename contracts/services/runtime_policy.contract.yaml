@@ -11,6 +11,20 @@ profiles:
     main_port: 8085
     effects_port: 8086
     topic_provisioner_max_partitions: 0
+    secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
+    secret_resolver_mappings:
+      - logical_name: llm.openrouter.api_key
+        source:
+          source_type: env
+          source_path: OPEN_ROUTER_API_KEY
+      - logical_name: llm.glm.api_key
+        source:
+          source_type: env
+          source_path: LLM_GLM_API_KEY
+      - logical_name: llm.gemini.api_key
+        source:
+          source_type: env
+          source_path: GEMINI_API_KEY
     services:
       main:
         runtime_id: dev-main
@@ -50,6 +64,20 @@ profiles:
     main_port: 18085
     effects_port: 18086
     topic_provisioner_max_partitions: 1
+    secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
+    secret_resolver_mappings:
+      - logical_name: llm.openrouter.api_key
+        source:
+          source_type: env
+          source_path: OPEN_ROUTER_API_KEY
+      - logical_name: llm.glm.api_key
+        source:
+          source_type: env
+          source_path: LLM_GLM_API_KEY
+      - logical_name: llm.gemini.api_key
+        source:
+          source_type: env
+          source_path: GEMINI_API_KEY
     services:
       main:
         runtime_id: stability-test-main

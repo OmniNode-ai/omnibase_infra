@@ -1,0 +1,85 @@
+# OMN-12860 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-12860"
+title: "Infra lane overlay renders logical secret resolver config"
+summary: >-
+  Extends runtime policy to declare logical LLM secret references and concrete
+  secret source descriptors, renders those policy values into runtime env, and
+  materializes a typed ModelSecretResolverConfig artifact at runtime startup.
+  This keeps Bifrost route authority on logical refs while allowing dev and
+  stability-test lanes to use environment variables as local secret sources.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "protocols"
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Secret resolver renderer and runtime policy contract tests pass"
+    command: >-
+      uv run pytest tests/unit/runtime/test_render_secret_resolver_config.py
+      tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py
+      tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py
+      tests/integration/runtime/test_runtime_policy_contract.py -q
+  - kind: "tests"
+    description: "Stability-test compose render exposes contract-owned resolver config path"
+    command: >-
+      uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - kind: "ci"
+    description: "Touched runtime policy and renderer files pass ruff"
+    command: >-
+      uv run ruff check src/omnibase_infra/runtime/render_secret_resolver_config.py
+      src/omnibase_infra/runtime/models/model_runtime_profile_policy.py
+      scripts/render_runtime_policy_env.py
+      tests/unit/runtime/test_render_secret_resolver_config.py
+      tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py
+      tests/integration/infra/test_stability_test_runtime_compose_render.py
+      tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py
+      tests/integration/runtime/test_runtime_policy_contract.py
+  - kind: "manual"
+    description: "Post-merge dev/stability deploy captures runtime identity and resolver artifact evidence"
+    command: >-
+      deploy dev/stability runtime, then record runtime SHA, image digest,
+      runtime-policy hash, overlay hash, ONEX_SECRET_RESOLVER_CONFIG_PATH, and
+      logical llm.openrouter.api_key resolution through SecretResolver without
+      logging secret values
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-renderer-tests"
+    description: "Secret resolver renderer and runtime policy contract tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/test_render_secret_resolver_config.py
+          tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py
+          tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py
+          tests/integration/runtime/test_runtime_policy_contract.py -q
+  - id: "dod-stability-compose"
+    description: "Stability-test compose render consumes contract-owned resolver config"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
+  - id: "dod-policy-sync"
+    description: "Rendered runtime-policy.env matches runtime_policy.contract.yaml"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run python scripts/render_runtime_policy_env.py --check-env-file
+          docker/runtime-policy.env
+  - id: "dod-deploy"
+    description: "Runtime deploy evidence is required before declaring dev/stability fixed"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          deploy dev/stability runtime after merge; capture runtime SHA, image
+          digest, contract hash, overlay hash, config path, and logical
+          OpenRouter secret-ref resolution evidence
