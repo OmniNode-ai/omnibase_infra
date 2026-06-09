@@ -10,6 +10,7 @@ from omnibase_infra.runtime.models.model_runtime_process_policy import (
     ModelRuntimeProcessPolicy,
     RuntimeProcessName,
 )
+from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
 
 
 class ModelRuntimeProfilePolicy(BaseModel):
@@ -21,6 +22,8 @@ class ModelRuntimeProfilePolicy(BaseModel):
     main_port: int = Field(ge=1, le=65535)
     effects_port: int = Field(ge=1, le=65535)
     topic_provisioner_max_partitions: int = Field(ge=0)
+    secret_resolver_config_path: str = ""
+    secret_resolver_mappings: tuple[ModelSecretMapping, ...] = ()
     processes: dict[RuntimeProcessName, ModelRuntimeProcessPolicy] = Field(
         alias="services"
     )
@@ -31,5 +34,17 @@ class ModelRuntimeProfilePolicy(BaseModel):
         observed = set(self.processes)
         if observed != required:
             msg = f"runtime profile processes must be {sorted(required)}, got {sorted(observed)}"
+            raise ValueError(msg)
+        logical_names = [
+            mapping.logical_name for mapping in self.secret_resolver_mappings
+        ]
+        if len(logical_names) != len(set(logical_names)):
+            msg = "runtime profile secret resolver logical names must be unique"
+            raise ValueError(msg)
+        if (
+            self.secret_resolver_mappings
+            and not self.secret_resolver_config_path.strip()
+        ):
+            msg = "runtime profile secret resolver mappings require a config path"
             raise ValueError(msg)
         return self

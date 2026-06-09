@@ -1074,6 +1074,16 @@ class TestDockerComposeProfiles:
         _pg_dsn = "postgresql://postgres:test@postgres:5432/omnibase_infra"
         _intel_dsn = "postgresql://postgres:test@postgres:5432/omniintelligence"
         _local_lan_cidr = ".".join(("192", "168", "86", "0")) + "/24"
+        _secret_resolver_config_json = (
+            '{"enable_convention_fallback":false,"mappings":['
+            '{"logical_name":"llm.openrouter.api_key",'
+            '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
+            '{"logical_name":"llm.glm.api_key",'
+            '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
+            '{"logical_name":"llm.gemini.api_key",'
+            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
+        )
+        _secret_resolver_config_path = "/app/data/delegation/secret_resolver.yaml"
         env = os.environ.copy()
         env.update(
             {
@@ -1116,10 +1126,16 @@ class TestDockerComposeProfiles:
                 "BIFROST_VERIFY_ENDPOINTS": "1",
                 "DEV_RUNTIME_EFFECTS_CAPABILITIES": "effects.consumer,market.skill-proof,runtime.effects",
                 "DEV_RUNTIME_EFFECTS_PORT": "8086",
+                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
+                "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
                 "DEV_RUNTIME_MAIN_CAPABILITIES": "market.skill-proof,workflow.orchestration,runtime.main",
                 "DEV_RUNTIME_MAIN_PORT": "8085",
                 "DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION": "true",
+                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
+                "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
                 "DEV_RUNTIME_WORKER_CAPABILITIES": "workflow.dispatch,contract.update,runtime.worker",
+                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON": _secret_resolver_config_json,
+                "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH": _secret_resolver_config_path,
                 "OMNIMEMORY_ENABLED": "false",
                 "OMNIMEMORY_MEMGRAPH_PORT": "7687",
                 "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",

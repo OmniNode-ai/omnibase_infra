@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import sys
 from pathlib import Path
@@ -21,6 +22,9 @@ from omnibase_infra.runtime.models.model_runtime_policy_contract import (
 )
 from omnibase_infra.runtime.models.model_runtime_process_policy import (
     RuntimeProcessName,
+)
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
 )
 
 _DEFAULT_CONTRACT = (
@@ -82,6 +86,16 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         env[f"{profile_prefix}_TOPIC_PROVISIONER_MAX_PARTITIONS"] = str(
             profile.topic_provisioner_max_partitions
         )
+        secret_resolver_config_json = ""
+        if profile.secret_resolver_mappings:
+            secret_resolver_config_json = json.dumps(
+                ModelSecretResolverConfig(
+                    mappings=list(profile.secret_resolver_mappings),
+                    enable_convention_fallback=False,
+                ).model_dump(mode="json", exclude_defaults=True),
+                separators=(",", ":"),
+                sort_keys=True,
+            )
 
         for process_name, process in profile.processes.items():
             process_prefix = _PROCESS_ENV_PREFIX[process_name]
@@ -95,6 +109,10 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             env[f"{prefix}_PUBLISH_INTROSPECTION"] = _bool_text(
                 process.publish_introspection
             )
+            env[f"{prefix}_SECRET_RESOLVER_CONFIG_PATH"] = (
+                profile.secret_resolver_config_path
+            )
+            env[f"{prefix}_SECRET_RESOLVER_CONFIG_JSON"] = secret_resolver_config_json
 
     return dict(sorted(env.items()))
 
