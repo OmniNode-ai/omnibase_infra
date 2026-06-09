@@ -697,7 +697,13 @@ class DeployExecutor:
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
 
-    def compose_gen(self, bundles: list[str], on_phase_update: PhaseCallback) -> None:
+    def compose_gen(
+        self,
+        bundles: list[str],
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    ) -> None:
         """Regenerate docker-compose.infra.yml from the catalog CLI.
 
         Runs ``uv run python -m omnibase_infra.docker.catalog.cli generate
@@ -741,6 +747,31 @@ class DeployExecutor:
             )
         else:
             logger.info("compose_gen complete: %s", result.stdout.strip())
+            profile = "runtime" if "runtime" in selected else "core"
+            config = lane_config_for(lane)
+            validate_cmd = [
+                "docker",
+                "compose",
+                *_compose_file_args(lane),
+                "-p",
+                config.compose_project,
+                "--profile",
+                profile,
+                "config",
+                "--quiet",
+            ]
+            validate_result = _run(
+                validate_cmd,
+                timeout=timeout,
+                cwd=REPO_DIR,
+                env=_compose_env(),
+            )
+            if validate_result.returncode != 0:
+                raise RuntimeError(
+                    "compose_gen produced invalid lane compose for "
+                    f"{lane.value}: "
+                    f"{validate_result.stderr.strip() or validate_result.stdout.strip()}"
+                )
 
         on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.SUCCESS)
 

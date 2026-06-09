@@ -1,6 +1,6 @@
 name: projection-api
 description: OmniMarket projection API server for reducer-owned projection snapshots (OMN-11542)
-image: omnibase-infra-runtime:latest
+image: runtime:latest
 layer: runtime
 container_name: omnimarket-projection-api
 required_env:

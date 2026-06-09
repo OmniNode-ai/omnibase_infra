@@ -8,6 +8,7 @@ core:
     - redpanda
     - valkey
     - infisical
+    - keycloak
   includes: []
   inject_env:
     INFISICAL_ADDR: "http://infisical:8080"
@@ -53,6 +54,7 @@ runtime-observability-projections:
     - decision-store-consumer
     - omnimarket-projection-delegation
     - infra-routing-decisions-consumer
+    - projection-api
   includes: []
   inject_env: {}
   inject_required_env:
