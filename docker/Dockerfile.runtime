@@ -359,7 +359,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "pytest>=8.4.0,<10.0.0" \
     "pytest-asyncio>=1.3.0,<2.0.0" \
     "docker>=7.0.0,<8.0.0" \
-    "python-snappy>=0.7.0,<1.0.0"
+    "python-snappy>=0.7.0,<1.0.0" \
+    "cachetools>=6.2.4,<8.0.0"
 
 # Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
@@ -380,6 +381,16 @@ assert torch.version.cuda is None, f'Expected CPU torch, got CUDA {torch.version
 nvidia_pkgs = [m.name for m in pkgutil.iter_modules() if 'nvidia' in m.name]; \
 assert not nvidia_pkgs, f'Unexpected NVIDIA packages: {nvidia_pkgs}'; \
 print(f'torch {torch.__version__} (CPU-only) verified, no NVIDIA packages')"
+
+# OMN-12848: fail the build if a generation-path transitive dep is missing.
+# omnimemory declares cachetools; node_semantic_analyzer_compute /
+# node_agent_learning_retrieval_effect import omnimemory. A missing transitive
+# dep previously degraded silently at runtime (entry-point load failure) instead
+# of failing the build. Assert the imports succeed at build time.
+RUN /app/.venv/bin/python -c "\
+import importlib; \
+[importlib.import_module(m) for m in ('cachetools', 'omnimemory')]; \
+print('generation-path transitive deps verified: cachetools, omnimemory')"
 
 # Cleanup: remove __pycache__ and .pyc files from venv
 # Note: does NOT touch /root/.cache/uv (that's a cache mount, not persisted in layer)
