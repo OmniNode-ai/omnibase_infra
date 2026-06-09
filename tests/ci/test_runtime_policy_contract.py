@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -60,6 +63,45 @@ def test_runtime_policy_env_matches_contract_renderer() -> None:
     observed = POLICY_ENV_PATH.read_text(encoding="utf-8")
 
     assert observed == expected
+
+
+def test_runtime_policy_env_shell_source_preserves_json() -> None:
+    keys = " ".join(
+        [
+            "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
+            "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
+            "DEV_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
+            "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
+            "STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
+            "STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
+        ]
+    )
+    command = f"""
+set -euo pipefail
+set -a
+source {shlex.quote(str(POLICY_ENV_PATH))}
+set +a
+{shlex.quote(sys.executable)} - {keys} <<'PY'
+import json
+import os
+import sys
+
+for key in sys.argv[1:]:
+    payload = json.loads(os.environ[key])
+    assert payload["enable_convention_fallback"] is False
+    assert payload["mappings"]
+PY
+"""
+
+    result = subprocess.run(
+        ["bash", "-lc", command],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_runtime_policy_env_has_expected_lane_values() -> None:

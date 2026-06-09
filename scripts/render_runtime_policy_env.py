@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ from omnibase_infra.runtime.models.model_secret_resolver_config import (
 _DEFAULT_CONTRACT = (
     _REPO_ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
 )
+_SHELL_SAFE_DOTENV_VALUE = re.compile(r"^[A-Za-z0-9_./,:@+-]+$")
 
 _PROFILE_ENV_PREFIX: dict[RuntimeProfileName, str] = {
     "dev": "DEV",
@@ -118,12 +120,15 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
 
 
 def format_dotenv(env: dict[str, str]) -> str:
-    """Format env vars as a dotenv file."""
+    """Format env vars as a dotenv file that is safe to shell-source."""
     lines = [
         "# Generated from contracts/services/runtime_policy.contract.yaml.",
         "# Do not edit policy values here; edit the contract and re-render.",
     ]
-    lines.extend(f"{key}={value}" for key, value in env.items())
+    lines.extend(
+        f"{key}={value if not value or _SHELL_SAFE_DOTENV_VALUE.fullmatch(value) else shlex.quote(value)}"
+        for key, value in env.items()
+    )
     return "\n".join(lines) + "\n"
 
 
