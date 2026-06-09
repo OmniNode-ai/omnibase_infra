@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Registry tests for OMN-10563: services.omnimarket section + 1.2 schema bump.
+"""Registry tests for OMN-10563: services.omnimarket section and schema bumps.
 
 Validates:
-1. Registry version bumped to 1.2.
+1. Registry version is at least the schema level that introduced services.
 2. `services` section exists and parses correctly.
 3. `services.omnimarket` declares the keys named in the public-shippable plan
    Task 16 (kafka.KAFKA_GROUP_ID, llm.LLM_*_URL/_MODEL_ID, db.POSTGRES_DATABASE).
@@ -43,8 +43,8 @@ def register_repo_module():  # type: ignore[no-untyped-def]
 
 
 class TestRegistryVersionBump:
-    def test_version_is_1_2(self, registry_data: dict[str, object]) -> None:
-        assert registry_data.get("version") == "1.2"
+    def test_version_is_1_3(self, registry_data: dict[str, object]) -> None:
+        assert registry_data.get("version") == "1.3"
 
     def test_top_level_sections_present(self, registry_data: dict[str, object]) -> None:
         # All preexisting top-level sections must remain present after the
