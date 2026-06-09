@@ -37,6 +37,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -75,6 +76,7 @@ CircuitState = Literal["closed", "open", "half_open"]
 """Valid circuit breaker states for endpoint status."""
 
 _VALID_CIRCUIT_STATES: frozenset[str] = frozenset({"closed", "open", "half_open"})
+_CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 
 
 def _parse_circuit_state(
@@ -95,6 +97,30 @@ def _parse_circuit_state(
         # Why: Runtime validation guarantees the returned value matches the contract.
         return raw  # type: ignore[return-value]
     return default
+
+
+def _probe_paths(endpoint_url: str) -> tuple[str, str]:
+    """Return health and model-discovery probe URLs for an endpoint.
+
+    Some contract-owned cloud endpoints are configured as complete chat
+    completion URLs because the inference caller POSTs them verbatim. Health
+    probing still needs to hit sibling discovery paths, not append paths below
+    ``/chat/completions``.
+    """
+    parsed = urlsplit(endpoint_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+        path = path[: -len(_CHAT_COMPLETIONS_PATH_SUFFIX)]
+        health_path = f"{path}/health"
+        models_path = f"{path}/models"
+    else:
+        base_path = path.rstrip("/")
+        health_path = f"{base_path}/health"
+        models_path = f"{base_path}/v1/models"
+    return (
+        urlunsplit((parsed.scheme, parsed.netloc, health_path, "", "")),
+        urlunsplit((parsed.scheme, parsed.netloc, models_path, "", "")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -577,24 +603,28 @@ class ServiceLlmEndpointHealth:
         client = await self._get_http_client()
         primary_error: str = ""
 
+        health_url, models_url = _probe_paths(base_url)
+
         # Primary probe: /health
         try:
-            resp = await client.get(f"{base_url.rstrip('/')}/health")
+            resp = await client.get(health_url)
             if 200 <= resp.status_code < 300:
                 return True, ""
             primary_error = f"Primary /health: HTTP {resp.status_code}"
         except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             primary_error = f"Primary /health: {type(exc).__name__}"
 
-        # Fallback probe: /v1/models (vLLM-style)
+        # Fallback probe: model discovery.
         try:
-            resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
+            resp = await client.get(models_url)
             if 200 <= resp.status_code < 300:
                 return True, ""
-            fallback_error = f"Fallback /v1/models: HTTP {resp.status_code}"
+            if resp.status_code in {401, 403}:
+                return True, ""
+            fallback_error = f"Fallback model discovery: HTTP {resp.status_code}"
             return False, f"{primary_error}; {fallback_error}"
         except httpx.HTTPError as exc:
-            fallback_error = f"Fallback /v1/models: {type(exc).__name__}"
+            fallback_error = f"Fallback model discovery: {type(exc).__name__}"
             return False, f"{primary_error}; {fallback_error}"
 
     async def _emit_health_event(

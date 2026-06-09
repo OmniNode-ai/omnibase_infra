@@ -493,6 +493,65 @@ class TestServiceLlmEndpointHealthProbe:
             assert status.available is True
 
     @pytest.mark.asyncio
+    async def test_probe_full_chat_completion_url_uses_sibling_models_path(
+        self,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        """Complete chat URLs must not be probed as /chat/completions/v1/models."""
+        cfg = ModelLlmEndpointHealthConfig(
+            endpoints={
+                "cloud-glm": ("https://api.z.ai/api/coding/paas/v4/chat/completions")
+            },
+            probe_interval_seconds=5.0,
+            probe_timeout_seconds=2.0,
+        )
+        service = ServiceLlmEndpointHealth(config=cfg, event_bus=mock_event_bus)
+        seen_urls: list[str] = []
+
+        async def mock_get(url: str, **kwargs: object) -> httpx.Response:
+            seen_urls.append(url)
+            if url.endswith("/health"):
+                return httpx.Response(404, request=httpx.Request("GET", url))
+            return httpx.Response(200, request=httpx.Request("GET", url))
+
+        with patch.object(httpx.AsyncClient, "get", side_effect=mock_get):
+            status_map = await service.probe_all()
+
+        assert status_map["cloud-glm"].available is True
+        assert seen_urls == [
+            "https://api.z.ai/api/coding/paas/v4/health",
+            "https://api.z.ai/api/coding/paas/v4/models",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_probe_auth_gated_models_endpoint_does_not_open_circuit(
+        self,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        """401/403 model discovery proves cloud reachability without poisoning route health."""
+        cfg = ModelLlmEndpointHealthConfig(
+            endpoints={
+                "cloud-glm": ("https://api.z.ai/api/coding/paas/v4/chat/completions")
+            },
+            probe_interval_seconds=5.0,
+            probe_timeout_seconds=2.0,
+            circuit_breaker_threshold=1,
+        )
+        service = ServiceLlmEndpointHealth(config=cfg, event_bus=mock_event_bus)
+
+        async def mock_get(url: str, **kwargs: object) -> httpx.Response:
+            status_code = 401 if url.endswith("/models") else 404
+            return httpx.Response(status_code, request=httpx.Request("GET", url))
+
+        with patch.object(httpx.AsyncClient, "get", side_effect=mock_get):
+            status_map = await service.probe_all()
+
+        status = status_map["cloud-glm"]
+        assert status.available is True
+        assert status.error == ""
+        assert status.circuit_state == "closed"
+
+    @pytest.mark.asyncio
     async def test_probe_both_fail(
         self,
         service: ServiceLlmEndpointHealth,
