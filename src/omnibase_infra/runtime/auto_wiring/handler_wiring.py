@@ -1697,6 +1697,20 @@ def _topics_for_handler_entry(
     if len(topics) == 1:
         return topics
 
+    # OMN-12848: a sole handler entry unambiguously owns every subscribe topic.
+    # The ambiguity guard below (return ()) only applies when MULTIPLE handler
+    # entries compete for the same topics without per-handler event_type
+    # disambiguation. A single-handler contract with an event_model and more
+    # than one subscribe topic (e.g. node_generation_consumer subscribing to
+    # both node-generation-requested and node-deploy) previously fell through to
+    # return () and registered ZERO dispatch routes — the command was consumed
+    # then DLQ'd ("No dispatcher found"). Assign all topics to the sole handler.
+    if (
+        contract.handler_routing is not None
+        and len(contract.handler_routing.handlers) == 1
+    ):
+        return topics
+
     return ()
 
 
