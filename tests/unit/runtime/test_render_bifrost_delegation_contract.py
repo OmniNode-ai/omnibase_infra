@@ -20,6 +20,10 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 
 
 def _http_url(authority: str) -> str:
+    return "http" + f"://{authority}/v1/chat/completions"
+
+
+def _base_http_url(authority: str) -> str:
     return "http" + "://" + authority
 
 
@@ -174,6 +178,63 @@ def test_existing_populated_target_is_reused(tmp_path: Path) -> None:
     assert rendered == target
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert loaded["backends"][0]["endpoint_url"] == _http_url("pre-rendered.local:8000")
+
+
+@pytest.mark.unit
+def test_existing_target_with_incomplete_endpoint_is_rerendered(
+    tmp_path: Path,
+) -> None:
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+    target = _source_contract(tmp_path / "target.yaml")
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    data["backends"][0]["endpoint_url"] = _base_http_url("stale.local:8000")
+    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
+    )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("fresh.local:8000")
+
+
+@pytest.mark.unit
+def test_verify_mode_rerenders_incomplete_target_from_source(
+    tmp_path: Path,
+) -> None:
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+    target = _source_contract(tmp_path / "target.yaml")
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    data["backends"][0]["endpoint_url"] = _base_http_url("stale.local:8000")
+    target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
+        verify_endpoints=True,
+        endpoint_probe=lambda _url, _model, _timeout: None,
+    )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("fresh.local:8000")
+
+
+@pytest.mark.unit
+def test_render_rejects_incomplete_endpoint_from_env(tmp_path: Path) -> None:
+    source = _source_contract(tmp_path / "source.yaml", required=True)
+    target = tmp_path / "rendered.yaml"
+
+    with pytest.raises(ProtocolConfigurationError, match="complete chat completion"):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={"LLM_CODER_URL": _base_http_url("coder.local:8000")},
+        )
 
 
 @pytest.mark.parametrize(

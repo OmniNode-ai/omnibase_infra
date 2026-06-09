@@ -18,7 +18,7 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 import yaml
@@ -50,6 +50,7 @@ def _resolve_default_source_path() -> Path:
 
 _DEFAULT_SOURCE_PATH = _resolve_default_source_path()
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
+_CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 
 EndpointProbe = Callable[[str, str, float], str | None]
 
@@ -88,15 +89,22 @@ def _env_flag(value: str | None, *, default: bool) -> bool:
 
 
 def _probe_openai_model_endpoint(
-    base_url: str,
+    endpoint_url: str,
     model_name: str,
     timeout_seconds: float,
 ) -> str | None:
-    """Return None when ``base_url`` proves it serves ``model_name``."""
-    parsed = urlsplit(base_url)
+    """Return None when ``endpoint_url`` proves it serves ``model_name``."""
+    parsed = urlsplit(endpoint_url)
     if parsed.scheme not in {"http", "https"}:
-        return f"unsupported endpoint URL scheme for {base_url!r}"
-    endpoint = base_url.rstrip("/") + "/v1/models"
+        return f"unsupported endpoint URL scheme for {endpoint_url!r}"
+
+    path = parsed.path.rstrip("/")
+    if path.endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+        path = path[: -len(_CHAT_COMPLETIONS_PATH_SUFFIX)]
+        models_path = f"{path}/models"
+    else:
+        models_path = f"{path}/v1/models"
+    endpoint = urlunsplit((parsed.scheme, parsed.netloc, models_path, "", ""))
     request = Request(endpoint, headers={"accept": "application/json"})  # noqa: S310
     try:
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
@@ -168,6 +176,58 @@ def _populate_backend_endpoint(
 _RENDER_HINT_FIELDS = frozenset({"required", "base_url_env"})
 
 
+def _endpoint_url_completeness_errors(
+    data: dict[str, object],
+    *,
+    path: Path,
+) -> list[str]:
+    backends = data.get("backends")
+    if not isinstance(backends, list):
+        return []
+
+    errors: list[str] = []
+    for backend in backends:
+        if not isinstance(backend, dict):
+            continue
+        endpoint_url = backend.get("endpoint_url")
+        if not isinstance(endpoint_url, str) or not endpoint_url.strip():
+            continue
+
+        parsed = urlsplit(endpoint_url.strip())
+        if parsed.scheme not in {"http", "https"}:
+            continue
+
+        backend_id = backend.get("backend_id", "<unknown>")
+        if parsed.query or parsed.fragment:
+            errors.append(
+                f"{backend_id}: endpoint_url must not include query or fragment: "
+                f"{endpoint_url!r}"
+            )
+            continue
+        if not parsed.path.rstrip("/").endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+            errors.append(
+                f"{backend_id}: endpoint_url must be a complete chat completion "
+                f"URL ending in {_CHAT_COMPLETIONS_PATH_SUFFIX!r}: "
+                f"{endpoint_url!r}"
+            )
+
+    return errors
+
+
+def _validate_bifrost_delegation_endpoint_urls(
+    data: dict[str, object],
+    *,
+    path: Path,
+) -> None:
+    errors = _endpoint_url_completeness_errors(data, path=path)
+    if errors:
+        joined = "; ".join(errors)
+        raise ProtocolConfigurationError(
+            "Bifrost delegation HTTP endpoint_url values must be complete chat "
+            f"completion URLs: {joined}"
+        )
+
+
 def _strip_render_hint_fields(path: Path) -> None:
     """Remove render-only hint fields from a contract file in place."""
     if not path.exists():
@@ -191,8 +251,12 @@ def _strip_render_hint_fields(path: Path) -> None:
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
-def _validate_bifrost_delegation_config(path: Path) -> None:
-    data = _load_yaml(path)
+def _validate_bifrost_delegation_data(
+    data: dict[str, object],
+    *,
+    path: Path,
+    validate_endpoint_urls: bool = True,
+) -> None:
     backends = data.get("backends")
     routing_rules = data.get("routing_rules")
     default_backends = data.get("default_backends", [])
@@ -281,6 +345,22 @@ def _validate_bifrost_delegation_config(path: Path) -> None:
             "Bifrost delegation config contains duplicate routing rule_id values"
         )
 
+    if validate_endpoint_urls:
+        _validate_bifrost_delegation_endpoint_urls(data, path=path)
+
+
+def _validate_bifrost_delegation_config(path: Path) -> None:
+    data = _load_yaml(path)
+    _validate_bifrost_delegation_data(data, path=path)
+
+
+def _has_complete_endpoint_urls(path: Path) -> bool:
+    try:
+        data = _load_yaml(path)
+    except ProtocolConfigurationError:
+        return False
+    return not _endpoint_url_completeness_errors(data, path=path)
+
 
 def _load_render_source(
     *,
@@ -289,7 +369,14 @@ def _load_render_source(
     source: Path,
 ) -> dict[str, object]:
     if should_verify and _has_populated_endpoint(target):
-        return _load_yaml(target)
+        data = _load_yaml(target)
+        _validate_bifrost_delegation_data(
+            data,
+            path=target,
+            validate_endpoint_urls=False,
+        )
+        if _has_complete_endpoint_urls(target):
+            return data
     if source.exists():
         return _load_yaml(source)
     raise ProtocolConfigurationError(f"Bifrost source contract not found at {source}")
@@ -364,8 +451,14 @@ def render_bifrost_delegation_contract(
 
     if not should_verify and _has_populated_endpoint(target):
         _strip_render_hint_fields(target)
-        _validate_bifrost_delegation_config(target)
-        return target
+        data = _load_yaml(target)
+        _validate_bifrost_delegation_data(
+            data,
+            path=target,
+            validate_endpoint_urls=False,
+        )
+        if _has_complete_endpoint_urls(target):
+            return target
 
     data = _load_render_source(
         should_verify=should_verify, target=target, source=source
