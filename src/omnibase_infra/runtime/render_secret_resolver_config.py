@@ -57,7 +57,12 @@ def _load_source_data(
             "Secret resolver render requires ONEX_SECRET_RESOLVER_CONFIG_JSON or "
             "ONEX_SECRET_RESOLVER_SOURCE_CONFIG_PATH"
         )
-    raw: object = yaml.safe_load(source.read_text(encoding="utf-8"))
+    try:
+        raw: object = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            f"Secret resolver source config could not be loaded: {source}"
+        ) from exc
     if not isinstance(raw, dict):
         raise ProtocolConfigurationError(
             f"Secret resolver source config must have a mapping root: {source}"
@@ -140,7 +145,12 @@ def render_secret_resolver_config(
 
 
 def _load_yaml(path: Path) -> dict[str, object]:
-    raw: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        raw: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            f"Secret resolver config could not be loaded: {path}"
+        ) from exc
     if not isinstance(raw, dict):
         raise ProtocolConfigurationError(
             f"Secret resolver config must have a mapping root: {path}"

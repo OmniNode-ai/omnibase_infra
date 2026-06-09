@@ -6,11 +6,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from omnibase_infra.runtime.models.model_runtime_policy_contract import (
     ModelRuntimePolicyContract,
 )
+
+pytestmark = [pytest.mark.integration]
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_PATH = ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"

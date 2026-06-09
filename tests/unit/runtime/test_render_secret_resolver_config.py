@@ -88,6 +88,22 @@ def test_render_secret_resolver_config_from_source_file(tmp_path: Path) -> None:
     assert _load_rendered(target).mappings[0].logical_name == "llm.openrouter.api_key"
 
 
+def test_render_secret_resolver_config_wraps_source_yaml_errors(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.yaml"
+    source.write_text("mappings: [", encoding="utf-8")
+
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match="Secret resolver source config could not be loaded",
+    ):
+        render_secret_resolver_config(
+            target_path=tmp_path / "rendered.yaml",
+            environ={"ONEX_SECRET_RESOLVER_SOURCE_CONFIG_PATH": str(source)},
+        )
+
+
 def test_empty_secret_resolver_config_path_disables_render(tmp_path: Path) -> None:
     rendered = render_secret_resolver_config(
         target_path=None,
