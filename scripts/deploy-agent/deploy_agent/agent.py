@@ -183,6 +183,7 @@ class DeployAgent:
             self.executor.compose_gen(
                 SCOPE_BUNDLES.get(cmd.scope, ["core", "runtime"]),
                 on_phase_update=on_phase_update,
+                lane=cmd.runtime_lane,
             )
 
             # Seed Infisical before containers start (non-fatal)

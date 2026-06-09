@@ -1,9 +1,6 @@
--- Placeholder: keycloak database creation is handled by provision-keycloak.py
--- (or by docker-entrypoint-initdb.d on fresh volumes). CREATE DATABASE cannot
--- run inside a transaction block, so it is not executable by the migration
--- runner. This file reserves migration number 041 for documentation purposes.
-DO $$
-BEGIN
-  RAISE NOTICE 'Migration 041: keycloak DB creation handled by provision-keycloak.py (no-op in migration runner)';
-END
-$$;
+-- onex-create-database: keycloak
+-- Ensure warm Postgres volumes have the Keycloak database before the
+-- keycloak service starts. The migration runners interpret the directive
+-- above before executing this SQL body so the file stays valid SQL for both
+-- psql and asyncpg-based migration paths.
+SELECT 1;

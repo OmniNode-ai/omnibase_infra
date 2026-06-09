@@ -33,6 +33,14 @@ MIGRATION_SETS = [
     ("docker", REPO_ROOT / "docker" / "migrations" / "forward"),
     ("src", REPO_ROOT / "src" / "omnibase_infra" / "migrations" / "forward"),
 ]
+CREATE_DATABASE_DIRECTIVE = re.compile(
+    r"^--\s*onex-create-database:\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$",
+    re.IGNORECASE,
+)
+CREATE_DATABASE_DIRECTIVE_PREFIX = re.compile(
+    r"^--\s*onex-create-database\s*:",
+    re.IGNORECASE,
+)
 
 
 def extract_sequence_number(filename: str) -> int:
@@ -100,6 +108,33 @@ def parse_connect_directive(sql: str) -> tuple[str | None, str]:
         remaining.append(line)
 
     return target_database, "".join(remaining)
+
+
+def parse_create_database_directive(sql: str) -> tuple[str | None, str]:
+    """Return optional database creation directive and SQL without the directive.
+
+    ``-- onex-create-database: <database>`` is migration metadata consumed by
+    both the Python runner and the shell forward-migration runner. The directive
+    keeps database creation idempotent without embedding psql-only meta commands
+    such as ``\\gexec`` in migrations that CI applies through asyncpg.
+    """
+
+    remaining: list[str] = []
+    database: str | None = None
+
+    for line in sql.splitlines(keepends=True):
+        stripped = line.strip()
+        if database is None:
+            match = CREATE_DATABASE_DIRECTIVE.match(stripped)
+            if match:
+                database = match.group(1)
+                validate_database_identifier(database)
+                continue
+            if CREATE_DATABASE_DIRECTIVE_PREFIX.match(stripped):
+                raise ValueError(f"invalid database name in directive: {stripped!r}")
+        remaining.append(line)
+
+    return database, "".join(remaining)
 
 
 def validate_database_identifier(database: str) -> None:
@@ -253,14 +288,20 @@ async def apply_migration(
     source_set: str,
     path: Path,
     dry_run: bool,
+    *,
+    base_conn: asyncpg.Connection | None = None,
 ) -> None:
     mid = migration_id(source_set, path.name)
     _, sql = parse_connect_directive(path.read_text())
+    create_database, sql = parse_create_database_directive(sql)
     checksum = file_checksum(path)
 
     if dry_run:
         print(f"  [dry-run] would apply: {mid}")
         return
+
+    if create_database is not None:
+        await ensure_database_exists(base_conn or conn, create_database)
 
     # Migrations that use CREATE INDEX CONCURRENTLY cannot run inside an implicit
     # transaction block (which Postgres creates when you send multiple statements
@@ -347,7 +388,13 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
         print(f"Applying {len(pending)} pending migration(s)...")
         for _, source_set, path, target_database in pending:
             conn = base_conn if dry_run else await _conn_for_database(target_database)
-            await apply_migration(conn, source_set, path, dry_run)
+            await apply_migration(
+                conn,
+                source_set,
+                path,
+                dry_run,
+                base_conn=base_conn,
+            )
 
         return len(pending)
     finally:

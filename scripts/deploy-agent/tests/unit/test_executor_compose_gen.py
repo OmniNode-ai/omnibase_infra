@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from deploy_agent.events import Phase, PhaseStatus, Scope
+from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus, Scope
 from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor, _compose_env
 
 
@@ -52,6 +52,7 @@ def test_compose_env_loads_contract_rendered_runtime_policy(
     assert env["DEV_RUNTIME_MAIN_CAPABILITIES"] == "market.skill-proof,runtime.main"
 
 
+@pytest.mark.unit
 class TestComposeGen:
     """compose_gen must invoke catalog CLI and write to COMPOSE_FILE."""
 
@@ -127,18 +128,19 @@ class TestComposeGen:
         from deploy_agent.executor import REPO_DIR
 
         executor = DeployExecutor()
-        captured_env: dict[str, str] = {}
+        captured_envs: list[dict[str, str]] = []
         monkeypatch.setenv("PYTHONPATH", "/stale/canonical/src")
 
         def fake_run(
             cmd: list[str], timeout: int, **kwargs
         ) -> subprocess.CompletedProcess:
-            captured_env.update(kwargs["env"])
+            captured_envs.append(kwargs["env"])
             return _make_result()
 
         with patch("deploy_agent.executor._run", side_effect=fake_run):
             executor.compose_gen(["core", "runtime"], _noop_phase_update)
 
+        captured_env = captured_envs[0]
         assert captured_env["PYTHONPATH"].split(":")[:2] == [
             f"{REPO_DIR}/src",
             "/stale/canonical/src",
@@ -181,6 +183,62 @@ class TestComposeGen:
             Phase.COMPOSE_GEN,
             PhaseStatus.SUCCESS,
         ) in phase_updates, "Expected SUCCESS update for COMPOSE_GEN"
+
+    def test_compose_gen_validates_generated_lane_compose(self) -> None:
+        """A successful compose_gen must validate the lane compose artifact."""
+        executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
+            return _make_result()
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            executor.compose_gen(
+                ["core", "runtime"],
+                _noop_phase_update,
+                lane=EnumRuntimeLane.STABILITY_TEST,
+            )
+
+        validate_cmd = captured_cmds[1]
+        assert validate_cmd[:2] == ["docker", "compose"]
+        assert "docker-compose.stability-test.yml" in " ".join(validate_cmd)
+        assert "--profile" in validate_cmd
+        assert validate_cmd[validate_cmd.index("--profile") + 1] == "runtime"
+        assert validate_cmd[-2:] == ["config", "--quiet"]
+
+    def test_compose_gen_rejects_invalid_generated_lane_compose(self) -> None:
+        """compose_gen must fail before deploy effects if validation fails."""
+        executor = DeployExecutor()
+        phase_updates: list[tuple[Phase, PhaseStatus]] = []
+
+        def track_updates(phase: Phase, status: PhaseStatus) -> None:
+            phase_updates.append((phase, status))
+
+        results = [
+            _make_result(stdout="generated"),
+            _make_result(returncode=1, stderr="service x has neither image nor build"),
+        ]
+
+        def fake_run(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
+            return results.pop(0)
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            with pytest.raises(RuntimeError, match="invalid lane compose"):
+                executor.compose_gen(
+                    ["core", "runtime"],
+                    track_updates,
+                    lane=EnumRuntimeLane.STABILITY_TEST,
+                )
+
+        assert (
+            Phase.COMPOSE_GEN,
+            PhaseStatus.SUCCESS,
+        ) not in phase_updates
 
     def test_scope_bundles_covers_all_scopes(self) -> None:
         """SCOPE_BUNDLES must have an entry for every Scope value."""

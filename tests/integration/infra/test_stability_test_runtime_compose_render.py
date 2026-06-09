@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -111,8 +112,11 @@ COMPOSE_RENDER_ENV = {
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
     "INFISICAL_REDIS_URL": "redis://:render-only-valkey-password@valkey:6379",
+    "CI_CALLBACK_TOKEN": "deploy-agent-compose-parse-only",
     "GITHUB_TOKEN": "render-only-github-token",
+    "KEYCLOAK_ADMIN_CLIENT_SECRET": "render-only-admin-client-secret",
     "LINEAR_API_KEY": "render-only-linear-api-key",
+    "LINEAR_WEBHOOK_SECRET": "deploy-agent-compose-parse-only",
     "LLM_CODER_FAST_URL": _http_url("llm-coder-fast.invalid"),
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),
     "LLM_DEEPSEEK_R1_URL": _http_url("llm-deepseek.invalid"),
@@ -128,11 +132,20 @@ COMPOSE_RENDER_ENV = {
     "ONEX_INFRA_HOST": "192.168.86.201",
     "ONEX_INFRA_USER": "jonah",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
+    "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN": (
+        "postgresql://postgres:postgres@postgres:5432/omnidash_analytics"
+    ),
+    "OMNIDASH_ANALYTICS_DB_URL": (
+        "postgresql://postgres:postgres@postgres:5432/omnidash_analytics"
+    ),
     "POSTGRES_PASSWORD": "postgres",
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     "STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT": "38080",
+    "VALKEY_PASSWORD": "render-only-valkey-password",
+    "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN": "deploy-agent-compose-parse-only",
+    "WAITLIST_NOTIFIER_SLACK_CHANNEL_ID": "deploy-agent-compose-parse-only",
 }
 
 
@@ -165,9 +178,19 @@ def _docker_compose_available() -> bool:
 
 
 def _compose_render_env() -> dict[str, str]:
+    python_path = os.pathsep.join(
+        path
+        for path in (
+            str(REPO_ROOT / "src"),
+            str(REPO_ROOT),
+            os.environ.get("PYTHONPATH", ""),
+        )
+        if path
+    )
     return {
         "HOME": os.environ.get("HOME", ""),
         "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": python_path,
         "USER": os.environ.get("USER", ""),
         **COMPOSE_RENDER_ENV,
     }
@@ -224,6 +247,66 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
     assert rendered_services == EXPECTED_RENDERED_SERVICES
     assert rendered_services.isdisjoint(OUT_OF_LANE_SERVICES)
+
+
+@pytest.mark.integration
+def test_stability_lane_catalog_generated_runtime_compose_is_valid(
+    tmp_path: Path,
+) -> None:
+    """Deploy-agent compose_gen output must validate with the stability overlay."""
+    generated_compose = tmp_path / "docker-compose.generated.yml"
+    generate_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "omnibase_infra.docker.catalog.cli",
+            "generate",
+            "core",
+            "runtime",
+            "--output",
+            str(generated_compose),
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+    assert generate_result.returncode == 0, generate_result.stderr
+
+    compose_prefix = [
+        "docker",
+        "compose",
+        "--env-file",
+        "docker/runtime-policy.env",
+        "-f",
+        str(generated_compose),
+        "-f",
+        COMPOSE_FILES[1],
+        "--profile",
+        "runtime",
+    ]
+    validate_result = subprocess.run(
+        [*compose_prefix, "config", "--quiet"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+    assert validate_result.returncode == 0, validate_result.stderr
+
+    services_result = subprocess.run(
+        [*compose_prefix, "config", "--services"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+    assert services_result.returncode == 0, services_result.stderr
+    rendered_services = set(services_result.stdout.splitlines())
+    assert EXPECTED_RENDERED_SERVICES.issubset(rendered_services)
 
 
 @pytest.mark.integration

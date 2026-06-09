@@ -151,10 +151,16 @@ def test_union_of_sub_bundles_equals_original_runtime() -> None:
     # set comes from resolving `runtime`.
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])
-    # Exclude core-bundle services (postgres/redpanda/valkey/infisical) from
-    # the comparison — those come from `includes: [core]`, not from runtime
+    # Exclude services that come from `includes: [core]`, not from runtime
     # decomposition.
-    core_services = {"postgres", "redpanda", "valkey", "infisical", "phoenix"}
+    core_services = {
+        "postgres",
+        "redpanda",
+        "valkey",
+        "infisical",
+        "phoenix",
+        "keycloak",
+    }
     runtime_services_resolved = resolved.service_names - core_services
     assert union == runtime_services_resolved, (
         f"decomposition drift: union={sorted(union)}, "

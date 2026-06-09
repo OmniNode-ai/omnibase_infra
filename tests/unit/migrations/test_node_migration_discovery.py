@@ -148,6 +148,40 @@ class TestNamespacedDiscoveryWiring:
         # Node files are tracked as node:<node>:<filename>.
         assert 'migration_id="node:${node_name}:${filename}"' in script
 
+    def test_runner_rejects_malformed_create_database_directive(
+        self, tmp_path: Path
+    ) -> None:
+        migrations_dir = tmp_path / "migrations"
+        migrations_dir.mkdir()
+        (migrations_dir / "001_bad_directive.sql").write_text(
+            "--   onex-create-database: bad/name\nSELECT 1;\n",
+            encoding="utf-8",
+        )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        psql = bin_dir / "psql"
+        psql.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        psql.chmod(0o755)
+
+        result = subprocess.run(
+            ["sh", str(RUNNER)],
+            check=False,
+            env={
+                **os.environ,
+                "MIGRATIONS_DIR": str(migrations_dir),
+                "NODE_MIGRATIONS_DIR": str(tmp_path / "no-node-migrations"),
+                "POSTGRES_PASSWORD": "postgres",
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            },
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode == 1
+        assert "invalid database identifier in migration directive: bad/name" in (
+            result.stderr
+        )
+
 
 class TestSyncedNodesAllowlist:
     """The allowlist file scopes which node migrations are vendored."""

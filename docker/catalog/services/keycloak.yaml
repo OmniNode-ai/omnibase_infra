@@ -4,18 +4,19 @@ image: quay.io/keycloak/keycloak:26.3.3
 layer: infrastructure
 container_name: omnibase-infra-keycloak
 required_env:
-  - KC_DB_PASSWORD
+  - POSTGRES_PASSWORD
 hardcoded_env:
   KC_DB: postgres
   KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
   KC_DB_USERNAME: postgres
+  KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
   KC_HTTP_ENABLED: 'true'
   KC_HTTP_PORT: '8080'
   KC_HOSTNAME_STRICT: 'false'
   KC_LOG_LEVEL: INFO
 operational_defaults:
   KC_BOOTSTRAP_ADMIN_USERNAME: admin
-  KC_BOOTSTRAP_ADMIN_PASSWORD: keycloak-dev-password
+  KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}
 ports:
   external: 28080
   internal: 8080
