@@ -103,6 +103,10 @@ def _http_url(authority: str) -> str:
     return "http" + "://" + authority
 
 
+def _chat_url(authority: str) -> str:
+    return f"{_http_url(authority)}/v1/chat/completions"
+
+
 def _cidr(prefix: str, suffix: str) -> str:
     return prefix + "." + suffix
 
@@ -348,6 +352,18 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
+        assert environment["BIFROST_LOCAL_CODER_ENDPOINT_URL"] == _chat_url(
+            "llm-coder.invalid"
+        )
+        assert environment["BIFROST_LOCAL_REASONER_ENDPOINT_URL"] == _chat_url(
+            "llm-coder-fast.invalid"
+        )
+        assert environment["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"] == _chat_url(
+            "llm-embedding.invalid"
+        )
+        assert environment["BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL"] == _chat_url(
+            "llm-deepseek.invalid"
+        )
         assert (
             _label_value(
                 services[service_name],

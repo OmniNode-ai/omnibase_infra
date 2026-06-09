@@ -229,6 +229,10 @@ x-runtime-env: &runtime-env
   LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
   LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for PluginLlm activation}
   LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for PluginLlm activation}
+  BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-${LLM_CODER_URL:?LLM_CODER_URL required for Bifrost local coder}/v1/chat/completions}
+  BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for Bifrost local reasoner}/v1/chat/completions}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for Bifrost local embedding}/v1/chat/completions}
+  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for Bifrost local DS V4 Flash}/v1/chat/completions}
   # Cloud-tier GLM route refs are optional at boot but must be present in the
   # container env when routing authority selects api_key_ref=LLM_GLM_API_KEY.
   LLM_GLM_URL: ${LLM_GLM_URL:?LLM_GLM_URL is required for GLM escalation routing}
