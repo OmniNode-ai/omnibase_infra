@@ -97,3 +97,24 @@ class TestConnectDirective:
             runner.database_url_for_database(db_url, "omnidash_analytics")
             == "postgresql://user:pass@example.test:5432/omnidash_analytics?sslmode=prefer"
         )
+
+
+@pytest.mark.unit
+class TestCreateDatabaseDirective:
+    def test_extracts_create_database_directive(self):
+        runner = load_runner()
+        sql = "-- onex-create-database: keycloak\nSELECT 1;"
+
+        database, cleaned = runner.parse_create_database_directive(sql)
+
+        assert database == "keycloak"
+        assert "onex-create-database" not in cleaned
+        assert "SELECT 1;" in cleaned
+
+    def test_rejects_invalid_create_database_directive(self):
+        runner = load_runner()
+
+        with pytest.raises(ValueError, match="invalid database name"):
+            runner.parse_create_database_directive(
+                "-- onex-create-database: bad/name\nSELECT 1;"
+            )

@@ -20,7 +20,7 @@ pytestmark = pytest.mark.unit
 def test_keycloak_database_migration_is_executable_not_placeholder() -> None:
     sql = KEYCLOAK_MIGRATION.read_text(encoding="utf-8")
 
-    assert "CREATE DATABASE keycloak" in sql
-    assert "WHERE NOT EXISTS" in sql
-    assert "\\gexec" in sql
+    assert "-- onex-create-database: keycloak" in sql
+    assert "SELECT 1;" in sql
     assert "no-op" not in sql.lower()
+    assert "\\gexec" not in sql

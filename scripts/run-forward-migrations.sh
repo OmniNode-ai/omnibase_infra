@@ -53,6 +53,31 @@ NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
+validate_database_identifier() {
+  database="$1"
+  if ! printf '%s' "$database" | grep -Eq '^[A-Za-z_][A-Za-z0-9_-]*$'; then
+    echo "[forward-migration] invalid database identifier in migration directive: ${database}" >&2
+    exit 1
+  fi
+}
+
+ensure_directive_database() {
+  migration_file="$1"
+  database="$(
+    sed -n -E 's/^--[[:space:]]*onex-create-database:[[:space:]]*([A-Za-z_][A-Za-z0-9_-]*)[[:space:]]*$/\1/p' "$migration_file" \
+      | head -1
+  )"
+  if [ -z "$database" ]; then
+    return 0
+  fi
+  validate_database_identifier "$database"
+  echo "[forward-migration]   ensure database ${database}..."
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 <<-EOSQL
+    SELECT 'CREATE DATABASE "$database"'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$database')\gexec
+EOSQL
+}
+
 # ---------------------------------------------------------------------------
 # 1. Ensure schema_migrations tracking table exists (idempotent)
 # ---------------------------------------------------------------------------
@@ -92,6 +117,7 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   echo "[forward-migration]   apply ${filename}..."
 
   # Apply migration then record in tracking table
+  ensure_directive_database "$migration_file"
   psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
     -v ON_ERROR_STOP=1 -f "$migration_file"
 

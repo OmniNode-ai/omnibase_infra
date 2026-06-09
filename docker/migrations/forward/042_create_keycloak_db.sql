@@ -1,8 +1,6 @@
+-- onex-create-database: keycloak
 -- Ensure warm Postgres volumes have the Keycloak database before the
--- keycloak service starts. The forward-migration runner executes SQL files
--- with psql, so \gexec can run CREATE DATABASE outside a transaction while
--- remaining idempotent.
-SELECT 'CREATE DATABASE keycloak'
-WHERE NOT EXISTS (
-    SELECT FROM pg_database WHERE datname = 'keycloak'
-)\gexec
+-- keycloak service starts. The migration runners interpret the directive
+-- above before executing this SQL body so the file stays valid SQL for both
+-- psql and asyncpg-based migration paths.
+SELECT 1;
