@@ -99,6 +99,20 @@ class TestVendoredViewMigrations:
         assert "0007_delegation_events.sql" in files
         assert "0008_generation_events.sql" in files
         assert "0010_create_delegation_dashboard_projection_views.sql" in files
+        assert "0012_generation_output_columns.sql" in files
+        assert "0013_generation_proof_fields.sql" in files
+
+    def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
+        """Base migration must be safe when delegation_events already exists."""
+        migration = NODES_DIR / "node_projection_delegation" / "0007_delegation_events.sql"
+        sql = migration.read_text(encoding="utf-8")
+        alter_pos = sql.index("ALTER TABLE delegation_events")
+        index_pos = sql.index("idx_delegation_events_created_at")
+
+        assert alter_pos < index_pos
+        assert "ADD COLUMN IF NOT EXISTS created_at" in sql
+        assert "ADD COLUMN IF NOT EXISTS tokens_input" in sql
+        assert "ADD COLUMN IF NOT EXISTS tokens_output" in sql
 
     def test_registration_projection_migrations_vendored(self) -> None:
         """The node_service_registry owner migrations are vendored durably."""
