@@ -63,13 +63,17 @@ validate_database_identifier() {
 
 ensure_directive_database() {
   migration_file="$1"
-  database="$(
-    sed -n -E 's/^--[[:space:]]*onex-create-database:[[:space:]]*([A-Za-z_][A-Za-z0-9_-]*)[[:space:]]*$/\1/p' "$migration_file" \
-      | head -1
+  directive_line="$(
+    grep -i -m 1 -E '^--[[:space:]]*onex-create-database[[:space:]]*:' "$migration_file" || true
   )"
-  if [ -z "$database" ]; then
+  if [ -z "$directive_line" ]; then
     return 0
   fi
+
+  database="$(
+    printf '%s\n' "$directive_line" \
+      | sed -E 's/^--[[:space:]]*onex-create-database[[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//'
+  )"
   validate_database_identifier "$database"
   echo "[forward-migration]   ensure database ${database}..."
   psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 <<-EOSQL

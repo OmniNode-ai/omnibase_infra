@@ -118,3 +118,11 @@ class TestCreateDatabaseDirective:
             runner.parse_create_database_directive(
                 "-- onex-create-database: bad/name\nSELECT 1;"
             )
+
+    def test_rejects_whitespace_variant_invalid_create_database_directive(self):
+        runner = load_runner()
+
+        with pytest.raises(ValueError, match="invalid database name"):
+            runner.parse_create_database_directive(
+                "--   onex-create-database: bad/name\nSELECT 1;"
+            )

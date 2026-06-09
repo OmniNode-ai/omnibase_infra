@@ -37,6 +37,10 @@ CREATE_DATABASE_DIRECTIVE = re.compile(
     r"^--\s*onex-create-database:\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$",
     re.IGNORECASE,
 )
+CREATE_DATABASE_DIRECTIVE_PREFIX = re.compile(
+    r"^--\s*onex-create-database\s*:",
+    re.IGNORECASE,
+)
 
 
 def extract_sequence_number(filename: str) -> int:
@@ -126,7 +130,7 @@ def parse_create_database_directive(sql: str) -> tuple[str | None, str]:
                 database = match.group(1)
                 validate_database_identifier(database)
                 continue
-            if stripped.lower().startswith("-- onex-create-database:"):
+            if CREATE_DATABASE_DIRECTIVE_PREFIX.match(stripped):
                 raise ValueError(f"invalid database name in directive: {stripped!r}")
         remaining.append(line)
 

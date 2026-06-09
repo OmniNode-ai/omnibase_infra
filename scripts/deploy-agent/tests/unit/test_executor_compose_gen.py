@@ -52,6 +52,7 @@ def test_compose_env_loads_contract_rendered_runtime_policy(
     assert env["DEV_RUNTIME_MAIN_CAPABILITIES"] == "market.skill-proof,runtime.main"
 
 
+@pytest.mark.unit
 class TestComposeGen:
     """compose_gen must invoke catalog CLI and write to COMPOSE_FILE."""
 
