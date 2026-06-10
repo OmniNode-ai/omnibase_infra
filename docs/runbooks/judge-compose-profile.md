@@ -30,7 +30,8 @@ Judge-provided secrets and local credentials come from
 `docker/judge.env.example`. Copy it to a local ignored env file and replace:
 
 - `GEMINI_API_KEY`
-- `GOOGLE_API_KEY` only if the caller requires a separate alias
+- `GOOGLE_API_KEY`, usually the same value as `GEMINI_API_KEY` for the Gemini
+  judge route
 - `OPEN_ROUTER_API_KEY` only for OpenRouter fallback testing
 - `LLM_GLM_API_KEY` only for GLM fallback testing
 - `GITHUB_TOKEN` and `LINEAR_API_KEY` only for effects that create PRs or tickets
@@ -85,8 +86,8 @@ runtime-effects
 ## Troubleshooting
 
 Missing key:
-Set `GEMINI_API_KEY` in the judge env file. The placeholder in
-`docker/judge.env.example` is render-only.
+Set `GEMINI_API_KEY` and `GOOGLE_API_KEY` in the judge env file. The
+placeholders in `docker/judge.env.example` are render-only.
 
 Quota exceeded:
 Use the recorded Gemini evidence path for the demo story, or provide an

@@ -191,6 +191,7 @@ def test_judge_example_env_contains_only_operator_inputs() -> None:
     example_env = _load_env(JUDGE_ENV_EXAMPLE)
 
     assert example_env["GEMINI_API_KEY"] == "replace-with-gemini-api-key"
+    assert example_env["GOOGLE_API_KEY"] == "replace-with-gemini-api-key"
     assert example_env["OMNICLAUDE_SKILLS_DIR"] == "../omnimarket/plugins/onex/skills"
     assert "POSTGRES_PASSWORD" in example_env
     assert "VALKEY_PASSWORD" in example_env

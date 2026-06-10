@@ -99,7 +99,7 @@ x-judge-runtime-env: &judge-runtime-env
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
   LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}
-  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY required for judge Gemini route}
   OPEN_ROUTER_API_KEY: ${OPEN_ROUTER_API_KEY:-}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:-}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:-judge-local-only}
