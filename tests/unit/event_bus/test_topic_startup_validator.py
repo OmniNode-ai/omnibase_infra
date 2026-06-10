@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -65,14 +66,34 @@ def _patch_aiokafka_import(mock_admin: AsyncMock):
     )
 
 
+def _write_contract_topics(contracts_root: Path, topics: tuple[str, ...]) -> None:
+    """Write a minimal node contract declaring the provided topics."""
+    node_dir = contracts_root / "node_test"
+    node_dir.mkdir(parents=True)
+    rows = "\n".join(f"    - {topic}" for topic in topics)
+    (node_dir / "contract.yaml").write_text(
+        f"""name: node_test
+event_bus:
+  publish_topics:
+{rows}
+""",
+        encoding="utf-8",
+    )
+
+
 @pytest.fixture
-def validator():
+def validator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Create a validator with test bootstrap servers."""
     from omnibase_infra.event_bus.service_topic_startup_validator import (
         TopicStartupValidator,
     )
 
-    return TopicStartupValidator(bootstrap_servers="localhost:19092")
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "test_only")
+    _write_contract_topics(tmp_path, SAMPLE_SUFFIXES)
+    return TopicStartupValidator(
+        bootstrap_servers="localhost:19092",
+        contracts_root=tmp_path,
+    )
 
 
 @pytest.mark.unit
@@ -86,10 +107,6 @@ async def test_all_topics_present(
     mock_admin = _make_mock_admin(broker_topics=broker_topics)
 
     with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
         _patch_aiokafka_import(mock_admin),
         caplog.at_level(logging.DEBUG),
     ):
@@ -117,10 +134,6 @@ async def test_topics_missing(
     mock_admin = _make_mock_admin(broker_topics=broker_topics)
 
     with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
         _patch_aiokafka_import(mock_admin),
         caplog.at_level(logging.ERROR),
     ):
@@ -151,10 +164,6 @@ async def test_topics_missing_can_suppress_per_topic_error_logs(
     mock_admin = _make_mock_admin(broker_topics=broker_topics)
 
     with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
         _patch_aiokafka_import(mock_admin),
         caplog.at_level(logging.ERROR),
     ):
@@ -177,10 +186,6 @@ async def test_strict_mode_raises(
     mock_admin = _make_mock_admin(broker_topics={})
 
     with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
         _patch_aiokafka_import(mock_admin),
     ):
         result = await validator.validate(correlation_id=uuid4())
@@ -210,10 +215,6 @@ async def test_broker_unreachable(
     mock_admin = _make_mock_admin(start_error=ConnectionError("Connection refused"))
 
     with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
         _patch_aiokafka_import(mock_admin),
         caplog.at_level(logging.WARNING),
     ):
@@ -233,6 +234,8 @@ async def test_broker_unreachable(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_aiokafka_not_importable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """aiokafka not importable -> is_valid=True, status='skipped', logger.warning."""
@@ -240,15 +243,14 @@ async def test_aiokafka_not_importable(
         TopicStartupValidator,
     )
 
-    validator = TopicStartupValidator(bootstrap_servers="localhost:19092")
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "test_only")
+    _write_contract_topics(tmp_path, SAMPLE_SUFFIXES)
+    validator = TopicStartupValidator(
+        bootstrap_servers="localhost:19092",
+        contracts_root=tmp_path,
+    )
 
-    with (
-        patch(
-            "omnibase_infra.event_bus.service_topic_startup_validator.ALL_PROVISIONED_SUFFIXES",
-            SAMPLE_SUFFIXES,
-        ),
-        caplog.at_level(logging.WARNING),
-    ):
+    with caplog.at_level(logging.WARNING):
         # Remove aiokafka from sys.modules and make import fail
         saved_modules = {}
         for key in list(sys.modules.keys()):
@@ -282,3 +284,33 @@ async def test_aiokafka_not_importable(
     assert any("aiokafka" in msg.lower() for msg in warning_messages), (
         f"Expected warning about missing aiokafka, got: {warning_messages}"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_contract_topic_not_static_registry_drives_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A topic declared only in contract YAML is required by validation."""
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "test_only")
+    contract_only_topic = "onex.evt.test.contract-only.v1"
+    _write_contract_topics(tmp_path, (contract_only_topic,))
+    broker_topics = {contract_only_topic: MagicMock()}
+    mock_admin = _make_mock_admin(broker_topics=broker_topics)
+
+    from omnibase_infra.event_bus.service_topic_startup_validator import (
+        TopicStartupValidator,
+    )
+
+    validator = TopicStartupValidator(
+        bootstrap_servers="localhost:19092",
+        contracts_root=tmp_path,
+    )
+
+    with _patch_aiokafka_import(mock_admin):
+        result = await validator.validate(correlation_id=uuid4())
+
+    assert result.is_valid is True
+    assert result.required_topics == (contract_only_topic,)
+    assert result.present_topics == (contract_only_topic,)

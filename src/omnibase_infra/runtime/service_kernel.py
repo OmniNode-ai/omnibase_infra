@@ -1106,6 +1106,9 @@ async def bootstrap() -> int:
 
         # 3.5. Provision platform topics (best-effort, never blocks startup)
         if use_kafka:
+            _contracts_root = _get_contracts_dir()
+            _skill_manifests_root: Path | None = None
+            _extra_manifest_roots: list[Path] = []
             try:
                 from omnibase_infra.event_bus.service_topic_manager import (
                     TopicProvisioner,
@@ -1115,7 +1118,6 @@ async def bootstrap() -> int:
                 _skills_root_env = ""
                 if is_runtime_package_active("omniclaude"):
                     _skills_root_env = _resolve_marketplace_skills_root()
-                _skill_manifests_root: Path | None = None
                 if not _skills_root_env:
                     logger.info(
                         "Topic provisioning: skill-manifest discovery disabled"
@@ -1132,11 +1134,8 @@ async def bootstrap() -> int:
                     else:
                         _skill_manifests_root = _skill_manifests_path
 
-                _contracts_root = _get_contracts_dir()
-
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
-                _extra_manifest_roots: list[Path] = []
                 for _subdir in ("cli", "services"):
                     _candidate = _infra_src / _subdir
                     if _candidate.is_dir():
@@ -1186,6 +1185,9 @@ async def bootstrap() -> int:
 
                 validator = TopicStartupValidator(
                     bootstrap_servers=kafka_bootstrap_servers,
+                    contracts_root=_contracts_root,
+                    skill_manifests_root=_skill_manifests_root,
+                    skill_manifests_roots=_extra_manifest_roots,
                 )
                 strict_topic_validation = (
                     os.environ.get("STARTUP_VALIDATION_STRICT") == "1"
@@ -1204,10 +1206,11 @@ async def bootstrap() -> int:
                             TopicProvisioner as _AutoCreateProvisioner,
                         )
 
-                        _auto_contracts_root = _get_contracts_dir()
                         _auto_provisioner = _AutoCreateProvisioner(
                             bootstrap_servers=kafka_bootstrap_servers,
-                            contracts_root=_auto_contracts_root,
+                            contracts_root=_contracts_root,
+                            skill_manifests_root=_skill_manifests_root,
+                            skill_manifests_roots=_extra_manifest_roots,
                         )
                         _auto_result = (
                             await _auto_provisioner.ensure_provisioned_topics_exist(
