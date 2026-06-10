@@ -1122,6 +1122,7 @@ class TestDockerComposeProfiles:
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
                 "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
+                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
                 # OMN-11673: runtime policy contract vars are required by
                 # compose even when docker/runtime-policy.env is also loaded.
                 "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",

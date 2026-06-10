@@ -131,6 +131,7 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_GLM_URL",
         "LLM_GLM_MODEL_NAME",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",
         # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
         "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS",

@@ -64,6 +64,7 @@ _PRE_GROWTH_ENV_VARS = frozenset(
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",
         # OMN-11595: runtime-effects owns GitHub API polling and must validate
         # its deploy-time token requirement with the rest of the effects bundle.

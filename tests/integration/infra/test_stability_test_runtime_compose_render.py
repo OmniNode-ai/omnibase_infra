@@ -132,6 +132,7 @@ COMPOSE_RENDER_ENV = {
     "GOOGLE_API_KEY": "render-only-google-api-key",
     "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",

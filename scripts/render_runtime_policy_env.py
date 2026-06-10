@@ -66,6 +66,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             contract.auxiliary_services_omnimemory_enabled
         ),
         "ONEX_ACTIVE_RUNTIME_PACKAGES": ",".join(contract.active_runtime_packages),
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": ",".join(
+            contract.llm_cloud_endpoint_host_allowlist
+        ),
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
     }
 

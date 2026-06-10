@@ -109,6 +109,10 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
 
     assert env["AUXILIARY_SERVICES_OMNIMEMORY_ENABLED"] == "false"
     assert env["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
+    assert (
+        env["LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST"]
+        == "generativelanguage.googleapis.com,api.z.ai"
+    )
     assert env["DEV_RUNTIME_MAIN_PORT"] == "8085"
     assert env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
     assert env["STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"

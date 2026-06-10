@@ -56,6 +56,7 @@ REQUIRED_RUNTIME_KEYS: frozenset[str] = frozenset(
         "LLM_GLM_API_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "VALKEY_HOST",
         "VALKEY_PORT",
     }

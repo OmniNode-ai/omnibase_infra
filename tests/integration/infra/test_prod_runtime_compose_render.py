@@ -44,6 +44,7 @@ COMPOSE_RENDER_ENV = {
     "GEMINI_API_KEY": "render-only-gemini-api-key",
     "GOOGLE_API_KEY": "render-only-google-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",

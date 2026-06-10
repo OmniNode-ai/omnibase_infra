@@ -244,6 +244,7 @@ x-runtime-env: &runtime-env
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required for Gemini routing}
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:-${GEMINI_API_KEY:?GEMINI_API_KEY is required for GOOGLE_API_KEY alias}}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
+  LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}
   # --- OpenTelemetry (OMN-8697: wired to Phoenix for LLM span visibility) ---
   # Phoenix runs alongside the runtime; all containers export spans via OTLP HTTP.
