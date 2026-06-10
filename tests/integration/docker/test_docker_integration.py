@@ -1113,6 +1113,18 @@ class TestDockerComposeProfiles:
                 "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
                 "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
                 "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+                "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
+                    "http://llm-coder.test:8000/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
+                    "http://llm-coder-fast.test:8001/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
+                    "http://llm-embed.test:8100/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
+                    "http://llm-r1.test:8101/v1/chat/completions"
+                ),
                 "LLM_GLM_URL": "http://llm-glm.test:8102",
                 "LLM_GLM_MODEL_NAME": "glm-4.5",
                 "LLM_GLM_API_KEY": "render-only-glm-api-key",
