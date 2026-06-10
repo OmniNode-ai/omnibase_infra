@@ -1403,6 +1403,7 @@ class TestCidrAllowlistValidation:
                 "http://8.8.8.8:8000/v1/completions", correlation_id
             )
 
+    @pytest.mark.unit
     async def test_cloud_https_host_allowlist_passes(
         self, correlation_id: UUID
     ) -> None:
@@ -1419,6 +1420,7 @@ class TestCidrAllowlistValidation:
                 correlation_id,
             )
 
+    @pytest.mark.unit
     async def test_cloud_host_requires_https(self, correlation_id: UUID) -> None:
         """A declared cloud hostname over HTTP must still use and fail CIDR validation."""
         harness = LlmTransportHarness()
@@ -1439,6 +1441,7 @@ class TestCidrAllowlistValidation:
                     correlation_id,
                 )
 
+    @pytest.mark.unit
     async def test_undeclared_cloud_https_host_rejected(
         self, correlation_id: UUID
     ) -> None:
@@ -1461,6 +1464,7 @@ class TestCidrAllowlistValidation:
                     correlation_id,
                 )
 
+    @pytest.mark.unit
     async def test_cloud_allowlist_does_not_accept_ip_literals(
         self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
     ) -> None:
