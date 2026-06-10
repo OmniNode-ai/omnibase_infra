@@ -34,11 +34,18 @@ Judge-provided secrets and local credentials come from
 - `OPEN_ROUTER_API_KEY` only for OpenRouter fallback testing
 - `LLM_GLM_API_KEY` only for GLM fallback testing
 - `GITHUB_TOKEN` and `LINEAR_API_KEY` only for effects that create PRs or tickets
+- `OMNICLAUDE_SKILLS_DIR`, required by compose, pointing at the host skills tree
+  mounted read-only at `/app/skills`
 
 No source-level provider, model, endpoint, or secret literal should be required
 for the judge reproduction path. Provider keys are resolved through
 `ONEX_SECRET_RESOLVER_CONFIG_JSON` generated from the runtime policy contract,
 with `enable_convention_fallback=false`.
+
+From a canonical OmniNode workspace, `docker/judge.env.example` uses
+`../omnimarket/plugins/onex/skills` for `OMNICLAUDE_SKILLS_DIR` when compose is
+run from the `omnibase_infra` repo root. A cloned repo outside that workspace
+must set this value to an existing local skills directory before rendering.
 
 ## Non-Mutating Validation
 

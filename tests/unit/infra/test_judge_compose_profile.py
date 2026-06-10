@@ -191,6 +191,7 @@ def test_judge_example_env_contains_only_operator_inputs() -> None:
     example_env = _load_env(JUDGE_ENV_EXAMPLE)
 
     assert example_env["GEMINI_API_KEY"] == "replace-with-gemini-api-key"
+    assert example_env["OMNICLAUDE_SKILLS_DIR"] == "../omnimarket/plugins/onex/skills"
     assert "POSTGRES_PASSWORD" in example_env
     assert "VALKEY_PASSWORD" in example_env
     assert "KEYCLOAK_ISSUER" not in example_env
@@ -232,4 +233,7 @@ def test_judge_runtime_services_mount_contracts_from_clone() -> None:
     for service_name in (*RUNTIME_SERVICES, "projection-api"):
         volumes = compose["services"][service_name]["volumes"]
         assert "../contracts:/app/contracts:ro" in volumes
-        assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+        assert (
+            "${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro"
+            in volumes
+        )

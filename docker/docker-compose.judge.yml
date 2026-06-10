@@ -347,7 +347,7 @@ services:
       - judge_runtime_logs:/app/logs
       - judge_runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     tmpfs:
       - /run/onex-runtime:uid=1000,gid=1000,mode=0770
     healthcheck:
@@ -392,7 +392,7 @@ services:
       - judge_effects_logs:/app/logs
       - judge_effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -425,7 +425,7 @@ services:
       - "${JUDGE_PROJECTION_API_PORT:-43002}:3002"
     volumes:
       - ../contracts:/app/contracts:ro
-      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3002/health"]
       interval: 30s

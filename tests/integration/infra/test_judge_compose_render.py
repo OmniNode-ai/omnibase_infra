@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 COMPOSE_FILE = "docker/docker-compose.judge.yml"
 
 EXPECTED_RENDERED_SERVICES = {
