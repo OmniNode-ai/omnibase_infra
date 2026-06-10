@@ -146,6 +146,32 @@ def test_judge_runtime_identity_and_secret_refs_are_contract_owned() -> None:
 
 
 @pytest.mark.unit
+def test_judge_runtime_build_defaults_are_valid_dockerfile_selectors() -> None:
+    compose = _load_compose()
+    build_args = compose["x-runtime-base"]["build"]["args"]
+
+    assert build_args["BUILD_SOURCE"] == "${BUILD_SOURCE:-release}"
+    assert build_args["EXPECTED_BUILD_SOURCE"] == "${EXPECTED_BUILD_SOURCE:-release}"
+
+
+@pytest.mark.unit
+def test_judge_bifrost_defaults_are_chat_completion_urls() -> None:
+    compose = _load_compose()
+    environment = compose["x-judge-runtime-env"]
+
+    for key in (
+        "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+        "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+        "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+        "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
+    ):
+        assert "/chat/completions" in environment[key]
+    assert (
+        "/openai/embeddings" not in environment["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"]
+    )
+
+
+@pytest.mark.unit
 def test_judge_example_env_contains_only_operator_inputs() -> None:
     example_env = _load_env(JUDGE_ENV_EXAMPLE)
 

@@ -44,8 +44,8 @@ x-runtime-base: &runtime-base
     context: ..
     dockerfile: docker/Dockerfile.runtime
     args:
-      BUILD_SOURCE: "${BUILD_SOURCE:-source}"
-      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-source}"
+      BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
   profiles: ["judge"]
   networks:
     - omnibase-infra-judge-network
@@ -93,7 +93,7 @@ x-judge-runtime-env: &judge-runtime-env
   LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:-https://generativelanguage.googleapis.com}
   BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
-  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/embeddings}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/paas/v4}
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
