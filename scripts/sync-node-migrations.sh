@@ -35,16 +35,11 @@
 #   3. installed package: python -c 'import omnimarket; print(parent)'
 #
 # NODE SELECTION
-#   Discovery is scoped by the allowlist (one entry per line) in
-#     docker/migrations/forward/nodes/.synced-nodes
-#   Each entry is either:
-#     <node>                 vendor ALL of that node's migrations, or
-#     <node>:<glob>          vendor only files whose basename matches <glob>
-#                            (shell case-glob, e.g. 076_*.sql)
-#   This keeps the vendored tree deterministic: only nodes whose projection
-#   tables/views omnibase_infra is responsible for materializing are pulled in,
-#   and --check stays consistent with what is committed. Add an entry and re-run
-#   to onboard a new node's migrations.
+#   Every marketplace node migration discovered under
+#     src/omnimarket/nodes/<node>/migrations/*.sql
+#   is vendored. There is intentionally no allowlist: if a marketplace node
+#   declares a projection surface, its schema migration must be eligible for the
+#   same deploy-time materialization path as every other marketplace node.
 #
 # USAGE
 #   scripts/sync-node-migrations.sh            # vendor (writes files)
@@ -66,39 +61,6 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEST_ROOT="${REPO_ROOT}/docker/migrations/forward/nodes"
-SYNCED_NODES_FILE="${DEST_ROOT}/.synced-nodes"
-
-# Load the node allowlist (one node name per line; '#' comments and blanks ok).
-load_synced_nodes() {
-  if [ ! -f "${SYNCED_NODES_FILE}" ]; then
-    echo "[sync-node-migrations] ERROR: missing node allowlist ${SYNCED_NODES_FILE}" >&2
-    exit 2
-  fi
-  grep -vE '^\s*(#|$)' "${SYNCED_NODES_FILE}" | tr -d ' \t'
-}
-
-# Return 0 if (node, filename) is selected by the allowlist.
-# Entries are  <node>  (all files) or  <node>:<glob>  (basename glob match).
-file_is_allowed() {
-  _node="$1"
-  _file="$2"
-  for _entry in ${SYNCED_NODES}; do
-    _entry_node="${_entry%%:*}"
-    if [ "${_entry_node}" != "${_node}" ]; then
-      continue
-    fi
-    if [ "${_entry}" = "${_entry_node}" ]; then
-      # Bare node entry: all files allowed.
-      return 0
-    fi
-    _glob="${_entry#*:}"
-    # shellcheck disable=SC2254
-    case "${_file}" in
-      ${_glob}) return 0 ;;
-    esac
-  done
-  return 1
-}
 
 resolve_omnimarket_src() {
   if [ -n "${OMNIMARKET_SRC:-}" ] && [ -d "${OMNIMARKET_SRC}/src/omnimarket/nodes" ]; then
@@ -156,25 +118,24 @@ case "${OMK_RESOLVED}" in
     ;;
 esac
 
-SYNCED_NODES="$(load_synced_nodes)"
-
 echo "[sync-node-migrations] omnimarket nodes: ${NODES_DIR}"
 echo "[sync-node-migrations] vendoring into:   ${DEST_ROOT}"
-echo "[sync-node-migrations] allowlisted nodes: ${SYNCED_NODES}"
+echo "[sync-node-migrations] selection:        all marketplace node migrations"
 
 DRIFT=0
 COPIED=0
+EXPECTED_LIST="$(mktemp)"
+ACTUAL_LIST="$(mktemp)"
+trap 'rm -f "${EXPECTED_LIST}" "${ACTUAL_LIST}"' EXIT
 
-# Discover every node migration file and mirror it (allowlisted nodes only).
+# Discover every node migration file and mirror it.
 while IFS= read -r src_file; do
   # src_file = ${NODES_DIR}/<node>/migrations/<file>.sql
   node_name="$(basename "$(dirname "$(dirname "${src_file}")")")"
   filename="$(basename "${src_file}")"
-  if ! file_is_allowed "${node_name}" "${filename}"; then
-    continue
-  fi
   dest_dir="${DEST_ROOT}/${node_name}"
   dest_file="${dest_dir}/${filename}"
+  printf '%s/%s\n' "${node_name}" "${filename}" >> "${EXPECTED_LIST}"
 
   if [ "${CHECK_MODE}" -eq 1 ]; then
     if [ ! -f "${dest_file}" ] || ! cmp -s "${src_file}" "${dest_file}"; then
@@ -190,6 +151,32 @@ while IFS= read -r src_file; do
     fi
   fi
 done < <(find "${NODES_DIR}" -type f -path "*/migrations/*.sql" | sort)
+
+if [ -d "${DEST_ROOT}" ]; then
+  find "${DEST_ROOT}" -type f -name "*.sql" \
+    | sed "s#^${DEST_ROOT}/##" \
+    | sort > "${ACTUAL_LIST}"
+else
+  : > "${ACTUAL_LIST}"
+fi
+sort -o "${EXPECTED_LIST}" "${EXPECTED_LIST}"
+
+if [ "${CHECK_MODE}" -eq 1 ]; then
+  while IFS= read -r extra_file; do
+    if [ -n "${extra_file}" ] && ! grep -Fxq "${extra_file}" "${EXPECTED_LIST}"; then
+      echo "[sync-node-migrations] DRIFT: stale vendored migration ${extra_file}" >&2
+      DRIFT=1
+    fi
+  done < "${ACTUAL_LIST}"
+else
+  while IFS= read -r extra_file; do
+    if [ -n "${extra_file}" ] && ! grep -Fxq "${extra_file}" "${EXPECTED_LIST}"; then
+      rm -f "${DEST_ROOT}/${extra_file}"
+      echo "[sync-node-migrations]   removed stale ${extra_file}"
+      COPIED=$((COPIED + 1))
+    fi
+  done < "${ACTUAL_LIST}"
+fi
 
 if [ "${CHECK_MODE}" -eq 1 ]; then
   if [ "${DRIFT}" -eq 1 ]; then

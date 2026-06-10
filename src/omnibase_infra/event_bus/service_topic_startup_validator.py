@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Topic Startup Validator for registry-first existence checks.
+"""Topic Startup Validator for contract-first existence checks.
 
-Validates that all platform topics declared in ``ALL_PROVISIONED_SUFFIXES``
-exist on the Kafka/Redpanda broker at startup time. Default behaviour is
+Validates that all contract-declared topics exist on the Kafka/Redpanda broker
+at startup time. Default behaviour is
 best-effort (log warnings). Opt-in strict mode via
 ``STARTUP_VALIDATION_STRICT=1`` raises ``RuntimeError`` on missing topics.
 
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from omnibase_infra.event_bus.enum_topic_validation_status import (
@@ -29,20 +30,22 @@ from omnibase_infra.event_bus.enum_topic_validation_status import (
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
 )
-from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
 # OMN-8783: No default — KAFKA_BOOTSTRAP_SERVERS must be set via overlay.
 ENV_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
+ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
+DEFAULT_CONTRACTS_DIR = "./contracts"
 
 
 class TopicStartupValidator:
     """Validates that required platform topics exist on the broker.
 
-    Queries the broker for existing topics and compares against
-    ``ALL_PROVISIONED_SUFFIXES``. Returns a ``ModelTopicValidationResult``
-    with details about present and missing topics.
+    Queries the broker for existing topics and compares against topics
+    discovered from contract YAML, skill manifests, and installed runtime
+    packages. Returns a ``ModelTopicValidationResult`` with details about
+    present and missing topics.
 
     Thread Safety:
         This class is coroutine-safe. All methods are async and use
@@ -59,6 +62,10 @@ class TopicStartupValidator:
         self,
         bootstrap_servers: str | None = None,
         request_timeout_ms: int = 10000,
+        *,
+        contracts_root: Path | None = None,
+        skill_manifests_root: Path | None = None,
+        skill_manifests_roots: list[Path] | None = None,
     ) -> None:
         """Initialize the topic startup validator.
 
@@ -66,10 +73,41 @@ class TopicStartupValidator:
             bootstrap_servers: Kafka broker addresses. If None, reads from
                 KAFKA_BOOTSTRAP_SERVERS env var (raises KeyError if absent).
             request_timeout_ms: Timeout for admin operations in milliseconds.
+            contracts_root: Path to contract.yaml root directory. Defaults to
+                ONEX_CONTRACTS_DIR or ./contracts. Topics are discovered via
+                ContractTopicExtractor; no static topic registry is used.
+            skill_manifests_root: Optional single path to a skill manifests
+                directory. Kept for compatibility with TopicProvisioner.
+            skill_manifests_roots: Optional list of additional topics.yaml
+                manifest roots.
         """
         # OMN-8783: Hard-fail if not provided and env var absent.
         self._bootstrap_servers = bootstrap_servers or os.environ[ENV_BOOTSTRAP_SERVERS]
         self._request_timeout_ms = request_timeout_ms
+        self._contracts_root = contracts_root or Path(
+            os.environ.get(ENV_CONTRACTS_DIR, DEFAULT_CONTRACTS_DIR)
+        )
+        if not self._contracts_root.is_dir():
+            raise FileNotFoundError(
+                "contracts_root does not exist or is not a directory: "
+                f"{self._contracts_root}"
+            )
+        self._skill_manifests_root = skill_manifests_root
+        self._skill_manifests_roots = skill_manifests_roots
+
+    def _required_topics(self) -> tuple[str, ...]:
+        """Return required topics from the same contract extractor as provisioning."""
+        from omnibase_infra.tools.contract_topic_extractor import (
+            ContractTopicExtractor,
+        )
+
+        extractor = ContractTopicExtractor(include_installed_packages=True)
+        entries = extractor.extract_all(
+            contracts_root=self._contracts_root,
+            skill_manifests_root=self._skill_manifests_root,
+            skill_manifests_roots=self._skill_manifests_roots,
+        )
+        return tuple(sorted({entry.topic for entry in entries}))
 
     async def validate(
         self,
@@ -79,8 +117,8 @@ class TopicStartupValidator:
     ) -> ModelTopicValidationResult:
         """Validate that all required platform topics exist on the broker.
 
-        Collects required topics from ``ALL_PROVISIONED_SUFFIXES`` and checks
-        their existence via ``AIOKafkaAdminClient.list_topics()``.
+        Collects required topics from contract extraction and checks their
+        existence via ``AIOKafkaAdminClient.list_topics()``.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
@@ -93,7 +131,7 @@ class TopicStartupValidator:
             ``ModelTopicValidationResult`` with validation outcome.
         """
         correlation_id = correlation_id or uuid4()
-        required = ALL_PROVISIONED_SUFFIXES
+        required = self._required_topics()
 
         # Guard: aiokafka not installed
         try:

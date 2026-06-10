@@ -5,16 +5,17 @@
 
 These tests are Docker/DB-independent. They prove:
 
-  1. The two OMN-12489 view migrations are vendored durably into the
-     namespaced forward location, so a clean clone reproduces the views
-     with NO manual copy.
+  1. Marketplace node migrations are vendored durably into the namespaced
+     forward location, so a clean clone reproduces node-owned schemas and
+     views with NO manual copy.
   2. ``run-forward-migrations.sh`` contains the namespaced discovery pass
      that applies node migrations under ``node:<node>:<file>`` ids — a
      separate identity space from the flat infra sequence, so a node
      migration numbered 076 never collides with infra's flat 076 and no
      renumber is ever required.
   3. The vendored tree stays in sync with the omnimarket source when the
-     source tree is resolvable (drift guard via sync-node-migrations.sh).
+     source tree is resolvable (drift guard via sync-node-migrations.sh), with
+     no node allowlist.
 
 Ticket: OMN-12559
 """
@@ -32,7 +33,7 @@ FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
 NODES_DIR = FORWARD_DIR / "nodes"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-node-migrations.sh"
-SYNCED_NODES = NODES_DIR / ".synced-nodes"
+SYNCED_NODES_ALLOWLIST = NODES_DIR / ".synced-nodes"
 
 DELEGATION_VIEW = (
     NODES_DIR
@@ -56,12 +57,22 @@ REGISTRATION_CREATE = (
 REGISTRATION_HEARTBEAT = (
     NODES_DIR / "node_projection_registration" / "0001_add_heartbeat_columns.sql"
 )
+DEPLOYMENT_EVIDENCE_CREATE = (
+    NODES_DIR
+    / "node_deployment_evidence_reducer"
+    / "0001_create_deployment_evidence_projection_tables.sql"
+)
+EVIDENCE_DASHBOARD_CREATE = (
+    NODES_DIR
+    / "node_evidence_dashboard_reducer"
+    / "0001_create_evidence_dashboard_projection_tables.sql"
+)
 
 pytestmark = pytest.mark.unit
 
 
 class TestVendoredViewMigrations:
-    """The two OMN-12489 view migrations are durably vendored (no manual copy)."""
+    """Marketplace node migrations are durably vendored (no manual copy)."""
 
     def test_delegation_dashboard_views_vendored(self) -> None:
         assert DELEGATION_VIEW.is_file(), (
@@ -148,6 +159,29 @@ class TestVendoredViewMigrations:
         assert "ADD COLUMN IF NOT EXISTS last_heartbeat_at" in heartbeat_sql
         assert "ADD COLUMN IF NOT EXISTS uptime_seconds" in heartbeat_sql
 
+    def test_deployment_evidence_projection_migrations_vendored(self) -> None:
+        """Deployment evidence tables must materialize from node contracts."""
+        assert DEPLOYMENT_EVIDENCE_CREATE.is_file(), (
+            "deployment evidence reducer migrations must be vendored under "
+            "docker/migrations/forward/nodes/node_deployment_evidence_reducer/"
+        )
+        sql = DEPLOYMENT_EVIDENCE_CREATE.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS deployment_evidence_projection" in sql
+        assert "CREATE TABLE IF NOT EXISTS deployment_readiness_projection" in sql
+
+    def test_evidence_dashboard_projection_migrations_vendored(self) -> None:
+        """Evidence dashboard projection tables must be available to omnidash."""
+        assert EVIDENCE_DASHBOARD_CREATE.is_file(), (
+            "evidence dashboard reducer migrations must be vendored under "
+            "docker/migrations/forward/nodes/node_evidence_dashboard_reducer/"
+        )
+        sql = EVIDENCE_DASHBOARD_CREATE.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS evidence_dashboard_projection" in sql
+        assert "CREATE TABLE IF NOT EXISTS evidence_correlation_trace_projection" in sql
+        assert (
+            "CREATE TABLE IF NOT EXISTS evidence_readiness_aggregate_projection" in sql
+        )
+
 
 class TestNamespacedDiscoveryWiring:
     """run-forward-migrations.sh applies node migrations under namespaced ids."""
@@ -213,15 +247,18 @@ class TestNamespacedDiscoveryWiring:
         )
 
 
-class TestSyncedNodesAllowlist:
-    """The allowlist file scopes which node migrations are vendored."""
+class TestNoNodeMigrationAllowlist:
+    """All marketplace node migrations are eligible for vendoring."""
 
-    def test_allowlist_exists_and_lists_both_nodes(self) -> None:
-        assert SYNCED_NODES.is_file()
-        content = SYNCED_NODES.read_text(encoding="utf-8")
-        assert "node_projection_delegation" in content
-        assert "node_projection_savings" in content
-        assert "node_projection_registration" in content
+    def test_synced_nodes_allowlist_removed(self) -> None:
+        assert not SYNCED_NODES_ALLOWLIST.exists()
+
+    def test_sync_script_has_no_node_allowlist(self) -> None:
+        script = SYNC_SCRIPT.read_text(encoding="utf-8")
+        assert "SYNCED_NODES_FILE" not in script
+        assert "load_synced_nodes" not in script
+        assert "file_is_allowed" not in script
+        assert ".synced-nodes" not in script
 
 
 def _resolve_omnimarket_src() -> Path | None:
