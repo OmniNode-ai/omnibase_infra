@@ -101,6 +101,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "QDRANT_API_KEY",
         # Cloud-tier LLM route secret ref — credential, sourced from Infisical/k8s secret.
         "LLM_GLM_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
     }
 )
 
@@ -130,6 +132,9 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_DEEPSEEK_R1_URL",
         "LLM_GLM_URL",
         "LLM_GLM_MODEL_NAME",
+        "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+        "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+        "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
         "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",

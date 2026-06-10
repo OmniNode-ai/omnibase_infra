@@ -277,11 +277,6 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         """
         cls._LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
 
-    @classmethod
-    def _reload_cloud_endpoint_host_allowlist(cls) -> None:
-        """Re-parse ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST`` for tests/runtime reloads."""
-        cls._CLOUD_LLM_HOSTS = _parse_cloud_endpoint_host_allowlist()
-
     #: Environment variable name for the HMAC shared secret.
     LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
 
