@@ -42,15 +42,18 @@ def _load_dotenv(path: Path) -> dict[str, str]:
     return env
 
 
-def test_runtime_policy_contract_declares_three_runtime_lanes() -> None:
+def test_runtime_policy_contract_declares_runtime_lanes() -> None:
     contract = _load_contract()
 
-    assert set(contract.profiles) == {"dev", "stability-test", "prod"}
+    assert set(contract.profiles) == {"dev", "stability-test", "judge", "prod"}
     assert contract.profiles["dev"].main_port == 8085
     assert contract.profiles["dev"].effects_port == 8086
     assert contract.profiles["stability-test"].main_port == 18085
     assert contract.profiles["stability-test"].effects_port == 18086
     assert contract.profiles["stability-test"].topic_provisioner_max_partitions == 1
+    assert contract.profiles["judge"].main_port == 48085
+    assert contract.profiles["judge"].effects_port == 48086
+    assert contract.profiles["judge"].topic_provisioner_max_partitions == 1
     assert contract.profiles["prod"].main_port == 28085
     assert contract.profiles["prod"].effects_port == 28086
 
@@ -74,6 +77,9 @@ def test_runtime_policy_env_shell_source_preserves_json() -> None:
             "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
             "STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
             "STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
+            "JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
+            "JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON",
+            "JUDGE_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON",
         ]
     )
     command = f"""
@@ -116,6 +122,9 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     assert env["DEV_RUNTIME_MAIN_PORT"] == "8085"
     assert env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
     assert env["STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
+    assert env["JUDGE_RUNTIME_MAIN_PORT"] == "48085"
+    assert env["JUDGE_RUNTIME_EFFECTS_PORT"] == "48086"
+    assert env["JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
     assert env["PROD_RUNTIME_MAIN_PORT"] == "28085"
     assert (
         env["STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES"]
@@ -127,6 +136,10 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     )
     assert (
         env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
+        == "/app/data/delegation/secret_resolver.yaml"
+    )
+    assert (
+        env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
         == "/app/data/delegation/secret_resolver.yaml"
     )
     assert (

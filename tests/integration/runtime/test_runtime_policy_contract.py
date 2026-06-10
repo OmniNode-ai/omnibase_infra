@@ -54,6 +54,8 @@ def test_runtime_policy_contract_controls_all_runtime_lane_ports() -> None:
         "STABILITY_TEST_RUNTIME_EFFECTS_PORT": contract.profiles[
             "stability-test"
         ].effects_port,
+        "JUDGE_RUNTIME_MAIN_PORT": contract.profiles["judge"].main_port,
+        "JUDGE_RUNTIME_EFFECTS_PORT": contract.profiles["judge"].effects_port,
         "PROD_RUNTIME_MAIN_PORT": contract.profiles["prod"].main_port,
         "PROD_RUNTIME_EFFECTS_PORT": contract.profiles["prod"].effects_port,
     }
@@ -67,8 +69,12 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
     rendered_env = _load_dotenv(POLICY_ENV_PATH)
 
     stability_profile = contract.profiles["stability-test"]
+    judge_profile = contract.profiles["judge"]
     logical_names = {
         mapping.logical_name for mapping in stability_profile.secret_resolver_mappings
+    }
+    judge_logical_names = {
+        mapping.logical_name for mapping in judge_profile.secret_resolver_mappings
     }
 
     assert logical_names == {
@@ -76,6 +82,7 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "llm.glm.api_key",
         "llm.gemini.api_key",
     }
+    assert judge_logical_names == logical_names
     assert (
         rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
         == stability_profile.secret_resolver_config_path
@@ -83,4 +90,12 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
     assert (
         "OPENROUTER_API_KEY"
         not in rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        rendered_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
+        == judge_profile.secret_resolver_config_path
+    )
+    assert (
+        "OPENROUTER_API_KEY"
+        not in rendered_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )

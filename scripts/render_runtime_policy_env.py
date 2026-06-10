@@ -36,6 +36,7 @@ _SHELL_SAFE_DOTENV_VALUE = re.compile(r"^[A-Za-z0-9_./,:@+-]+$")
 _PROFILE_ENV_PREFIX: dict[RuntimeProfileName, str] = {
     "dev": "DEV",
     "stability-test": "STABILITY_TEST",
+    "judge": "JUDGE",
     "prod": "PROD",
 }
 _PROCESS_ENV_PREFIX: dict[RuntimeProcessName, str] = {
