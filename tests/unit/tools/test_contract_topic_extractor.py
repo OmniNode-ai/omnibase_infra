@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -734,19 +736,47 @@ def test_extract_from_real_nodes_directory() -> None:
 
 
 @pytest.mark.unit
-def test_approved_packages_includes_omnimarket() -> None:
-    """omnimarket must be in _APPROVED_PACKAGES so its topics are provisioned on boot.
-
-    Without omnimarket in the approved list, ContractTopicExtractor skips all
-    omnimarket contracts even when include_installed_packages=True, leaving 41+
-    nodes with unprovisioned topics and InfraTimeoutError on every boot cycle.
-    """
-    from omnibase_infra.tools.contract_topic_extractor import _APPROVED_PACKAGES
-
-    assert "omnimarket" in _APPROVED_PACKAGES, (
-        "omnimarket must be in _APPROVED_PACKAGES — omitting it causes 41+ nodes "
-        "to fail with InfraTimeoutError on every boot cycle"
+def test_installed_package_discovery_has_no_static_marketplace_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any installed ONEX package can contribute contract-declared topics."""
+    contract = write_contract(
+        tmp_path,
+        "node_marketplace",
+        """
+        event_bus:
+          publish_topics:
+            - "onex.evt.marketplace-plugin.ready.v1"
+        """,
     )
+    monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
+
+    def fake_entry_points(*, group: str):
+        if group == "onex.node_package":
+            return [SimpleNamespace(name="marketplace_plugin")]
+        if group == "onex.nodes":
+            return []
+        return []
+
+    with (
+        patch(
+            "omnibase_infra.tools.contract_topic_extractor.importlib.metadata.entry_points",
+            fake_entry_points,
+        ),
+        patch.object(
+            ContractTopicExtractor,
+            "_discover_package_contracts",
+            return_value=[contract],
+        ),
+    ):
+        entries = ContractTopicExtractor(
+            include_installed_packages=True
+        ).extract_from_installed_packages()
+
+    assert [entry.topic for entry in entries] == [
+        "onex.evt.marketplace-plugin.ready.v1"
+    ]
 
 
 @pytest.mark.unit
@@ -785,7 +815,7 @@ def test_extract_from_installed_packages_respects_active_runtime_packages(
 
     extractor = ContractTopicExtractor(include_installed_packages=True)
     entries = extractor.extract_from_installed_packages(
-        approved_packages=("omniclaude", "omnimarket")
+        packages=("omniclaude", "omnimarket")
     )
 
     assert entries

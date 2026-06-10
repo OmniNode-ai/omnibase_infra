@@ -31,24 +31,14 @@ from pydantic import BaseModel
 
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
-    is_runtime_package_active,
+    normalize_runtime_package_name,
 )
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants / allowlists
+# Constants
 # ---------------------------------------------------------------------------
-
-_APPROVED_PACKAGES: tuple[str, ...] = (
-    "omnibase_core",
-    "omnibase_infra",
-    "omnibase_spi",
-    "omniintelligence",
-    "omnimemory",
-    "omniclaude",
-    "omnimarket",
-)
 
 _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent", "dlq"})
 _VALID_DLQ_CATEGORIES: frozenset[str] = frozenset({"intents", "events", "commands"})
@@ -405,6 +395,35 @@ def _find_package_root(
     return None
 
 
+def _entry_point_package_name(value: str) -> str | None:
+    """Return the top-level package name from an entry-point value."""
+
+    module_path = value.split(":", 1)[0].strip()
+    if not module_path:
+        return None
+    return module_path.split(".", 1)[0]
+
+
+def _discover_installed_topic_packages() -> tuple[str, ...]:
+    """Discover installed packages that can own contract-declared topics."""
+
+    active_packages = get_active_runtime_packages()
+    if active_packages is not None:
+        return tuple(sorted(active_packages))
+
+    candidates: set[str] = set()
+
+    for ep in importlib.metadata.entry_points(group="onex.node_package"):
+        candidates.add(normalize_runtime_package_name(ep.name))
+
+    for ep in importlib.metadata.entry_points(group="onex.nodes"):
+        package_name = _entry_point_package_name(ep.value)
+        if package_name is not None:
+            candidates.add(normalize_runtime_package_name(package_name))
+
+    return tuple(sorted(candidates))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -419,7 +438,8 @@ class ContractTopicExtractor:
 
     Args:
         include_installed_packages: When True, ``extract_all()`` will also
-            discover contracts from approved installed packages via importlib.
+            discover contracts from installed ONEX runtime packages via
+            importlib metadata.
     """
 
     def __init__(self, *, include_installed_packages: bool = False) -> None:
@@ -655,12 +675,12 @@ class ContractTopicExtractor:
 
     def extract_from_installed_packages(
         self,
-        approved_packages: tuple[str, ...] = _APPROVED_PACKAGES,
+        packages: tuple[str, ...] | None = None,
     ) -> list[ModelContractTopicEntry]:
-        """Extract topics from contract.yaml files in approved installed packages.
+        """Extract topics from contract.yaml files in installed ONEX packages.
 
         Uses ``importlib.metadata`` and ``importlib.resources`` to discover
-        contract YAML files bundled inside approved packages.  Works with both
+        contract YAML files bundled inside runtime packages.  Works with both
         editable installs (``pip install -e .``) and normal installs.
 
         The discovery strategy for each package:
@@ -672,8 +692,9 @@ class ContractTopicExtractor:
            ``<install_root>/nodes/**/contract.yaml`` on the filesystem.
 
         Args:
-            approved_packages: Tuple of package names to scan.  Defaults to
-                the platform-approved set (omnibase_core, omnibase_infra, etc.).
+            packages: Optional tuple of package names to scan. When omitted,
+                package names are discovered from ``ONEX_ACTIVE_RUNTIME_PACKAGES``
+                or installed ``onex.node_package`` / ``onex.nodes`` entry points.
 
         Returns:
             Sorted, deduplicated list of ``ModelContractTopicEntry`` objects.
@@ -682,18 +703,24 @@ class ContractTopicExtractor:
             ValueError: If the same logical package is discovered via multiple
                 install paths (duplicate discovery).
 
-        Ticket: OMN-5132
+        Ticket: OMN-5132, OMN-12917
         """
         accumulated: dict[str, ModelContractTopicEntry] = {}
         seen_package_roots: dict[str, Path] = {}
         active_packages = get_active_runtime_packages()
-        approved_packages = tuple(
-            pkg
-            for pkg in approved_packages
-            if is_runtime_package_active(pkg, active_packages)
+        candidate_packages = (
+            tuple(normalize_runtime_package_name(pkg) for pkg in packages)
+            if packages is not None
+            else _discover_installed_topic_packages()
         )
+        if active_packages is not None:
+            candidate_packages = tuple(
+                pkg
+                for pkg in candidate_packages
+                if normalize_runtime_package_name(pkg) in active_packages
+            )
 
-        for pkg_name in approved_packages:
+        for pkg_name in candidate_packages:
             contract_paths = self._discover_package_contracts(pkg_name)
             if contract_paths is None:
                 # Package not installed or has no contracts — non-fatal
