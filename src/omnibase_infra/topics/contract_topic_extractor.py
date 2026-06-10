@@ -292,37 +292,35 @@ class ContractTopicExtractor:
             OMN-5132
         """
         from omnibase_infra.tools.contract_topic_extractor import (
-            _APPROVED_PACKAGES,
-        )
-        from omnibase_infra.tools.contract_topic_extractor import (
             ContractTopicExtractor as _CanonicalExtractor,
         )
 
         manifest = TopicManifest()
         canonical = _CanonicalExtractor()
+        contract_paths = sorted(
+            {
+                contract_path
+                for entry in canonical.extract_from_installed_packages()
+                for contract_path in entry.source_contracts
+            }
+        )
 
-        for pkg_name in _APPROVED_PACKAGES:
-            contract_paths = canonical._discover_package_contracts(pkg_name)
-            if contract_paths is None:
-                continue
-
-            for contract_path in contract_paths:
-                try:
-                    node_topics = self.extract_from_file(contract_path)
-                    manifest.nodes[node_topics.node_name] = node_topics
-                except (
-                    OSError,
-                    yaml.YAMLError,
-                    KeyError,
-                    TypeError,
-                    ValueError,
-                ):
-                    logger.warning(
-                        "Failed to parse contract from package %s: %s",
-                        pkg_name,
-                        contract_path,
-                        exc_info=True,
-                    )
+        for contract_path in contract_paths:
+            try:
+                node_topics = self.extract_from_file(contract_path)
+                manifest.nodes[node_topics.node_name] = node_topics
+            except (
+                OSError,
+                yaml.YAMLError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                logger.warning(
+                    "Failed to parse installed package contract: %s",
+                    contract_path,
+                    exc_info=True,
+                )
 
         return manifest
 
