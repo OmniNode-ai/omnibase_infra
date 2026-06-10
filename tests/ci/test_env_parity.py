@@ -133,6 +133,7 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_GLM_URL",
         "LLM_GLM_MODEL_NAME",
         "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+        "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
         "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
         "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
@@ -200,7 +201,7 @@ def extract_runtime_env_keys(compose_path: Path) -> set[str]:
     if not block_match:
         return set()
     block = block_match.group(0)
-    keys = re.findall(r"^\s{2}([A-Z_]+):", block, re.MULTILINE)
+    keys = re.findall(r"^\s{2}([A-Z0-9_]+):", block, re.MULTILINE)
     return set(keys)
 
 
