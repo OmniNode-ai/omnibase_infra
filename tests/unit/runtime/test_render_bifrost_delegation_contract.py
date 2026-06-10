@@ -132,6 +132,17 @@ def _source_contract_with_optional_backend(path: Path) -> Path:
     )
 
 
+def _cloud_backend() -> dict[str, object]:
+    return {
+        "backend_id": "cloud-glm",
+        "endpoint_url": _http_url("cloud.local:9000"),
+        "model_name": "glm-test",
+        "tier": "cloud",
+        "timeout_ms": 30000,
+        "capabilities": ["code_generation"],
+    }
+
+
 @pytest.mark.unit
 def test_render_populates_endpoint_from_declared_provider_env(tmp_path: Path) -> None:
     source = _source_contract(tmp_path / "source.yaml")
@@ -199,6 +210,54 @@ def test_existing_target_with_incomplete_endpoint_is_rerendered(
     assert rendered == target
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert loaded["backends"][0]["endpoint_url"] == _http_url("fresh.local:8000")
+
+
+@pytest.mark.unit
+def test_existing_cloud_populated_target_rerenders_declared_local_env_backends(
+    tmp_path: Path,
+) -> None:
+    source_backend = _backend(
+        backend_id="local-qwen-coder-30b",
+        base_url_env="LLM_CODER_URL",
+        required=False,
+        model_name="qwen-test",
+        capabilities=["code_generation"],
+    )
+    source = _write_contract(
+        tmp_path / "source.yaml",
+        _contract_data([source_backend, _cloud_backend()]),
+    )
+    target = _write_contract(
+        tmp_path / "target.yaml",
+        _contract_data(
+            [
+                {
+                    **source_backend,
+                    "endpoint_url": "",
+                    "model_name": "",
+                },
+                _cloud_backend(),
+            ]
+        ),
+    )
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("fresh.local:8000")},
+    )
+
+    assert rendered == target
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    local_backend = next(
+        backend
+        for backend in loaded["backends"]
+        if backend["backend_id"] == "local-qwen-coder-30b"
+    )
+    assert local_backend["endpoint_url"] == _http_url("fresh.local:8000")
+    assert local_backend["model_name"] == "qwen-test"
+    assert "base_url_env" not in local_backend
+    assert "required" not in local_backend
 
 
 @pytest.mark.unit

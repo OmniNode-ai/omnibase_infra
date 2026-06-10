@@ -58,6 +58,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.mixins.mixin_llm_http_transport import (
     MixinLlmHttpTransport,
     _parse_cidr_allowlist,
+    _parse_cloud_endpoint_host_allowlist,
 )
 
 # ── Test Harness ─────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ def _set_llm_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]
     - LOCAL_LLM_SHARED_SECRET: HMAC fail-closed check passes for standard tests.
     - LLM_ENDPOINT_CIDR_ALLOWLIST: Required since OMN-7410 removed the fallback default.
       Uses 192.168.86.0/24 to match the test URL (192.168.86.201).
+    - LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: Explicit authenticated cloud LLM hosts.
 
     Tests that specifically validate missing-secret or missing-CIDR behavior
     override these by unsetting the variables.
@@ -171,13 +173,21 @@ def _set_llm_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]
 
     monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", TEST_SHARED_SECRET)
     monkeypatch.setenv("LLM_ENDPOINT_CIDR_ALLOWLIST", "192.168.86.0/24")
+    monkeypatch.setenv(
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
+        "generativelanguage.googleapis.com,api.z.ai",
+    )
     # Clear cached CIDR on both the base class and the test harness subclass
     # to prevent cross-test pollution (ClassVar caches on whichever class calls first)
     MixinLlmHttpTransport._LOCAL_LLM_CIDRS = None
+    MixinLlmHttpTransport._CLOUD_LLM_HOSTS = None
     LlmTransportHarness._LOCAL_LLM_CIDRS = None
+    LlmTransportHarness._CLOUD_LLM_HOSTS = None
     yield
     MixinLlmHttpTransport._LOCAL_LLM_CIDRS = None
+    MixinLlmHttpTransport._CLOUD_LLM_HOSTS = None
     LlmTransportHarness._LOCAL_LLM_CIDRS = None
+    LlmTransportHarness._CLOUD_LLM_HOSTS = None
 
 
 @pytest.fixture
@@ -1393,6 +1403,83 @@ class TestCidrAllowlistValidation:
                 "http://8.8.8.8:8000/v1/completions", correlation_id
             )
 
+    @pytest.mark.unit
+    async def test_cloud_https_host_allowlist_passes(
+        self, correlation_id: UUID
+    ) -> None:
+        """An exact HTTPS cloud provider hostname declared by policy must pass."""
+        harness = LlmTransportHarness()
+
+        with patch.object(
+            asyncio.get_running_loop(),
+            "getaddrinfo",
+            side_effect=AssertionError("cloud host must not use local DNS CIDR check"),
+        ):
+            await harness._validate_endpoint_allowlist(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                correlation_id,
+            )
+
+    @pytest.mark.unit
+    async def test_cloud_host_requires_https(self, correlation_id: UUID) -> None:
+        """A declared cloud hostname over HTTP must still use and fail CIDR validation."""
+        harness = LlmTransportHarness()
+
+        async def mock_getaddrinfo(
+            *args: object, **kwargs: object
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            return [(2, 1, 6, "", ("216.239.38.223", 0))]
+
+        with patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=mock_getaddrinfo
+        ):
+            with pytest.raises(
+                InfraAuthenticationError, match="outside the local LLM allowlist"
+            ):
+                await harness._validate_endpoint_allowlist(
+                    "http://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    correlation_id,
+                )
+
+    @pytest.mark.unit
+    async def test_undeclared_cloud_https_host_rejected(
+        self, correlation_id: UUID
+    ) -> None:
+        """A public HTTPS hostname not declared by policy must fail closed."""
+        harness = LlmTransportHarness()
+
+        async def mock_getaddrinfo(
+            *args: object, **kwargs: object
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            return [(2, 1, 6, "", ("203.0.113.10", 0))]
+
+        with patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=mock_getaddrinfo
+        ):
+            with pytest.raises(
+                InfraAuthenticationError, match="outside the local LLM allowlist"
+            ):
+                await harness._validate_endpoint_allowlist(
+                    "https://example-cloud-llm.invalid/v1/chat/completions",
+                    correlation_id,
+                )
+
+    @pytest.mark.unit
+    async def test_cloud_allowlist_does_not_accept_ip_literals(
+        self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cloud host policy must not be usable to allow public IP literals."""
+        monkeypatch.setenv("LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST", "8.8.8.8")
+        LlmTransportHarness._CLOUD_LLM_HOSTS = None
+        harness = LlmTransportHarness()
+
+        with pytest.raises(
+            InfraAuthenticationError, match="outside the local LLM allowlist"
+        ):
+            await harness._validate_endpoint_allowlist(
+                "https://8.8.8.8/v1/completions", correlation_id
+            )
+
     async def test_localhost_rejected(self, correlation_id: UUID) -> None:
         """127.0.0.1 (localhost) must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
@@ -1654,6 +1741,51 @@ class TestParseCidrAllowlist:
         with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
             with pytest.raises(RuntimeError, match=r"All entries.*were malformed"):
                 _parse_cidr_allowlist()
+
+
+# ── Cloud Host Allowlist Parsing (OMN-12885) ───────────────────────────
+
+
+@pytest.mark.unit
+class TestParseCloudEndpointHostAllowlist:
+    """Validate exact cloud LLM hostname allowlist parsing."""
+
+    def test_parse_cloud_hosts_custom_multiple(self) -> None:
+        """Multiple comma-separated hostnames parse as lower-case exact hosts."""
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": (
+                    "GENERATIVELANGUAGE.googleapis.com, api.z.ai."
+                )
+            },
+        ):
+            result = _parse_cloud_endpoint_host_allowlist()
+        assert result == frozenset({"generativelanguage.googleapis.com", "api.z.ai"})
+
+    def test_parse_cloud_hosts_missing_is_empty(self) -> None:
+        """Missing config yields no cloud host grants; callers still fail closed."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST", None)
+            result = _parse_cloud_endpoint_host_allowlist()
+        assert result == frozenset()
+
+    def test_parse_cloud_hosts_skips_urls_ports_paths_and_ips(self) -> None:
+        """Entries must be bare hostnames, not URLs, host:port values, paths, or IPs."""
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": (
+                    "https://generativelanguage.googleapis.com,"
+                    "api.z.ai:443,"
+                    "example.com/v1,"
+                    "8.8.8.8,"
+                    "generativelanguage.googleapis.com"
+                )
+            },
+        ):
+            result = _parse_cloud_endpoint_host_allowlist()
+        assert result == frozenset({"generativelanguage.googleapis.com"})
 
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────

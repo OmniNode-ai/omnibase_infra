@@ -38,10 +38,25 @@ COMPOSE_RENDER_ENV = {
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),
     "LLM_DEEPSEEK_R1_URL": _http_url("llm-deepseek.invalid"),
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL": _http_url(
+        "llm-coder.invalid/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL": _http_url(
+        "llm-coder-fast.invalid/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": _http_url(
+        "llm-embedding.invalid/v1/chat/completions"
+    ),
+    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": _http_url(
+        "llm-deepseek.invalid/v1/chat/completions"
+    ),
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",

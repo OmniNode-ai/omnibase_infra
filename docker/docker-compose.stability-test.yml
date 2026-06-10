@@ -233,6 +233,8 @@ services:
       - "com.omninode.ticket=OMN-10281"
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"
       - "com.omninode.runtime.id=stability-test-worker"
+    deploy:
+      replicas: ${STABILITY_TEST_WORKER_REPLICAS:-1}
   agent-actions-consumer:
     profiles: !override ["stability-test-disabled"]
   skill-lifecycle-consumer:

@@ -23,6 +23,7 @@ class ModelRuntimePolicyContract(BaseModel):
     name: Literal["runtime_policy"]
     version: int = Field(ge=1)
     active_runtime_packages: tuple[str, ...] = Field(min_length=1)
+    llm_cloud_endpoint_host_allowlist: tuple[str, ...] = Field(default=())
     omnimemory_memgraph_port: int = Field(ge=1, le=65535)
     auxiliary_services_omnimemory_enabled: bool
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]
@@ -34,6 +35,26 @@ class ModelRuntimePolicyContract(BaseModel):
             msg = "active runtime packages must be unique"
             raise ValueError(msg)
         return value
+
+    @field_validator("llm_cloud_endpoint_host_allowlist")
+    @classmethod
+    def _cloud_hosts_are_exact_hostnames(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        normalized: list[str] = []
+        for hostname in value:
+            host = hostname.strip().lower().rstrip(".")
+            if not host or "://" in host or "/" in host or ":" in host:
+                msg = (
+                    "llm_cloud_endpoint_host_allowlist entries must be bare "
+                    f"hostnames, got {hostname!r}"
+                )
+                raise ValueError(msg)
+            normalized.append(host)
+        if len(set(normalized)) != len(normalized):
+            msg = "llm cloud endpoint host allowlist entries must be unique"
+            raise ValueError(msg)
+        return tuple(normalized)
 
     @model_validator(mode="after")
     def _requires_three_runtime_profiles(self) -> ModelRuntimePolicyContract:

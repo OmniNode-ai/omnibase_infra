@@ -80,6 +80,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          shared-env-enabled: "false"
 
       - name: Run guard unit tests
         run: |

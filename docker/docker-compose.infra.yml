@@ -229,12 +229,22 @@ x-runtime-env: &runtime-env
   LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
   LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for PluginLlm activation}
   LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for PluginLlm activation}
+  BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:?BIFROST_LOCAL_CODER_ENDPOINT_URL required for Bifrost local coder}
+  BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:?BIFROST_LOCAL_REASONER_ENDPOINT_URL required for Bifrost local reasoner}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:?BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL required for Bifrost local embedding}
+  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:?BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL required for Bifrost local DS V4 Flash}
   # Cloud-tier GLM route refs are optional at boot but must be present in the
   # container env when routing authority selects api_key_ref=LLM_GLM_API_KEY.
   LLM_GLM_URL: ${LLM_GLM_URL:?LLM_GLM_URL is required for GLM escalation routing}
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:?LLM_GLM_MODEL_NAME is required for GLM escalation routing}
   LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:?LLM_GLM_API_KEY is required for GLM escalation routing}
+  # Gemini/Google ADK hackathon lane: the routing authority declares
+  # api_key_ref=llm.gemini.api_key for cloud-gemini-flash. The secret resolver
+  # maps that ref to GEMINI_API_KEY, so runtime containers must receive the key.
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required for Gemini routing}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY is required for Gemini/Google ADK routing}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
+  LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}
   # --- OpenTelemetry (OMN-8697: wired to Phoenix for LLM span visibility) ---
   # Phoenix runs alongside the runtime; all containers export spans via OTLP HTTP.

@@ -103,6 +103,10 @@ def _http_url(authority: str) -> str:
     return "http" + "://" + authority
 
 
+def _chat_url(authority: str) -> str:
+    return f"{_http_url(authority)}/v1/chat/completions"
+
+
 def _cidr(prefix: str, suffix: str) -> str:
     return prefix + "." + suffix
 
@@ -121,11 +125,18 @@ COMPOSE_RENDER_ENV = {
     "LLM_CODER_URL": _http_url("llm-coder.invalid"),
     "LLM_DEEPSEEK_R1_URL": _http_url("llm-deepseek.invalid"),
     "LLM_EMBEDDING_URL": _http_url("llm-embedding.invalid"),
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL": _chat_url("llm-coder.invalid"),
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL": _chat_url("llm-coder-fast.invalid"),
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": _chat_url("llm-embedding.invalid"),
+    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": _chat_url("llm-deepseek.invalid"),
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
     "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
+    "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
     "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
@@ -348,6 +359,18 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
+        assert environment["BIFROST_LOCAL_CODER_ENDPOINT_URL"] == _chat_url(
+            "llm-coder.invalid"
+        )
+        assert environment["BIFROST_LOCAL_REASONER_ENDPOINT_URL"] == _chat_url(
+            "llm-coder-fast.invalid"
+        )
+        assert environment["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"] == _chat_url(
+            "llm-embedding.invalid"
+        )
+        assert environment["BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL"] == _chat_url(
+            "llm-deepseek.invalid"
+        )
         assert (
             _label_value(
                 services[service_name],

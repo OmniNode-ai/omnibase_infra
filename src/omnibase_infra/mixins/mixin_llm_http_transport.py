@@ -22,9 +22,11 @@ Security:
       inclusion in error context or exception messages, preventing accidental
       leakage of secrets or PII through error propagation paths.
     - CIDR allowlist (default: ``192.168.86.0/24``, configurable via
-      ``LLM_ENDPOINT_CIDR_ALLOWLIST``) restricts outbound LLM calls to the
-      local network trust boundary. Requests to IPs outside the configured
-      ranges are rejected before any HTTP call is made (fail-closed).
+      ``LLM_ENDPOINT_CIDR_ALLOWLIST``) restricts local outbound LLM calls to the
+      local network trust boundary. Authenticated cloud providers must use HTTPS
+      and match an exact hostname in ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST``.
+      Requests outside these declared boundaries are rejected before any HTTP
+      call is made (fail-closed).
     - HMAC-SHA256 request signing using the ``LOCAL_LLM_SHARED_SECRET``
       environment variable adds an ``x-omn-node-signature`` header to all
       outbound requests. If the secret is not configured, requests are
@@ -97,6 +99,7 @@ from omnibase_infra.models.model_retry_error_classification import (
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
+_CLOUD_HOST_ALLOWED_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789.-")
 
 
 def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
@@ -137,6 +140,45 @@ def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
         )
         raise RuntimeError(msg)
     return tuple(parsed)
+
+
+def _parse_cloud_endpoint_host_allowlist() -> frozenset[str]:
+    """Parse exact cloud LLM hostnames from the runtime policy env var.
+
+    ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST`` is a comma-separated list of
+    lower-level provider hostnames such as ``generativelanguage.googleapis.com``.
+    Entries must be bare hostnames: no scheme, no path, no port, and no IP
+    literals. Malformed entries are logged and skipped. Missing or empty config
+    yields an empty set so cloud endpoints fail closed through the normal local
+    CIDR check unless the runtime policy explicitly declares hostnames.
+    """
+    raw = os.environ.get("LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST", "")
+    parsed: set[str] = set()
+    for entry in raw.split(","):
+        hostname = entry.strip().lower().rstrip(".")
+        if not hostname:
+            continue
+        malformed = (
+            "://" in hostname
+            or "/" in hostname
+            or ":" in hostname
+            or any(char not in _CLOUD_HOST_ALLOWED_CHARS for char in hostname)
+            or hostname.startswith(".")
+            or hostname.endswith(".")
+        )
+        try:
+            ip_address(hostname)
+            malformed = True
+        except ValueError:
+            pass
+        if malformed:
+            logger.warning(
+                "Skipping malformed hostname in LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: %r",
+                entry.strip(),
+            )
+            continue
+        parsed.add(hostname)
+    return frozenset(parsed)
 
 
 class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
@@ -203,6 +245,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #:    unnecessary downtime and discourage frequent rotation.
     # Parsed lazily on first access; use _reload_cidr_allowlist() to refresh after env changes.
     _LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...] | None] = None
+    _CLOUD_LLM_HOSTS: ClassVar[frozenset[str] | None] = None
 
     @classmethod
     def _get_cidr_allowlist(cls) -> tuple[IPv4Network, ...]:
@@ -210,6 +253,13 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         if cls._LOCAL_LLM_CIDRS is None:
             cls._LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
         return cls._LOCAL_LLM_CIDRS
+
+    @classmethod
+    def _get_cloud_endpoint_host_allowlist(cls) -> frozenset[str]:
+        """Return exact allowed cloud LLM hostnames, parsing on first access."""
+        if cls._CLOUD_LLM_HOSTS is None:
+            cls._CLOUD_LLM_HOSTS = _parse_cloud_endpoint_host_allowlist()
+        return cls._CLOUD_LLM_HOSTS
 
     @classmethod
     def _reload_cidr_allowlist(cls) -> None:
@@ -406,14 +456,14 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         url: str,
         correlation_id: UUID,
     ) -> None:
-        """Validate that the URL target IP is within the local LLM CIDR allowlist.
+        """Validate that the URL target is within a declared LLM egress boundary.
 
-        Resolves the hostname to an IPv4 address and checks membership in
-        ``LOCAL_LLM_CIDRS`` (default: ``192.168.86.0/24``, configurable via
-        the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable). This is a
-        fail-closed check: if the hostname cannot be resolved or the IP is
-        outside all configured allowlist ranges, the request is rejected before
-        any HTTP call is made.
+        Exact HTTPS hostnames in ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST`` are
+        accepted as authenticated cloud-provider endpoints. All other targets
+        resolve to an IPv4 address and must fall within ``LOCAL_LLM_CIDRS``.
+        This is a fail-closed check: if the hostname cannot be resolved or the
+        IP is outside all configured allowlist ranges, the request is rejected
+        before any HTTP call is made.
 
         DNS resolution uses ``asyncio.get_running_loop().getaddrinfo()`` to
         avoid blocking the event loop on synchronous ``socket.getaddrinfo()``.
@@ -450,6 +500,19 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 f"Cannot extract hostname from URL for allowlist validation: {url}",
                 context=ctx,
             )
+
+        hostname_normalized = hostname.lower().rstrip(".")
+        cloud_hosts = self._get_cloud_endpoint_host_allowlist()
+        if parsed.scheme == "https" and hostname_normalized in cloud_hosts:
+            logger.debug(
+                "Endpoint passed cloud host allowlist check",
+                extra={
+                    "hostname": hostname_normalized,
+                    "correlation_id": str(correlation_id),
+                    "target": self._llm_target_name,
+                },
+            )
+            return
 
         # Resolve hostname to IP address
         try:

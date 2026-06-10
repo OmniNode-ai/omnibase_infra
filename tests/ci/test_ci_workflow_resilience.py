@@ -25,6 +25,9 @@ PR_MERGED_EVENT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-merged-even
 RUNTIME_REBUILD_TRIGGER_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
 )
+PROD_PROMOTION_LINEAGE_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "prod-promotion-lineage.yml"
+)
 OMNI_STANDARDS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "omni-standards-compliance.yml"
 )
@@ -71,6 +74,19 @@ def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
         step for step in steps if step.get("name") == "Check migration freeze"
     )
     assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
+
+
+def test_prod_promotion_lineage_guard_uses_uncached_direct_setup() -> None:
+    workflow = _load_yaml(PROD_PROMOTION_LINEAGE_WORKFLOW)
+    setup_step = next(
+        step
+        for step in workflow["jobs"]["guard-tests"]["steps"]
+        if step.get("name") == "Setup Python and uv"
+    )
+
+    assert setup_step["uses"] == "./.github/actions/setup-python-uv"
+    assert setup_step["with"]["cache-enabled"] == "false"
+    assert setup_step["with"]["shared-env-enabled"] == "false"
 
 
 def test_migration_integration_resolves_reachable_postgres_host() -> None:

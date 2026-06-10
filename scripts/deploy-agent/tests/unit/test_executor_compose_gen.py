@@ -10,6 +10,7 @@ skipped because the static compose file is never updated.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -50,6 +51,32 @@ def test_compose_env_loads_contract_rendered_runtime_policy(
 
     assert env["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
     assert env["DEV_RUNTIME_MAIN_CAPABILITIES"] == "market.skill-proof,runtime.main"
+
+
+@pytest.mark.unit
+def test_compose_env_unquotes_runtime_policy_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deploy-agent must not pass shell quotes through to Compose process env."""
+    policy_env = tmp_path / "runtime-policy.env"
+    policy_env.write_text(
+        "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON="
+        '\'{"enable_convention_fallback":false,"mappings":[{"logical_name":"llm.openrouter.api_key","source":{"source_type":"env","source_path":"OPEN_ROUTER_API_KEY"}}]}\'\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy_env)
+    monkeypatch.delenv(
+        "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
+        raising=False,
+    )
+
+    env = _compose_env()
+    resolver_config = json.loads(
+        env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+
+    assert resolver_config["enable_convention_fallback"] is False
+    assert resolver_config["mappings"][0]["logical_name"] == "llm.openrouter.api_key"
 
 
 @pytest.mark.unit

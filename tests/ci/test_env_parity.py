@@ -101,6 +101,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "QDRANT_API_KEY",
         # Cloud-tier LLM route secret ref — credential, sourced from Infisical/k8s secret.
         "LLM_GLM_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
     }
 )
 
@@ -130,7 +132,12 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "LLM_DEEPSEEK_R1_URL",
         "LLM_GLM_URL",
         "LLM_GLM_MODEL_NAME",
+        "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+        "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
+        "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+        "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
         "LLM_ENDPOINT_CIDR_ALLOWLIST",
+        "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
         "LOCAL_LLM_SHARED_SECRET",
         # Topic provisioner partition cap — local-only tuning knob; k8s does not set it
         "ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS",
@@ -194,7 +201,7 @@ def extract_runtime_env_keys(compose_path: Path) -> set[str]:
     if not block_match:
         return set()
     block = block_match.group(0)
-    keys = re.findall(r"^\s{2}([A-Z_]+):", block, re.MULTILINE)
+    keys = re.findall(r"^\s{2}([A-Z0-9_]+):", block, re.MULTILINE)
     return set(keys)
 
 

@@ -157,19 +157,49 @@ def test_compose_env_is_selected_after_network_probe(workflow: Workflow) -> None
     compose_text = "\n".join(_step_text(s) for s in compose_steps)
     assert 'docker network connect "${omnibase_infra_network}"' in compose_text
     assert "runner_on_compose_network=true" in compose_text
+    assert "e2e_redpanda_advertise_host" in compose_text
     assert "compose service endpoints reachable by docker dns" in compose_text
+    assert (
+        "compose service endpoints reachable by generated container names"
+        in compose_text
+    )
     assert "compose service endpoints reachable by host-published ports" in compose_text
-    assert "unreachable from the runner by docker dns or localhost" in compose_text
+    assert "compose service endpoints reachable by docker host gateway" in compose_text
+    assert (
+        "unreachable from the runner by docker dns, localhost, or docker host gateway"
+        in compose_text
+    )
     assert "capture_compose_infra_diagnostics" in compose_text
     assert "redpanda logs tail" in compose_text
     assert "rpk topic list --brokers redpanda:9092" in compose_text
     assert "compose services not healthy after 150s" in compose_text
     assert "kafka_bootstrap_servers=redpanda:9092" in compose_text
+    assert (
+        "kafka_bootstrap_servers=${omnibase_infra_redpanda_container}:9092"
+        in compose_text
+    )
     assert "kafka_bootstrap_servers=localhost:${kafka_port}" in compose_text
+    assert (
+        "kafka_bootstrap_servers=${e2e_redpanda_advertise_host}:${kafka_port}"
+        in compose_text
+    )
     assert "postgres:5432" in compose_text
+    assert "${omnibase_infra_postgres_container}:5432" in compose_text
     assert "localhost:${postgres_port}" in compose_text
+    assert "${e2e_redpanda_advertise_host}:${postgres_port}" in compose_text
     assert compose_text.index("compose infra healthy after") < compose_text.index(
         "compose service endpoints reachable by docker dns"
+    )
+
+
+def test_e2e_redpanda_internal_listener_advertises_generated_container_name() -> None:
+    compose_text = (
+        Path(__file__).resolve().parents[2] / "docker" / "docker-compose.e2e.yml"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "--advertise-kafka-addr internal://${OMNIBASE_INFRA_REDPANDA_CONTAINER:-redpanda}:9092"
+        in compose_text
     )
 
 

@@ -3,6 +3,9 @@ version: 1
 active_runtime_packages:
   - omnibase_infra
   - omnimarket
+llm_cloud_endpoint_host_allowlist:
+  - generativelanguage.googleapis.com
+  - api.z.ai
 omnimemory_memgraph_port: 7687
 auxiliary_services_omnimemory_enabled: false
 profiles:

@@ -36,6 +36,15 @@ def test_runtime_policy_contract_controls_all_runtime_lane_ports() -> None:
     contract = ModelRuntimePolicyContract.model_validate(raw)
     rendered_env = _load_dotenv(POLICY_ENV_PATH)
 
+    assert contract.llm_cloud_endpoint_host_allowlist == (
+        "generativelanguage.googleapis.com",
+        "api.z.ai",
+    )
+    assert (
+        rendered_env["LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST"]
+        == "generativelanguage.googleapis.com,api.z.ai"
+    )
+
     expected_ports = {
         "DEV_RUNTIME_MAIN_PORT": contract.profiles["dev"].main_port,
         "DEV_RUNTIME_EFFECTS_PORT": contract.profiles["dev"].effects_port,

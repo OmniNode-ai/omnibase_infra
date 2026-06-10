@@ -96,9 +96,9 @@ services:
       # host-side Kafka clients (runtime, aiokafka) resolve to the correct
       # port. Without this, broker metadata advertises 29092 (container port)
       # which is unreachable from the host even though 19092 is mapped.
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${KAFKA_PORT:-19092}
+      - --advertise-kafka-addr internal://${OMNIBASE_INFRA_REDPANDA_CONTAINER:-redpanda}:9092,external://${E2E_REDPANDA_ADVERTISE_HOST:-localhost}:${KAFKA_PORT:-19092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${E2E_REDPANDA_ADVERTISE_HOST:-localhost}:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145

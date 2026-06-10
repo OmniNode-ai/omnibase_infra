@@ -141,6 +141,14 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
 
 
 @pytest.mark.unit
+def test_stability_lane_runtime_worker_is_not_scaled_to_zero() -> None:
+    overlay = _load_overlay()
+    worker = overlay["services"]["runtime-worker"]
+
+    assert worker["deploy"]["replicas"] == "${STABILITY_TEST_WORKER_REPLICAS:-1}"
+
+
+@pytest.mark.unit
 def test_stability_lane_uses_workspace_selector_and_isolated_groups() -> None:
     overlay = _load_overlay()
     services = overlay["services"]

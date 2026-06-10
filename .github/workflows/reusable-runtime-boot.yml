@@ -229,6 +229,54 @@ jobs:
           export REDPANDA_SCHEMA_REGISTRY_PORT="$(pick_free_port)"
           export REDPANDA_PANDAPROXY_PORT="$(pick_free_port)"
           read -r -a compose_cmd <<< "${DOCKER_COMPOSE_CMD}"
+
+          # Self-hosted CI runners run inside Docker containers that share the
+          # host Docker daemon via /var/run/docker.sock. Port bindings on the
+          # host (localhost:$POSTGRES_PORT, localhost:$KAFKA_PORT) are NOT reachable from the
+          # runner container. Detect that topology before starting Redpanda so
+          # the external listener advertises the Docker host gateway when the
+          # workflow has to fall back to host-published ports.
+          runner_container_id=""
+          mapfile -t runner_candidates < <(
+            {
+              grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
+              hostname
+            } | awk 'NF && !seen[$0]++'
+          )
+          for candidate in "${runner_candidates[@]}"; do
+            if docker inspect --type container "$candidate" >/dev/null 2>&1; then
+              runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
+              break
+            fi
+          done
+
+          export E2E_REDPANDA_ADVERTISE_HOST="localhost"
+          if [[ -n "$runner_container_id" ]]; then
+            docker_host_gateway="$(
+              python - <<'PY'
+          import socket
+          import struct
+
+          try:
+              with open("/proc/net/route", encoding="utf-8") as route_file:
+                  next(route_file)
+                  for line in route_file:
+                      fields = line.split()
+                      if len(fields) >= 3 and fields[1] == "00000000":
+                          gateway = int(fields[2], 16)
+                          print(socket.inet_ntoa(struct.pack("<L", gateway)))
+                          break
+          except OSError:
+              pass
+          PY
+            )"
+            if [[ -n "$docker_host_gateway" ]]; then
+              export E2E_REDPANDA_ADVERTISE_HOST="${docker_host_gateway}"
+            fi
+            echo "Runner container ID: ${runner_container_id}"
+            echo "E2E Redpanda advertise host: ${E2E_REDPANDA_ADVERTISE_HOST}"
+          fi
+
           {
             echo "POSTGRES_PORT=${POSTGRES_PORT}"
             echo "PG_PORT=${POSTGRES_PORT}"
@@ -236,6 +284,7 @@ jobs:
             echo "REDPANDA_ADMIN_PORT=${REDPANDA_ADMIN_PORT}"
             echo "REDPANDA_SCHEMA_REGISTRY_PORT=${REDPANDA_SCHEMA_REGISTRY_PORT}"
             echo "REDPANDA_PANDAPROXY_PORT=${REDPANDA_PANDAPROXY_PORT}"
+            echo "E2E_REDPANDA_ADVERTISE_HOST=${E2E_REDPANDA_ADVERTISE_HOST}"
           } >> "$GITHUB_ENV"
 
           POSTGRES_PORT="${POSTGRES_PORT}" \
@@ -243,6 +292,7 @@ jobs:
           REDPANDA_ADMIN_PORT="${REDPANDA_ADMIN_PORT}" \
           REDPANDA_SCHEMA_REGISTRY_PORT="${REDPANDA_SCHEMA_REGISTRY_PORT}" \
           REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
+          E2E_REDPANDA_ADVERTISE_HOST="${E2E_REDPANDA_ADVERTISE_HOST}" \
             "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
 
           capture_compose_infra_diagnostics() {
@@ -267,28 +317,8 @@ jobs:
             } > compose_infra_diagnostics.txt 2>&1 || true
           }
 
-          # Self-hosted CI runners run inside Docker containers that share the
-          # host Docker daemon via /var/run/docker.sock. Port bindings on the
-          # host (localhost:$POSTGRES_PORT, localhost:$KAFKA_PORT) are NOT reachable from the
-          # runner container. Connect the runner to the compose network so the
-          # runtime can reach services by container name on internal ports.
-          runner_container_id=""
-          mapfile -t runner_candidates < <(
-            {
-              grep -Eo '[0-9a-f]{64}' /proc/self/cgroup 2>/dev/null || true
-              hostname
-            } | awk 'NF && !seen[$0]++'
-          )
-          for candidate in "${runner_candidates[@]}"; do
-            if docker inspect --type container "$candidate" >/dev/null 2>&1; then
-              runner_container_id="$(docker inspect --type container --format '{{.Id}}' "$candidate")"
-              break
-            fi
-          done
-
           runner_on_compose_network=false
           if [[ -n "$runner_container_id" ]]; then
-            echo "Runner container ID: ${runner_container_id}"
             docker network connect "${OMNIBASE_INFRA_NETWORK}" "${runner_container_id}" 2>/dev/null || true
             if docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "$runner_container_id" \
               | grep -q "\"${OMNIBASE_INFRA_NETWORK}\""; then
@@ -344,6 +374,15 @@ jobs:
               echo "KAFKA_BROKER_ALLOWLIST=redpanda:"
               echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@postgres:5432/omnibase_infra"
             } >> "$GITHUB_ENV"
+          elif $runner_on_compose_network \
+            && can_connect "${OMNIBASE_INFRA_POSTGRES_CONTAINER}" 5432 \
+            && can_connect "${OMNIBASE_INFRA_REDPANDA_CONTAINER}" 9092; then
+            echo "compose service endpoints reachable by generated container names"
+            {
+              echo "KAFKA_BOOTSTRAP_SERVERS=${OMNIBASE_INFRA_REDPANDA_CONTAINER}:9092"
+              echo "KAFKA_BROKER_ALLOWLIST=${OMNIBASE_INFRA_REDPANDA_CONTAINER}:"
+              echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@${OMNIBASE_INFRA_POSTGRES_CONTAINER}:5432/omnibase_infra"
+            } >> "$GITHUB_ENV"
           elif can_connect localhost "${POSTGRES_PORT}" && can_connect localhost "${KAFKA_PORT}"; then
             echo "compose service endpoints reachable by host-published ports"
             {
@@ -351,9 +390,18 @@ jobs:
               echo "KAFKA_BROKER_ALLOWLIST=localhost:"
               echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@localhost:${POSTGRES_PORT}/omnibase_infra"
             } >> "$GITHUB_ENV"
+          elif [[ "${E2E_REDPANDA_ADVERTISE_HOST}" != "localhost" ]] \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${POSTGRES_PORT}" \
+            && can_connect "${E2E_REDPANDA_ADVERTISE_HOST}" "${KAFKA_PORT}"; then
+            echo "compose service endpoints reachable by Docker host gateway"
+            {
+              echo "KAFKA_BOOTSTRAP_SERVERS=${E2E_REDPANDA_ADVERTISE_HOST}:${KAFKA_PORT}"
+              echo "KAFKA_BROKER_ALLOWLIST=${E2E_REDPANDA_ADVERTISE_HOST}:"
+              echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@${E2E_REDPANDA_ADVERTISE_HOST}:${POSTGRES_PORT}/omnibase_infra"
+            } >> "$GITHUB_ENV"
           else
-            echo "::error::compose services are healthy but unreachable from the runner by Docker DNS or localhost published ports"
-            echo "runner_container_id=${runner_container_id:-<none>} runner_on_compose_network=${runner_on_compose_network}"
+            echo "::error::compose services are healthy but unreachable from the runner by Docker DNS, localhost, or Docker host gateway"
+            echo "runner_container_id=${runner_container_id:-<none>} runner_on_compose_network=${runner_on_compose_network} e2e_redpanda_advertise_host=${E2E_REDPANDA_ADVERTISE_HOST}"
             exit 1
           fi
 

@@ -1113,13 +1113,28 @@ class TestDockerComposeProfiles:
                 "LLM_CODER_FAST_URL": "http://llm-coder-fast.test:8001",
                 "LLM_EMBEDDING_URL": "http://llm-embed.test:8100",
                 "LLM_DEEPSEEK_R1_URL": "http://llm-r1.test:8101",
+                "BIFROST_LOCAL_CODER_ENDPOINT_URL": (
+                    "http://llm-coder.test:8000/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_REASONER_ENDPOINT_URL": (
+                    "http://llm-coder-fast.test:8001/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
+                    "http://llm-embed.test:8100/v1/chat/completions"
+                ),
+                "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": (
+                    "http://llm-r1.test:8101/v1/chat/completions"
+                ),
                 "LLM_GLM_URL": "http://llm-glm.test:8102",
                 "LLM_GLM_MODEL_NAME": "glm-4.5",
                 "LLM_GLM_API_KEY": "render-only-glm-api-key",
+                "GEMINI_API_KEY": "render-only-gemini-api-key",
+                "GOOGLE_API_KEY": "render-only-google-api-key",
                 # OMN-10943: HTTP request signing and CIDR allowlist for the
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
                 "LLM_ENDPOINT_CIDR_ALLOWLIST": _local_lan_cidr,
+                "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
                 # OMN-11673: runtime policy contract vars are required by
                 # compose even when docker/runtime-policy.env is also loaded.
                 "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": "false",
