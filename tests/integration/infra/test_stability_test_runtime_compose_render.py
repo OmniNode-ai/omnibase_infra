@@ -128,6 +128,8 @@ COMPOSE_RENDER_ENV = {
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
+    "GEMINI_API_KEY": "render-only-gemini-api-key",
+    "GOOGLE_API_KEY": "render-only-google-api-key",
     "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",

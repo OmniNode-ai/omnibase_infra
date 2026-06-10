@@ -1116,6 +1116,8 @@ class TestDockerComposeProfiles:
                 "LLM_GLM_URL": "http://llm-glm.test:8102",
                 "LLM_GLM_MODEL_NAME": "glm-4.5",
                 "LLM_GLM_API_KEY": "render-only-glm-api-key",
+                "GEMINI_API_KEY": "render-only-gemini-api-key",
+                "GOOGLE_API_KEY": "render-only-google-api-key",
                 # OMN-10943: HTTP request signing and CIDR allowlist for the
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
