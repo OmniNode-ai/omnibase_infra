@@ -229,6 +229,21 @@ def test_judge_lane_render_does_not_expose_dev_stability_or_prod_ports() -> None
 
 
 @pytest.mark.integration
+def test_judge_lane_render_raises_redpanda_fd_and_partition_capacity() -> None:
+    rendered_config = _compose_config_json()
+    redpanda = rendered_config["services"]["redpanda"]
+    command = redpanda["command"]
+
+    assert redpanda["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
+    assert "--overprovisioned" in command
+    assert command[command.index("--memory") + 1] == "8G"
+    assert "--reserve-memory" in command
+    assert command[command.index("--reserve-memory") + 1] == "0M"
+    assert "--check=false" in command
+    assert "topic_partitions_per_shard=7000" in command
+
+
+@pytest.mark.integration
 def test_judge_secret_refs_are_rendered_from_runtime_policy() -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]

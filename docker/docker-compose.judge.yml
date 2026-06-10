@@ -155,9 +155,14 @@ services:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-judge-redpanda
     profiles: ["judge"]
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     command:
       - redpanda
       - start
+      - --overprovisioned
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
@@ -171,7 +176,12 @@ services:
       - --smp
       - "1"
       - --memory
-      - ${REDPANDA_MEMORY:-2G}
+      - ${REDPANDA_MEMORY:-8G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
       - --default-log-level=warn
       - --set
       - topic_partitions_per_shard=7000

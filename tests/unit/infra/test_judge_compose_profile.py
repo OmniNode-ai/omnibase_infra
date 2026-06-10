@@ -172,6 +172,21 @@ def test_judge_bifrost_defaults_are_chat_completion_urls() -> None:
 
 
 @pytest.mark.unit
+def test_judge_redpanda_can_host_full_contract_topic_catalog() -> None:
+    compose = _load_compose()
+    redpanda = compose["services"]["redpanda"]
+    command = redpanda["command"]
+
+    assert redpanda["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
+    assert "--overprovisioned" in command
+    assert command[command.index("--memory") + 1] == "${REDPANDA_MEMORY:-8G}"
+    assert "--reserve-memory" in command
+    assert command[command.index("--reserve-memory") + 1] == "0M"
+    assert "--check=false" in command
+    assert "topic_partitions_per_shard=7000" in command
+
+
+@pytest.mark.unit
 def test_judge_example_env_contains_only_operator_inputs() -> None:
     example_env = _load_env(JUDGE_ENV_EXAMPLE)
 
