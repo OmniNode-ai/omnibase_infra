@@ -12,7 +12,7 @@ from omnibase_infra.runtime.models.model_runtime_profile_policy import (
     ModelRuntimeProfilePolicy,
 )
 
-RuntimeProfileName = Literal["dev", "stability-test", "prod"]
+RuntimeProfileName = Literal["dev", "stability-test", "judge", "prod"]
 
 
 class ModelRuntimePolicyContract(BaseModel):
@@ -57,8 +57,8 @@ class ModelRuntimePolicyContract(BaseModel):
         return tuple(normalized)
 
     @model_validator(mode="after")
-    def _requires_three_runtime_profiles(self) -> ModelRuntimePolicyContract:
-        required = {"dev", "stability-test", "prod"}
+    def _requires_runtime_profiles(self) -> ModelRuntimePolicyContract:
+        required = {"dev", "stability-test", "judge", "prod"}
         observed = set(self.profiles)
         if observed != required:
             msg = f"runtime policy profiles must be {sorted(required)}, got {sorted(observed)}"

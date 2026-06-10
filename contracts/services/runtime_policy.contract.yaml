@@ -115,6 +115,59 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+  judge:
+    compose_project: omnibase-infra-judge
+    main_port: 48085
+    effects_port: 48086
+    topic_provisioner_max_partitions: 1
+    secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
+    secret_resolver_mappings:
+      - logical_name: llm.openrouter.api_key
+        source:
+          source_type: env
+          source_path: OPEN_ROUTER_API_KEY
+      - logical_name: llm.glm.api_key
+        source:
+          source_type: env
+          source_path: LLM_GLM_API_KEY
+      - logical_name: llm.gemini.api_key
+        source:
+          source_type: env
+          source_path: GEMINI_API_KEY
+    services:
+      main:
+        runtime_id: judge-main
+        runtime_address: runtime://judge-local/judge/main
+        capabilities:
+          - market.skill-proof
+          - workflow.orchestration
+          - runtime.main
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: true
+      effects:
+        runtime_id: judge-effects
+        runtime_address: runtime://judge-local/judge/effects
+        capabilities:
+          - effects.consumer
+          - market.skill-proof
+          - runtime.effects
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
+      worker:
+        runtime_id: judge-worker
+        runtime_address: runtime://judge-local/judge/worker
+        capabilities:
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
+        bifrost_verify_endpoints: false
+        omnimemory_enabled: false
+        omnimemory_memgraph_host: ""
+        publish_introspection: false
   prod:
     compose_project: omnibase-infra-prod
     main_port: 28085

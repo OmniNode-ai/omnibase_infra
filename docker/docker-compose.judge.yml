@@ -1,0 +1,449 @@
+# docker-compose.judge.yml
+# OMN-12924: minimal judge reproducibility lane.
+#
+# This stack is intentionally standalone instead of layered on the full local
+# development compose file. Docker Compose interpolates every input file before
+# merge, so a pure overlay would still inherit dev-only .env requirements.
+#
+# Validation:
+#   docker compose --env-file docker/runtime-policy.env \
+#     --env-file docker/judge.env.example \
+#     -f docker/docker-compose.judge.yml \
+#     --profile judge config --quiet
+#
+# Running containers or mutating a remote host is outside this file's proof
+# boundary unless a cold-clone/cold-compose run is explicitly approved.
+name: omnibase-infra-judge
+
+x-omninode-contract-overlay:
+  judge-redpanda:
+    advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:49092"
+    kafka_port_publish: &judge_redpanda_kafka_port_publish "49092:19092"
+    admin_port_publish: &judge_redpanda_admin_port_publish "49644:9644"
+  judge-model-secrets:
+    required_secret_refs:
+      - GEMINI_API_KEY
+    optional_secret_refs:
+      - OPEN_ROUTER_API_KEY
+      - LLM_GLM_API_KEY
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+
+x-logging-defaults: &logging-defaults
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-runtime-base: &runtime-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.runtime
+    args:
+      BUILD_SOURCE: "${BUILD_SOURCE:-source}"
+      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-source}"
+  profiles: ["judge"]
+  networks:
+    - omnibase-infra-judge-network
+  logging: *logging-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1536M
+      reservations:
+        cpus: "0.25"
+        memory: 256M
+
+x-judge-runtime-env: &judge-runtime-env
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+  POSTGRES_HOST: postgres
+  OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+  OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  KAFKA_BROKER_ALLOWLIST: "redpanda:"
+  BUS_ID: "judge"
+  VALKEY_HOST: "valkey"
+  VALKEY_PORT: "6379"
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+  ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+  ONEX_ENVIRONMENT: judge
+  KAFKA_ENVIRONMENT: judge
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set JUDGE_TOPIC_PROVISIONER_MAX_PARTITIONS}
+  ONEX_STATE_ROOT: /app/data/.onex_state_judge
+  ONEX_STATE_DIR: /app/data/.onex_state_judge
+  ONEX_BOX_ID: judge-local
+  BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
+  LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
+  LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
+  LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:-https://generativelanguage.googleapis.com}
+  LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:-https://generativelanguage.googleapis.com}
+  LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:-https://generativelanguage.googleapis.com}
+  BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/embeddings}
+  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/paas/v4}
+  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
+  LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}}
+  OPEN_ROUTER_API_KEY: ${OPEN_ROUTER_API_KEY:-}
+  LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:-}
+  LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:-judge-local-only}
+  LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  GH_TOKEN: ${GITHUB_TOKEN:-}
+  ONEX_REGISTRATION_AUTO_ACK: "false"
+  USE_EVENT_ROUTING: "true"
+  INFISICAL_ADDR: ""
+  INFISICAL_CLIENT_ID: ""
+  INFISICAL_CLIENT_SECRET: ""
+  INFISICAL_PROJECT_ID: ""
+  INFISICAL_ENVIRONMENT: ""
+  KEYCLOAK_ADMIN_URL: ""
+  KEYCLOAK_REALM: ""
+  KEYCLOAK_ADMIN_CLIENT_ID: ""
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ""
+  KEYCLOAK_ISSUER: ""
+  ONEX_SERVICE_CLIENT_ID: ""
+  ONEX_SERVICE_CLIENT_SECRET: ""
+  OMNIMEMORY_ENABLED: ${JUDGE_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set JUDGE_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
+  OMNIMEMORY_MEMGRAPH_HOST: ${JUDGE_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set JUDGE_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
+  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:?runtime policy contract must set OMNIMEMORY_MEMGRAPH_PORT}
+  OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
+  QDRANT_HOST: ""
+  QDRANT_PORT: "6333"
+  QDRANT_API_KEY: ""
+  KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-judge-postgres
+    profiles: ["judge"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: omnibase_infra
+    ports:
+      - "${JUDGE_POSTGRES_EXTERNAL_PORT:-35436}:5432"
+    volumes:
+      - judge_postgres_data:/var/lib/postgresql/data
+      - ./migrations/forward:/docker-entrypoint-initdb.d:ro
+    networks:
+      - omnibase-infra-judge-network
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
+    logging: *logging-defaults
+    restart: unless-stopped
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-judge-redpanda
+    profiles: ["judge"]
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - *judge_redpanda_advertised_kafka_addr
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - ${REDPANDA_MEMORY:-2G}
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports:
+      - *judge_redpanda_kafka_port_publish
+      - *judge_redpanda_admin_port_publish
+    volumes:
+      - judge_redpanda_data:/var/lib/redpanda/data
+    networks:
+      - omnibase-infra-judge-network
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-judge-redpanda-partition-cap
+    profiles: ["judge"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-judge-network
+    restart: "no"
+
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: omnibase-infra-judge-valkey
+    profiles: ["judge"]
+    command: >-
+      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$$VALKEY_PASSWORD"'
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+    ports:
+      - "${JUDGE_VALKEY_EXTERNAL_PORT:-56379}:6379"
+    volumes:
+      - judge_valkey_data:/data
+    networks:
+      - omnibase-infra-judge-network
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+    logging: *logging-defaults
+    restart: unless-stopped
+
+  forward-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-judge-forward-migration
+    profiles: ["judge"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      MIGRATIONS_DIR: /migrations/forward
+    volumes:
+      - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
+      - ../docker/migrations/forward:/migrations/forward:ro
+    entrypoint: ["sh", "/run-forward-migrations.sh"]
+    networks:
+      - omnibase-infra-judge-network
+    restart: "no"
+    logging: *logging-defaults
+
+  migration-gate:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-judge-migration-gate
+    profiles: ["judge"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumes:
+      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+    networks:
+      - omnibase-infra-judge-network
+    healthcheck:
+      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *logging-defaults
+    restart: unless-stopped
+
+  intelligence-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-judge-intelligence-migration
+    profiles: ["judge"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MIGRATIONS_DIR: /migrations/intelligence
+    volumes:
+      - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+      - ../docker/migrations/intelligence:/migrations/intelligence:ro
+    entrypoint: ["sh", "/run-intelligence-migrations.sh"]
+    networks:
+      - omnibase-infra-judge-network
+    restart: "no"
+    logging: *logging-defaults
+
+  omninode-runtime:
+    <<: *runtime-base
+    container_name: omninode-judge-runtime
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-partition-cap:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    environment:
+      <<: *judge-runtime-env
+      RUNTIME_PROFILE: main
+      OTEL_SERVICE_NAME: omninode-judge-runtime-main
+      ONEX_RUNTIME_ID: judge-main
+      ONEX_RUNTIME_ADDRESS: runtime://judge-local/judge/main
+      ONEX_RUNTIME_CAPABILITIES: ${JUDGE_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set JUDGE_RUNTIME_MAIN_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${JUDGE_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set JUDGE_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
+      ONEX_GROUP_ID: onex-judge-runtime-main
+      KAFKA_INSTANCE_ID: judge-main
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${JUDGE_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
+    ports:
+      - "${JUDGE_RUNTIME_MAIN_PORT:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - judge_runtime_logs:/app/logs
+      - judge_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=judge"
+      - "com.omninode.ticket=OMN-12924"
+      - "com.omninode.runtime.address=runtime://judge-local/judge/main"
+      - "com.omninode.runtime.id=judge-main"
+
+  runtime-effects:
+    <<: *runtime-base
+    container_name: omninode-judge-runtime-effects
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      <<: *judge-runtime-env
+      RUNTIME_PROFILE: effects
+      OTEL_SERVICE_NAME: omninode-judge-runtime-effects
+      ONEX_RUNTIME_ID: judge-effects
+      ONEX_RUNTIME_ADDRESS: runtime://judge-local/judge/effects
+      ONEX_RUNTIME_CAPABILITIES: ${JUDGE_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${JUDGE_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${JUDGE_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${JUDGE_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_GROUP_ID: onex-judge-runtime-effects
+      KAFKA_INSTANCE_ID: judge-effects
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+    ports:
+      - "${JUDGE_RUNTIME_EFFECTS_PORT:?runtime policy contract must set JUDGE_RUNTIME_EFFECTS_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - judge_effects_logs:/app/logs
+      - judge_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=judge"
+      - "com.omninode.ticket=OMN-12924"
+      - "com.omninode.runtime.address=runtime://judge-local/judge/effects"
+      - "com.omninode.runtime.id=judge-effects"
+
+  projection-api:
+    <<: *runtime-base
+    container_name: omnimarket-judge-projection-api
+    command: ["omnimarket-projection-api"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *judge-runtime-env
+      RUNTIME_PROFILE: projection-api
+      OTEL_SERVICE_NAME: omnimarket-judge-projection-api
+      BIFROST_CONTRACT_PATH: ""
+    ports:
+      - "${JUDGE_PROJECTION_API_PORT:-43002}:3002"
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "com.omninode.lane=judge"
+      - "com.omninode.ticket=OMN-12924"
+      - "com.omninode.service=projection-api"
+
+networks:
+  omnibase-infra-judge-network:
+    name: omnibase-infra-judge-network
+    driver: bridge
+
+volumes:
+  judge_postgres_data:
+    name: omnibase-infra-judge-postgres-data
+  judge_redpanda_data:
+    name: omnibase-infra-judge-redpanda-data
+  judge_valkey_data:
+    name: omnibase-infra-judge-valkey-data
+  judge_runtime_logs:
+    name: omninode-judge-runtime-logs
+  judge_runtime_data:
+    name: omninode-judge-runtime-data
+  judge_effects_logs:
+    name: omninode-judge-effects-logs
+  judge_effects_data:
+    name: omninode-judge-effects-data
