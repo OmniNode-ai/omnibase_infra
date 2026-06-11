@@ -982,6 +982,13 @@ jobs:
           echo "================================================================"
           uv run python scripts/check_dockerfile_pins.py
 
+      - name: Check runtime image identity stamping
+        run: |
+          echo "================================================================"
+          echo "Runtime Image Identity Check (OMN-12965)"
+          echo "================================================================"
+          uv run python scripts/check_runtime_image_identity.py
+
   # ============================================================================
   # ONEX Compliance Check
   # Runs `onex compliance check` to validate contracts, handlers, and schemas.

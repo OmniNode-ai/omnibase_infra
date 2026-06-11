@@ -1349,6 +1349,11 @@ build_images() {
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    # OMN-12965: stamp org.opencontainers.image.version from pyproject so the
+    # runtime image carries a real version instead of the Dockerfile placeholder
+    # (0.1.0). A placeholder version degrades every proof packet.
+    local runtime_version
+    runtime_version="$(read_version "${deploy_target}")"
     local omni_home="${OMNI_HOME:-}"
     local build_source
     build_source="$(resolve_build_source)"
@@ -1375,7 +1380,9 @@ build_images() {
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
+        --build-arg "GIT_SHA=${git_sha}"
         --build-arg "VCS_REF=${git_sha}"
+        --build-arg "RUNTIME_VERSION=${runtime_version}"
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
         --build-arg "COMPOSE_PROJECT=${compose_project}"
@@ -1387,7 +1394,7 @@ build_images() {
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     )
 
-    log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -1551,6 +1558,20 @@ verify_deployment() {
     else
         log_warn "Could not read image label (container may not exist yet)."
     fi
+
+    # OMN-12965: verify org.opencontainers.image.version is a real version, not
+    # the Dockerfile placeholder (0.1.0) or blank. A placeholder/blank identity
+    # degrades every proof packet (runtime SHA + image digest are required
+    # citations in accepted evidence).
+    local version_label
+    version_label="$(docker inspect "${container_id}" \
+        --format='{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null || true)"
+    if [[ -z "${version_label}" || "${version_label}" == "0.1.0" ]]; then
+        log_error "Image version label is blank/placeholder: org.opencontainers.image.version='${version_label}'"
+        log_error "Runtime image identity is degraded (OMN-12965). Rebuild with RUNTIME_VERSION from pyproject."
+        exit 1
+    fi
+    log_info "Image version label OK: org.opencontainers.image.version=${version_label}"
 
     # 4. Log sentinel: entrypoint ran
     log_info "Checking log sentinels..."

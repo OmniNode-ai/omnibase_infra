@@ -106,6 +106,16 @@ repos:
         files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-12965: enforce runtime image identity stamping (version + revision).
+      # A blank/placeholder identity degrades every proof packet. Guards both the
+      # Dockerfile workspace-mode identity guard and the cmd_up build-arg wiring.
+      - id: check-runtime-image-identity
+        name: Enforce runtime image identity labels (OMN-12965)
+        entry: uv run --frozen python scripts/check_runtime_image_identity.py
+        language: system
+        files: ^(docker/Dockerfile\.runtime|src/omnibase_infra/docker/catalog/cli\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
       - id: check-env-reads
         name: Block new os.environ reads (use overlay-resolved config)
