@@ -163,6 +163,21 @@ def build_plan(
             continue
         remove_container_ids.append(cid)
 
+    # Reconcile: the SAME image id can surface in multiple `docker image ls` rows
+    # (one per repo:tag). If any row produced a keep reason for an id, KEEP WINS —
+    # a protected id must never be in the remove list even if another tag routed it
+    # to removal. Also dedupe while preserving order.
+    seen: set[str] = set()
+    safe_remove: list[str] = []
+    for image_id in remove_image_ids:
+        if image_id in kept_reasons:
+            continue
+        if image_id in seen:
+            continue
+        seen.add(image_id)
+        safe_remove.append(image_id)
+    remove_image_ids = safe_remove
+
     return {
         "min_age_days": min_age_days,
         "remove_image_ids": remove_image_ids,

@@ -136,3 +136,26 @@ class TestDiskGcPlanSafety:
     def test_min_age_days_surfaced_in_plan(self) -> None:
         plan = disk_gc_plan.build_plan(KEEP_LIST, [], [], set(), now=NOW)
         assert plan["min_age_days"] == 3
+
+    def test_keep_wins_when_same_id_appears_as_dangling_and_kept(self) -> None:
+        # The SAME image id surfaces twice: once as an old dangling row (→ remove
+        # path) and once tagged 'latest' (→ keep path). Keep must win; the id must
+        # NOT appear in remove_image_ids.
+        shared = "sha-shared"
+        images = [
+            _img(shared, "<none>", "<none>", days_ago=10),
+            _img(shared, "omninode-runtime", "latest", days_ago=10),
+        ]
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
+        assert shared not in plan["remove_image_ids"]
+        assert shared in plan["kept_reasons"]
+
+    def test_remove_image_ids_are_deduped(self) -> None:
+        # Same id as two old dangling rows must appear at most once in the plan.
+        dup = "sha-dup"
+        images = [
+            _img(dup, "<none>", "<none>", days_ago=10),
+            _img(dup, "<none>", "<none>", days_ago=12),
+        ]
+        plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
+        assert plan["remove_image_ids"].count(dup) == 1
