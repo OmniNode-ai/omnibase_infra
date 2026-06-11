@@ -629,12 +629,18 @@ def main() -> int:
             resp.raise_for_status()
             try:
                 body = resp.json()
-                if body.get("status") != "ok":
+                # Honor both editions: community returns {"message": "Ok"},
+                # enterprise returns {"status": "ok"}. _is_infisical_ready is the
+                # single source of truth for readiness (the inline status-only
+                # check here was a bug that blocked provisioning against the
+                # community edition deployed on .201 — OMN-12966).
+                if not _is_infisical_ready(body):
                     logger.error(
-                        "Infisical at %s returned HTTP 200 but status field is %r "
-                        "(expected 'ok'). The server may still be initialising.",
+                        "Infisical at %s returned HTTP 200 but body is %r "
+                        "(expected status=ok or message=Ok). "
+                        "The server may still be initialising.",
                         args.addr,
-                        body.get("status"),
+                        body,
                     )
                     return 1
             except (ValueError, KeyError):
