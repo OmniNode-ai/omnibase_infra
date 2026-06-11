@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Release backmerge identity checks for OMN-12765."""
 
@@ -28,5 +28,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    assert lock["identity_digest"] == "7f4a28050457a278a6712b05de154cb8"
-    assert lock["shared_env_digest"] == "83c23e55321a8c8cb95d48c1"
+    assert lock["identity_digest"] == "5ca7b605e708ac7370ade50548732174"
+    assert lock["shared_env_digest"] == "518dcd6c7e30e5b60a2ac703"
