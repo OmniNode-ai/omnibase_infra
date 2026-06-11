@@ -15,10 +15,13 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayTenantIdentity,
 )
 
+BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
+PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+
 
 def _cloud_bus() -> ModelGatewayCloudBusConfig:
     return ModelGatewayCloudBusConfig(
-        broker_provider_id="redpanda-dogfood",
+        broker_provider_id=BROKER_PROVIDER_ID,
         cloud_broker_ref="gateway.cloud.kafka.broker",
         cloud_auth_ref="gateway.cloud.kafka.oauth",
         acl_provisioner_ref="gateway.cloud.kafka.authorization",
@@ -42,7 +45,7 @@ def test_config_rejects_reserved_tenant_slug() -> None:
         ModelGatewayTenantIdentity(
             tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             tenant_slug="system",
-            principal_id="tenant:11111111-1111-1111-1111-111111111111",
+            principal_id=PRINCIPAL_ID,
         )
 
 
@@ -52,7 +55,7 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
             tenant_identity=ModelGatewayTenantIdentity(
                 tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
                 tenant_slug="acme",
-                principal_id="tenant:11111111-1111-1111-1111-111111111111",
+                principal_id=PRINCIPAL_ID,
             ),
             cloud_bus=_cloud_bus(),
             local_transport_flavor="containerized",
@@ -68,7 +71,7 @@ def test_config_requires_silence_window_above_heartbeat() -> None:
 def test_cloud_bus_config_rejects_ambient_kafka_env_refs() -> None:
     with pytest.raises(ValidationError, match=r"KAFKA_\* env"):
         ModelGatewayCloudBusConfig(
-            broker_provider_id="redpanda-dogfood",
+            broker_provider_id=BROKER_PROVIDER_ID,
             cloud_broker_ref="KAFKA_BOOTSTRAP_SERVERS",
             cloud_auth_ref="gateway.cloud.kafka.oauth",
             acl_provisioner_ref="gateway.cloud.kafka.authorization",
@@ -80,7 +83,7 @@ def test_cloud_bus_config_rejects_ambient_kafka_env_refs() -> None:
 def test_cloud_bus_config_rejects_literal_bootstrap_server_field() -> None:
     with pytest.raises(ValidationError, match="bootstrap_servers"):
         ModelGatewayCloudBusConfig(
-            broker_provider_id="redpanda-dogfood",
+            broker_provider_id=BROKER_PROVIDER_ID,
             cloud_broker_ref="gateway.cloud.kafka.broker",
             cloud_auth_ref="gateway.cloud.kafka.oauth",
             acl_provisioner_ref="gateway.cloud.kafka.authorization",

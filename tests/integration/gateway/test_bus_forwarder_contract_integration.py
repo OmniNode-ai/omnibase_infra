@@ -24,6 +24,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_for
 pytestmark = pytest.mark.integration
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
+BROKER_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
+PRINCIPAL_ID = UUID("33333333-3333-3333-3333-333333333333")
+CORRELATION_ID = UUID("44444444-4444-4444-4444-444444444444")
 INBOUND_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
 OUTBOUND_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
 WIRE_INBOUND_TOPIC = f"tenant-acme.{INBOUND_TOPIC}"
@@ -89,10 +92,10 @@ def _config() -> ModelGatewayForwarderConfig:
         tenant_identity=ModelGatewayTenantIdentity(
             tenant_id=TENANT_ID,
             tenant_slug="acme",
-            principal_id=f"tenant:{TENANT_ID}",
+            principal_id=PRINCIPAL_ID,
         ),
         cloud_bus=ModelGatewayCloudBusConfig(
-            broker_provider_id="redpanda-dogfood",
+            broker_provider_id=BROKER_PROVIDER_ID,
             cloud_broker_ref="gateway.cloud.kafka.broker",
             cloud_auth_ref="gateway.cloud.kafka.oauth",
             acl_provisioner_ref="gateway.cloud.kafka.authorization",
@@ -111,8 +114,8 @@ def _envelope(**overrides: object) -> ModelGatewayEnvelope:
     values = {
         "tenant_id": TENANT_ID,
         "tenant_slug": "acme",
-        "envelope_id": str(uuid4()),
-        "correlation_id": "corr-1",
+        "envelope_id": uuid4(),
+        "correlation_id": CORRELATION_ID,
         "causation_id": None,
         "event_type": "LlmInferenceResponse",
         "source_topic": OUTBOUND_TOPIC,

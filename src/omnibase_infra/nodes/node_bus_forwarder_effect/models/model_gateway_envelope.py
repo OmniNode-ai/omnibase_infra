@@ -16,8 +16,8 @@ class ModelGatewayEnvelope(BaseModel):
 
     tenant_id: UUID = Field(..., description="Immutable tenant identity.")
     tenant_slug: str = Field(..., description="Recorded human-facing tenant slug.")
-    envelope_id: str = Field(..., description="Unique envelope id used for dedupe.")
-    correlation_id: str = Field(..., description="Per-tenant request correlation id.")
+    envelope_id: UUID = Field(..., description="Unique envelope id used for dedupe.")
+    correlation_id: UUID = Field(..., description="Per-tenant request correlation id.")
     causation_id: str | None = Field(default=None, description="Parent envelope id.")
     event_type: str = Field(..., description="Raw routing key preserved across hops.")
     source_topic: str = Field(..., description="Topic this envelope was consumed from.")
@@ -27,8 +27,6 @@ class ModelGatewayEnvelope(BaseModel):
 
     @field_validator(
         "tenant_slug",
-        "envelope_id",
-        "correlation_id",
         "event_type",
         "source_topic",
         "canonical_topic",

@@ -28,7 +28,7 @@ class HandlerForwardOutbound:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    def handle(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
+    def forward_outbound(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
         """Return an outbound envelope with a validated tenant wire topic."""
         identity = self._config.tenant_identity
         if envelope.tenant_id != identity.tenant_id:

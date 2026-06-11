@@ -33,7 +33,7 @@ config:
   gateway_forwarder:
     cloud_leg:
       transport: "kafka"
-      broker_provider_id: "redpanda-dogfood"
+      broker_provider_id: "22222222-2222-2222-2222-222222222222"
       cloud_broker_ref: "gateway.cloud.kafka.broker"
       cloud_auth_ref: "gateway.cloud.kafka.oauth"
       acl_provisioner_ref: "gateway.cloud.kafka.authorization"

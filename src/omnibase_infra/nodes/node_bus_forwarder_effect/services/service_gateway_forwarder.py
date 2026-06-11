@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Protocol
 
 from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
     HandlerConsumeInbound,
@@ -28,18 +28,18 @@ class ProtocolGatewayBus(Protocol):
         topic: str,
         key: bytes | None,
         value: bytes,
-        headers: Any | None = None,
+        headers: object | None = None,
     ) -> None:
         """Publish bytes to a topic."""
 
     async def subscribe(
         self,
         topic: str,
-        node_identity: Any | None = None,
-        on_message: Callable[[Any], Awaitable[None]] | None = None,
+        node_identity: object | None = None,
+        on_message: Callable[[object], Awaitable[None]] | None = None,
         *,
         group_id: str | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to a topic and return an async unsubscribe callback."""
 
@@ -94,9 +94,9 @@ class ServiceGatewayForwarder:
         for unsubscribe in callbacks:
             await unsubscribe()
 
-    async def _forward_outbound_message(self, message: Any) -> None:
+    async def _forward_outbound_message(self, message: object) -> None:
         envelope = self._decode_message(message)
-        transformed = self._outbound_handler.handle(envelope)
+        transformed = self._outbound_handler.forward_outbound(envelope)
         await self._cloud_bus.publish(
             topic=transformed.wire_topic,
             key=getattr(message, "key", None),
@@ -104,9 +104,9 @@ class ServiceGatewayForwarder:
             headers=getattr(message, "headers", None),
         )
 
-    async def _consume_inbound_message(self, message: Any) -> None:
+    async def _consume_inbound_message(self, message: object) -> None:
         envelope = self._decode_message(message)
-        transformed = self._inbound_handler.handle(envelope)
+        transformed = self._inbound_handler.consume_inbound(envelope)
         await self._local_bus.publish(
             topic=transformed.canonical_topic,
             key=getattr(message, "key", None),
@@ -119,7 +119,7 @@ class ServiceGatewayForwarder:
         return f"tenant-{identity.tenant_slug}-gateway-forwarder-{direction}"
 
     @staticmethod
-    def _decode_message(message: Any) -> ModelGatewayEnvelope:
+    def _decode_message(message: object) -> ModelGatewayEnvelope:
         value = getattr(message, "value", message)
         if isinstance(value, str):
             value = value.encode("utf-8")

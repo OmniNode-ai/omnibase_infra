@@ -29,7 +29,7 @@ class HandlerConsumeInbound:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    def handle(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
+    def consume_inbound(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
         """Return an inbound envelope with a validated bare canonical topic."""
         identity = self._config.tenant_identity
         if envelope.tenant_id != identity.tenant_id:
