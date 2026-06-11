@@ -1,0 +1,78 @@
+# OMN-12940 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-12940"
+title: "Recursively unwrap double-wrapped transport envelopes in auto-wiring dispatch"
+summary: >-
+  The runtime auto-wiring dispatch layer constructs the contract input_model
+  itself via model_validate(_extract_dispatch_payload(envelope)) before the
+  handler runs. _extract_dispatch_payload unwrapped exactly one level, so a
+  double-wrapped delivery stayed an envelope and model_validate raised
+  "N validation errors ... Field required" — bypassing the omnimarket
+  handler-side coerce/unwrap fixes (OMN-12935/12936) entirely. A second site,
+  the post-handler correlation read in _normalize_handler_result, called bare
+  UUID() on a non-hex candidate and crashed dispatch. This makes the unwrap
+  recursive/envelope-aware and routes the correlation read through the existing
+  _coerce_uuid_or_none guard, unblocking runtime verification of the evidence
+  pipeline and readiness gate.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Double-wrapped envelope unwrap + UUID-guard unit tests pass"
+    command: >-
+      uv run pytest
+      tests/unit/runtime/auto_wiring/test_handler_wiring_double_wrapped_envelope.py -q
+  - kind: "tests"
+    description: "Full auto-wiring unit suite passes (no regression in dispatch path)"
+    command: >-
+      uv run pytest tests/unit/runtime/auto_wiring/ -q
+  - kind: "ci"
+    description: "Touched files pass ruff and mypy --strict"
+    command: >-
+      uv run ruff check
+      src/omnibase_infra/runtime/auto_wiring/handler_wiring.py
+      tests/unit/runtime/auto_wiring/test_handler_wiring_double_wrapped_envelope.py
+      && uv run mypy src/omnibase_infra/runtime/auto_wiring/handler_wiring.py --strict
+  - kind: "manual"
+    description: >-
+      Post-merge stability redeploy re-runs the evidence-pipeline verification
+      leg and captures a fresh projection row / correlation-ID-backed traversal
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-double-wrapped-unit"
+    description: "Failing-first unit tests reproduce the live ValidationError + UUID crash and now pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest
+          tests/unit/runtime/auto_wiring/test_handler_wiring_double_wrapped_envelope.py -q
+  - id: "dod-auto-wiring-suite"
+    description: "Full auto-wiring unit suite green (no dispatch-path regression)"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/runtime/auto_wiring/ -q
+  - id: "dod-type-and-lint"
+    description: "Changed source passes mypy --strict and ruff"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run mypy src/omnibase_infra/runtime/auto_wiring/handler_wiring.py --strict
+  - id: "dod-runtime-reverify"
+    description: "Stability redeploy + evidence-pipeline re-verification leg before declaring fixed"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          rebuild stability runtime images from omnibase_infra@dev including this
+          fix; thin-publish to onex.cmd.omnimarket.evidence-pipeline-start.v1;
+          assert no ValidationError on dispatcher.auto.* and a fresh projection
+          row materializes keyed by the correlation id
