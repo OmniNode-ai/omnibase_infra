@@ -65,19 +65,41 @@ log "Starting ($( [[ "$EXECUTE" == true ]] && echo EXECUTE || echo DRY-RUN )), k
 # ---------------------------------------------------------------------------
 # Resolve the removal PLAN in Python (deterministic, testable). The plan is the
 # only thing that decides what gets removed; bash only executes it.
-# We pass docker inventory in on stdin so the planner is pure and unit-testable.
+#
+# Docker inventory is written to per-run scratch files and handed to the planner
+# on stdin as a JSON envelope. We do NOT pass it via env vars: a host with many
+# images blows past ARG_MAX (`Argument list too long`). Scratch lives under the
+# log dir (never /tmp), and is cleaned on exit.
 # ---------------------------------------------------------------------------
-DOCKER_IMAGES_JSON="$(docker image ls --all --no-trunc --format '{{json .}}' 2>/dev/null || echo '')"
-DOCKER_PS_JSON="$(docker ps --all --no-trunc --format '{{json .}}' 2>/dev/null || echo '')"
-# Image-in-use set: every image id/ref referenced by any container.
-DOCKER_INUSE="$(docker ps --all --format '{{.Image}}' 2>/dev/null | sort -u || echo '')"
+SCRATCH="$(mktemp -d "$(dirname "$LOG_FILE")/disk-gc.XXXXXX")"
+trap 'rm -rf "$SCRATCH"' EXIT
+docker image ls --all --no-trunc --format '{{json .}}' >"$SCRATCH/images.ndjson" 2>/dev/null || : >"$SCRATCH/images.ndjson"
+docker ps --all --no-trunc --format '{{json .}}' >"$SCRATCH/ps.ndjson" 2>/dev/null || : >"$SCRATCH/ps.ndjson"
+docker ps --all --format '{{.Image}}' 2>/dev/null | sort -u >"$SCRATCH/inuse.txt" || : >"$SCRATCH/inuse.txt"
 
 PLAN_JSON="$(
-  KEEP_LIST="$KEEP_LIST" \
-  IMAGES_JSON="$DOCKER_IMAGES_JSON" \
-  PS_JSON="$DOCKER_PS_JSON" \
-  INUSE="$DOCKER_INUSE" \
-  python3 "${SCRIPT_DIR}/disk_gc_plan.py"
+  KEEP_LIST="$KEEP_LIST" python3 - "$SCRATCH" "${SCRIPT_DIR}/disk_gc_plan.py" <<'PYWRAP'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+scratch = Path(sys.argv[1])
+planner = sys.argv[2]
+envelope = json.dumps(
+    {
+        "images_ndjson": (scratch / "images.ndjson").read_text(),
+        "ps_ndjson": (scratch / "ps.ndjson").read_text(),
+        "inuse": (scratch / "inuse.txt").read_text(),
+    }
+)
+proc = subprocess.run(
+    [sys.executable, planner], input=envelope, capture_output=True, text=True
+)
+sys.stderr.write(proc.stderr)
+sys.stdout.write(proc.stdout)
+sys.exit(proc.returncode)
+PYWRAP
 )"
 
 if [[ "$EMIT_JSON" == true ]]; then

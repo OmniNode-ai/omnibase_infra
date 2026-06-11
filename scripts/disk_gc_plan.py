@@ -8,11 +8,13 @@ This module is the *only* place that decides what the .201 docker/disk GC remove
 emits a JSON plan; the shell only executes that plan. Keeping the decision logic
 here (not in bash) makes the safety guarantees unit-testable without docker.
 
-Inputs (all via env so the shell can hand off raw `docker ... --format '{{json .}}'`):
-  KEEP_LIST   path to keep-list.yaml
-  IMAGES_JSON newline-delimited JSON objects from `docker image ls --format '{{json .}}'`
-  PS_JSON     newline-delimited JSON objects from `docker ps -a --format '{{json .}}'`
-  INUSE       newline-delimited image refs referenced by containers (`docker ps -a {{.Image}}`)
+Inputs:
+  KEEP_LIST  (env)   path to keep-list.yaml (small — env is fine)
+  stdin      (JSON)  {"images_ndjson": "...", "ps_ndjson": "...", "inuse": "..."}
+                     where each value is the raw multi-line output of the matching
+                     `docker ... --format '{{json .}}'` command. Inventory is passed
+                     on stdin (NOT env) because a host with many images blows past
+                     ARG_MAX when the blobs are env vars (`Argument list too long`).
 
 Output: a single JSON object on stdout:
   {
@@ -174,12 +176,13 @@ def main() -> int:
     with open(keep_list_path, encoding="utf-8") as fh:
         keep_list = yaml.safe_load(fh) or {}
 
-    images = _load_ndjson(os.environ.get("IMAGES_JSON", ""))
-    containers = _load_ndjson(os.environ.get("PS_JSON", ""))
+    raw = sys.stdin.read()
+    payload = json.loads(raw) if raw.strip() else {}
+
+    images = _load_ndjson(payload.get("images_ndjson", ""))
+    containers = _load_ndjson(payload.get("ps_ndjson", ""))
     inuse = {
-        line.strip()
-        for line in os.environ.get("INUSE", "").splitlines()
-        if line.strip()
+        line.strip() for line in payload.get("inuse", "").splitlines() if line.strip()
     }
 
     plan = build_plan(keep_list, images, containers, inuse)
