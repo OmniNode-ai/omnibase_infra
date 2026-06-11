@@ -77,29 +77,19 @@ docker image ls --all --no-trunc --format '{{json .}}' >"$SCRATCH/images.ndjson"
 docker ps --all --no-trunc --format '{{json .}}' >"$SCRATCH/ps.ndjson" 2>/dev/null || : >"$SCRATCH/ps.ndjson"
 docker ps --all --format '{{.Image}}' 2>/dev/null | sort -u >"$SCRATCH/inuse.txt" || : >"$SCRATCH/inuse.txt"
 
+# Build the stdin JSON envelope from the scratch files (SCRATCH_DIR env tells the
+# encoder where to read), then pipe it straight into the planner. Two simple
+# processes, no nested subprocess, no env-var size limit.
 PLAN_JSON="$(
-  KEEP_LIST="$KEEP_LIST" python3 - "$SCRATCH" "${SCRIPT_DIR}/disk_gc_plan.py" <<'PYWRAP'
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-scratch = Path(sys.argv[1])
-planner = sys.argv[2]
-envelope = json.dumps(
-    {
-        "images_ndjson": (scratch / "images.ndjson").read_text(),
-        "ps_ndjson": (scratch / "ps.ndjson").read_text(),
-        "inuse": (scratch / "inuse.txt").read_text(),
-    }
-)
-proc = subprocess.run(
-    [sys.executable, planner], input=envelope, capture_output=True, text=True
-)
-sys.stderr.write(proc.stderr)
-sys.stdout.write(proc.stdout)
-sys.exit(proc.returncode)
-PYWRAP
+  SCRATCH_DIR="$SCRATCH" python3 -c '
+import json, os
+d = os.environ["SCRATCH_DIR"]
+print(json.dumps({
+    "images_ndjson": open(os.path.join(d, "images.ndjson")).read(),
+    "ps_ndjson": open(os.path.join(d, "ps.ndjson")).read(),
+    "inuse": open(os.path.join(d, "inuse.txt")).read(),
+}))
+' | KEEP_LIST="$KEEP_LIST" python3 "${SCRIPT_DIR}/disk_gc_plan.py"
 )"
 
 if [[ "$EMIT_JSON" == true ]]; then
