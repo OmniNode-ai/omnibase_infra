@@ -1,0 +1,43 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13008
+title: 'Automated worktree GC + .201 docker/disk GC + disk watermark alert ratchet'
+summary: 'Conservative, keep-list-driven .201 disk maintenance: merged-worktree GC (drives prune-worktrees.sh), docker/image GC, and a df watermark alert ratchet (>85% ticket, >90% bus event), shipped as systemd user timer units plus dry-run-tested GC scripts.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: GC plan-safety + dry-run + watermark-event unit tests pass
+    command: uv run pytest tests/unit/scripts/test_disk_gc_plan.py tests/unit/scripts/test_disk_gc_dry_run.py tests/unit/scripts/test_disk_watermark_event.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Removal-plan resolver never reaps a keep-list repo, kept tag, in-use image, or too-young artifact (pure-planner safety tests)
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_disk_gc_plan.py -q'
+  - id: dod-002
+    description: GC shell scripts in default/dry-run mode issue no destructive docker/git/rpk op; --execute correctly forwards the flag
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_disk_gc_dry_run.py -q'
+  - id: dod-003
+    description: Disk-watermark bus event builder produces stable typed warning/critical events with a dedupe alert_key
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_disk_watermark_event.py -q'
+  - id: dod-deploy
+    description: systemd USER timer units (NOT lane containers) installed + enabled on .201 via deploy/disk-gc/install-disk-gc.sh; verified with systemctl --user list-timers
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_disk_gc_plan.py tests/unit/scripts/test_disk_gc_dry_run.py -q'
