@@ -24,6 +24,10 @@ from urllib.request import Request, urlopen
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.config_provenance import (
+    build_config_provenance,
+    write_provenance_sidecar,
+)
 
 _LEGACY_SOURCE_PATH = Path("/app/src/omnibase_infra/configs/bifrost_delegation.yaml")
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
@@ -566,6 +570,31 @@ def render_bifrost_delegation_contract(
     return target
 
 
+def _emit_config_provenance(rendered: Path, *, env: Mapping[str, str]) -> None:
+    """Compute, log, and persist config provenance for the rendered contract.
+
+    Provenance compares the deployed (volume) contract that the runtime actually
+    loaded against the packaged source resolved from the same rules the renderer
+    uses. The single-line summary is logged to stdout so it appears in container
+    startup logs; the sidecar JSON lets the drift sweep and proof packets read
+    provenance without re-resolving the packaged source path (OMN-12958).
+    """
+    source_env = env.get("BIFROST_SOURCE_CONTRACT_PATH", "").strip()
+    source = Path(source_env) if source_env else _DEFAULT_SOURCE_PATH
+    provenance = build_config_provenance(
+        config_name="bifrost_delegation",
+        deployed_path=rendered,
+        source_path=source,
+    )
+    sys.stdout.write(f"[entrypoint] {provenance.provenance_line()}\n")
+    if provenance.has_drifted:
+        sys.stdout.write(
+            "[entrypoint] WARNING: deployed Bifrost delegation config drifted "
+            "from packaged source; re-seed required (OMN-12958)\n"
+        )
+    write_provenance_sidecar(provenance, deployed_path=rendered)
+
+
 def main() -> int:
     rendered = render_bifrost_delegation_contract()
     if rendered is None:
@@ -575,6 +604,7 @@ def main() -> int:
         )
         return 0
     sys.stdout.write(f"[entrypoint] Bifrost delegation contract ready: {rendered}\n")
+    _emit_config_provenance(rendered, env=os.environ)
     return 0
 
 
