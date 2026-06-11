@@ -99,6 +99,9 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
         ProtocolPatternBBrokerTransport,
     )
+    from omnibase_infra.runtime.service_terminal_event_consumer import (
+        TerminalEventConsumer,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -1603,20 +1606,27 @@ def _make_sync_event_consumer(
     *,
     event_bus: object,
     handler_name: str,
-) -> Callable[[str, str, float], dict[str, object] | None]:
+) -> TerminalEventConsumer:
     """Materialize the blocking terminal-event consumer for request/response handlers.
 
     Mirror of ``_make_sync_event_publisher`` for the consume leg. Some EFFECT
     handlers (e.g. ``HandlerContextRoiRunner``, OMN-13005) publish a command and
     then block on the correlated terminal event, reading result fields back from
-    its payload. They declare an injectable ``event_consumer`` with the sync shape
-    ``(terminal_topic, correlation_id, timeout_seconds) -> dict | None``.
+    its payload. They declare an injectable ``event_consumer``.
+
+    The returned object is directly callable with the legacy single-call shape
+    ``(terminal_topic, correlation_id, timeout_seconds) -> dict | None`` and also
+    exposes ``.open(topic) -> TerminalConsumerSession`` for the two-phase
+    (subscribe-before-publish) protocol introduced in OMN-13012: the handler
+    positions the consumer (assign + seek_to_end) BEFORE publishing its command,
+    then waits AFTER, so a terminal emitted in the publish→wait gap is not seeked
+    past.
 
     Without this injection the handler falls back to its own no-op default that
     returns ``None`` immediately — never honoring the timeout, so every result
     row is a degenerate generation-failure even though the terminal event arrives
-    moments later. The concrete consumer here runs the correlate-and-wait loop on
-    an isolated event loop in a worker thread so blocking does not deadlock the
+    moments later. The concrete consumer runs the correlate-and-wait loop on an
+    isolated event loop in a worker thread so blocking does not deadlock the
     runtime dispatch loop that delivers the awaited terminal.
     """
     from omnibase_infra.runtime.service_terminal_event_consumer import (
