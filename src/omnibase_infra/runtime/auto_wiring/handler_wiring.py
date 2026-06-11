@@ -1541,6 +1541,7 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
         {
             "event_bus",
             "event_publisher",
+            "event_consumer",
             "dispatch_port",
             "provisioner",
             "drain_proof_gate",
@@ -1596,6 +1597,36 @@ def _make_sync_event_publisher(
         task.add_done_callback(_log_publish_failure)
 
     return _publish
+
+
+def _make_sync_event_consumer(
+    *,
+    event_bus: object,
+    handler_name: str,
+) -> Callable[[str, str, float], dict[str, object] | None]:
+    """Materialize the blocking terminal-event consumer for request/response handlers.
+
+    Mirror of ``_make_sync_event_publisher`` for the consume leg. Some EFFECT
+    handlers (e.g. ``HandlerContextRoiRunner``, OMN-13005) publish a command and
+    then block on the correlated terminal event, reading result fields back from
+    its payload. They declare an injectable ``event_consumer`` with the sync shape
+    ``(terminal_topic, correlation_id, timeout_seconds) -> dict | None``.
+
+    Without this injection the handler falls back to its own no-op default that
+    returns ``None`` immediately — never honoring the timeout, so every result
+    row is a degenerate generation-failure even though the terminal event arrives
+    moments later. The concrete consumer here runs the correlate-and-wait loop on
+    an isolated event loop in a worker thread so blocking does not deadlock the
+    runtime dispatch loop that delivers the awaited terminal.
+    """
+    from omnibase_infra.runtime.service_terminal_event_consumer import (
+        make_terminal_event_consumer,
+    )
+
+    return make_terminal_event_consumer(
+        event_bus=event_bus,
+        handler_name=handler_name,
+    )
 
 
 def _contracts_root_for_runtime_dependencies() -> Path:
@@ -1681,10 +1712,12 @@ def _materialize_known_handler_dependencies(
     requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
     required_params = _required_handler_init_params(handler_cls)
     requires_event_publisher = "event_publisher" in constructor_params
+    requires_event_consumer = "event_consumer" in constructor_params
     if (
         not required_params
         and not requires_delegation_port
         and not requires_event_publisher
+        and not requires_event_consumer
     ):
         return materialized_explicit_dependencies
     available = {
@@ -1701,10 +1734,16 @@ def _materialize_known_handler_dependencies(
             event_bus=event_bus,
             handler_name=handler_name,
         )
+    if requires_event_consumer and event_bus is not None:
+        available["event_consumer"] = _make_sync_event_consumer(
+            event_bus=event_bus,
+            handler_name=handler_name,
+        )
     if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
         available.update(_build_topic_migration_executor_dependencies())
     if not (
         requires_event_publisher
+        or requires_event_consumer
         or required_params.intersection(
             {"container", "ownership_query", "dispatch_port"}
         )
@@ -1739,6 +1778,8 @@ def _materialize_known_handler_dependencies(
         handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
     if requires_event_publisher and "event_publisher" in available:
         handler_dependencies.setdefault("event_publisher", available["event_publisher"])
+    if requires_event_consumer and "event_consumer" in available:
+        handler_dependencies.setdefault("event_consumer", available["event_consumer"])
     merged[handler_name] = handler_dependencies
     return merged
 
