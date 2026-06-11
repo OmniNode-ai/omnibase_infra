@@ -39,11 +39,24 @@ def test_runtime_policy_contract_controls_all_runtime_lane_ports() -> None:
     assert contract.llm_cloud_endpoint_host_allowlist == (
         "generativelanguage.googleapis.com",
         "api.z.ai",
+        "aiplatform.googleapis.com",
     )
     assert (
         rendered_env["LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST"]
-        == "generativelanguage.googleapis.com,api.z.ai"
+        == "generativelanguage.googleapis.com,api.z.ai,aiplatform.googleapis.com"
     )
+    assert (
+        contract.bifrost_vertex_gemini_endpoint_url
+        == "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
+    )
+    assert (
+        rendered_env["BIFROST_VERTEX_GEMINI_ENDPOINT_URL"]
+        == contract.bifrost_vertex_gemini_endpoint_url
+    )
+    assert contract.google_cloud_project == "gen-lang-client-0084338881"
+    assert rendered_env["GOOGLE_CLOUD_PROJECT"] == contract.google_cloud_project
+    assert contract.google_cloud_location == "us-central1"
+    assert rendered_env["GOOGLE_CLOUD_LOCATION"] == contract.google_cloud_location
 
     expected_ports = {
         "DEV_RUNTIME_MAIN_PORT": contract.profiles["dev"].main_port,
@@ -81,6 +94,7 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "llm.openrouter.api_key",
         "llm.glm.api_key",
         "llm.gemini.api_key",
+        "llm.vertex.access_token",
     }
     assert judge_logical_names == logical_names
     assert (
