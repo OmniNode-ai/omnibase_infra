@@ -564,6 +564,56 @@ stage_workspace_if_needed() {
     log_step "Stage Workspace Sibling Repos"
     log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
     (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
+
+    check_sibling_lock_pins "${repo_root}" "${omni_home}"
+}
+
+check_sibling_lock_pins() {
+    # Fail-fast preflight (OMN-12987): every vendored sibling's version/SHA must
+    # match the consuming repo's (omnimarket) uv.lock pin. The 2026-06-11
+    # stability crash shipped a 13-day-stale infra 0.37.0 because the build
+    # ignored the dev lock; this guard refuses to build a stale image.
+    local repo_root="$1"
+    local omni_home="$2"
+    local guard="${repo_root}/scripts/runtime_build/check_sibling_lock_pins.py"
+    if [[ ! -f "${guard}" ]]; then
+        log_error "Sibling lock-pin preflight not found: ${guard}"
+        log_error "Cannot verify vendored siblings match the consuming lock. Aborting."
+        exit 1
+    fi
+
+    log_step "Sibling Lock-Pin Preflight (OMN-12987)"
+    # Write under sibling-repos/ so it rides along with the directory the
+    # Dockerfile already COPYs into the build image (no extra COPY needed).
+    mkdir -p "${repo_root}/workspace/sibling-repos"
+    local provenance_out="${repo_root}/workspace/sibling-repos/.sibling-lock-pins.json"
+    local python_bin
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the sibling lock-pin preflight."
+        exit 1
+    fi
+
+    log_cmd "OMNI_HOME=${omni_home} ${guard} --provenance-out ${provenance_out}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! OMNI_HOME="${omni_home}" uv run --project "${repo_root}" python "${guard}" \
+            --provenance-out "${provenance_out}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    else
+        if ! OMNI_HOME="${omni_home}" "${python_bin}" "${guard}" \
+            --provenance-out "${provenance_out}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    fi
+    log_info "Sibling lock-pin preflight passed: all vendored siblings match the lock."
 }
 
 check_git_dirty() {
@@ -1115,6 +1165,9 @@ if spec and spec.origin:
     log_cmd "rsync -a --delete workspace/sibling-repos/ -> deployed"
     rsync -a --delete \
         "${repo_root}/workspace/sibling-repos/" "${deploy_target}/workspace/sibling-repos/"
+    # The lock-pin preflight result (OMN-12987) lives under sibling-repos/ as
+    # .sibling-lock-pins.json, so the rsync above already carries it into the
+    # build context for the in-image provenance merge.
 
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."

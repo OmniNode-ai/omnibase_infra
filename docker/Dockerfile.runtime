@@ -320,7 +320,7 @@ RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
     else \
-        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": []\n}\n' \
+        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": [],\n  "lock_pin_comparison": []\n}\n' \
             "${BUILD_DATE:-unknown}" "${VCS_REF:-unknown}" > /app/build-provenance.json; \
     fi
 

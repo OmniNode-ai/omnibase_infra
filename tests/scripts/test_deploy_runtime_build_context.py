@@ -142,3 +142,35 @@ def test_deploy_runtime_stages_workspace_and_passes_omni_home_arg() -> None:
         '--build-arg "EXPECTED_BUILD_SOURCE=${expected_build_source}"' in deploy_script
     )
     assert '--build-arg "OMNI_HOME=${omni_home}"' in deploy_script
+
+
+@pytest.mark.unit
+def test_deploy_runtime_runs_sibling_lock_pin_preflight() -> None:
+    """Workspace staging must run the OMN-12987 lock-pin preflight before build.
+
+    Recurrence guard: the 2026-06-11 stability crash shipped a 13-day-stale
+    infra 0.37.0 because the build ignored the omnimarket dev lock. The deploy
+    script must invoke check_sibling_lock_pins after staging and abort on
+    failure.
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    # The preflight is called from stage_workspace_if_needed after staging.
+    assert 'check_sibling_lock_pins "${repo_root}" "${omni_home}"' in deploy_script
+    # The preflight function references the guard script and aborts on failure.
+    assert "scripts/runtime_build/check_sibling_lock_pins.py" in deploy_script
+    assert "Refusing to build a stale image." in deploy_script
+
+
+@pytest.mark.unit
+def test_stage_workspace_emits_build_sha_marker() -> None:
+    """stage_workspace.sh must record each sibling's HEAD SHA (OMN-12987).
+
+    rsync drops .git, so without a .build-sha marker the staged tree has no
+    recoverable SHA and the lock-pin preflight cannot verify the vendored commit.
+    """
+    stage_script = (
+        DEPLOY_SCRIPT.parent / "runtime_build" / "stage_workspace.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'git -C "${src}" rev-parse HEAD > "${dst}/.build-sha"' in stage_script
