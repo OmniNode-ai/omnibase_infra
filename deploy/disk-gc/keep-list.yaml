@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# keep-list.yaml — Versioned protect-list for the .201 conservative docker/disk GC.
+#
+# OMN-13008. This file is the single source of truth for what disk-gc.sh must NOT
+# remove. It is read at runtime by disk-gc.sh; nothing is hardcoded in the script.
+#
+# How matching works:
+#   - keep_image_repos:  any docker image whose repository name contains one of
+#                        these substrings is NEVER removed, regardless of age.
+#                        Use this for the live runtime image family and any
+#                        image you may need to roll back to.
+#   - keep_image_tags:   any image whose ":tag" matches one of these (exact tag
+#                        match) is NEVER removed. Use for tagged rollback sets.
+#   - protect_running:   when true (default), images referenced by any container
+#                        (running OR stopped) are always kept even if not listed
+#                        above. This is the backstop that prevents pulling the
+#                        rug out from a lane mid-flight.
+#
+# Maintenance: when promoting a new runtime image generation, add its tag to
+# keep_image_tags so the GC keeps the prior generation as a rollback target for
+# `superseded_image_keep_generations` cycles. Do NOT hardcode tags in the script.
+schema_version: "1.0.0"
+# Image repositories (substring match) that are always retained.
+keep_image_repos:
+  - omninode-runtime
+  - omnibase-infra
+  - omnibase-intelligence
+  - omnimarket
+  - omnidash
+  - projection-api
+  # Core infra base images — removing these forces slow re-pulls and can wedge a
+  # lane restart while /data is already tight.
+  - postgres
+  - redpandadata/redpanda
+  - valkey
+# Exact image tags (the part after ':') that are always retained — tagged
+# rollback sets. Update on each promotion.
+keep_image_tags:
+  - latest
+  - stable
+  - rollback
+# Keep images referenced by any container (running or stopped). The live lane
+# backstop. Disable only with explicit operator approval.
+protect_running: true
+# How many superseded (untagged-by-keep_image_tags) generations of a kept repo
+# to retain before the oldest become eligible for removal once older than
+# superseded_image_max_age_days. Belt-and-suspenders with age.
+superseded_image_keep_generations: 2
+# Age threshold (days) below which NOTHING is removed, even dangling images.
+# Conservative: a just-built image is never reaped.
+min_age_days: 3
