@@ -12,9 +12,8 @@
 #     names no consumer-attached profile, so its subscriptions are never drained
 #
 # Pre-existing violators are frozen in
-# validation/runtime_profiles_allowlist.yaml (drain tracked by OMN-12982); the
-# validator discovers that file by walking up from each scanned contract to the
-# repo root (pyproject.toml). The gate blocks NEW orphans.
+# config/validation/runtime_profiles_allowlist.yaml (drain tracked by OMN-12982); the
+# workflow passes that repo-local path explicitly. The gate blocks NEW orphans.
 #
 # Required status check context: "Runtime Profiles / validate".
 
@@ -75,7 +74,7 @@ jobs:
           )
 
           result = ValidatorRuntimeProfiles(
-              allowlist_path=Path("validation/runtime_profiles_allowlist.yaml")
+              allowlist_path=Path("config/validation/runtime_profiles_allowlist.yaml")
           ).validate(Path("src"))
           for issue in result.issues:
               print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
