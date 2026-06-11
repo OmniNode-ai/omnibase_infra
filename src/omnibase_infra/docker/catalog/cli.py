@@ -27,6 +27,9 @@ import yaml
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
+from omnibase_infra.docker.catalog.validator_healthcheck_start_period import (
+    validate_migration_gate_start_period,
+)
 
 _OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
 
@@ -338,6 +341,12 @@ def cmd_validate_runtime(args: list[str]) -> int:
                 f"{svc_name}: {key!r} appears in both operational_defaults and required_env"
                 " (required_env wins — consider removing from operational_defaults)"
             )
+
+    # Migration-completion gates must keep start_period above the floor so a
+    # still-applying gate is reported `starting`, not UNHEALTHY (OMN-12973).
+    start_period_result = validate_migration_gate_start_period(resolved.manifests)
+    for violation in start_period_result.violations:
+        errors.append(violation.message())
 
     if warnings:
         for w in warnings:
