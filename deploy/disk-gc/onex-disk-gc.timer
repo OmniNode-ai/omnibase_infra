@@ -21,9 +21,13 @@ Documentation=https://github.com/OmniNode-ai/omnibase_infra
 [Timer]
 # First run 5 min after the user manager starts (let docker settle).
 OnStartupSec=5min
-# Then hourly. Watermark alerts need to be timely; GC is idempotent + conservative.
-OnUnitActiveSec=1h
-# Fire a missed run on resume (laptop/host sleep, reboots).
+# Then every hour on a calendar schedule. Calendar recurrence re-arms reliably for
+# a oneshot service (OnUnitActiveSec does not always re-elapse once the unit goes
+# inactive). Watermark alerts stay timely; GC is idempotent + conservative.
+OnCalendar=hourly
+# Spread load a little so it never lines up with other top-of-hour jobs.
+RandomizedDelaySec=2min
+# Fire a missed run on resume (host sleep, reboots).
 Persistent=true
 Unit=onex-disk-gc.service
 
