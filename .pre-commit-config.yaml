@@ -196,6 +196,22 @@ repos:
         files: '\.yaml$'
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-12957: runtime_profiles contract validator (omnibase_core).
+      # Enforces three rules on every node contract.yaml:
+      #   - runtime_profiles_missing (OMN-9886)
+      #   - runtime_profile_unregistered (declared profile not in the canonical
+      #     omnibase_core REGISTERED_RUNTIME_PROFILES registry)
+      #   - runtime_profile_no_consumer_lane (subscribing REDUCER/EFFECT names
+      #     no consumer-attached profile, so subscriptions are never drained)
+      # Pre-existing violators are frozen in validation/runtime_profiles_allowlist.yaml
+      # (discovered by repo-root walk; drain tracked by OMN-12982).
+      - id: onex-validate-runtime-profiles
+        name: Validate runtime_profiles on node contracts (OMN-12957)
+        entry: uv run --frozen python -m omnibase_core.validation.validator_runtime_profiles src/
+        language: system
+        files: 'contract\.yaml$'
+        pass_filenames: false
+        stages: [pre-commit]
       # Pattern validation - naming conventions
       - id: onex-validate-patterns
         name: ONEX Pattern Validation
