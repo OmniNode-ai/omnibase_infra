@@ -1,7 +1,19 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Topic Completeness Allowlist (OMN-3257)
+# Topic Completeness Temporary Suppressions (OMN-12979)
 #
-# All topics migrated to contract YAML or standalone manifests as of OMN-4622.
-# This file is intentionally empty.
-allowlist: []
+# Topic authority belongs in contract YAML and topics.yaml manifests, not in
+# this file. This file is only for temporary validation false positives.
+#
+# Every suppression entry must include:
+#   topic, owner, reason, created_at, expires_at, replacement_authority
+#
+# Example:
+# suppressions:
+#   - topic: onex.evt.example.temporary-topic.v1
+#     owner: "@infra"
+#     reason: "Waiting for contract authority to land."
+#     created_at: "2026-06-11"
+#     expires_at: "2026-06-18"
+#     replacement_authority: "src/omnibase_infra/nodes/example/contract.yaml"
+suppressions: []
