@@ -28,11 +28,11 @@ from pathlib import Path
 SIBLING_REPOS_DIR = Path("/workspace/sibling-repos")
 VENV_DIR = Path("/app/.venv")
 OUTPUT_MANIFEST = Path("/app/build-provenance.json")
-# Expected-vs-actual sibling pin comparison produced by the host-side lock-pin
-# preflight (check_sibling_lock_pins.py, OMN-12987). Staged under sibling-repos/
-# so it rides along into the build image. Absent on builds that skipped the
-# preflight (e.g. release mode); the manifest then records an empty comparison.
-LOCK_PIN_COMPARISON = SIBLING_REPOS_DIR / ".sibling-lock-pins.json"
+# Expected-vs-actual sibling-pin comparison emitted by the preflight
+# (check_sibling_lock_pins.py via stage_workspace.sh). Folded into the manifest
+# so deploy verifiers can assert the build honored the consuming repo's lock
+# (OMN-12977). Absent only for builds staged before the preflight existed.
+PIN_COMPARISON_PATH = Path("/workspace/sibling-pin-comparison.json")
 
 # Canonical set of sibling repos that workspace mode must provision.
 # Keys are the directory names under sibling-repos/; values are installed
@@ -62,7 +62,7 @@ def _hash_tree(root: Path) -> str:
     return h.hexdigest()
 
 
-def _installed_direct_url(dist_name: str) -> dict | None:
+def _installed_direct_url(dist_name: str) -> dict[str, object] | None:
     """Return the direct_url metadata dict for an installed package, or None."""
     try:
         dist = importlib.metadata.distribution(dist_name)
@@ -71,27 +71,33 @@ def _installed_direct_url(dist_name: str) -> dict | None:
     direct_url_text = dist.read_text("direct_url.json")
     if direct_url_text is None:
         return None
-    return json.loads(direct_url_text)
+    parsed: dict[str, object] = json.loads(direct_url_text)
+    return parsed
 
 
-def _load_lock_pin_comparison() -> list[dict]:
-    """Return the host-side expected-vs-actual sibling pin comparison.
+def _load_pin_comparison(errors: list[str]) -> dict[str, object] | None:
+    """Load the preflight's expected-vs-actual sibling-pin comparison.
 
-    The list is produced by check_sibling_lock_pins.py (OMN-12987) and staged
-    into the build image. Returns an empty list when the file is absent (the
-    preflight was skipped) so the manifest is always well-formed.
+    Returns the parsed comparison dict, or None when the artifact is absent
+    (e.g. a build staged before the preflight existed). A present-but-drifted
+    comparison is recorded as an error so the proof surfaces it.
     """
-    if not LOCK_PIN_COMPARISON.is_file():
-        return []
-    try:
-        data = json.loads(LOCK_PIN_COMPARISON.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+    if not PIN_COMPARISON_PATH.exists():
+        return None
+    comparison: dict[str, object] = json.loads(
+        PIN_COMPARISON_PATH.read_text(encoding="utf-8")
+    )
+    drift_count = comparison.get("drift_count", 0)
+    if drift_count and not comparison.get("allow_drift", False):
+        errors.append(
+            f"sibling-pin comparison reports {drift_count} unacknowledged "
+            "drift(s) -- the build vendored stale siblings (OMN-12977)."
+        )
+    return comparison
 
 
 def main() -> int:
-    proofs: list[dict] = []
+    proofs: list[dict[str, object]] = []
     errors: list[str] = []
 
     for repo_dir_name, pkg_name in WORKSPACE_PACKAGES.items():
@@ -119,10 +125,11 @@ def main() -> int:
             )
             continue
 
-        install_url = direct_url.get("url", "")
-        is_local = direct_url.get("dir_info", {}).get("editable") is not None or (
-            install_url.startswith("file://")
-        )
+        install_url_raw = direct_url.get("url", "")
+        install_url = install_url_raw if isinstance(install_url_raw, str) else ""
+        dir_info = direct_url.get("dir_info", {})
+        editable = dir_info.get("editable") if isinstance(dir_info, dict) else None
+        is_local = editable is not None or install_url.startswith("file://")
 
         if not is_local:
             errors.append(
@@ -158,15 +165,18 @@ def main() -> int:
             f"install={install_url}"
         )
 
-    lock_pin_comparison = _load_lock_pin_comparison()
+    # Fold in the sibling-pin comparison so deploy verifiers can confirm the
+    # build honored the consuming repo's uv.lock (OMN-12977). A drift here would
+    # already have aborted the build in the default (no-override) path; when an
+    # operator override was used, this records expected-vs-actual durably.
+    sibling_pin_comparison = _load_pin_comparison(errors)
+
     manifest = {
         "build_source": "workspace",
         "build_time": os.environ.get("BUILD_DATE", "unknown"),
         "vcs_ref": os.environ.get("VCS_REF", "unknown"),
         "proofs": proofs,
-        # OMN-12987: expected-vs-actual sibling lock pins so deploy verifiers can
-        # detect a stale-sibling build without re-running the host preflight.
-        "lock_pin_comparison": lock_pin_comparison,
+        "sibling_pin_comparison": sibling_pin_comparison,
     }
 
     OUTPUT_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
