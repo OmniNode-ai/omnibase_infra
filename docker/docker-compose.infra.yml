@@ -251,13 +251,13 @@ x-runtime-env: &runtime-env
   # <value>, so that file holds a short-lived OAuth access token minted from ADC
   # (`gcloud auth application-default print-access-token`), refreshed by the
   # operator/bootstrap (tokens expire ~1h). The token VALUE is never in committed
-  # config. These vars default empty so the Gemini key path keeps working on lanes
-  # where Vertex is not configured (provider-agnostic).
+  # config. These vars fail fast when the Vertex route is configured so a partial
+  # project/region/endpoint setup cannot silently disable the bearer path.
   # BIFROST_VERTEX_GEMINI_ENDPOINT_URL is the COMPLETE project+region Vertex
   # OpenAI-compat chat-completions URL, supplied by the overlay (OMN-12815).
-  BIFROST_VERTEX_GEMINI_ENDPOINT_URL: ${BIFROST_VERTEX_GEMINI_ENDPOINT_URL:-}
-  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
-  GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-}
+  BIFROST_VERTEX_GEMINI_ENDPOINT_URL: ${BIFROST_VERTEX_GEMINI_ENDPOINT_URL:?BIFROST_VERTEX_GEMINI_ENDPOINT_URL is required for Vertex Gemini routing}
+  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT is required for Vertex Gemini routing}
+  GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:?GOOGLE_CLOUD_LOCATION is required for Vertex Gemini routing}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}

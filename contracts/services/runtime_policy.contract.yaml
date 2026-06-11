@@ -10,6 +10,9 @@ llm_cloud_endpoint_host_allowlist:
   # part of the host (e.g. us-central1-aiplatform.googleapis.com); the suffix
   # below allows region-prefixed Vertex hosts for the ADC ($500-credit) path.
   - aiplatform.googleapis.com
+bifrost_vertex_gemini_endpoint_url: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions
+google_cloud_project: gen-lang-client-0084338881
+google_cloud_location: us-central1
 omnimemory_memgraph_port: 7687
 auxiliary_services_omnimemory_enabled: false
 profiles:
