@@ -644,11 +644,22 @@ services:
     networks:
       - omnibase-infra-network
     healthcheck:
+      # start_period must cover the real forward+intelligence migration window.
+      # This sentinel is a long-running keepalive (entrypoint above), NOT a
+      # one-shot; the healthcheck runs continuously against
+      # db_metadata.migrations_complete. On a cold prod volume the migrations
+      # take ~2 min to apply and stamp the flag (OMN-12973: prod gate started
+      # 09:35:22, intelligence-migration finished 09:37:18). With start_period
+      # 10s the gate left `starting` after 10s and was reported UNHEALTHY for
+      # ~2 min until migrations completed. start_period 180s keeps the gate in
+      # `health: starting` for the full migration window so a still-applying
+      # gate is never reported UNHEALTHY. Floor enforced by
+      # validate_migration_gate_start_period (OMN-12973).
       test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 10s
+      start_period: 180s
     logging: *logging-defaults
     restart: unless-stopped
     deploy:
