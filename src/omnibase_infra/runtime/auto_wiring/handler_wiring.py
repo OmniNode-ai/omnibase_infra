@@ -719,10 +719,52 @@ def _materialize_typed_event_envelope(
     )
 
 
+# Transport-envelope keys the runtime adds around the domain payload. When the
+# dispatch engine materializes a ModelEventEnvelope to a dict it nests the domain
+# fields under ``payload`` and carries routing metadata (``partition_key`` etc.)
+# alongside. Domain models never declare these keys, so a mapping that carries a
+# ``payload`` mapping plus any marker is a transport envelope to unwrap. Mirrors
+# omnimarket's ``_ENVELOPE_MARKER_KEYS`` predicate (OMN-12935/12936); the
+# auto-wiring kernel unwraps here because it constructs the typed model itself,
+# upstream of the handler's own coercion (OMN-12940).
+_ENVELOPE_MARKER_KEYS: frozenset[str] = frozenset(
+    {
+        "partition_key",
+        "event_type",
+        "envelope_id",
+        "event_id",
+        "correlation_id",
+        "__debug_trace",
+    }
+)
+
+
+def _is_transport_envelope(value: object) -> bool:
+    """True when ``value`` is a transport envelope wrapping a domain payload.
+
+    A transport envelope is a mapping that carries a ``payload`` mapping plus at
+    least one transport marker key. Requiring a marker avoids over-unwrapping a
+    legitimate domain model that happens to declare its own ``payload`` field.
+    """
+    return (
+        isinstance(value, Mapping)
+        and isinstance(value.get("payload"), Mapping)
+        and bool(_ENVELOPE_MARKER_KEYS & value.keys())
+    )
+
+
 def _extract_dispatch_payload(envelope: object) -> object:
-    if isinstance(envelope, Mapping):
-        return envelope.get("payload", envelope)
-    return getattr(envelope, "payload", envelope)
+    # The runtime may deliver a DOUBLE- (or deeper-) wrapped envelope, e.g.
+    # ``{"payload": {"payload": {domain}, ...markers}, "partition_key": None}``.
+    # Unwrap recursively until the domain payload is reached so the kernel's
+    # ``model_validate`` (and the post-handler correlation read) operate on the
+    # domain, not on an intermediate envelope (OMN-12940).
+    candidate: object = envelope
+    if not isinstance(candidate, Mapping):
+        candidate = getattr(candidate, "payload", candidate)
+    while _is_transport_envelope(candidate):
+        candidate = cast("Mapping[str, object]", candidate)["payload"]
+    return candidate
 
 
 def _extract_dispatch_topic(envelope: object) -> str:
@@ -779,12 +821,14 @@ def _normalize_handler_result(
 
     payload = _extract_dispatch_payload(envelope)
     correlation_candidate = _extract_dispatch_correlation_id(envelope, payload)
-    if isinstance(correlation_candidate, UUID):
-        correlation_id = correlation_candidate
-    elif isinstance(correlation_candidate, str) and correlation_candidate:
-        correlation_id = UUID(correlation_candidate)
-    else:
-        correlation_id = uuid4()
+    # Guard the coercion: a non-hex correlation candidate must fall back to a
+    # fresh uuid4() rather than crash dispatch with ``ValueError: badly formed
+    # hexadecimal UUID string`` (OMN-12940). ``_coerce_uuid_or_none`` already
+    # guards every other correlation read site (555/702/1207/1278).
+    coerced_correlation = _coerce_uuid_or_none(correlation_candidate)
+    correlation_id: UUID = (
+        coerced_correlation if isinstance(coerced_correlation, UUID) else uuid4()
+    )
 
     output_events: list[BaseModel] = []
     output_intents: tuple[object, ...] = ()
