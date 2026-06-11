@@ -55,6 +55,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_DELEGATION_FAILED_V1 = "onex.evt.omnibase-infra.delegation-failed.v1"  # onex.evt.omnibase-infra.delegation-failed.v1
     EVT_EVAL_COMPLETED_V1 = "onex.evt.omnibase-infra.eval-completed.v1"  # onex.evt.omnibase-infra.eval-completed.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
+    EVT_GATEWAY_HEARTBEAT_V1 = "onex.evt.omnibase-infra.gateway-heartbeat.v1"  # onex.evt.omnibase-infra.gateway-heartbeat.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.inference-response.v1"  # onex.evt.omnibase-infra.inference-response.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
