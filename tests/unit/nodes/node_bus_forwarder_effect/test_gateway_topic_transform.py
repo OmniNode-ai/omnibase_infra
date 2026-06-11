@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
 from __future__ import annotations
@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
     HandlerConsumeInbound,
     HandlerForwardOutbound,
@@ -85,6 +86,11 @@ def test_outbound_rejects_undeclared_topic() -> None:
         HandlerForwardOutbound(_config()).forward_outbound(envelope)
 
 
+def test_outbound_zero_arg_runtime_discovery_fails_fast_on_use() -> None:
+    with pytest.raises(ProtocolConfigurationError, match="ForwardOutbound"):
+        HandlerForwardOutbound().forward_outbound(_envelope())
+
+
 def test_inbound_strips_tenant_prefix_to_bare_contract_topic() -> None:
     envelope = _envelope(
         event_type="DelegationInferenceRequest",
@@ -122,3 +128,14 @@ def test_inbound_rejects_envelope_tenant_mismatch() -> None:
 
     with pytest.raises(ValueError, match="tenant_id"):
         HandlerConsumeInbound(_config()).consume_inbound(envelope)
+
+
+def test_inbound_zero_arg_runtime_discovery_fails_fast_on_use() -> None:
+    envelope = _envelope(
+        source_topic=f"tenant-acme.{INBOUND_TOPIC}",
+        wire_topic=f"tenant-acme.{INBOUND_TOPIC}",
+        canonical_topic=INBOUND_TOPIC,
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="ConsumeInbound"):
+        HandlerConsumeInbound().consume_inbound(envelope)
