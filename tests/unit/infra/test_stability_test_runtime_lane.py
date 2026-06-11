@@ -142,10 +142,36 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
 
 @pytest.mark.unit
 def test_stability_lane_runtime_worker_is_not_scaled_to_zero() -> None:
+    """OMN-12990: the worker replica count must fail-fast on the ledgered value.
+
+    The base compose default is ``${WORKER_REPLICAS:-0}``; a soft ``:-1`` default
+    here would silently re-introduce the silent-drop hole on any recreate that
+    omitted the policy env. The override must reference the contract-rendered
+    ``STABILITY_TEST_WORKER_REPLICAS`` with the ``:?`` fail-fast form so a missing
+    policy env aborts the recreate loudly instead of dropping the worker.
+    """
     overlay = _load_overlay()
     worker = overlay["services"]["runtime-worker"]
+    replicas = worker["deploy"]["replicas"]
 
-    assert worker["deploy"]["replicas"] == "${STABILITY_TEST_WORKER_REPLICAS:-1}"
+    assert replicas.startswith("${STABILITY_TEST_WORKER_REPLICAS:?")
+    assert ":-" not in replicas
+    assert replicas != "${STABILITY_TEST_WORKER_REPLICAS:-0}"
+    assert replicas != "${STABILITY_TEST_WORKER_REPLICAS:-1}"
+
+
+@pytest.mark.unit
+def test_stability_lane_worker_replicas_pinned_in_ledgered_policy_env() -> None:
+    """OMN-12990: the worker replica count is declared in the ledgered env.
+
+    The compose override is fail-fast on STABILITY_TEST_WORKER_REPLICAS; the value
+    itself must live in docker/runtime-policy.env (rendered from the runtime policy
+    contract), pinned to a running worker so a lane recreate preserves it.
+    """
+    policy_env = _load_runtime_policy_env()
+
+    assert policy_env["STABILITY_TEST_WORKER_REPLICAS"] == "1"
+    assert int(policy_env["STABILITY_TEST_WORKER_REPLICAS"]) >= 1
 
 
 @pytest.mark.unit

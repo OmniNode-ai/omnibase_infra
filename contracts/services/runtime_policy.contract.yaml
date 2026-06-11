@@ -54,6 +54,8 @@ profiles:
       worker:
         runtime_id: dev-worker
         runtime_address: runtime://omninode-pc/dev/worker
+        # OMN-12990: explicit worker replica pin in the ledgered config surface.
+        replicas: 1
         capabilities:
           - workflow.dispatch
           - contract.update
@@ -107,6 +109,8 @@ profiles:
       worker:
         runtime_id: stability-test-worker
         runtime_address: runtime://omninode-pc/stability-test/worker
+        # OMN-12990: explicit worker replica pin in the ledgered config surface.
+        replicas: 1
         capabilities:
           - workflow.dispatch
           - contract.update
@@ -160,6 +164,8 @@ profiles:
       worker:
         runtime_id: judge-worker
         runtime_address: runtime://judge-local/judge/worker
+        # OMN-12990: explicit worker replica pin in the ledgered config surface.
+        replicas: 1
         capabilities:
           - workflow.dispatch
           - contract.update
@@ -199,6 +205,8 @@ profiles:
       worker:
         runtime_id: prod-worker
         runtime_address: runtime://omninode-pc/prod/worker
+        # OMN-12990: explicit worker replica pin in the ledgered config surface.
+        replicas: 1
         capabilities:
           - workflow.dispatch
           - contract.update

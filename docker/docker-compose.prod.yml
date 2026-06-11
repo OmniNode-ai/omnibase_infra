@@ -216,6 +216,13 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.runtime.address=runtime://omninode-pc/prod/worker"
       - "com.omninode.runtime.id=prod-worker"
+    deploy:
+      # OMN-12990: fail-fast on the ledgered config value. Without this override
+      # the prod worker inherited the base ${WORKER_REPLICAS:-0} default and a
+      # plain recreate would silently run zero workers. Sourcing
+      # docker/runtime-policy.env supplies PROD_WORKER_REPLICAS=1; a recreate
+      # without it now fails loudly instead of dropping the worker with no signal.
+      replicas: ${PROD_WORKER_REPLICAS:?runtime policy contract must set PROD_WORKER_REPLICAS (source docker/runtime-policy.env)}
   agent-actions-consumer:
     profiles: !override ["prod-disabled"]
   skill-lifecycle-consumer:

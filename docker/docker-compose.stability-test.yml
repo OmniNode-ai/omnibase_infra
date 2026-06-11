@@ -234,7 +234,13 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"
       - "com.omninode.runtime.id=stability-test-worker"
     deploy:
-      replicas: ${STABILITY_TEST_WORKER_REPLICAS:-1}
+      # OMN-12990: fail-fast on the ledgered config value, NOT a soft :-1
+      # default. The base compose sets ${WORKER_REPLICAS:-0}; a plain recreate
+      # that omits the policy env would silently drop the worker. Sourcing
+      # docker/runtime-policy.env (rendered from runtime_policy.contract.yaml)
+      # supplies STABILITY_TEST_WORKER_REPLICAS=1; a recreate without it now
+      # fails loudly here instead of scaling the worker to zero with no signal.
+      replicas: ${STABILITY_TEST_WORKER_REPLICAS:?runtime policy contract must set STABILITY_TEST_WORKER_REPLICAS (source docker/runtime-policy.env)}
   agent-actions-consumer:
     profiles: !override ["stability-test-disabled"]
   skill-lifecycle-consumer:
