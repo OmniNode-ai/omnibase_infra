@@ -20,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 PROVENANCE_SCRIPT = (
     REPO_ROOT / "scripts" / "runtime_build" / "compute_workspace_provenance.py"
 )
+# Pin-resolution helper imported by the provenance script (OMN-12989). Isolated
+# test copies of the provenance script must place this alongside the copy so the
+# sys.path-relative import resolves — mirrors the Dockerfile's dual COPY.
+PIN_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "resolve_workspace_pins.py"
 STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 
 
@@ -222,7 +226,15 @@ def test_workspace_build_passes_build_date_and_vcs_ref(
 
     build_cmd = captured_cmds[0]
     assert "VCS_REF=deadbeef" in build_cmd
-    assert "RUNTIME_VERSION=0.38.0" in build_cmd
+    # RUNTIME_VERSION is sourced from the repo's own pyproject — read it the same
+    # way the executor does so this assertion never drifts on a version bump.
+    import tomllib
+
+    pyproject = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    expected_runtime_version = pyproject["project"]["version"]
+    assert f"RUNTIME_VERSION={expected_runtime_version}" in build_cmd
     assert any(a.startswith("BUILD_DATE=") for a in build_cmd)
 
 
@@ -261,6 +273,10 @@ def test_provenance_script_passes_with_valid_local_installs(
 
     patched_script = tmp_path / "compute_workspace_provenance_test.py"
     patched_script.write_text(script_src, encoding="utf-8")
+    # Co-locate the pin-resolution helper so the script's import resolves.
+    (tmp_path / "resolve_workspace_pins.py").write_text(
+        PIN_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
 
     # Patch importlib.metadata to simulate local installs
     mock_dist = MagicMock()
@@ -322,6 +338,9 @@ def test_provenance_script_missing_sibling_repo_exits_nonzero(
 
     patched_script = tmp_path / "compute_prov_missing.py"
     patched_script.write_text(script_src, encoding="utf-8")
+    (tmp_path / "resolve_workspace_pins.py").write_text(
+        PIN_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
 
     import sys
 
@@ -378,3 +397,147 @@ def test_dockerfile_workspace_copy_and_provenance_present() -> None:
     assert "build-provenance.json" in dockerfile
     assert "com.omninode.workspace_provenance_manifest" in dockerfile
     assert "--if-present" not in dockerfile
+
+
+def test_dockerfile_copies_pin_resolution_helper() -> None:
+    """OMN-12989: the pin-resolution helper must be copied beside the provenance
+    script so the in-image import resolves."""
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(
+        encoding="utf-8"
+    )
+    assert "scripts/runtime_build/resolve_workspace_pins.py" in dockerfile
+    assert "/workspace/resolve_workspace_pins.py" in dockerfile
+
+
+def _patched_provenance(tmp_path: Path, sibling_dir: Path, manifest_path: Path) -> Path:
+    """Write an isolated copy of the provenance script + helper, path-patched."""
+    script_src = PROVENANCE_SCRIPT.read_text(encoding="utf-8")
+    script_src = script_src.replace(
+        'SIBLING_REPOS_DIR = Path("/workspace/sibling-repos")',
+        f'SIBLING_REPOS_DIR = Path("{sibling_dir}")',
+    ).replace(
+        'OUTPUT_MANIFEST = Path("/app/build-provenance.json")',
+        f'OUTPUT_MANIFEST = Path("{manifest_path}")',
+    )
+    patched = tmp_path / "compute_prov_pins.py"
+    patched.write_text(script_src, encoding="utf-8")
+    (tmp_path / "resolve_workspace_pins.py").write_text(
+        PIN_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return patched
+
+
+_OMNIMARKET_LOCK = """
+version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "omnibase-compat"
+version = "0.5.1"
+source = { git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=4d887307aae34d9d40d389ba91070cb411ce3df5#4d887307aae34d9d40d389ba91070cb411ce3df5" }
+
+[[package]]
+name = "omnibase-infra"
+version = "0.38.1"
+source = { git = "https://github.com/OmniNode-ai/omnibase_infra.git?rev=e2dbdc950540df8bc59ca4370b2d4a0f5b8d6c59#e2dbdc950540df8bc59ca4370b2d4a0f5b8d6c59" }
+
+[[package]]
+name = "onex-change-control"
+version = "0.9.0"
+source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=4877d3c223517cb0c7e1eca462ba0f4d38916314" }
+
+[[package]]
+name = "omnimarket"
+version = "0.4.3"
+source = { editable = "." }
+"""
+
+
+def _stage_siblings(sibling_dir: Path) -> None:
+    """Create the three workspace siblings (compat, occ, omnimarket) at lock pin."""
+    for repo, version in (
+        ("omnibase_compat", "0.5.1"),
+        ("onex_change_control", "0.9.0"),
+        ("omnimarket", "0.4.3"),
+    ):
+        d = sibling_dir / repo
+        d.mkdir(parents=True)
+        name = repo.replace("_", "-")
+        (d / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "{version}"\n', encoding="utf-8"
+        )
+    (sibling_dir / "omnimarket" / "uv.lock").write_text(
+        _OMNIMARKET_LOCK, encoding="utf-8"
+    )
+
+
+def test_provenance_emits_pin_comparison_block(tmp_path: Path) -> None:
+    """OMN-12989: the manifest carries an expected-vs-actual pin_comparison block."""
+    import sys
+
+    sibling_dir = tmp_path / "workspace" / "sibling-repos"
+    sibling_dir.mkdir(parents=True)
+    _stage_siblings(sibling_dir)
+    manifest_path = tmp_path / "build-provenance.json"
+    patched = _patched_provenance(tmp_path, sibling_dir, manifest_path)
+
+    # Host infra version resolved from importlib.metadata is at/above pin in the
+    # test venv (>=0.38.1), so the infra self-check passes; here we only assert
+    # the comparison block is present and the staged siblings are recorded.
+    subprocess.run(
+        [sys.executable, str(patched)], capture_output=True, text=True, check=False
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "pin_comparison" in manifest
+    by_pkg = {e["package"]: e for e in manifest["pin_comparison"]}
+    # omnibase-compat staged at exactly the lock pin.
+    assert by_pkg["omnibase-compat"]["status"] == "exact"
+    assert by_pkg["omnibase-compat"]["match"] is True
+    # The host infra self-check appears only when omnibase-infra is installed in
+    # the running venv (always true in the build image; not in the deploy-agent
+    # venv). When present it must carry the lock-pinned expected version.
+    if "omnibase-infra" in by_pkg:
+        assert by_pkg["omnibase-infra"]["expected_version"] == "0.38.1"
+
+
+def test_build_comparisons_flags_host_infra_regression(tmp_path: Path) -> None:
+    """OMN-12989 (unit): the exact crash — host infra 0.37.0 vs lock pin 0.38.1.
+
+    Exercises build_comparisons directly with an explicit host-infra actual
+    version so the regression detection does not depend on the test venv.
+    """
+    mod = _load_resolve_module()
+    omnimarket = tmp_path / "omnimarket"
+    omnimarket.mkdir()
+    (omnimarket / "uv.lock").write_text(_OMNIMARKET_LOCK, encoding="utf-8")
+
+    # Synthesize a "host infra" pyproject tree at the stale crash version.
+    infra = tmp_path / "omnibase_infra"
+    infra.mkdir()
+    (infra / "pyproject.toml").write_text(
+        '[project]\nname = "omnibase-infra"\nversion = "0.37.0"\n', encoding="utf-8"
+    )
+
+    comparisons = mod.build_comparisons(
+        lock_path=omnimarket / "uv.lock",
+        siblings={"omnibase-infra": infra},
+    )
+    infra_cmp = next(c for c in comparisons if c.package == "omnibase-infra")
+    assert infra_cmp.status == "regression"
+    with pytest.raises(mod.WorkspacePinError):
+        mod.assert_pins_satisfied(comparisons)
+
+
+def _load_resolve_module():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "resolve_workspace_pins_provtest", str(PIN_SCRIPT)
+    )
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    return mod
