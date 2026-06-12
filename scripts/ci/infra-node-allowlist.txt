@@ -25,6 +25,9 @@ src/omnibase_infra/nodes/node_build_loop_projection_compute/handlers/__init__.py
 src/omnibase_infra/nodes/node_build_loop_projection_compute/handlers/handler_build_loop_projection.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_build_loop_write_effect/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_build_loop_write_effect/handlers/handler_build_loop_append.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/__init__.py  # OMN-12909: infra-owned tenant gateway bus bridge; enforces transport boundary, not business-domain logic.
+src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_consume_inbound.py  # OMN-12909: infra-owned tenant gateway bus bridge; strips cloud wire prefixes before local bus republish.
+src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_forward_outbound.py  # OMN-12909: infra-owned tenant gateway bus bridge; validates local topics before cloud bus forwarding.
 src/omnibase_infra/nodes/node_chain_orchestrator/handlers/__init__.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_learn_initiate.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_replay_complete.py  # OMN-10956 baseline: approved existing infra handler path; new business-domain handlers belong in omnimarket.
