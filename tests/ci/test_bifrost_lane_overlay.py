@@ -108,3 +108,53 @@ def test_overlay_env_has_all_four_bifrost_keys() -> None:
 def test_render_script_exists() -> None:
     """The render script must exist so operators can regenerate the sidecar."""
     assert RENDER_SCRIPT.exists(), f"Missing render script: {RENDER_SCRIPT}"
+
+
+COMPOSE_INFRA = ROOT / "docker" / "docker-compose.infra.yml"
+_RUNTIME_SERVICES_NEEDING_BIFROST = frozenset(
+    {"omninode-runtime", "runtime-effects", "runtime-worker"}
+)
+
+
+def test_compose_env_file_is_service_level_not_top_level() -> None:
+    """OMN-12864: dev.bifrost.env must be wired as a service-level env_file, not top-level.
+
+    Docker Compose v2 schema rejects 'env_file' as an additional property at the
+    top level (outside of 'services'). The committed sidecar must be wired
+    per-service so compose config renders cleanly in CI.
+    """
+    import yaml
+
+    text = COMPOSE_INFRA.read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+
+    # Top-level env_file is schema-invalid in compose v2 — must be absent.
+    assert "env_file" not in data, (
+        "docker-compose.infra.yml has a top-level 'env_file' key which is schema-invalid "
+        "in Docker Compose v2. Move it to service-level env_file blocks."
+    )
+
+
+def test_runtime_services_have_bifrost_env_file() -> None:
+    """OMN-12864: Runtime services that render Bifrost must declare the committed env_file.
+
+    This ensures BIFROST_LOCAL_* vars flow into the three runtime containers from
+    the committed overlay, not from ephemeral shell exports.
+    """
+    import yaml
+
+    data = yaml.safe_load(COMPOSE_INFRA.read_text(encoding="utf-8"))
+    services = data.get("services", {})
+
+    for svc in _RUNTIME_SERVICES_NEEDING_BIFROST:
+        assert svc in services, f"Service {svc!r} not found in compose file"
+        svc_cfg = services[svc]
+        env_files = svc_cfg.get("env_file", [])
+        assert isinstance(env_files, list) and env_files, (
+            f"Service {svc!r} has no env_file block — "
+            "BIFROST_LOCAL_* overlay won't reach this container"
+        )
+        paths = [(e["path"] if isinstance(e, dict) else e) for e in env_files]
+        assert any("dev.bifrost.env" in p for p in paths), (
+            f"Service {svc!r} env_file does not include dev.bifrost.env. Found: {paths}"
+        )
