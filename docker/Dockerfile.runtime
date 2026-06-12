@@ -266,6 +266,10 @@ COPY workspace/sibling-repos/ /workspace/sibling-repos/
 
 # Copy provenance helper (always present — used in workspace mode, no-op otherwise)
 COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_workspace_provenance.py
+# Pin-resolution helper imported by the provenance script (OMN-12989): enforces
+# that staged siblings honor the consuming repo's uv.lock pins. Must sit beside
+# the provenance script so its sys.path-relative import resolves inside the image.
+COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspace_pins.py
 
 # Copy the sibling-pin comparison emitted by the preflight (OMN-12977). A
 # committed placeholder makes this COPY always valid; workspace mode overwrites

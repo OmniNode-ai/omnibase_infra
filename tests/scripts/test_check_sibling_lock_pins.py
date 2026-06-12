@@ -20,6 +20,7 @@ _SCRIPT = _REPO_ROOT / "scripts" / "runtime_build" / "check_sibling_lock_pins.py
 _PROVENANCE_SCRIPT = (
     _REPO_ROOT / "scripts" / "runtime_build" / "compute_workspace_provenance.py"
 )
+_PIN_SCRIPT = _REPO_ROOT / "scripts" / "runtime_build" / "resolve_workspace_pins.py"
 
 _LOCK_INFRA_REV = "e2dbdc950540df8bc59ca4370b2d4a0f5b8d6c59"
 _LOCK_CORE_REV = "c97c2c9a45c5fb0def5fb7dacfd5f01278bb9f55"
@@ -196,6 +197,10 @@ def _write_patched_provenance_script(
     )
     patched = tmp_path / "compute_workspace_provenance_patched.py"
     patched.write_text(script_src, encoding="utf-8")
+    (tmp_path / "resolve_workspace_pins.py").write_text(
+        _PIN_SCRIPT.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     return patched
 
 
@@ -225,10 +230,11 @@ def test_provenance_script_folds_sibling_pin_comparison(tmp_path: Path) -> None:
         tmp_path, sibling_dir, manifest_path, comparison_path
     )
 
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(patched)], capture_output=True, text=True, check=False
     )
 
+    assert manifest_path.exists(), result.stderr
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["sibling_pin_comparison"] == pin_payload
 
@@ -242,9 +248,10 @@ def test_provenance_script_uses_none_when_pin_comparison_absent(tmp_path: Path) 
         tmp_path, sibling_dir, manifest_path, comparison_path
     )
 
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(patched)], capture_output=True, text=True, check=False
     )
 
+    assert manifest_path.exists(), result.stderr
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["sibling_pin_comparison"] is None
