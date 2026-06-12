@@ -316,13 +316,24 @@ class TerminalEventConsumer:
         self._handler_name = handler_name
 
     def open(self, terminal_topic: str) -> TerminalConsumerSession:
-        """Open a positioned (assign + seek_to_end NOW) session before publishing."""
+        """Open a positioned (assign + seek_to_end NOW) session before publishing.
+
+        The session constructor starts its worker loop thread immediately, so a
+        failure inside ``session.open()`` (consumer start timeout, partition-assign
+        timeout, broker auth error) must close the session before re-raising —
+        otherwise the thread and its event loop leak with no reachable handle
+        (OMN-13058).
+        """
         session = TerminalConsumerSession(
             event_bus=self._event_bus,
             handler_name=self._handler_name,
             terminal_topic=terminal_topic,
         )
-        return session.open()
+        try:
+            return session.open()
+        except BaseException:
+            session.close()
+            raise
 
     def __call__(
         self, terminal_topic: str, correlation_id: str, timeout_seconds: float
