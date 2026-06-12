@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-disk-gc.service — .201 disk maintenance pass (OMN-13008).
+#
+# A systemd USER unit (NOT a lane container). One-shot maintenance run, triggered
+# by onex-disk-gc.timer. Runs three conservative passes in order:
+#   1. worktree-gc.sh   — remove merged+clean worktrees (drives prune-worktrees.sh)
+#   2. disk-gc.sh       — conservative docker/builder/image GC honoring keep-list
+#   3. disk-watermark-check.sh — emit bus alert if /data crosses the watermark
+#
+# Install (on .201, as the runtime user — NO sudo, user scope):
+#   bash deploy/disk-gc/install-disk-gc.sh
+#
+# Check:
+#   systemctl --user status onex-disk-gc.timer
+#   journalctl --user -u onex-disk-gc.service -f
+
+[Unit]
+Description=ONEX .201 disk maintenance (worktree GC + docker GC + watermark alert)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+
+[Service]
+Type=oneshot
+
+# Resolve OMNI_HOME for the runtime user on .201.
+Environment="OMNI_HOME=%h/Code/omni_home"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# KAFKA_BOOTSTRAP_SERVERS for the watermark bus publish is sourced from the
+# operator env file (not hardcoded in source). Optional ('-' prefix): if the
+# file is absent the watermark check still runs but logs the event instead of
+# publishing (fail-soft on the alert publish, never a silent default broker).
+EnvironmentFile=-%h/.omnibase/.env
+
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex
+
+# 1. Merged-worktree GC (drives the canonical prune-worktrees.sh safety logic).
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/worktree-gc.sh --execute --worktrees-root /data/omninode/omni_worktrees
+
+# 2. Conservative docker/disk GC honoring the versioned keep-list.
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-gc.sh --execute
+
+# 3. Watermark alert ratchet (non-zero exit on breach is expected; do not fail the unit).
+ExecStart=-/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-watermark-check.sh --mount /data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-disk-gc
+
+[Install]
+WantedBy=default.target

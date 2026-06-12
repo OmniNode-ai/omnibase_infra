@@ -59,6 +59,15 @@ for repo in "${SIBLING_REPOS[@]}"; do
         --exclude='.venv' \
         --exclude='*.egg-info' \
         "${src}/" "${dst}/"
+    # Record the source HEAD SHA so the lock-pin preflight and provenance can
+    # identify exactly which commit was vendored. rsync drops .git, so without
+    # this marker the staged tree has no recoverable SHA (OMN-12987).
+    if git -C "${src}" rev-parse HEAD >/dev/null 2>&1; then
+        git -C "${src}" rev-parse HEAD > "${dst}/.build-sha"
+    else
+        echo "ERROR: cannot resolve HEAD SHA for ${src}; refusing to stage an unverifiable tree" >&2
+        exit 3
+    fi
 done
 
 echo "workspace staging complete: ${#SIBLING_REPOS[@]} repos staged to ${STAGING_DIR}"

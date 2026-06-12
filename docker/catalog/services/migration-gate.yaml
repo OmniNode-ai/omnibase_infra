@@ -14,12 +14,23 @@ hardcoded_env:
 operational_defaults:
   POSTGRES_USER: postgres
 ports: null
+# start_period_s must cover the real forward+intelligence migration window.
+# The sentinel is a long-running keepalive (`while true; sleep 3600`) with a
+# continuous healthcheck against db_metadata.migrations_complete; it is NOT a
+# one-shot. On a cold prod volume, forward-migration + intelligence-migration
+# take ~2 min to apply and stamp the flag (OMN-12973: prod gate started
+# 09:35:22, intelligence-migration finished 09:37:18). With start_period_s=10
+# the gate exited `starting` after 10s and was reported UNHEALTHY for ~2 min
+# until migrations completed. start_period_s=180 keeps the gate in
+# `health: starting` for the full migration window so a still-applying gate is
+# never reported UNHEALTHY. The start_period floor is enforced by
+# validate_migration_gate_start_period (OMN-12973).
 healthcheck:
   test: sh /check_migrations_complete.sh
   interval_s: 10
   timeout_s: 5
   retries: 30
-  start_period_s: 10
+  start_period_s: 180
 volumes:
   - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
 depends_on:

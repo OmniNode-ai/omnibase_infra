@@ -234,7 +234,13 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/worker"
       - "com.omninode.runtime.id=stability-test-worker"
     deploy:
-      replicas: ${STABILITY_TEST_WORKER_REPLICAS:-1}
+      # OMN-12988: pin the worker to a literal 1 — the base infra compose
+      # defaults runtime-worker to replicas 0 (${WORKER_REPLICAS:-0}), so a
+      # plain compose up/recreate would silently drop the stability-lane worker
+      # (4-container census: main, effects, worker, projection-api). A literal
+      # (not ${VAR:-1} env indirection) means no stray exported env var can
+      # scale it back to 0 with zero signal.
+      replicas: 1
   agent-actions-consumer:
     profiles: !override ["stability-test-disabled"]
   skill-lifecycle-consumer:

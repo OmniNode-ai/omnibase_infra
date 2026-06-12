@@ -564,6 +564,56 @@ stage_workspace_if_needed() {
     log_step "Stage Workspace Sibling Repos"
     log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
     (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
+
+    check_sibling_lock_pins "${repo_root}" "${omni_home}"
+}
+
+check_sibling_lock_pins() {
+    # Fail-fast preflight (OMN-12987): every vendored sibling's version/SHA must
+    # match the consuming repo's (omnimarket) uv.lock pin. The 2026-06-11
+    # stability crash shipped a 13-day-stale infra 0.37.0 because the build
+    # ignored the dev lock; this guard refuses to build a stale image.
+    local repo_root="$1"
+    local omni_home="$2"
+    local guard="${repo_root}/scripts/runtime_build/check_sibling_lock_pins.py"
+    if [[ ! -f "${guard}" ]]; then
+        log_error "Sibling lock-pin preflight not found: ${guard}"
+        log_error "Cannot verify vendored siblings match the consuming lock. Aborting."
+        exit 1
+    fi
+
+    log_step "Sibling Lock-Pin Preflight (OMN-12987)"
+    # Write under sibling-repos/ so it rides along with the directory the
+    # Dockerfile already COPYs into the build image (no extra COPY needed).
+    mkdir -p "${repo_root}/workspace/sibling-repos"
+    local provenance_out="${repo_root}/workspace/sibling-repos/.sibling-lock-pins.json"
+    local python_bin
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the sibling lock-pin preflight."
+        exit 1
+    fi
+
+    log_cmd "OMNI_HOME=${omni_home} ${guard} --provenance-out ${provenance_out}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! OMNI_HOME="${omni_home}" uv run --project "${repo_root}" python "${guard}" \
+            --provenance-out "${provenance_out}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    else
+        if ! OMNI_HOME="${omni_home}" "${python_bin}" "${guard}" \
+            --provenance-out "${provenance_out}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    fi
+    log_info "Sibling lock-pin preflight passed: all vendored siblings match the lock."
 }
 
 check_git_dirty() {
@@ -1115,6 +1165,9 @@ if spec and spec.origin:
     log_cmd "rsync -a --delete workspace/sibling-repos/ -> deployed"
     rsync -a --delete \
         "${repo_root}/workspace/sibling-repos/" "${deploy_target}/workspace/sibling-repos/"
+    # The lock-pin preflight result (OMN-12987) lives under sibling-repos/ as
+    # .sibling-lock-pins.json, so the rsync above already carries it into the
+    # build context for the in-image provenance merge.
 
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
@@ -1349,6 +1402,11 @@ build_images() {
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    # OMN-12965: stamp org.opencontainers.image.version from pyproject so the
+    # runtime image carries a real version instead of the Dockerfile placeholder
+    # (0.1.0). A placeholder version degrades every proof packet.
+    local runtime_version
+    runtime_version="$(read_version "${deploy_target}")"
     local omni_home="${OMNI_HOME:-}"
     local build_source
     build_source="$(resolve_build_source)"
@@ -1375,7 +1433,9 @@ build_images() {
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
+        --build-arg "GIT_SHA=${git_sha}"
         --build-arg "VCS_REF=${git_sha}"
+        --build-arg "RUNTIME_VERSION=${runtime_version}"
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
         --build-arg "COMPOSE_PROJECT=${compose_project}"
@@ -1387,7 +1447,7 @@ build_images() {
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     )
 
-    log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -1551,6 +1611,20 @@ verify_deployment() {
     else
         log_warn "Could not read image label (container may not exist yet)."
     fi
+
+    # OMN-12965: verify org.opencontainers.image.version is a real version, not
+    # the Dockerfile placeholder (0.1.0) or blank. A placeholder/blank identity
+    # degrades every proof packet (runtime SHA + image digest are required
+    # citations in accepted evidence).
+    local version_label
+    version_label="$(docker inspect "${container_id}" \
+        --format='{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null || true)"
+    if [[ -z "${version_label}" || "${version_label}" == "0.1.0" ]]; then
+        log_error "Image version label is blank/placeholder: org.opencontainers.image.version='${version_label}'"
+        log_error "Runtime image identity is degraded (OMN-12965). Rebuild with RUNTIME_VERSION from pyproject."
+        exit 1
+    fi
+    log_info "Image version label OK: org.opencontainers.image.version=${version_label}"
 
     # 4. Log sentinel: entrypoint ran
     log_info "Checking log sentinels..."

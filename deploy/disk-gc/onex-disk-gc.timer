@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-disk-gc.timer — triggers the .201 disk maintenance pass (OMN-13008).
+#
+# Systemd USER timer. The watermark check runs hourly so /data alerts fire well
+# before detonation; the GC passes are conservative (keep-list + min_age_days) so
+# running hourly is safe and self-throttling.
+#
+# Install on .201 (user scope, no sudo):
+#   bash deploy/disk-gc/install-disk-gc.sh
+#
+# Check:
+#   systemctl --user list-timers onex-disk-gc.timer
+#   systemctl --user status onex-disk-gc.timer
+
+[Unit]
+Description=ONEX .201 disk maintenance timer (worktree + docker GC + watermark)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+# First run 5 min after the user manager starts (let docker settle).
+OnStartupSec=5min
+# Then every hour on a calendar schedule. Calendar recurrence re-arms reliably for
+# a oneshot service (OnUnitActiveSec does not always re-elapse once the unit goes
+# inactive). Watermark alerts stay timely; GC is idempotent + conservative.
+OnCalendar=hourly
+# Spread load a little so it never lines up with other top-of-hour jobs.
+RandomizedDelaySec=2min
+# Fire a missed run on resume (host sleep, reboots).
+Persistent=true
+Unit=onex-disk-gc.service
+
+[Install]
+WantedBy=timers.target

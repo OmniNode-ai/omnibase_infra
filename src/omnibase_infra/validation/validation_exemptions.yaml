@@ -727,6 +727,19 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-1139
   # ==========================================================================
+  # ModelConfigProvenance config_name Exemption (OMN-12958)
+  # ==========================================================================
+  # config_name is the logical config identifier string (e.g., "bifrost_delegation"),
+  # not an entity reference requiring ID + display_name.
+  - file_pattern: 'config_provenance\.py'
+    violation_pattern: "Field 'config_name' might reference an entity"
+    reason: >
+      config_name is a logical config identifier string (e.g., "bifrost_delegation") used to label which runtime-rendered contract a provenance record describes. It is not an entity reference and does not require the ID + display_name pattern.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-12958
+  # ==========================================================================
   # ModelIntrospectionConfig node_name Exemption (omnibase-core 0.14.0 upgrade)
   # ==========================================================================
   # node_name is a canonical identifier for consumer group derivation, not an entity reference.

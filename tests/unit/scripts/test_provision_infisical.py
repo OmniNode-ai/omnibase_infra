@@ -325,7 +325,82 @@ class TestMainAlreadyProvisioned:
         assert len(folder_calls) > 0
 
 
+# ---------------------------------------------------------------------------
+# Tests: main() — fresh-provision readiness gate (OMN-12966)
+# ---------------------------------------------------------------------------
+
+
+class _GatePassedError(Exception):
+    """Raised from the mocked bootstrap call to signal the fresh-provision
+    readiness gate was passed (i.e. did NOT short-circuit with return 1)."""
+
+
+@pytest.mark.unit
+class TestMainFreshProvisionReadinessGate:
+    """The fresh-provision path (no credentials in env) must accept both the
+    enterprise {"status": "ok"} and community {"message": "Ok"} status payloads
+    at its readiness gate before attempting bootstrap.
+
+    Regression for OMN-12966: the fresh-path gate only accepted {"status":
+    "ok"} and rejected the community-edition payload returned by the Infisical
+    instance deployed on .201, returning 1 before bootstrap could run.
+    """
+
+    def _empty_env(self, tmp_path: Path) -> Path:
+        env_file = tmp_path / ".env"
+        _write_env(env_file, "INFRA_HOST=192.168.86.201\n")  # no INFISICAL_* creds
+        return env_file
+
+    def _run_with_status(self, tmp_path: Path, status_body: dict[str, Any]) -> int:
+        env_file = self._empty_env(tmp_path)
+        status_resp = _make_httpx_response(200, status_body)
+
+        # First httpx.Client (readiness probe) returns the status body.
+        # Second httpx.Client (bootstrap flow) raises _GatePassedError so the test
+        # proves the gate was passed without exercising the full bootstrap.
+        probe_client = MagicMock()
+        probe_client.__enter__ = MagicMock(return_value=probe_client)
+        probe_client.__exit__ = MagicMock(return_value=False)
+        probe_client.get.return_value = status_resp
+
+        bootstrap_client = MagicMock()
+        bootstrap_client.__enter__ = MagicMock(side_effect=_GatePassedError())
+
+        with (
+            patch.object(_provision_mod, "_ENV_FILE", env_file),
+            patch.object(
+                _provision_mod, "_ADMIN_TOKEN_FILE", tmp_path / ".infisical-admin-token"
+            ),
+            patch("sys.argv", ["provision-infisical.py", f"--env-file={env_file}"]),
+            patch("httpx.Client", side_effect=[probe_client, bootstrap_client]),
+        ):
+            try:
+                return int(_main())
+            except _GatePassedError:
+                # Reaching the bootstrap client means the readiness gate passed.
+                return 0
+
+    def test_fresh_provision_community_edition_message_ok_passes_gate(
+        self, tmp_path: Path
+    ) -> None:
+        rc = self._run_with_status(tmp_path, {"message": "Ok"})
+        assert rc == 0  # gate passed (bootstrap reached via _GatePassedError)
+
+    def test_fresh_provision_enterprise_status_ok_passes_gate(
+        self, tmp_path: Path
+    ) -> None:
+        rc = self._run_with_status(tmp_path, {"status": "ok"})
+        assert rc == 0
+
+    def test_fresh_provision_not_ready_returns_1(self, tmp_path: Path) -> None:
+        # Neither status=ok nor message=Ok: gate must reject with rc=1, never
+        # reach bootstrap.
+        rc = self._run_with_status(tmp_path, {"message": "initializing"})
+        assert rc == 1
+
+
 __all__: list[str] = [
     "TestCreateInfisicalFoldersIdempotency",
     "TestMainAlreadyProvisioned",
+    "TestMainFreshProvisionReadinessGate",
 ]

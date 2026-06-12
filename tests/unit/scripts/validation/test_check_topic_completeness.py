@@ -11,10 +11,13 @@ from pathlib import Path
 import pytest
 
 from scripts.validation.check_topic_completeness import (
+    SuppressionConfigError,
     check_completeness,
     collect_registry_from_constants_file,
     collect_registry_from_contracts,
+    collect_registry_from_manifests,
     load_allowlist,
+    load_topic_suppressions,
     main,
     scan_source_for_topics,
 )
@@ -141,38 +144,75 @@ class TestScanSourceForTopics:
 
 
 @pytest.mark.unit
-class TestLoadAllowlist:
-    """Tests for allowlist loading."""
+class TestLoadTopicSuppressions:
+    """Tests for temporary suppression loading."""
 
-    def test_loads_yaml_format(self, tmp_path: Path) -> None:
+    def test_loads_metadata_rich_suppression(self, tmp_path: Path) -> None:
+        suppressions = tmp_path / "suppressions.yaml"
+        suppressions.write_text(
+            textwrap.dedent("""\
+            suppressions:
+              - topic: onex.evt.platform.test-topic.v1
+                owner: "@infra"
+                reason: "Waiting for contract authority to land."
+                created_at: "2026-06-11"
+                expires_at: "2099-06-11"
+                replacement_authority: "src/omnibase_infra/nodes/example/contract.yaml"
+            """)
+        )
+        topics = load_topic_suppressions(suppressions)
+        assert "onex.evt.platform.test-topic.v1" in topics
+
+    def test_empty_legacy_allowlist_returns_empty(self, tmp_path: Path) -> None:
+        allowlist = tmp_path / "allowlist.yaml"
+        allowlist.write_text("allowlist: []\n")
+        topics = load_allowlist(allowlist)
+        assert topics == set()
+
+    def test_legacy_allowlist_entries_are_rejected(self, tmp_path: Path) -> None:
         allowlist = tmp_path / "allowlist.yaml"
         allowlist.write_text(
             textwrap.dedent("""\
             allowlist:
               - onex.evt.platform.test-topic.v1
-              - onex.cmd.omniclaude.other-topic.v1
             """)
         )
-        topics = load_allowlist(allowlist)
-        assert "onex.evt.platform.test-topic.v1" in topics
-        assert "onex.cmd.omniclaude.other-topic.v1" in topics
+        with pytest.raises(SuppressionConfigError, match="legacy 'allowlist'"):
+            load_topic_suppressions(allowlist)
 
-    def test_loads_plain_text_format(self, tmp_path: Path) -> None:
-        allowlist = tmp_path / "allowlist.txt"
-        allowlist.write_text(
+    def test_missing_suppression_metadata_is_rejected(self, tmp_path: Path) -> None:
+        suppressions = tmp_path / "suppressions.yaml"
+        suppressions.write_text(
             textwrap.dedent("""\
-            # Comment line
-            onex.evt.platform.test-topic.v1
-            onex.cmd.omniclaude.other-topic.v1
+            suppressions:
+              - topic: onex.evt.platform.test-topic.v1
+                owner: "@infra"
+                reason: "Missing expiry and authority."
+                created_at: "2026-06-11"
             """)
         )
-        topics = load_allowlist(allowlist)
-        assert "onex.evt.platform.test-topic.v1" in topics
-        assert "onex.cmd.omniclaude.other-topic.v1" in topics
+        with pytest.raises(SuppressionConfigError, match="missing required field"):
+            load_topic_suppressions(suppressions)
 
     def test_nonexistent_file_returns_empty(self, tmp_path: Path) -> None:
-        topics = load_allowlist(tmp_path / "nope.yaml")
+        topics = load_topic_suppressions(tmp_path / "nope.yaml")
         assert topics == set()
+
+
+@pytest.mark.unit
+class TestCollectRegistryFromManifests:
+    """Tests for topics.yaml manifest topic extraction."""
+
+    def test_root_topics_yaml_is_registry_authority(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "topics.yaml"
+        manifest.write_text(
+            textwrap.dedent("""\
+            topics:
+              - onex.evt.platform.manifest-topic.v1
+            """)
+        )
+        topics = collect_registry_from_manifests([tmp_path])
+        assert "onex.evt.platform.manifest-topic.v1" in topics
 
 
 @pytest.mark.unit
@@ -201,18 +241,66 @@ class TestCheckCompleteness:
         assert len(unregistered) == 1
         assert unregistered[0][1] == "onex.evt.fake.unknown-topic.v1"
 
-    def test_allowlisted_topic_passes(self, tmp_path: Path) -> None:
-        # Source with a topic that is NOT in registry but IS in allowlist
+    def test_bare_allowlist_does_not_hide_unregistered_topic(
+        self, tmp_path: Path
+    ) -> None:
+        # Source with a topic that is NOT in registry but is in a legacy allowlist
         src = tmp_path / "module.py"
         src.write_text('MY_TOPIC = "onex.evt.fake.allowed-topic.v1"\n')
 
         allowlist = tmp_path / "allowlist.yaml"
         allowlist.write_text("allowlist:\n  - onex.evt.fake.allowed-topic.v1\n")
 
+        with pytest.raises(SuppressionConfigError, match="legacy 'allowlist'"):
+            check_completeness(src_root=tmp_path, allowlist_path=allowlist)
+
+    def test_unexpired_suppression_passes(self, tmp_path: Path) -> None:
+        # Source with a topic that is NOT in registry but has temporary metadata
+        src = tmp_path / "module.py"
+        src.write_text('MY_TOPIC = "onex.evt.fake.allowed-topic.v1"\n')
+
+        suppressions = tmp_path / "suppressions.yaml"
+        suppressions.write_text(
+            textwrap.dedent("""\
+            suppressions:
+              - topic: onex.evt.fake.allowed-topic.v1
+                owner: "@infra"
+                reason: "Temporary fixture while contract authority lands."
+                created_at: "2026-06-11"
+                expires_at: "2099-06-11"
+                replacement_authority: "contracts/example/contract.yaml"
+            """)
+        )
+
         unregistered, _ = check_completeness(
-            src_root=tmp_path, allowlist_path=allowlist
+            src_root=tmp_path, allowlist_path=suppressions
         )
         assert len(unregistered) == 0
+
+    def test_expired_suppression_does_not_hide_unregistered_topic(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "module.py"
+        src.write_text('MY_TOPIC = "onex.evt.fake.expired-topic.v1"\n')
+
+        suppressions = tmp_path / "suppressions.yaml"
+        suppressions.write_text(
+            textwrap.dedent("""\
+            suppressions:
+              - topic: onex.evt.fake.expired-topic.v1
+                owner: "@infra"
+                reason: "Expired fixture."
+                created_at: "2020-01-01"
+                expires_at: "2020-01-02"
+                replacement_authority: "contracts/example/contract.yaml"
+            """)
+        )
+
+        unregistered, _ = check_completeness(
+            src_root=tmp_path, allowlist_path=suppressions
+        )
+        assert len(unregistered) == 1
+        assert unregistered[0][1] == "onex.evt.fake.expired-topic.v1"
 
     def test_contract_registered_topic_passes(self, tmp_path: Path) -> None:
         # Create contract with topic
@@ -240,6 +328,28 @@ class TestCheckCompleteness:
         assert len(unregistered) == 0
         assert "onex.evt.platform.test-event.v1" in registry
 
+    def test_topics_yaml_registered_topic_passes(self, tmp_path: Path) -> None:
+        manifests = tmp_path / "manifests"
+        manifests.mkdir()
+        manifest = manifests / "topics.yaml"
+        manifest.write_text(
+            textwrap.dedent("""\
+            topics:
+              - onex.evt.platform.manifest-event.v1
+            """)
+        )
+
+        src = tmp_path / "src"
+        src.mkdir()
+        module = src / "module.py"
+        module.write_text('TOPIC = "onex.evt.platform.manifest-event.v1"\n')
+
+        unregistered, registry = check_completeness(
+            src_root=src, manifest_roots=[manifests]
+        )
+        assert len(unregistered) == 0
+        assert "onex.evt.platform.manifest-event.v1" in registry
+
 
 @pytest.mark.unit
 class TestMainCLI:
@@ -263,6 +373,17 @@ class TestMainCLI:
 
         result = main(["--src", str(tmp_path), "--quiet"])
         assert result == 1
+
+    def test_legacy_allowlist_returns_config_error(self, tmp_path: Path) -> None:
+        module = tmp_path / "module.py"
+        module.write_text('USE = "onex.evt.fake.unknown.v1"\n')
+        allowlist = tmp_path / "allowlist.yaml"
+        allowlist.write_text("allowlist:\n  - onex.evt.fake.unknown.v1\n")
+
+        result = main(
+            ["--src", str(tmp_path), "--allowlist", str(allowlist), "--quiet"]
+        )
+        assert result == 2
 
     def test_show_registry(self, tmp_path: Path) -> None:
         topics_file = tmp_path / "topics.py"
