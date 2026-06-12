@@ -1,0 +1,7 @@
+{
+  "lock_source": "placeholder",
+  "allow_drift": false,
+  "drift_count": 0,
+  "comparisons": [],
+  "_note": "Placeholder committed so the Dockerfile COPY always resolves. In workspace mode, stage_workspace.sh overwrites this with the real expected-vs-actual sibling-pin comparison (OMN-12977). Release mode ignores it."
+}
