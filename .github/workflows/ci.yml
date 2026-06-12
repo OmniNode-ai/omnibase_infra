@@ -127,7 +127,7 @@ jobs:
 
       # OMN-13026: Transport-mock lint. Bare AsyncMock/MagicMock without
       # spec=/spec_set= on EventBus/transport/kafka surfaces. Ratchet: existing
-      # violations frozen in validation/transport_mock_baseline.yaml. New
+      # violations frozen in config/validation/transport_mock_baseline.yaml. New
       # violations in any PR are blocked. Drain tracked by per-site tickets.
       # SYNC with pre-commit hook 'transport-mock-lint'.
       # Clone omnibase_core HEAD so the validator is available before the
@@ -136,7 +136,7 @@ jobs:
         run: |
           uv run python \
             -m omnibase_core.validators.transport_mock_lint \
-            --baseline validation/transport_mock_baseline.yaml \
+            --baseline config/validation/transport_mock_baseline.yaml \
             tests/
 
       - name: Run mypy type checking

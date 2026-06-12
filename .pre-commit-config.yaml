@@ -29,10 +29,10 @@ repos:
       - id: check-stub-implementations
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
       # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
-      # in validation/transport_mock_baseline.yaml (218 violations, 63 files).
+      # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
-        args: [--baseline, validation/transport_mock_baseline.yaml]
+        args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   - repo: https://github.com/OmniNode-ai/onex_change_control
