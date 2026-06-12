@@ -684,6 +684,88 @@ guard_prod_promotion_lineage() {
     log_info "Prod promotion-lineage guard passed: source clean + promoted."
 }
 
+guard_hotpatch_ledger() {
+    # Hot-patch ledger rebuild preflight (OMN-13014, retro B-1).
+    #
+    # In-container hot-patches (.prepatch sibling discipline) silently revert
+    # on any image rebuild / force-recreate. When a hot-patch ledger exists on
+    # this host, refuse to build a lane whose recorded patches have source PRs
+    # not merged into the build ref, or whose containers carry unledgered
+    # .prepatch files. Delegates to scripts/preflight_hotpatch_ledger.py.
+    # Sole bypass: HOTPATCH_PREFLIGHT_BYPASS with a Rule-10 user-approval
+    # receipt ('# skip-token-allowed: <receipt-id>'), validated by the gate.
+    local repo_root="$1"
+    local git_sha="$2"
+    local compose_project="$3"
+
+    log_step "Hot-Patch Ledger Preflight (OMN-13014)"
+
+    local ledger_path="${HOTPATCH_LEDGER_PATH:-/data/omninode/hotpatch-ledger/ledger.yaml}"
+    if [[ ! -f "${ledger_path}" ]]; then
+        log_warn "No hot-patch ledger at ${ledger_path} — nothing recorded on this host; gate skipped."
+        log_warn "If containers here carry live hot-patches, STOP and write the ledger first."
+        return 0
+    fi
+
+    local gate="${repo_root}/scripts/preflight_hotpatch_ledger.py"
+    if [[ ! -f "${gate}" ]]; then
+        log_error "Hot-patch ledger exists at ${ledger_path} but the gate script is missing: ${gate}"
+        log_error "Refusing to rebuild over recorded hot-patches without the preflight."
+        exit 1
+    fi
+
+    # Lane = compose project suffix (omnibase-infra-stability-test -> stability-test);
+    # the bare dev project (omnibase-infra) maps to lane 'dev'.
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+    if [[ -z "${lane}" ]]; then
+        lane="dev"
+    fi
+
+    # Workspace builds vendor sibling repos from OMNI_HOME clones; the gate
+    # resolves each ledger row's repo build ref (clone HEAD unless overridden
+    # via --build-ref) and runs git merge-base --is-ancestor per merge commit.
+    local clones_root="${OMNI_HOME:-}"
+    if [[ -z "${clones_root}" ]]; then
+        log_error "Hot-patch ledger present but OMNI_HOME is unset."
+        log_error "Cannot resolve build-input clones for the hot-patch preflight."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the hot-patch ledger preflight."
+        exit 1
+    fi
+
+    local gate_args=(
+        --lane "${lane}"
+        --ledger "${ledger_path}"
+        --clones-root "${clones_root}"
+        --build-ref "omnibase_infra=${git_sha}"
+    )
+    log_cmd "${gate} ${gate_args[*]}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! uv run --project "${repo_root}" python "${gate}" "${gate_args[@]}"; then
+            log_error "Hot-patch ledger preflight FAILED. Refusing to rebuild over live hot-patches."
+            exit 1
+        fi
+    else
+        if ! "${python_bin}" "${gate}" "${gate_args[@]}"; then
+            log_error "Hot-patch ledger preflight FAILED. Refusing to rebuild over live hot-patches."
+            exit 1
+        fi
+    fi
+
+    log_info "Hot-patch ledger preflight passed: all recorded patches merged into the build ref."
+}
+
 # =============================================================================
 # Concurrency Lock
 # =============================================================================
@@ -1832,6 +1914,11 @@ main() {
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+
+    # Hot-patch ledger preflight: refuse to rebuild over live in-container
+    # hot-patches whose source PRs are not merged into the build ref.
+    # Runs in both dry-run and execute modes (OMN-13014, retro B-1).
+    guard_hotpatch_ledger "${repo_root}" "${git_sha}" "${compose_project}"
 
     # --print-compose-cmd: show commands and exit
     if [[ "${PRINT_COMPOSE_CMD}" == true ]]; then
