@@ -49,6 +49,11 @@ OUTPUT_MANIFEST = Path("/app/build-provenance.json")
 # The consuming repo whose uv.lock pins the sibling versions. omnimarket dev's
 # lock is the authority the runtime image must honor.
 CONSUMING_REPO = "omnimarket"
+# Expected-vs-actual sibling-pin comparison emitted by the preflight
+# (check_sibling_lock_pins.py via stage_workspace.sh). Folded into the manifest
+# so deploy verifiers can assert the build honored the consuming repo's lock
+# (OMN-12977). Absent only for builds staged before the preflight existed.
+PIN_COMPARISON_PATH = Path("/workspace/sibling-pin-comparison.json")
 
 # Canonical set of sibling repos that workspace mode must provision.
 # Keys are the directory names under sibling-repos/; values are installed
@@ -115,6 +120,27 @@ def _host_infra_comparison(lock_path: Path) -> PinComparison | None:
         actual_version=installed_version,
         actual_rev=None,
     )
+
+
+def _load_pin_comparison(errors: list[str]) -> dict[str, object] | None:
+    """Load the preflight's expected-vs-actual sibling-pin comparison.
+
+    Returns the parsed comparison dict, or None when the artifact is absent
+    (e.g. a build staged before the preflight existed). A present-but-drifted
+    comparison is recorded as an error so the proof surfaces it.
+    """
+    if not PIN_COMPARISON_PATH.exists():
+        return None
+    comparison: dict[str, object] = json.loads(
+        PIN_COMPARISON_PATH.read_text(encoding="utf-8")
+    )
+    drift_count = comparison.get("drift_count", 0)
+    if drift_count and not comparison.get("allow_drift", False):
+        errors.append(
+            f"sibling-pin comparison reports {drift_count} unacknowledged "
+            "drift(s) -- the build vendored stale siblings (OMN-12977)."
+        )
+    return comparison
 
 
 def main() -> int:
@@ -223,12 +249,19 @@ def main() -> int:
             "Workspace mode requires the consuming repo's uv.lock to be staged."
         )
 
+    # Fold in the sibling-pin comparison so deploy verifiers can confirm the
+    # build honored the consuming repo's uv.lock (OMN-12977). A drift here would
+    # already have aborted the build in the default (no-override) path; when an
+    # operator override was used, this records expected-vs-actual durably.
+    sibling_pin_comparison = _load_pin_comparison(errors)
+
     manifest = {
         "build_source": "workspace",
         "build_time": os.environ.get("BUILD_DATE", "unknown"),
         "vcs_ref": os.environ.get("VCS_REF", "unknown"),
         "proofs": proofs,
         "pin_comparison": pin_comparison,
+        "sibling_pin_comparison": sibling_pin_comparison,
     }
 
     OUTPUT_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

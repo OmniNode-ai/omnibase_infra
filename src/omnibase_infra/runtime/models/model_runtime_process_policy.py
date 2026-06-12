@@ -23,6 +23,14 @@ class ModelRuntimeProcessPolicy(BaseModel):
     omnimemory_enabled: bool
     omnimemory_memgraph_host: str = ""
     publish_introspection: bool = False
+    # OMN-12990: contract-declared replica count for this runtime process.
+    # The base compose worker deploy default is ${WORKER_REPLICAS:-0}, which
+    # silently scales the worker to zero on a plain compose recreate. Each lane
+    # pins this value via {PROFILE}_WORKER_REPLICAS (rendered into
+    # runtime-policy.env) and the lane overrides reference it fail-fast, so a
+    # recreate that omits the policy env fails loudly instead of dropping the
+    # worker with no signal.
+    replicas: int = Field(default=1, ge=1)
 
     @field_validator("capabilities")
     @classmethod

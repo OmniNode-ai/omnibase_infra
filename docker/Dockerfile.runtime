@@ -271,6 +271,12 @@ COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_wo
 # the provenance script so its sys.path-relative import resolves inside the image.
 COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspace_pins.py
 
+# Copy the sibling-pin comparison emitted by the preflight (OMN-12977). A
+# committed placeholder makes this COPY always valid; workspace mode overwrites
+# it via stage_workspace.sh so compute_workspace_provenance.py can fold the
+# expected-vs-actual pin proof into build-provenance.json for deploy verifiers.
+COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.json
+
 # workspace mode installs omnibase_compat, onex_change_control, omnimarket from
 # the staged local trees.  release mode installs from pinned remote sources.
 #

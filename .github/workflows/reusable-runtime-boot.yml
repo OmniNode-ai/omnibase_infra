@@ -287,13 +287,52 @@ jobs:
             echo "E2E_REDPANDA_ADVERTISE_HOST=${E2E_REDPANDA_ADVERTISE_HOST}"
           } >> "$GITHUB_ENV"
 
-          POSTGRES_PORT="${POSTGRES_PORT}" \
-          KAFKA_PORT="${KAFKA_PORT}" \
-          REDPANDA_ADMIN_PORT="${REDPANDA_ADMIN_PORT}" \
-          REDPANDA_SCHEMA_REGISTRY_PORT="${REDPANDA_SCHEMA_REGISTRY_PORT}" \
-          REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
-          E2E_REDPANDA_ADVERTISE_HOST="${E2E_REDPANDA_ADVERTISE_HOST}" \
-            "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
+          compose_up() {
+            POSTGRES_PORT="${POSTGRES_PORT}" \
+            KAFKA_PORT="${KAFKA_PORT}" \
+            REDPANDA_ADMIN_PORT="${REDPANDA_ADMIN_PORT}" \
+            REDPANDA_SCHEMA_REGISTRY_PORT="${REDPANDA_SCHEMA_REGISTRY_PORT}" \
+            REDPANDA_PANDAPROXY_PORT="${REDPANDA_PANDAPROXY_PORT}" \
+            E2E_REDPANDA_ADVERTISE_HOST="${E2E_REDPANDA_ADVERTISE_HOST}" \
+              "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml up -d postgres redpanda
+          }
+
+          retry_compose_down() {
+            "${compose_cmd[@]}" -p "${OMNIBASE_INFRA_COMPOSE_PROJECT}" -f docker/docker-compose.e2e.yml down -v --remove-orphans || true
+            docker network rm "${OMNIBASE_INFRA_NETWORK}" "${OMNIBASE_INFRA_COMPOSE_PROJECT}_default" 2>/dev/null || true
+          }
+
+          compose_started=false
+          for compose_attempt in 1 2 3; do
+            if compose_up; then
+              compose_started=true
+              break
+            fi
+            compose_status=$?
+            if [[ "${compose_attempt}" -eq 3 ]]; then
+              exit "${compose_status}"
+            fi
+            echo "::warning::compose infra bring-up failed on attempt ${compose_attempt}; repicking host ports and retrying"
+            retry_compose_down
+            export POSTGRES_PORT="$(pick_free_port)"
+            export KAFKA_PORT="$(pick_free_port)"
+            export REDPANDA_ADMIN_PORT="$(pick_free_port)"
+            export REDPANDA_SCHEMA_REGISTRY_PORT="$(pick_free_port)"
+            export REDPANDA_PANDAPROXY_PORT="$(pick_free_port)"
+            {
+              echo "POSTGRES_PORT=${POSTGRES_PORT}"
+              echo "PG_PORT=${POSTGRES_PORT}"
+              echo "KAFKA_PORT=${KAFKA_PORT}"
+              echo "REDPANDA_ADMIN_PORT=${REDPANDA_ADMIN_PORT}"
+              echo "REDPANDA_SCHEMA_REGISTRY_PORT=${REDPANDA_SCHEMA_REGISTRY_PORT}"
+              echo "REDPANDA_PANDAPROXY_PORT=${REDPANDA_PANDAPROXY_PORT}"
+            } >> "$GITHUB_ENV"
+          done
+
+          if [[ "${compose_started}" != "true" ]]; then
+            echo "::error::compose infra bring-up failed before health checks"
+            exit 1
+          fi
 
           capture_compose_infra_diagnostics() {
             {

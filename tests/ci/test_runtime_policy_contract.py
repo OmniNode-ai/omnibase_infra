@@ -178,3 +178,53 @@ def test_compose_consumes_policy_env_instead_of_hardcoded_policy_values() -> Non
         assert "ONEX_RUNTIME_CAPABILITIES: market.skill-proof" not in text
         assert "ONEX_RUNTIME_CAPABILITIES: effects.consumer" not in text
         assert "ONEX_RUNTIME_CAPABILITIES: workflow.dispatch" not in text
+
+
+def test_worker_replicas_pinned_in_contract_for_every_lane() -> None:
+    """OMN-12990: each lane's worker process declares an explicit replica pin.
+
+    The base compose default is ``${WORKER_REPLICAS:-0}`` (silent drop). The
+    contract worker process must carry a contract-declared replica count >= 1 so
+    the rendered policy env preserves the worker on a lane recreate.
+    """
+    contract = _load_contract()
+
+    for profile_name, profile in contract.profiles.items():
+        worker = profile.processes["worker"]
+        assert worker.replicas >= 1, profile_name
+
+
+def test_worker_replicas_rendered_into_policy_env_for_every_lane() -> None:
+    """OMN-12990: the renderer emits ``{PROFILE}_WORKER_REPLICAS`` per lane.
+
+    These are the ledgered config values the lane overrides reference fail-fast.
+    """
+    env = _load_dotenv(POLICY_ENV_PATH)
+
+    assert env["DEV_WORKER_REPLICAS"] == "1"
+    assert env["STABILITY_TEST_WORKER_REPLICAS"] == "1"
+    assert env["JUDGE_WORKER_REPLICAS"] == "1"
+    assert env["PROD_WORKER_REPLICAS"] == "1"
+
+
+def test_runtime_worker_replicas_are_fail_fast_not_silent_default() -> None:
+    """OMN-12990: lane overrides reference the policy value with fail-fast ``:?``.
+
+    A soft ``:-1`` / ``:-0`` default would silently re-introduce the silent-drop
+    hole on any recreate that omitted the policy env. The base compose keeps its
+    ``${WORKER_REPLICAS:-0}`` default (that is the gap the overrides close), so a
+    plain recreate against the base alone still scales to zero — by design the
+    lane overrides MUST be applied, and they now abort loudly when the policy env
+    is missing rather than dropping the worker with no signal.
+    """
+    stability_text = STABILITY_COMPOSE_PATH.read_text(encoding="utf-8")
+    prod_text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
+
+    assert "${STABILITY_TEST_WORKER_REPLICAS:?" in stability_text, (
+        "stability worker replicas must be fail-fast on the ledgered policy value"
+    )
+    assert "${STABILITY_TEST_WORKER_REPLICAS:-" not in stability_text
+    assert "${PROD_WORKER_REPLICAS:?" in prod_text, (
+        "prod worker replicas must be fail-fast on the ledgered policy value"
+    )
+    assert "${PROD_WORKER_REPLICAS:-" not in prod_text

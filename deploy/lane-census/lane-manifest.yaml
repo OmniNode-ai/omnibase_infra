@@ -1,0 +1,182 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lane-manifest.yaml — Versioned DESIRED-STATE census for the .201 runtime lanes (OMN-13011).
+#
+# THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
+# actual lane state:
+#   - volume config drift (OMN-12945 family)
+#   - WORKER_REPLICAS silent zero (OMN-12988 / OMN-12990)
+#   - 2026-06-11: prod runtime containers + broker network silently absent for
+#     hours during demo prep, with ZERO alert.
+#
+# This file is the single source of truth for what each lane MUST look like in
+# steady state. scripts/lane_census_plan.py reads it and diffs it against the
+# live `docker ps` / `docker network ls` inventory; scripts/lane-census-check.sh
+# drives the reconcile, emits a typed bus event, and fails fast (non-zero) on any
+# drift. Nothing about lane shape is hardcoded in the scripts — it all lives here.
+#
+# Maintenance: the container_name and network values below are derived from the
+# canonical compose lane files (docker/docker-compose.<lane>.yml `container_name`
+# fields and the `networks:` block). When a lane gains/loses a container or
+# renames its network, update BOTH the compose file and this manifest in the same
+# PR. tests/unit/scripts/test_lane_census_manifest_parity.py asserts the manifest
+# stays in lock-step with the compose files so the manifest can never silently
+# drift away from the lane it is supposed to police.
+#
+# Container kinds:
+#   service  — long-running; MUST be in `docker ps` Running state. Absence = drift.
+#   oneshot  — run-to-completion migration/init container; expected to have Exited
+#              (0). It is NOT drift for a oneshot to be absent (compose removes it)
+#              or Exited; it IS drift for a oneshot to be Running-stuck or Exited
+#              non-zero. Tracked, not required-running.
+#
+# replicas: the REQUIRED running count for a service container. 1 unless a lane
+# explicitly scales out. A service whose replicas resolve to 0 is itself drift
+# (the WORKER_REPLICAS silent-zero regression): declaring replicas: 0 here is
+# forbidden by the parity test.
+#
+# image_tag_pattern: a regex every running container's image tag must match for
+# the lane. Guards against a lane silently running a stale/wrong generation. The
+# special token "${RUNTIME_TAG}" is resolved at check time from the deploy-agent
+# resolved runtime version; absence of a resolved tag relaxes the check to the
+# default pattern (never a hard failure on an unresolvable tag — that is a
+# separate signal, not a census drift).
+
+schema_version: "1.0.0"
+
+# Default image-tag pattern applied to a lane that does not override it.
+default_image_tag_pattern: '.+'
+
+lanes:
+  stability-test:
+    compose_file: docker/docker-compose.stability-test.yml
+    compose_project: omnibase-infra-stability-test
+    network: omnibase-infra-stability-test-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-stability-test-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-stability-test-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-keycloak
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-stability-test-migration-gate
+        kind: oneshot
+      - name: omnibase-infra-stability-test-intelligence-migration
+        kind: oneshot
+      - name: omninode-stability-test-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-stability-test-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-api
+        kind: service
+        replicas: 1
+      # The worker that OMN-12988 / OMN-12990 silently scaled to 0. Declared
+      # replicas: 1 here so its absence (replicas 0 => no container) is loud drift.
+      - name: omninode-stability-test-runtime-worker
+        kind: service
+        replicas: 1
+
+  prod:
+    compose_file: docker/docker-compose.prod.yml
+    compose_project: omnibase-infra-prod
+    network: omnibase-infra-prod-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-prod-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-prod-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-prod-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-prod-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-prod-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-prod-migration-gate
+        kind: oneshot
+      - name: omnibase-infra-prod-intelligence-migration
+        kind: oneshot
+      # The four runtime services that were silently absent on 2026-06-11.
+      - name: omninode-prod-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-prod-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-prod-projection-api
+        kind: service
+        replicas: 1
+      - name: omninode-prod-runtime-worker
+        kind: service
+        replicas: 1
+
+  judge:
+    compose_file: docker/docker-compose.judge.yml
+    compose_project: omnibase-infra-judge
+    network: omnibase-infra-judge-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-judge-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-judge-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-judge-migration-gate
+        kind: oneshot
+      - name: omnibase-infra-judge-intelligence-migration
+        kind: oneshot
+      - name: omninode-judge-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-judge-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-judge-projection-api
+        kind: service
+        replicas: 1
+
+  # The dev lane (compose project `omnibase-infra`, the default infra stack) uses
+  # generated compose with non-prefixed container names; its census is the
+  # deploy-agent RUNTIME-scope verifier (OMN-12988). The lane manifest treats dev
+  # as OPTIONAL (reconcile-when-present): dev is a developer lane that is legitimately
+  # down most of the time, so its absence is not a steady-state regression. When dev
+  # IS up, the listed services must be running. This avoids a noisy false-positive
+  # ticket every time a developer stops their local stack.
+  dev:
+    compose_file: docker/docker-compose.generated.yml
+    compose_project: omnibase-infra
+    network: omnibase-infra_default
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-runtime-effects
+        kind: service
+        replicas: 1
