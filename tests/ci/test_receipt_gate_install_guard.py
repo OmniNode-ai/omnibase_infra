@@ -145,8 +145,15 @@ class TestReceiptGateInstallSafeguards:
             "candidate-selection and force the local wheel (OMN-9283)"
         )
 
-    def test_install_uninstalls_stale_pypi_package_first(self) -> None:
-        """The install step must uninstall omnibase-core/compat before reinstalling from source."""
+    def test_install_uses_clean_workspace_venv(self) -> None:
+        """The install step must start from a freshly cleared workspace venv.
+
+        OMN-12565 (core PR #1189) replaced the 'uninstall stale PyPI package
+        first' step (OMN-9198) with `uv venv --clear` into a workspace-rooted
+        venv: a cleared venv cannot carry a stale PyPI omnibase-core, which is
+        the same contamination guarantee without writing the system
+        interpreter.
+        """
         workflow = self._load_receipt_gate()
         steps = workflow["jobs"]["verify"]["steps"]
         install_step = next(
@@ -155,9 +162,10 @@ class TestReceiptGateInstallSafeguards:
         )
         assert install_step is not None
         run_script: str = install_step.get("run", "")
-        assert "uv pip uninstall" in run_script and "omnibase-core" in run_script, (
-            "Install omnibase_core step must uninstall the stale PyPI omnibase-core "
-            "package before installing from source (OMN-9198)"
+        assert "uv venv" in run_script and "--clear" in run_script, (
+            "Install omnibase_core step must create a cleared workspace venv "
+            "(`uv venv --clear`) so no stale PyPI omnibase-core package can "
+            "leak into the gate environment (OMN-12565, supersedes OMN-9198)"
         )
 
     def test_install_builds_wheel_from_source(self) -> None:
