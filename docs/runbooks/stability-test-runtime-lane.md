@@ -128,6 +128,56 @@ uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py -q
 uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
 ```
 
+## Worker Replica Census (OMN-12990)
+
+The base compose sets the runtime-worker deploy replicas to
+`${WORKER_REPLICAS:-0}` — a soft default of **zero**. The stability lane's
+required state includes a running worker (`GATE_ZERO_PROOF.md`: 4 runtime
+containers — main, effects, worker, projection-api). Any plain
+`docker compose up`/`recreate` that does not supply the worker replica count
+silently scales the worker to zero with no error and no signal.
+
+The lane override now references the ledgered policy value fail-fast:
+`replicas: ${STABILITY_TEST_WORKER_REPLICAS:?...}`. The value lives in
+`docker/runtime-policy.env` (rendered from
+`contracts/services/runtime_policy.contract.yaml`,
+`profiles.stability-test.services.worker.replicas`). A recreate that forgets to
+pass `--env-file docker/runtime-policy.env` aborts loudly instead of dropping the
+worker.
+
+Expected-container census for the lane (a missing worker is a FAILURE, not
+silence):
+
+- `omninode-stability-test-runtime`
+- `omninode-stability-test-runtime-effects`
+- `omninode-stability-test-runtime-worker`
+- `omnimarket-stability-test-projection-api`
+
+Confirm the rendered config keeps the worker before any recreate (validation
+only — this does not run `docker compose up`):
+
+```bash
+docker compose \
+  --env-file docker/runtime-policy.env \
+  -f docker/docker-compose.infra.yml \
+  -f docker/docker-compose.stability-test.yml \
+  --profile runtime \
+  config | grep -A2 'runtime-worker:' | grep -q 'replicas' && echo "worker replicas pinned"
+```
+
+After an operator-approved recreate, assert the running census matches the
+expected set (the worker must be present):
+
+```bash
+uv run python -m omnibase_infra.scripts.verify_container_manifest \
+  --catalog-dir docker/catalog \
+  --bundles runtime \
+  --json
+```
+
+A non-zero exit (missing `omninode-stability-test-runtime-worker`) is a census
+failure that must block the deploy/verify procedure.
+
 ## Explicit Non-Goals For This PR
 
 - It does not run `docker compose up`.
