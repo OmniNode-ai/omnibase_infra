@@ -17,6 +17,9 @@ description: >
   topics between a local runtime bus and the hosted cloud Kafka edge. The node
   owns all publishes; handlers only validate and return transformed envelopes.
 
+runtime_profiles:
+  - effects
+
 input_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
