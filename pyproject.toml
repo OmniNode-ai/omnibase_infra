@@ -169,9 +169,9 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-12763: bump core pin to dev HEAD (c7d6b5ec, OMN-12762)
-# which accepts quality-gate DoD overlay criteria in delegation wire requests.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c7d6b5ec010692b6724de1d49a0ee5a599d7ee06" }
+# OMN-12957: pin core to the merged runtime-profile registry/validator rules so
+# infra tests and the runtime-profile gate consume the canonical profile set.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "2defabef4d1a7558f59f9d2a3f7f42831b00fb51" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]

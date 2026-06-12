@@ -110,6 +110,16 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
 }
 
 
+# The infra runtime owns each profile's *behaviour* (prefetch policy); the
+# canonical *name set* lives in omnibase_core (OMN-12957) so contract validation
+# can enforce ``runtime_profiles`` membership without a core->infra dependency.
+# The two must stay in lockstep: a name core blesses that infra cannot boot — or
+# an infra profile core does not know about — is a silent-orphan hazard. The
+# parity guard is the test ``test_profiles_match_core_registry`` (a hard import-
+# time raise here would crash the runtime kernel on any core/infra version skew,
+# so the invariant is enforced at test/CI time instead of at import).
+
+
 def load_runtime_profile(profile_name: str | None = None) -> ModelRuntimeProfile:
     """Return the ``ModelRuntimeProfile`` for *profile_name*.
 

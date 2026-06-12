@@ -1130,6 +1130,12 @@ class TestDockerComposeProfiles:
                 "LLM_GLM_API_KEY": "render-only-glm-api-key",
                 "GEMINI_API_KEY": "render-only-gemini-api-key",
                 "GOOGLE_API_KEY": "render-only-google-api-key",
+                "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
+                    "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
+                    "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
+                ),
+                "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
+                "GOOGLE_CLOUD_LOCATION": "us-central1",
                 # OMN-10943: HTTP request signing and CIDR allowlist for the
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
