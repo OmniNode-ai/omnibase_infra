@@ -134,8 +134,7 @@ jobs:
       # OMN-13026 omnibase_core pin bump lands in the lockfile.
       - name: Transport-mock lint (OMN-13026)
         run: |
-          git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_validator
-          PYTHONPATH=../omnibase_core_validator/src python \
+          uv run python \
             -m omnibase_core.validators.transport_mock_lint \
             --baseline validation/transport_mock_baseline.yaml \
             tests/

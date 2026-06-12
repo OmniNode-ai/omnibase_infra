@@ -9,7 +9,7 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2defabef4d1a7558f59f9d2a3f7f42831b00fb51" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=309d89fa7254701347f95bf99205cccfb3f6c1df" },
     { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
 ]
 
@@ -2076,7 +2076,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.44.2"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2defabef4d1a7558f59f9d2a3f7f42831b00fb51#2defabef4d1a7558f59f9d2a3f7f42831b00fb51" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=309d89fa7254701347f95bf99205cccfb3f6c1df#309d89fa7254701347f95bf99205cccfb3f6c1df" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2189,7 +2189,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2defabef4d1a7558f59f9d2a3f7f42831b00fb51" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=309d89fa7254701347f95bf99205cccfb3f6c1df" },
     { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
