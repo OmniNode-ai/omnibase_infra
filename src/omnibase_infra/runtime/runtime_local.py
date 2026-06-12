@@ -1487,5 +1487,15 @@ class RuntimeLocal:
         """CLI exit code corresponding to the current result."""
         return _exit_code_for(self._result)
 
+    @property
+    def handler_result(self) -> object | None:
+        """The terminal handler's result object, if the run produced one.
+
+        Receipt mode (OMN-13094) uses the concrete type of this object as
+        the receipt's ``result_model`` schema identity; the JSON-serialized
+        form lives in ``workflow_result.json`` under ``handler_result``.
+        """
+        return self._handler_result
+
     # Prevent resource leaks — reserved for future bus/container teardown.
     del_alias = None  # placeholder for __del__ if needed
