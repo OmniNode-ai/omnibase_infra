@@ -171,7 +171,7 @@ override-dependencies = [
 [tool.uv.sources]
 # OMN-12957: pin core to the merged runtime-profile registry/validator rules so
 # infra tests and the runtime-profile gate consume the canonical profile set.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "309d89fa7254701347f95bf99205cccfb3f6c1df" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "2defabef4d1a7558f59f9d2a3f7f42831b00fb51" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
