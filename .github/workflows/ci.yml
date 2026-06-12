@@ -132,9 +132,17 @@ jobs:
       # SYNC with pre-commit hook 'transport-mock-lint'.
       # Clone omnibase_core HEAD so the validator is available before the
       # OMN-13026 omnibase_core pin bump lands in the lockfile.
+      - name: Checkout omnibase_core validator source
+        uses: actions/checkout@v6
+        with:
+          repository: OmniNode-ai/omnibase_core
+          ref: main
+          path: .ci/omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Transport-mock lint (OMN-13026)
         run: |
-          uv run python \
+          PYTHONPATH=.ci/omnibase_core/src uv run python \
             -m omnibase_core.validators.transport_mock_lint \
             --baseline config/validation/transport_mock_baseline.yaml \
             tests/
