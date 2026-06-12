@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -35,6 +36,12 @@ from omnibase_infra.utils.util_error_sanitization import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS = 30.0
+_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS = 0.05
+_DIRECT_TERMINAL_SESSION_TIMEOUT_MS = 45000
+_DIRECT_TERMINAL_HEARTBEAT_INTERVAL_MS = 15000
+_DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS = 300000
 
 
 def _broker_group_id(command_topic: str) -> str:
@@ -66,6 +73,182 @@ def _error_result(
 class TerminalPayload:
     payload: object
     topic: str
+
+
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal Kafka boundary handle
+class DirectTerminalConsumer:
+    consumer: AIOKafkaConsumer
+
+
+def _direct_terminal_bootstrap_servers(event_bus: object) -> str:
+    servers = getattr(event_bus, "_bootstrap_servers", None)
+    if not isinstance(servers, str) or not servers:
+        raise RuntimeError(
+            "terminal-event consumer: runtime event_bus exposes no string "
+            "_bootstrap_servers; cannot build a Kafka correlate consumer."
+        )
+    return servers
+
+
+def _direct_terminal_auth_kwargs(event_bus: object) -> dict[str, object]:
+    build_auth_kwargs = getattr(event_bus, "_build_auth_kwargs", None)
+    if not callable(build_auth_kwargs):
+        return {}
+    auth = cast("Callable[[], Mapping[str, object] | None]", build_auth_kwargs)()
+    return dict(auth or {})
+
+
+def _direct_terminal_client_version_kwargs(event_bus: object) -> dict[str, object]:
+    config = getattr(event_bus, "config", SimpleNamespace())
+    api_version = getattr(config, "api_version", None)
+    if api_version is None:
+        return {}
+    try:
+        parameters = inspect.signature(AIOKafkaConsumer.__init__).parameters
+    except (TypeError, ValueError):
+        return {}
+    if "api_version" not in parameters:
+        return {}
+    return {"api_version": api_version}
+
+
+def _extract_direct_terminal_correlation_id(payload: dict[str, object]) -> str | None:
+    value = payload.get("correlation_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def _build_direct_terminal_consumer(event_bus: object) -> AIOKafkaConsumer:
+    config = getattr(event_bus, "config", SimpleNamespace())
+    return AIOKafkaConsumer(
+        bootstrap_servers=_direct_terminal_bootstrap_servers(event_bus),
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+        session_timeout_ms=getattr(
+            config,
+            "session_timeout_ms",
+            _DIRECT_TERMINAL_SESSION_TIMEOUT_MS,
+        ),
+        heartbeat_interval_ms=getattr(
+            config,
+            "heartbeat_interval_ms",
+            _DIRECT_TERMINAL_HEARTBEAT_INTERVAL_MS,
+        ),
+        max_poll_interval_ms=getattr(
+            config,
+            "max_poll_interval_ms",
+            _DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS,
+        ),
+        retry_backoff_ms=getattr(config, "reconnect_backoff_ms", 2000),
+        **_direct_terminal_client_version_kwargs(event_bus),
+        **_direct_terminal_auth_kwargs(event_bus),
+    )
+
+
+async def _assign_direct_terminal_partitions(
+    consumer: AIOKafkaConsumer,
+    terminal_topic: str,
+    assign_cap_seconds: float,
+) -> None:
+    """Wait for reply-topic metadata, then assign all partitions."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + assign_cap_seconds
+    while True:
+        client = getattr(consumer, "_client", None)
+        set_topics = getattr(client, "set_topics", None)
+        if callable(set_topics):
+            set_topics([terminal_topic])
+        partitions = consumer.partitions_for_topic(terminal_topic) or set()
+        if partitions:
+            consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
+            return
+        if loop.time() >= deadline:
+            raise TimeoutError
+        await asyncio.sleep(_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS)
+
+
+async def open_direct_terminal_consumer(
+    *,
+    event_bus: object,
+    terminal_topic: str,
+) -> DirectTerminalConsumer:
+    """Start, assign, and seek an ephemeral terminal consumer to the current end."""
+    consumer = _build_direct_terminal_consumer(event_bus)
+    try:
+        await asyncio.wait_for(
+            consumer.start(),
+            timeout=_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
+        await _assign_direct_terminal_partitions(
+            consumer,
+            terminal_topic,
+            _DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
+        await consumer.seek_to_end(*consumer.assignment())
+    except BaseException:
+        await close_direct_terminal_consumer(
+            DirectTerminalConsumer(consumer),
+            terminal_topic=terminal_topic,
+            log_prefix="terminal-event consumer open cleanup",
+        )
+        raise
+    return DirectTerminalConsumer(consumer)
+
+
+async def poll_direct_terminal_consumer(
+    *,
+    handle: DirectTerminalConsumer,
+    terminal_topic: str,
+    correlation_id: str,
+    timeout_seconds: float,
+) -> dict[str, object] | None:
+    """Poll a positioned terminal consumer for the correlated terminal payload."""
+    loop = asyncio.get_running_loop()
+    try:
+        deadline = loop.time() + timeout_seconds
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                message = await asyncio.wait_for(
+                    handle.consumer.getone(),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                return None
+            if message.value is None:
+                continue
+            try:
+                body: dict[str, object] = json.loads(message.value.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if _extract_direct_terminal_correlation_id(body) == correlation_id:
+                return body
+    finally:
+        await close_direct_terminal_consumer(handle, terminal_topic=terminal_topic)
+
+
+async def close_direct_terminal_consumer(
+    handle: DirectTerminalConsumer,
+    *,
+    terminal_topic: str,
+    log_prefix: str = "terminal-event consumer",
+) -> None:
+    """Stop a direct terminal consumer, logging cleanup failures at the boundary."""
+    try:
+        await handle.consumer.stop()
+    except Exception as exc:  # noqa: BLE001 — boundary: best-effort cleanup
+        _LOGGER.warning(
+            "%s: failed to stop consumer for %s: %s",
+            log_prefix,
+            terminal_topic,
+            sanitize_error_message(exc),
+        )
 
 
 class RuntimePatternBBroker:

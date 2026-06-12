@@ -85,6 +85,18 @@ def test_compose_build_passes_build_source_args(
     assert "EXPECTED_BUILD_SOURCE=workspace" in build_cmd
     assert "OMNI_HOME=/data/omninode/omni_home" in build_cmd
 
+    # OMN-12965: the workspace build must stamp the full OCI image-identity quad
+    # so org.opencontainers.image.{version,revision,created} populate. A blank
+    # revision / placeholder version degrades every proof packet.
+    assert "GIT_SHA=abc1234" in build_cmd
+    assert "VCS_REF=abc1234" in build_cmd
+    runtime_version_args = [a for a in build_cmd if a.startswith("RUNTIME_VERSION=")]
+    assert runtime_version_args, "missing RUNTIME_VERSION build-arg (OMN-12965)"
+    assert runtime_version_args[0] != "RUNTIME_VERSION=0.1.0", (
+        "RUNTIME_VERSION must come from pyproject, not the Dockerfile placeholder"
+    )
+    assert any(a.startswith("BUILD_DATE=") for a in build_cmd)
+
 
 def test_unknown_build_source_fails_before_compose_build(
     monkeypatch: pytest.MonkeyPatch,

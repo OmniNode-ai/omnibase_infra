@@ -243,6 +243,21 @@ x-runtime-env: &runtime-env
   # maps that ref to GEMINI_API_KEY, so runtime containers must receive the key.
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required for Gemini routing}
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY is required for Gemini/Google ADK routing}
+  # Vertex bearer path (OMN-12971): ADDITIVE next to the Gemini API-key path. The
+  # routing authority declares secret_ref=llm.vertex.access_token for
+  # cloud-vertex-gemini; the secret resolver maps it to the mounted token FILE
+  # (source_type=file, /run/secrets/vertex_access_token — see
+  # runtime_policy.contract.yaml). The effect boundary posts Authorization: Bearer
+  # <value>, so that file holds a short-lived OAuth access token minted from ADC
+  # (`gcloud auth application-default print-access-token`), refreshed by the
+  # operator/bootstrap (tokens expire ~1h). The token VALUE is never in committed
+  # config. These vars fail fast when the Vertex route is configured so a partial
+  # project/region/endpoint setup cannot silently disable the bearer path.
+  # BIFROST_VERTEX_GEMINI_ENDPOINT_URL is the COMPLETE project+region Vertex
+  # OpenAI-compat chat-completions URL, supplied by the overlay (OMN-12815).
+  BIFROST_VERTEX_GEMINI_ENDPOINT_URL: ${BIFROST_VERTEX_GEMINI_ENDPOINT_URL:?BIFROST_VERTEX_GEMINI_ENDPOINT_URL is required for Vertex Gemini routing}
+  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT is required for Vertex Gemini routing}
+  GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:?GOOGLE_CLOUD_LOCATION is required for Vertex Gemini routing}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
   LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
   LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET required for local LLM HTTP request signing}
@@ -644,11 +659,22 @@ services:
     networks:
       - omnibase-infra-network
     healthcheck:
+      # start_period must cover the real forward+intelligence migration window.
+      # This sentinel is a long-running keepalive (entrypoint above), NOT a
+      # one-shot; the healthcheck runs continuously against
+      # db_metadata.migrations_complete. On a cold prod volume the migrations
+      # take ~2 min to apply and stamp the flag (OMN-12973: prod gate started
+      # 09:35:22, intelligence-migration finished 09:37:18). With start_period
+      # 10s the gate left `starting` after 10s and was reported UNHEALTHY for
+      # ~2 min until migrations completed. start_period 180s keeps the gate in
+      # `health: starting` for the full migration window so a still-applying
+      # gate is never reported UNHEALTHY. Floor enforced by
+      # validate_migration_gate_start_period (OMN-12973).
       test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 10s
+      start_period: 180s
     logging: *logging-defaults
     restart: unless-stopped
     deploy:
@@ -707,6 +733,16 @@ services:
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      # OMN-12971: Vertex bearer-token delivery. Bind the operator-supplied token
+      # file read-only at the path the secret resolver reads
+      # (llm.vertex.access_token → /run/secrets/vertex_access_token). The file
+      # holds a short-lived OAuth access token minted from ADC and refreshed by
+      # the operator/bootstrap; the effect boundary posts it as Authorization:
+      # Bearer <value>. The token VALUE never enters committed config — only the
+      # host path is operator-supplied. Defaults to /dev/null so lanes without
+      # Vertex configured still start (resolver returns empty → router skips
+      # Vertex, Gemini key path unaffected).
+      - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
     tmpfs:
       - /run/onex-runtime:uid=1000,gid=1000,mode=0770
     healthcheck:
@@ -766,6 +802,10 @@ services:
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      # OMN-12971: Vertex bearer-token delivery to the effects container (the
+      # runtime that makes the outbound provider call). Operator-supplied host
+      # token file bound read-only; token VALUE never in committed config.
+      - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

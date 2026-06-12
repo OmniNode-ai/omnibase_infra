@@ -152,6 +152,16 @@ boundaries.
   validation.
 - Topic drift and completeness scripts remain runnable from the repo root.
 
+**Topic authority**:
+- Marketplace and runtime topic authority comes from contract YAML,
+  `topics.yaml` manifests, generated topic enums, and canonical topic constants.
+- `scripts/validation/completeness-allowlist.yaml` is not marketplace policy
+  and must not be used as permanent topic authority.
+- Any topic-completeness suppression must be temporary and include `owner`,
+  `reason`, `created_at`, `expires_at`, and `replacement_authority`. Expired
+  suppressions stop suppressing violations, and legacy bare `allowlist:` entries
+  are rejected.
+
 ## Validation Results
 
 Each validator returns a `ModelValidationResult[None]` (or `CircularImportValidationResult` for imports) with:

@@ -28,6 +28,11 @@ from pathlib import Path
 SIBLING_REPOS_DIR = Path("/workspace/sibling-repos")
 VENV_DIR = Path("/app/.venv")
 OUTPUT_MANIFEST = Path("/app/build-provenance.json")
+# Expected-vs-actual sibling pin comparison produced by the host-side lock-pin
+# preflight (check_sibling_lock_pins.py, OMN-12987). Staged under sibling-repos/
+# so it rides along into the build image. Absent on builds that skipped the
+# preflight (e.g. release mode); the manifest then records an empty comparison.
+LOCK_PIN_COMPARISON = SIBLING_REPOS_DIR / ".sibling-lock-pins.json"
 
 # Canonical set of sibling repos that workspace mode must provision.
 # Keys are the directory names under sibling-repos/; values are installed
@@ -67,6 +72,22 @@ def _installed_direct_url(dist_name: str) -> dict | None:
     if direct_url_text is None:
         return None
     return json.loads(direct_url_text)
+
+
+def _load_lock_pin_comparison() -> list[dict]:
+    """Return the host-side expected-vs-actual sibling pin comparison.
+
+    The list is produced by check_sibling_lock_pins.py (OMN-12987) and staged
+    into the build image. Returns an empty list when the file is absent (the
+    preflight was skipped) so the manifest is always well-formed.
+    """
+    if not LOCK_PIN_COMPARISON.is_file():
+        return []
+    try:
+        data = json.loads(LOCK_PIN_COMPARISON.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def main() -> int:
@@ -137,11 +158,15 @@ def main() -> int:
             f"install={install_url}"
         )
 
+    lock_pin_comparison = _load_lock_pin_comparison()
     manifest = {
         "build_source": "workspace",
         "build_time": os.environ.get("BUILD_DATE", "unknown"),
         "vcs_ref": os.environ.get("VCS_REF", "unknown"),
         "proofs": proofs,
+        # OMN-12987: expected-vs-actual sibling lock pins so deploy verifiers can
+        # detect a stale-sibling build without re-running the host preflight.
+        "lock_pin_comparison": lock_pin_comparison,
     }
 
     OUTPUT_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

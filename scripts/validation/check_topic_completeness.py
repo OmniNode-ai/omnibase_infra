@@ -8,7 +8,8 @@
 #
 # Scans Python source files for ONEX topic string literals and validates that
 # every topic found in source is registered in the topic registry (union of
-# contract YAML topics, generated enum values, and manual constants files).
+# contract YAML topics, topics.yaml manifests, generated enum values, and manual
+# constants files).
 #
 # This script catches the case where a developer adds a topic string literal
 # to Python code without registering it in the canonical topic registry.
@@ -17,7 +18,8 @@
 #   - File types: .py only
 #   - Exclude paths: tests/, docs/, fixtures/, files with '# GENERATED' header
 #   - Match: string literals matching onex.(evt|cmd|dlq|intent).* (with version)
-#   - Allowlist: completeness-allowlist.yaml for known false positives
+#   - Temporary suppressions: completeness-allowlist.yaml entries must carry
+#     owner, reason, created_at, expires_at, and replacement_authority metadata
 #
 # Usage:
 #   uv run python scripts/validation/check_topic_completeness.py
@@ -31,14 +33,14 @@
 #   1  one or more unregistered topics found in source
 #   2  runtime error (bad arguments, unreadable files)
 #
-# NOTE: stdlib only — no third-party dependencies.
-
 from __future__ import annotations
 
 import argparse
 import ast
 import re
 import sys
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,32 @@ _EVENT_BUS_SECTION_KEYS: tuple[str, ...] = (
     "subscribe_topics",
     "publish_topics",
 )
+_SUPPRESSION_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "topic",
+        "owner",
+        "reason",
+        "created_at",
+        "expires_at",
+        "replacement_authority",
+    }
+)
+
+
+class SuppressionConfigError(ValueError):
+    """Raised when topic-completeness suppressions are malformed."""
+
+
+@dataclass(frozen=True)
+class TopicSuppression:
+    """Temporary topic-completeness suppression with required ownership."""
+
+    topic: str
+    owner: str
+    reason: str
+    created_at: date
+    expires_at: date
+    replacement_authority: str
 
 
 # ---------------------------------------------------------------------------
@@ -357,63 +385,142 @@ def scan_source_for_topics(
 
 
 # ---------------------------------------------------------------------------
-# Allowlist loading
+# Temporary suppression loading
 # ---------------------------------------------------------------------------
 
 
-def load_allowlist(allowlist_path: Path) -> set[str]:
-    """Load topic allowlist from a YAML file.
+def _parse_suppression_date(value: object, *, field: str, topic: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise SuppressionConfigError(
+                f"{topic}: {field} must be an ISO date (YYYY-MM-DD)"
+            ) from exc
+    raise SuppressionConfigError(f"{topic}: {field} must be an ISO date (YYYY-MM-DD)")
 
-    The allowlist is a simple list of topic strings that are known false
-    positives (e.g., examples in validators, test fixtures in src/).
 
-    Format (YAML):
-        allowlist:
-          - onex.evt.example.test-topic.v1
-          - onex.cmd.example.another-topic.v1
+def _require_non_empty_string(
+    item: dict[object, object], *, field: str, topic: str
+) -> str:
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise SuppressionConfigError(f"{topic}: {field} is required")
+    return value.strip()
 
-    Fallback format (plain text, one topic per line):
-        onex.evt.example.test-topic.v1
-        onex.cmd.example.another-topic.v1
-    """
-    if not allowlist_path.exists():
-        return set()
 
+def _load_yaml_or_empty(path: Path) -> object:
     try:
-        text = allowlist_path.read_text(encoding="utf-8")
-    except OSError:
-        return set()
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SuppressionConfigError(f"could not read suppression file {path}") from exc
 
-    # Try YAML parsing first
+    if not text.strip():
+        return {}
+
     try:
         import yaml
+    except ImportError as exc:
+        raise SuppressionConfigError(
+            "PyYAML is required to parse topic-completeness suppressions"
+        ) from exc
 
-        data = yaml.safe_load(text)
-        if isinstance(data, dict) and "allowlist" in data:
-            items = data["allowlist"]
-            if isinstance(items, list):
-                return {str(item) for item in items if item}
-    except ImportError:
-        pass
+    loaded = yaml.safe_load(text)
+    return loaded if loaded is not None else {}
 
-    # Fallback: plain text format
-    topics: set[str] = set()
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        # Skip YAML keys like "allowlist:"
-        if line.endswith(":"):
-            continue
-        # Strip leading "- " for YAML list items
-        if line.startswith("- "):
-            line = line[2:].strip()
-        # Strip quotes
-        line = line.strip("'\"")
-        if _TOPIC_PATTERN.match(line):
-            topics.add(line)
 
-    return topics
+def load_topic_suppressions(
+    suppression_path: Path, *, today: date | None = None
+) -> set[str]:
+    """Load active temporary topic suppressions from a YAML file.
+
+    Permanent topic allowlists are not accepted. Every active suppression must
+    declare ownership, rationale, creation/expiry dates, and the replacement
+    authority that should eventually register the topic.
+
+    Format (YAML):
+        suppressions:
+          - topic: onex.evt.example.test-topic.v1
+            owner: "@team-or-person"
+            reason: "Temporary source literal while contract lands."
+            created_at: "2026-06-11"
+            expires_at: "2026-06-18"
+            replacement_authority: "contracts/example/contract.yaml"
+    """
+    if not suppression_path.exists():
+        return set()
+
+    data = _load_yaml_or_empty(suppression_path)
+    if not isinstance(data, dict):
+        raise SuppressionConfigError(
+            "suppression file must be a mapping with a 'suppressions' list"
+        )
+
+    legacy_allowlist = data.get("allowlist")
+    if legacy_allowlist:
+        raise SuppressionConfigError(
+            "legacy 'allowlist' entries are no longer valid; use metadata-rich "
+            "'suppressions' entries with owner, reason, created_at, expires_at, "
+            "and replacement_authority"
+        )
+
+    suppressions = data.get("suppressions", [])
+    if suppressions is None:
+        suppressions = []
+    if not isinstance(suppressions, list):
+        raise SuppressionConfigError("'suppressions' must be a list")
+
+    active_topics: set[str] = set()
+    today = today or datetime.now(tz=UTC).date()
+    for index, item in enumerate(suppressions, start=1):
+        if not isinstance(item, dict):
+            raise SuppressionConfigError(
+                f"suppression #{index} must be a mapping with required metadata"
+            )
+
+        topic = _require_non_empty_string(item, field="topic", topic=f"#{index}")
+        missing = sorted(_SUPPRESSION_REQUIRED_FIELDS - {str(key) for key in item})
+        if missing:
+            raise SuppressionConfigError(
+                f"{topic}: missing required field(s): {', '.join(missing)}"
+            )
+        if not _TOPIC_PATTERN.match(topic):
+            raise SuppressionConfigError(f"{topic}: invalid ONEX topic name")
+
+        created_at = _parse_suppression_date(
+            item.get("created_at"), field="created_at", topic=topic
+        )
+        expires_at = _parse_suppression_date(
+            item.get("expires_at"), field="expires_at", topic=topic
+        )
+        if expires_at < created_at:
+            raise SuppressionConfigError(
+                f"{topic}: expires_at must be on or after created_at"
+            )
+
+        suppression = TopicSuppression(
+            topic=topic,
+            owner=_require_non_empty_string(item, field="owner", topic=topic),
+            reason=_require_non_empty_string(item, field="reason", topic=topic),
+            created_at=created_at,
+            expires_at=expires_at,
+            replacement_authority=_require_non_empty_string(
+                item, field="replacement_authority", topic=topic
+            ),
+        )
+        if suppression.expires_at >= today:
+            active_topics.add(suppression.topic)
+
+    return active_topics
+
+
+def load_allowlist(allowlist_path: Path) -> set[str]:
+    """Backward-compatible alias for temporary suppression loading."""
+    return load_topic_suppressions(allowlist_path)
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +541,7 @@ def check_completeness(
         src_root: Root directory of Python source to scan.
         contracts_root: Root directory containing contract.yaml files.
         constants_files: Additional Python files defining topic constants.
-        allowlist_path: Path to allowlist file for false positives.
+        allowlist_path: Path to temporary suppression file for false positives.
         manifest_roots: Additional directories with topics.yaml manifests
             (omniclaude skills, CLI relays, services).
 
@@ -461,18 +568,18 @@ def check_completeness(
     if manifest_roots:
         registry.update(collect_registry_from_manifests(manifest_roots))
 
-    # Load allowlist
-    allowlist: set[str] = set()
+    # Load active temporary suppressions. Permanent bare allowlists are rejected.
+    suppressed_topics: set[str] = set()
     if allowlist_path is not None:
-        allowlist = load_allowlist(allowlist_path)
+        suppressed_topics = load_topic_suppressions(allowlist_path)
 
     # Scan source for topic literals
     all_hits = scan_source_for_topics(src_root)
 
-    # Filter: keep only topics NOT in registry and NOT in allowlist
+    # Filter: keep only topics NOT in registry and NOT temporarily suppressed
     unregistered: list[tuple[Path, str, int]] = []
     for path, topic, lineno in all_hits:
-        if topic not in registry and topic not in allowlist:
+        if topic not in registry and topic not in suppressed_topics:
             unregistered.append((path, topic, lineno))
 
     return unregistered, registry
@@ -520,7 +627,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "Path to topic allowlist file "
+            "Path to topic temporary suppression file "
             "(default: scripts/validation/completeness-allowlist.yaml)"
         ),
     )
@@ -627,17 +734,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Run completeness check
-    unregistered, registry = check_completeness(
-        src_root=src_root,
-        contracts_root=contracts_root,
-        constants_files=(
-            [cf.resolve() for cf in args.constants_file]
-            if args.constants_file
-            else None
-        ),
-        allowlist_path=allowlist_path,
-        manifest_roots=manifest_roots if manifest_roots else None,
-    )
+    try:
+        unregistered, registry = check_completeness(
+            src_root=src_root,
+            contracts_root=contracts_root,
+            constants_files=(
+                [cf.resolve() for cf in args.constants_file]
+                if args.constants_file
+                else None
+            ),
+            allowlist_path=allowlist_path,
+            manifest_roots=manifest_roots if manifest_roots else None,
+        )
+    except SuppressionConfigError as exc:
+        print(
+            f"ERROR: invalid topic-completeness suppression config: {exc}",
+            file=sys.stderr,
+        )
+        return 2
 
     if not unregistered:
         if not args.quiet:
@@ -664,11 +778,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(
             "\nTo fix: register the topic in the appropriate contract.yaml or "
-            "topic constants file.",
+            "topics.yaml manifest.",
             file=sys.stderr,
         )
         print(
-            "If this is a false positive, add it to the allowlist at:"
+            "Temporary suppressions must declare owner, reason, created_at, "
+            "expires_at, and replacement_authority in:"
             "\n  scripts/validation/completeness-allowlist.yaml",
             file=sys.stderr,
         )
