@@ -185,6 +185,7 @@ wait
 # Aggregate results
 OK=0
 FAILED=()
+WARNED=()
 
 for repo in "${REPOS[@]}"; do
   result_file="$RESULTS_DIR/$repo"
@@ -193,7 +194,7 @@ for repo in "${REPOS[@]}"; do
     case "$status" in
       OK) (( OK++ )) || true ;;
       FAILED) FAILED+=("$repo") ;;
-      MISSING) FAILED+=("$repo (missing)") ;;
+      MISSING) WARNED+=("$repo (not cloned — skipped)") ;;
       # SKIPPED — don't count
     esac
   fi
@@ -284,5 +285,11 @@ fi
 # === End plugin cache refresh ===
 
 echo ""
-echo "${OK} repo(s) up to date. ${#FAILED[@]} failed."
+if [[ ${#WARNED[@]} -gt 0 ]]; then
+  echo "WARN: ${#WARNED[@]} repo(s) not found locally and were skipped:"
+  for w in "${WARNED[@]}"; do
+    echo "  WARN     $w"
+  done
+fi
+echo "${OK} repo(s) up to date. ${#FAILED[@]} failed. ${#WARNED[@]} absent (skipped)."
 [[ ${#FAILED[@]} -eq 0 ]] || exit 1

@@ -244,8 +244,8 @@ class TestPullAllScript:
         ).strip()
         assert current_branch == "main"
 
-    def test_script_handles_missing_repo(self) -> None:
-        """Run pull-all.sh with a nonexistent repo name against a temp dir."""
+    def test_missing_repo_warns_and_exits_zero(self) -> None:
+        """Absent repo emits a WARN line and exits 0 (OMN-13055)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = subprocess.run(
                 ["bash", str(PULL_ALL), "nonexistent_repo_xyz"],
@@ -254,8 +254,55 @@ class TestPullAllScript:
                 env={**os.environ, "OMNI_HOME": tmpdir},
                 check=False,
             )
-            assert result.returncode != 0
-            assert "MISSING" in result.stdout
+            assert result.returncode == 0, (
+                f"Expected exit 0 for absent repo; got {result.returncode}. "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+            assert "MISSING" in result.stdout or "not cloned" in result.stdout, (
+                f"Expected warning about absent repo; stdout={result.stdout!r}"
+            )
+
+    def test_missing_repo_mixed_with_present_exits_zero(self, tmp_path: Path) -> None:
+        """One absent + one OK repo: exit 0, absent repo warned (OMN-13055)."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+
+        result = _run_pull_all(
+            omni_home, fake_home, repos=["omniclaude", "nonexistent_xyz"]
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0 when present repos all OK; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "MISSING" in result.stdout or "not cloned" in result.stdout, (
+            f"Expected warning for absent repo; stdout={result.stdout!r}"
+        )
+        # The present repo must have been processed successfully.
+        assert "OK" in result.stdout, (
+            f"Expected OK for omniclaude; stdout={result.stdout!r}"
+        )
+
+    def test_failed_present_repo_still_exits_nonzero(self, tmp_path: Path) -> None:
+        """When a present repo fails (dirty), exit 1 even if other repos are absent."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)
+        # Make omniclaude dirty so it fails.
+        (omniclaude / "dirty.txt").write_text("uncommitted\n")
+
+        result = _run_pull_all(omni_home, fake_home, repos=["omniclaude", "absent_xyz"])
+        assert result.returncode != 0, (
+            f"Expected non-zero exit when a present repo fails; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "dirty worktree" in result.stdout
 
     def test_script_handles_bare_repo_no_crash(self) -> None:
         """Create a bare git repo and verify pull-all.sh does not crash."""
