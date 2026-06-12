@@ -53,7 +53,7 @@ that do not care about the race).
 
 Architecture (ARCH-002 — "runtime owns all Kafka plumbing"):
   - Nodes/handlers declare the consume requirement in their contract and call the
-    injected ``event_consumer``; they never touch ``AIOKafkaConsumer``.
+    injected ``event_consumer``; they never touch the Kafka client.
   - The correlate-and-wait loop here is the same proven shape used by
     ``RuntimePatternBBroker._dispatch_and_wait_with_direct_kafka_consumer``:
     assign reply-topic partitions, seek to end, then poll until a message whose
@@ -73,15 +73,19 @@ Loop isolation (why a worker thread):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from types import TracebackType
 from typing import cast
 
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from omnibase_infra.runtime.service_pattern_b_broker import (
+    DirectTerminalConsumer,
+    close_direct_terminal_consumer,
+    open_direct_terminal_consumer,
+    poll_direct_terminal_consumer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,89 +96,17 @@ EventConsumer = Callable[[str, str, float], dict[str, object] | None]
 # Bound the metadata/partition-assignment phase so a broker that never surfaces
 # the reply topic fails fast instead of consuming the whole caller timeout.
 _ASSIGN_TIMEOUT_CAP_SECONDS = 30.0
-_METADATA_POLL_INTERVAL_SECONDS = 0.05
-
-# aiokafka client tuning — matches the request-response / pattern-B defaults so a
-# slow generation does not trigger a session-timeout rebalance mid-wait.
-_DEFAULT_SESSION_TIMEOUT_MS = 45000
-_DEFAULT_HEARTBEAT_INTERVAL_MS = 15000
-_DEFAULT_MAX_POLL_INTERVAL_MS = 300000
 
 # Grace beyond a submitted coroutine's own timeout so a clean Kafka shutdown
 # completes before the calling thread gives up on the worker loop.
 _LOOP_SUBMIT_GRACE_SECONDS = 5.0
 
 
-def _bootstrap_servers(event_bus: object) -> str:
-    servers = getattr(event_bus, "_bootstrap_servers", None)
-    if not isinstance(servers, str) or not servers:
-        raise RuntimeError(
-            "terminal-event consumer: runtime event_bus exposes no string "
-            "_bootstrap_servers; cannot build a Kafka correlate consumer."
-        )
-    return servers
-
-
-def _auth_kwargs(event_bus: object) -> dict[str, object]:
-    build_auth_kwargs = getattr(event_bus, "_build_auth_kwargs", None)
-    if not callable(build_auth_kwargs):
-        return {}
-    auth = cast("Callable[[], Mapping[str, object] | None]", build_auth_kwargs)()
-    return dict(auth or {})
-
-
-def _extract_correlation_id(payload: dict[str, object]) -> str | None:
-    value = payload.get("correlation_id")
-    if value is None:
-        return None
-    return str(value)
-
-
-def _build_consumer(event_bus: object) -> AIOKafkaConsumer:
-    return AIOKafkaConsumer(
-        bootstrap_servers=_bootstrap_servers(event_bus),
-        group_id=None,
-        enable_auto_commit=False,
-        auto_offset_reset="latest",
-        session_timeout_ms=_DEFAULT_SESSION_TIMEOUT_MS,
-        heartbeat_interval_ms=_DEFAULT_HEARTBEAT_INTERVAL_MS,
-        max_poll_interval_ms=_DEFAULT_MAX_POLL_INTERVAL_MS,
-        **_auth_kwargs(event_bus),
-    )
-
-
-async def _assign_terminal_partitions(
-    consumer: AIOKafkaConsumer,
-    terminal_topic: str,
-    assign_cap_seconds: float,
-) -> None:
-    """Wait for the reply topic's partition metadata, then assign all partitions.
-
-    A freshly created topic may not have partition metadata immediately; poll
-    until it appears or the cap elapses (raising ``TimeoutError`` so the caller's
-    ``try`` returns ``None`` cleanly rather than hanging).
-    """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + assign_cap_seconds
-    while True:
-        client = getattr(consumer, "_client", None)
-        set_topics = getattr(client, "set_topics", None)
-        if callable(set_topics):
-            set_topics([terminal_topic])
-        partitions = consumer.partitions_for_topic(terminal_topic) or set()
-        if partitions:
-            consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
-            return
-        if loop.time() >= deadline:
-            raise TimeoutError
-        await asyncio.sleep(_METADATA_POLL_INTERVAL_SECONDS)
-
-
 async def _open_positioned_consumer(
     *,
     event_bus: object,
     terminal_topic: str,
-) -> AIOKafkaConsumer:
+) -> DirectTerminalConsumer:
     """Start an ephemeral consumer, assign the reply topic, and seek to end NOW.
 
     Returns the started, positioned consumer. The caller is responsible for
@@ -183,30 +115,15 @@ async def _open_positioned_consumer(
     published at-or-after this point is delivered to a subsequent poll, even if it
     arrives before the poll begins. This is the subscribe-before-publish leg.
     """
-    consumer = _build_consumer(event_bus)
-    try:
-        await asyncio.wait_for(consumer.start(), timeout=_ASSIGN_TIMEOUT_CAP_SECONDS)
-        await _assign_terminal_partitions(
-            consumer, terminal_topic, _ASSIGN_TIMEOUT_CAP_SECONDS
-        )
-        await consumer.seek_to_end(*consumer.assignment())
-    except BaseException:
-        try:
-            await consumer.stop()
-        except Exception as exc:  # noqa: BLE001 — boundary: best-effort cleanup
-            logger.warning(
-                "terminal-event consumer: failed to stop consumer during open "
-                "cleanup for %s: %s",
-                terminal_topic,
-                exc,
-            )
-        raise
-    return consumer
+    return await open_direct_terminal_consumer(
+        event_bus=event_bus,
+        terminal_topic=terminal_topic,
+    )
 
 
 async def _poll_correlated_terminal(
     *,
-    consumer: AIOKafkaConsumer,
+    consumer: DirectTerminalConsumer,
     terminal_topic: str,
     correlation_id: str,
     timeout_seconds: float,
@@ -217,34 +134,12 @@ async def _poll_correlated_terminal(
     Returns the deserialized terminal body whose ``correlation_id`` matches, or
     ``None`` on genuine timeout. Stops the consumer on the way out.
     """
-    loop = asyncio.get_running_loop()
-    try:
-        deadline = loop.time() + timeout_seconds
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                return None
-            try:
-                message = await asyncio.wait_for(consumer.getone(), timeout=remaining)
-            except TimeoutError:
-                return None
-            if message.value is None:
-                continue
-            try:
-                body: dict[str, object] = json.loads(message.value.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                continue
-            if _extract_correlation_id(body) == correlation_id:
-                return body
-    finally:
-        try:
-            await consumer.stop()
-        except Exception as exc:  # noqa: BLE001 — boundary: best-effort cleanup
-            logger.warning(
-                "terminal-event consumer: failed to stop consumer for %s: %s",
-                terminal_topic,
-                exc,
-            )
+    return await poll_direct_terminal_consumer(
+        handle=consumer,
+        terminal_topic=terminal_topic,
+        correlation_id=correlation_id,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 class TerminalConsumerSession:
@@ -275,7 +170,7 @@ class TerminalConsumerSession:
         self._handler_name = handler_name
         self._terminal_topic = terminal_topic
         self._loop = asyncio.new_event_loop()
-        self._consumer: AIOKafkaConsumer | None = None
+        self._consumer: DirectTerminalConsumer | None = None
         self._closed = False
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -304,7 +199,7 @@ class TerminalConsumerSession:
         if self._consumer is not None or self._closed:
             return self
         self._consumer = cast(
-            "AIOKafkaConsumer",
+            "DirectTerminalConsumer",
             self._submit(
                 _open_positioned_consumer(
                     event_bus=self._event_bus,
@@ -370,7 +265,10 @@ class TerminalConsumerSession:
         if consumer is not None:
             try:
                 stop_future: Future[object] = asyncio.run_coroutine_threadsafe(
-                    cast("Coroutine[object, object, object]", consumer.stop()),
+                    close_direct_terminal_consumer(
+                        consumer,
+                        terminal_topic=self._terminal_topic,
+                    ),
                     self._loop,
                 )
                 stop_future.result(timeout=_LOOP_SUBMIT_GRACE_SECONDS)
