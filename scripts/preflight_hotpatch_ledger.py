@@ -268,12 +268,12 @@ def run_preflight(args: argparse.Namespace) -> int:
                 failures.append(str(exc))
                 continue
             unledgered = [path for path in found if path not in ledgered]
-            missing = sorted(
-                path
-                for path in ledgered
-                if path not in found
-                and any(row["container"] == container for row in rows)
-            )
+            container_ledgered = {
+                str(row["prepatch_path"])
+                for row in rows
+                if row["container"] == container
+            }
+            missing = sorted(path for path in container_ledgered if path not in found)
             print(
                 f"HOTPATCH-PREFLIGHT: tripwire {container}: "
                 f"{len(found)} .prepatch file(s) live"
