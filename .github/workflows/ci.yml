@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: main
+          ref: dev
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
