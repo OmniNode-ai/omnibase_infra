@@ -1,0 +1,34 @@
+# skip-manifest.yaml — Intentionally-skipped migration IDs
+#
+# Ticket: OMN-13062 (migration-gate vacuity fix — retro A-10)
+#
+# PURPOSE
+#   The forward migration runner (run-forward-migrations.sh) checks this
+#   file before applying each migration.  A migration listed here is treated
+#   as already-applied (a skip record is written to schema_migrations with
+#   checksum "skip-manifest") without executing the SQL.
+#
+# WHEN TO USE
+#   - A migration was discovered to be a no-op on warm volumes (already
+#     applied via docker-entrypoint-initdb.d on first boot).
+#   - A migration contains a known-safe but environment-specific statement
+#     that must not re-run on warm volumes.
+#   - Never use this to hide a broken migration — fix the SQL instead.
+#
+# HOW TO ADD AN ENTRY
+#   1. Confirm the migration is safe to skip (e.g., idempotent but already
+#      applied, or intentionally empty).
+#   2. Add the entry to skipped_migrations below.
+#   3. Commit the manifest change in the SAME PR that deems the migration
+#      unrunnable.  Operator env cannot inject skips.
+#
+# ENTRY FORMAT
+#   id:     "docker/<NNN_name.sql>"   — migration_id as recorded in schema_migrations
+#   reason: "human-readable reason"
+#   ticket: "OMN-XXXX"               — Linear ticket authorising the skip
+#
+# EXIT CODES for run-forward-migrations.sh
+#   0 — all migrations applied (or skipped by this manifest)
+#   1 — migration failure (nonzero psql exit)
+
+skipped_migrations: []
