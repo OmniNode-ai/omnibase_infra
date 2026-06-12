@@ -188,6 +188,9 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelLocalStateStoreEntry": "Internal entry model for ModelLocalStateStore; covered by test_node_invocation_adapter.py",
     "ModelPluginDiscoveryEntry": "Converted from dataclass in OMN-12184; covered by test_model_plugin_discovery_report.py",
     "ModelPluginDiscoveryReport": "Converted from dataclass in OMN-12184; covered by test_model_plugin_discovery_report.py",
+    # OMN-12864: Bifrost lane overlay model — round-trip covered by
+    # tests/unit/runtime/models/test_model_bifrost_lane_overlay.py
+    "ModelBifrostLaneOverlay": "Typed deployment binding for Bifrost local endpoints; covered by test_model_bifrost_lane_overlay.py",
 }
 
 

@@ -47,6 +47,15 @@ ALLOWED_EMPTY_DEFAULTS = {
     # OMN-12196: bifrost source contract path; empty = resolve from omnimarket
     # package via importlib.resources (opt-in override for custom source path)
     "BIFROST_SOURCE_CONTRACT_PATH",
+    # OMN-12864: Bifrost local inference endpoints — provided by the committed
+    # lane overlay (docker/lane-overlays/dev.bifrost.env) at runtime. Compose-level
+    # :? is intentionally omitted so `docker compose config` renders cleanly in
+    # CI without the lane overlay pre-loaded. Validation at the Python layer
+    # (ModelBifrostLaneOverlay + render_bifrost_delegation_contract) is the
+    # enforcement point for dev-lane deployments.
+    "BIFROST_LOCAL_CODER_ENDPOINT_URL",
+    "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+    "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
 }
 
 
