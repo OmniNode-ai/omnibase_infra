@@ -23,6 +23,10 @@ from pathlib import Path
 import click
 
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_infra.cli.receipt_mode import (
+    default_emit_socket_path,
+    run_receipt_mode,
+)
 from omnibase_infra.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -126,6 +130,30 @@ def _entry_point_module(value: str) -> str:
     default=False,
     help="Enable DEBUG-level logging (default is INFO).",
 )
+@click.option(
+    "--output",
+    "output_mode",
+    type=click.Choice(["default", "receipt"]),
+    default="default",
+    show_default=True,
+    help=(
+        "Output mode. 'receipt' routes ALL runtime logging to a capture "
+        "file under the state root, content-addresses the capture log and "
+        "handler result in the artifact store, and prints exactly one typed "
+        "ModelSkillResult JSON to stdout (OMN-13094)."
+    ),
+)
+@click.option(
+    "--emit-socket",
+    "emit_socket",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Unix socket of the emit daemon for receipt-mode capture events "
+        "(default: ~/.claude/emit.sock). Unreachable daemon => events spool "
+        "under <state-root>/emit_spool/ for later replay."
+    ),
+)
 def run_node_by_name(
     node_name: str,
     contract_path: Path | None,
@@ -134,6 +162,8 @@ def run_node_by_name(
     backend: tuple[str, ...],
     timeout: int,
     verbose: bool,
+    output_mode: str,
+    emit_socket: Path | None,
 ) -> None:
     """Run a packaged ONEX node on the local runtime, resolved by NAME.
 
@@ -151,13 +181,8 @@ def run_node_by_name(
         onex node merge_sweep
         onex node merge_sweep --input fixtures/real_prs.json
         onex node merge_sweep --contract ./custom_contract.yaml --state-root ./state
+        onex node merge_sweep --output receipt   # one typed result JSON on stdout
     """
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
     resolved_contract = contract_path or _resolve_packaged_contract(node_name)
 
     try:
@@ -165,6 +190,28 @@ def run_node_by_name(
     except ModelOnexError as exc:
         click.echo(f"Error: {sanitize_error_message(exc)}", err=True)
         sys.exit(1)
+
+    if output_mode == "receipt":
+        # Receipt mode (OMN-13094): runtime logging goes to a capture file,
+        # never the console; stdout carries exactly one ModelSkillResult JSON.
+        sys.exit(
+            run_receipt_mode(
+                node_name=node_name,
+                contract_path=resolved_contract,
+                input_path=input_path,
+                state_root=state_root,
+                backend_overrides=backend_overrides,
+                timeout=timeout,
+                verbose=verbose,
+                emit_socket=emit_socket or default_emit_socket_path(),
+            )
+        )
+
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     runtime = RuntimeLocal(
         workflow_path=resolved_contract,
