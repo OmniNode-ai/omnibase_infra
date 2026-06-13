@@ -260,7 +260,11 @@ async def _assign_direct_terminal_partitions(
         await _refresh_terminal_topic_metadata(consumer)
 
 
-async def _pin_direct_terminal_end_offsets(consumer: AIOKafkaConsumer) -> None:
+async def _pin_direct_terminal_end_offsets(
+    consumer: AIOKafkaConsumer,
+    *,
+    timeout_seconds: float,
+) -> None:
     """Resolve the current end offsets SYNCHRONOUSLY and pin them via ``seek``.
 
     Why not ``seek_to_end`` (OMN-13118 strike-three)
@@ -287,11 +291,20 @@ async def _pin_direct_terminal_end_offsets(consumer: AIOKafkaConsumer) -> None:
 
     An empty assignment (partition-less reply topic, OMN-13118) has no offsets to
     resolve, so this is a no-op for that leg.
+
+    ``end_offsets`` is a broker ``ListOffsets`` round-trip that aiokafka documents
+    as able to block indefinitely. It is bounded by ``timeout_seconds`` (the same
+    cap as ``start`` and partition assignment) so a stalled broker fails fast here
+    instead of hanging the pre-publish positioning and reintroducing a wait wedge
+    in a new spot.
     """
     assignment = consumer.assignment()
     if not assignment:
         return
-    end_offsets = await consumer.end_offsets(list(assignment))
+    end_offsets = await asyncio.wait_for(
+        consumer.end_offsets(list(assignment)),
+        timeout=timeout_seconds,
+    )
     for topic_partition, offset in end_offsets.items():
         consumer.seek(topic_partition, offset)
 
@@ -319,7 +332,10 @@ async def open_direct_terminal_consumer(
             terminal_topic,
             _DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
         )
-        await _pin_direct_terminal_end_offsets(consumer)
+        await _pin_direct_terminal_end_offsets(
+            consumer,
+            timeout_seconds=_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
     except BaseException:
         await close_direct_terminal_consumer(
             DirectTerminalConsumer(consumer),
@@ -604,7 +620,10 @@ class RuntimePatternBBroker:
             # ``seek_to_end`` is a lazy LATEST reset resolved on the first poll —
             # AFTER this publish — so a terminal landing in the publish→poll gap
             # is skipped. ``end_offsets`` + ``seek`` fixes the position now.
-            await _pin_direct_terminal_end_offsets(consumer)
+            await _pin_direct_terminal_end_offsets(
+                consumer,
+                timeout_seconds=min(30, command.timeout_seconds),
+            )
             await self._publish_worker_command(command, route)
 
             deadline = asyncio.get_running_loop().time() + command.timeout_seconds
