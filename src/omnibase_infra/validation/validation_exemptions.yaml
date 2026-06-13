@@ -324,6 +324,15 @@ pattern_exemptions:
     documentation:
       - OMN-11546 concrete-node audit
     ticket: OMN-11570
+  - file_pattern: 'cli_delegate\.py'
+    method_pattern: "Function 'delegate_command'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Click injects command arguments and options directly into the command callback (same contract as run_node_by_name). The callback immediately forwards those values to run_delegate; replacing the signature with an intermediate model would obscure the Click contract without reducing runtime complexity.
+
+    documentation:
+      - OMN-13096 onex delegate single-command rewrite
+    ticket: OMN-13096
   # ==========================================================================
   # KafkaContractCache Exemptions (OMN-1989)
   # ==========================================================================

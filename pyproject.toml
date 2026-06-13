@@ -122,6 +122,7 @@ onex-status = "omnibase_infra.tui.__main__:run_status_tui"
 verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:main"
 
 [project.entry-points."onex.cli"]
+delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
 run = "omnibase_infra.cli.cli_node:run_node_by_name"
