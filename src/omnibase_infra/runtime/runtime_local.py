@@ -627,16 +627,26 @@ class RuntimeLocal:
         handlers = RuntimeLocal._as_workflow_maps(routing.get("handlers", []))
         errors: list[str] = []
         input_topic_set = set(subscribe_topics)
+        strategy = str(routing.get("routing_strategy", ""))
 
         # Per-entry field and topic validation
         for i, entry in enumerate(handlers):
             prefix = f"handlers[{i}]"
             em = RuntimeLocal._as_workflow_map(entry.get("event_model", {}))
             hd = RuntimeLocal._as_workflow_map(entry.get("handler", {}))
-            if not em.get("name"):
-                errors.append(f"{prefix}.event_model.name is missing")
-            if not em.get("module"):
-                errors.append(f"{prefix}.event_model.module is missing")
+            if strategy == "payload_type_match":
+                # payload_type_match routes by model type — event_model is required.
+                if not em.get("name"):
+                    errors.append(f"{prefix}.event_model.name is missing")
+                if not em.get("module"):
+                    errors.append(f"{prefix}.event_model.module is missing")
+            else:
+                # operation_match (and any future non-payload strategies) route by
+                # the `operation` field — event_model is not used and must not be
+                # required here. Require `operation` instead.
+                op = entry.get("operation")
+                if not op:
+                    errors.append(f"{prefix}.operation is missing")
             if not hd.get("name"):
                 errors.append(f"{prefix}.handler.name is missing")
             if not hd.get("module"):
