@@ -149,26 +149,84 @@ def _build_direct_terminal_consumer(event_bus: object) -> AIOKafkaConsumer:
     )
 
 
+async def _await_metadata_op(result: object) -> None:
+    """Await a client metadata operation result if it is awaitable.
+
+    ``AIOKafkaClient.set_topics`` / ``force_metadata_update`` return a future
+    that resolves when the broker metadata fetch completes. Awaiting it is what
+    makes partition metadata actually surface; ignoring it (the prior bug) left
+    the assign loop spinning on a stale, empty partition view. Test fakes return
+    a plain ``bool``, so only await when the result is awaitable.
+    """
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _force_terminal_topic_metadata(
+    consumer: AIOKafkaConsumer,
+    terminal_topic: str,
+) -> None:
+    """Track the reply topic and force a fresh broker metadata fetch.
+
+    ``set_topics`` only forces a metadata refresh when the requested topic set
+    DIFFERS from the currently-tracked set (aiokafka 0.13.0
+    ``AIOKafkaClient.set_topics``). Re-calling ``set_topics([same_topic])`` each
+    loop iteration therefore took the no-refresh branch after the first call, so
+    a consumer whose first metadata fetch had not yet surfaced partitions never
+    re-fetched and burned the whole assign cap, raising a bare ``TimeoutError``
+    (the empty-message ``wait failed`` seen live in OMN-13012). We register the
+    topic once, await that fetch, and on each subsequent miss force a refresh via
+    ``force_metadata_update`` (which always fetches) rather than the no-op
+    ``set_topics`` repeat.
+    """
+    client = getattr(consumer, "_client", None)
+    if client is None:
+        return
+    set_topics = getattr(client, "set_topics", None)
+    if callable(set_topics):
+        await _await_metadata_op(set_topics([terminal_topic]))
+
+
+async def _refresh_terminal_topic_metadata(consumer: AIOKafkaConsumer) -> None:
+    """Force a broker metadata fetch for the already-tracked reply topic."""
+    client = getattr(consumer, "_client", None)
+    if client is None:
+        return
+    force_metadata_update = getattr(client, "force_metadata_update", None)
+    if callable(force_metadata_update):
+        await _await_metadata_op(force_metadata_update())
+
+
 async def _assign_direct_terminal_partitions(
     consumer: AIOKafkaConsumer,
     terminal_topic: str,
     assign_cap_seconds: float,
 ) -> None:
-    """Wait for reply-topic metadata, then assign all partitions."""
+    """Track the reply topic, wait for its metadata, then assign all partitions.
+
+    The first ``set_topics`` registers the topic and forces the initial metadata
+    fetch (awaited). If partitions are still not visible (slow broker metadata),
+    each subsequent iteration forces a fresh fetch via ``force_metadata_update``
+    — NOT a repeat ``set_topics([same_topic])``, which aiokafka treats as a
+    no-op and never re-fetches (the OMN-13012 consume-leg wedge: only one of the
+    two ephemeral terminal consumers ever surfaced partitions).
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + assign_cap_seconds
+    await _force_terminal_topic_metadata(consumer, terminal_topic)
     while True:
-        client = getattr(consumer, "_client", None)
-        set_topics = getattr(client, "set_topics", None)
-        if callable(set_topics):
-            set_topics([terminal_topic])
         partitions = consumer.partitions_for_topic(terminal_topic) or set()
         if partitions:
             consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
             return
         if loop.time() >= deadline:
-            raise TimeoutError
+            raise TimeoutError(
+                "terminal-event consumer: reply topic "
+                f"{terminal_topic!r} surfaced no partitions within "
+                f"{assign_cap_seconds:.1f}s (broker metadata never advertised it)"
+            )
         await asyncio.sleep(_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS)
+        await _refresh_terminal_topic_metadata(consumer)
 
 
 async def open_direct_terminal_consumer(
