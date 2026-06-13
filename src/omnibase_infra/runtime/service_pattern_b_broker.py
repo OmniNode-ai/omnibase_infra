@@ -260,12 +260,54 @@ async def _assign_direct_terminal_partitions(
         await _refresh_terminal_topic_metadata(consumer)
 
 
+async def _pin_direct_terminal_end_offsets(consumer: AIOKafkaConsumer) -> None:
+    """Resolve the current end offsets SYNCHRONOUSLY and pin them via ``seek``.
+
+    Why not ``seek_to_end`` (OMN-13118 strike-three)
+    ------------------------------------------------
+    ``AIOKafkaConsumer.seek_to_end`` is LAZY: it calls
+    ``Fetcher.request_offset_reset(partitions, LATEST)``, which only marks the
+    partition "awaiting reset" and registers a position future. The actual LATEST
+    offset is resolved by a ``ListOffsets`` round-trip that happens on the FIRST
+    ``getone`` — which is AFTER the caller has published its command. With
+    generation completing in ~1s (dispatch loop freed, OMN-13010), the correlated
+    terminal lands in the gap between this open() and the first poll, so the
+    lazily-resolved LATEST position is the high-water-mark AFTER the record and
+    the poll starts reading PAST it. The terminal is never read, the trial never
+    correlates, and the experiment matrix re-fires the same cell forever — the
+    consume-leg wedge that survived PR #1969 (set_topics no-op) and PR #1970
+    (partition-less assign-cap) because neither addressed the seek timing.
+
+    ``end_offsets`` is a SYNCHRONOUS broker round-trip that returns the HWM
+    observed NOW (without changing the consumer position); ``seek`` then pins each
+    partition's read offset to that value deterministically. The resume position
+    is therefore fixed at open() time, BEFORE the publish, so any terminal emitted
+    at-or-after this offset is delivered to the subsequent poll. This is the real
+    subscribe-before-publish guarantee the two-phase protocol promised.
+
+    An empty assignment (partition-less reply topic, OMN-13118) has no offsets to
+    resolve, so this is a no-op for that leg.
+    """
+    assignment = consumer.assignment()
+    if not assignment:
+        return
+    end_offsets = await consumer.end_offsets(list(assignment))
+    for topic_partition, offset in end_offsets.items():
+        consumer.seek(topic_partition, offset)
+
+
 async def open_direct_terminal_consumer(
     *,
     event_bus: object,
     terminal_topic: str,
 ) -> DirectTerminalConsumer:
-    """Start, assign, and seek an ephemeral terminal consumer to the current end."""
+    """Start, assign, and pin an ephemeral terminal consumer to the current end.
+
+    The read position is captured SYNCHRONOUSLY via ``end_offsets`` + ``seek`` (not
+    the lazy ``seek_to_end``) so it is fixed at open() time, before the caller
+    publishes — the subscribe-before-publish guarantee that closes the
+    seek-past-the-terminal race (OMN-13118).
+    """
     consumer = _build_direct_terminal_consumer(event_bus)
     try:
         await asyncio.wait_for(
@@ -277,7 +319,7 @@ async def open_direct_terminal_consumer(
             terminal_topic,
             _DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
         )
-        await consumer.seek_to_end(*consumer.assignment())
+        await _pin_direct_terminal_end_offsets(consumer)
     except BaseException:
         await close_direct_terminal_consumer(
             DirectTerminalConsumer(consumer),
@@ -558,7 +600,11 @@ class RuntimePatternBBroker:
                 terminal_topics,
                 command.timeout_seconds,
             )
-            await consumer.seek_to_end(*consumer.assignment())
+            # Pin the read position SYNCHRONOUSLY at the current end (OMN-13118):
+            # ``seek_to_end`` is a lazy LATEST reset resolved on the first poll —
+            # AFTER this publish — so a terminal landing in the publish→poll gap
+            # is skipped. ``end_offsets`` + ``seek`` fixes the position now.
+            await _pin_direct_terminal_end_offsets(consumer)
             await self._publish_worker_command(command, route)
 
             deadline = asyncio.get_running_loop().time() + command.timeout_seconds

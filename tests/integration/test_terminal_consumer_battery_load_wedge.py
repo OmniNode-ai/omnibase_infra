@@ -225,6 +225,17 @@ class _FakeConsumer:
         assert self._topic is not None
         self._cursor = self._cluster.logs[self._topic].hwm
 
+    async def end_offsets(self, partitions: Any) -> dict[Any, int]:
+        # Synchronous HWM round-trip (OMN-13118): the offset of the next message,
+        # captured NOW without changing the consumer position.
+        assert self._topic is not None
+        hwm = self._cluster.logs[self._topic].hwm
+        return dict.fromkeys(partitions, hwm)
+
+    def seek(self, _partition: Any, offset: int) -> None:
+        # Synchronous position pin (OMN-13118) replacing the lazy seek_to_end.
+        self._cursor = offset
+
     async def getone(self) -> SimpleNamespace:
         assert self._topic is not None
         log = self._cluster.logs[self._topic]

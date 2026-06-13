@@ -155,6 +155,15 @@ class _FakeConsumer:
     async def seek_to_end(self, *_assignment: object) -> None:
         return None
 
+    async def end_offsets(self, partitions: Any) -> dict[Any, int]:
+        # Synchronous HWM round-trip (OMN-13118 pinning). This fake delivers by
+        # pending-payload dict rather than offset, so the value is incidental.
+        return dict.fromkeys(partitions, 0)
+
+    def seek(self, _partition: Any, _offset: int) -> None:
+        # Synchronous position pin (OMN-13118): no-op for the payload-dict fake.
+        return None
+
     async def getone(self) -> SimpleNamespace:
         # The COMPLETED-topic consumer delivers each pending correlated terminal
         # exactly once; otherwise (FAILED topic, or no pending payload) block
