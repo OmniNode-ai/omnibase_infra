@@ -31,6 +31,8 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     )
 
     # OMN-13096: identity regenerated after adding the 'delegate' onex.cli
-    # entry point to pyproject.toml (both digests bind pyproject.toml + uv.lock).
-    assert lock["identity_digest"] == "6f936c328d331c1e8f62594473c2dcc2"
-    assert lock["shared_env_digest"] == "6b42c54bfa466bd4d93fcc8c"
+    # entry point to pyproject.toml, merged with the 'skill' entry point from
+    # OMN-13097 (both digests bind pyproject.toml + uv.lock; same mechanical
+    # regeneration OMN-13094 did for the advanced core pin).
+    assert lock["identity_digest"] == "efc067283a47eb66bfae03322e966b0c"
+    assert lock["shared_env_digest"] == "215aa5ffa92e228bf703615d"

@@ -126,6 +126,7 @@ delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
 run = "omnibase_infra.cli.cli_node:run_node_by_name"
+skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
 [project.entry-points."onex.backends"]
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
