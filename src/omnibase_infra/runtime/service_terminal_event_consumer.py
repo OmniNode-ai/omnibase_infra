@@ -301,7 +301,16 @@ class LongLivedTerminalCorrelator:
                 sorted(body.keys()),
             )
             return
-        future = self._pending.pop(correlation_id, None)
+        # OMN-13118 (P_RESOLVE_BEFORE_AWAIT fix): resolve the future IN PLACE; do
+        # NOT pop on match. The always-on poll loop typically delivers the
+        # terminal before the runner's wait() attaches (publish -> generation ->
+        # wait latency, ~28s observed in rebuild-9), so popping on match discarded
+        # the resolved result and the late awaiter found nothing -> 120s timeout.
+        # Leaving the resolved future in the registry lets a late _wait read it;
+        # _wait pops on exit. register() (pre-publish) guarantees the future
+        # exists when this matches. Resolving in place is idempotent under a
+        # duplicate delivery (future.done() guard below).
+        future = self._pending.get(correlation_id)
         if future is None:
             # Unmatched terminal (late, or a correlation no live trial awaits).
             # Drop it — the correlator is fire-and-forget for unawaited cids.
@@ -422,8 +431,13 @@ class LongLivedTerminalCorrelator:
                 correlation_id,
                 timeout_seconds,
             )
-            self._pending.pop(correlation_id, None)
             return None
+        finally:
+            # OMN-13118 (P_RESOLVE_BEFORE_AWAIT fix): the awaiter owns removal now
+            # that _deliver resolves the future in place (no pop-on-match). Pop on
+            # BOTH success and timeout so a resolved-and-read future does not
+            # linger in the registry. Idempotent if two waiters share the cid.
+            self._pending.pop(correlation_id, None)
 
     def close(self) -> None:
         """Stop the poll loop, the consumer, and the worker loop. Idempotent."""
