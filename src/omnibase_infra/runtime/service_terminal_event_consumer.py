@@ -131,6 +131,7 @@ class LongLivedTerminalCorrelator:
         # correlation_id -> future resolved with the terminal payload (or None).
         self._pending: dict[str, asyncio.Future[dict[str, object] | None]] = {}
         self._poll_task: asyncio.Task[None] | None = None
+        self._diag_poll_iters = 0  # DIAG13118: throttle poll-loop assignment logging
         self._start_lock = asyncio.Lock()
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -195,6 +196,20 @@ class LongLivedTerminalCorrelator:
                 )
                 for topic_partition, offset in end_offsets.items():
                     consumer.seek(topic_partition, offset)
+                logger.warning(
+                    "DIAG13118 pin handler=%s topic=%s end_offsets=%s",
+                    self._handler_name,
+                    terminal_topic,
+                    {str(k): v for k, v in end_offsets.items()},
+                )
+            logger.warning(
+                "DIAG13118 ensure_topic handler=%s topic=%s new_partitions=%s "
+                "full_assignment=%s",
+                self._handler_name,
+                terminal_topic,
+                [str(p) for p in new_partitions],
+                [str(p) for p in consumer.assignment()],
+            )
             self._subscribed_topics.add(terminal_topic)
 
     async def _resolve_partitions(
@@ -232,6 +247,14 @@ class LongLivedTerminalCorrelator:
                 if not consumer.assignment():
                     await asyncio.sleep(_METADATA_POLL_INTERVAL_SECONDS)
                     continue
+                self._diag_poll_iters += 1
+                if self._diag_poll_iters % 50 == 1:
+                    logger.warning(
+                        "DIAG13118 poll handler=%s assignment=%s pending=%s",
+                        self._handler_name,
+                        [str(p) for p in consumer.assignment()],
+                        list(self._pending.keys())[:10],
+                    )
                 message = await asyncio.wait_for(
                     consumer.getone(), timeout=_POLL_GETONE_TIMEOUT_SECONDS
                 )
@@ -247,24 +270,55 @@ class LongLivedTerminalCorrelator:
                 )
                 await asyncio.sleep(_METADATA_POLL_INTERVAL_SECONDS)
                 continue
+            logger.warning(
+                "DIAG13118 getone handler=%s topic=%s partition=%s offset=%s",
+                self._handler_name,
+                getattr(message, "topic", None),
+                getattr(message, "partition", None),
+                getattr(message, "offset", None),
+            )
             self._deliver(message)
 
     def _deliver(self, message: object) -> None:
         value = getattr(message, "value", None)
         if value is None:
+            logger.warning(
+                "DIAG13118 deliver handler=%s drop=value_none", self._handler_name
+            )
             return
         try:
             body: dict[str, object] = json.loads(value.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            logger.warning(
+                "DIAG13118 deliver handler=%s drop=decode_error", self._handler_name
+            )
             return
         correlation_id = _extract_direct_terminal_correlation_id(body)
         if correlation_id is None:
+            logger.warning(
+                "DIAG13118 deliver handler=%s drop=cid_none body_keys=%s",
+                self._handler_name,
+                sorted(body.keys()),
+            )
             return
         future = self._pending.pop(correlation_id, None)
         if future is None:
             # Unmatched terminal (late, or a correlation no live trial awaits).
             # Drop it — the correlator is fire-and-forget for unawaited cids.
+            logger.warning(
+                "DIAG13118 deliver handler=%s extracted_cid=%s UNMATCHED "
+                "pending_keys=%s",
+                self._handler_name,
+                correlation_id,
+                list(self._pending.keys())[:10],
+            )
             return
+        logger.warning(
+            "DIAG13118 deliver handler=%s extracted_cid=%s MATCHED future_done=%s",
+            self._handler_name,
+            correlation_id,
+            future.done(),
+        )
         if not future.done():
             future.set_result(body)
 
@@ -301,6 +355,12 @@ class LongLivedTerminalCorrelator:
                 stale_future.set_result(None)
         if correlation_id not in self._pending:
             self._pending[correlation_id] = self._loop.create_future()
+        logger.warning(
+            "DIAG13118 register handler=%s cid=%s pending_count=%s",
+            self._handler_name,
+            correlation_id,
+            len(self._pending),
+        )
 
     def wait(
         self, correlation_id: str, timeout_seconds: float
@@ -338,13 +398,30 @@ class LongLivedTerminalCorrelator:
         if future is None:
             # Defensive: caller skipped register(); create it now (race-prone but
             # never worse than the legacy single-call path).
+            logger.warning(
+                "DIAG13118 wait handler=%s cid=%s NO_PRE_REGISTER",
+                self._handler_name,
+                correlation_id,
+            )
             future = self._loop.create_future()
             self._pending[correlation_id] = future
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 asyncio.shield(future), timeout=timeout_seconds
             )
+            logger.warning(
+                "DIAG13118 wait handler=%s cid=%s RESOLVED",
+                self._handler_name,
+                correlation_id,
+            )
+            return result
         except TimeoutError:
+            logger.warning(
+                "DIAG13118 wait handler=%s cid=%s TIMEOUT after %ss",
+                self._handler_name,
+                correlation_id,
+                timeout_seconds,
+            )
             self._pending.pop(correlation_id, None)
             return None
 
