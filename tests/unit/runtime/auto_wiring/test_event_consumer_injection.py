@@ -9,22 +9,25 @@ back), but the runtime auto-wiring materialized no consumer, so the handler fell
 back to a no-op default that returned ``None`` immediately and every row was a
 degenerate generation-failure.
 
-OMN-13012 is the FOURTH defect, exposed once OMN-13010 freed the dispatch loop and
-generation began completing in ~1s: the OMN-13005 consumer is a single callable
-that does ``assign -> seek_to_end -> poll`` AFTER the handler has already
-published, so a terminal emitted in the publish->seek gap is seeked PAST and lost
-(probe3). The fix makes the injected consumer two-phase — ``open(topic)`` assigns
-and seeks to end NOW (before publish), ``session.wait(cid, timeout)`` blocks from
-that captured position (after publish) — so a fast terminal is not skipped.
+OMN-13118 Tier B replaced the per-trial ephemeral consumer with ONE long-lived
+correlator (one consumer subscribed once to the terminal topics, a single poll
+loop, demux by ``correlation_id``). These tests drive the REAL wiring path
+(``_prepare_handler_wiring`` -> ``_materialize_known_handler_dependencies`` ->
+``make_terminal_event_consumer`` -> ``LongLivedTerminalCorrelator``) rather than
+constructing the handler directly, so they exercise the dispatch surface that the
+handler-isolation golden chain never touches (memory
+``feedback_real_dispatch_path_tests``). The Kafka layer is faked at the single
+seam the correlator builds its consumer through
+(``service_pattern_b_broker.AIOKafkaConsumer``) via a shared in-memory partition
+log; the real correlator subscribes, runs its poll loop, and demuxes terminals to
+the registered futures.
 
-These tests drive the REAL wiring path (``_prepare_handler_wiring`` ->
-``_materialize_known_handler_dependencies``) rather than constructing the handler
-directly, so they exercise the dispatch surface that the handler-isolation golden
-chain never touches (memory ``feedback_real_dispatch_path_tests``). The Kafka
-layer is faked at the two service seams (``_open_positioned_consumer`` and
-``_poll_correlated_terminal``) via a shared in-memory terminal log that models
-seek-to-end semantics: a poll only sees messages at or after the offset captured
-when its consumer was opened.
+These assert the two surviving contracts:
+  - OMN-13005: the injected consumer blocks-and-correlates (a delayed terminal is
+    still returned, not a degenerate row); and
+  - OMN-13012/13118: a terminal that lands in the open->wait gap is delivered (the
+    correlator registers the cid before publish, so the always-running poll loop
+    demuxes the gap-landed record).
 """
 
 from __future__ import annotations
@@ -35,7 +38,8 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -60,144 +64,131 @@ _COMMAND_TOPIC = "onex.cmd.omnimarket.node-generation-requested.v1"
 
 
 class RecordingEventBus:
+    """Event bus exposing the Kafka attributes the correlator's consumer needs."""
+
+    config = SimpleNamespace(
+        session_timeout_ms=45000,
+        heartbeat_interval_ms=15000,
+        max_poll_interval_ms=1800000,
+        reconnect_backoff_ms=2000,
+    )
+    _bootstrap_servers = "omn-13118-injection-test-broker"
+
     def __init__(self) -> None:
         self.published: list[tuple[str, bytes | None, bytes]] = []
 
     async def publish(self, topic: str, key: bytes | None, value: bytes) -> None:
         self.published.append((topic, key, value))
 
+    def _build_auth_kwargs(self) -> dict[str, object]:
+        return {}
+
 
 # ----------------------------------------------------------------------------
-# Fake Kafka terminal log modeling seek-to-end semantics
+# Fake Kafka partition log + single long-lived consumer
 # ----------------------------------------------------------------------------
+
+
+class _PartitionLog:
+    def __init__(self) -> None:
+        self._records: list[tuple[str, bytes]] = []
+        self._lock = threading.Lock()
+
+    @property
+    def hwm(self) -> int:
+        with self._lock:
+            return len(self._records)
+
+    def append(self, correlation_id: str, value: bytes) -> None:
+        with self._lock:
+            self._records.append((correlation_id, value))
+
+    def read_at(self, offset: int) -> tuple[str, bytes] | None:
+        with self._lock:
+            if offset < len(self._records):
+                return self._records[offset]
+            return None
 
 
 class FakeTerminalLog:
-    """Append-only terminal-event log with seek-to-end offset capture.
-
-    Models the exact race surface: a consumer opened at offset N never sees
-    messages appended before N (``seek_to_end`` skipped past them). A consumer
-    is a thin handle holding its captured start offset; ``poll`` returns the
-    first message at index >= start_offset whose ``correlation_id`` matches,
-    waiting up to ``timeout`` for one to be appended.
-    """
+    """In-memory terminal log the correlator's single consumer reads from."""
 
     def __init__(self) -> None:
-        self._messages: list[dict[str, Any]] = []
-        self._cond = threading.Condition()
+        self.partition = _PartitionLog()
 
-    def append(self, payload: dict[str, Any]) -> None:
-        with self._cond:
-            self._messages.append(payload)
-            self._cond.notify_all()
-
-    def current_end(self) -> int:
-        with self._cond:
-            return len(self._messages)
-
-    def poll(
-        self, start_offset: int, correlation_id: str, timeout_seconds: float
-    ) -> dict[str, Any] | None:
-        deadline = time.monotonic() + timeout_seconds
-        with self._cond:
-            idx = start_offset
-            while True:
-                while idx < len(self._messages):
-                    msg = self._messages[idx]
-                    idx += 1
-                    if str(msg.get("correlation_id")) == correlation_id:
-                        return msg
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None
-                self._cond.wait(timeout=remaining)
+    def append(self, correlation_id: str, payload: dict[str, Any]) -> None:
+        self.partition.append(correlation_id, json.dumps(payload).encode("utf-8"))
 
 
-class _FakeConsumerHandle:
-    """Opaque handle returned by the patched ``_open_positioned_consumer``."""
+class _FakeClient:
+    def __init__(self) -> None:
+        self.tracked: set[str] = set()
 
-    def __init__(self, log: FakeTerminalLog, start_offset: int) -> None:
-        self.log = log
-        self.start_offset = start_offset
+    async def _refresh(self) -> bool:
+        return True
+
+    def set_topics(self, topics: list[str]) -> Any:
+        self.tracked = set(topics)
+        return self._refresh()
+
+    def force_metadata_update(self) -> Any:
+        return self._refresh()
 
 
-def install_fake_kafka(log: FakeTerminalLog) -> tuple[Any, Any]:
-    """Build patched replacements for the two service seams, bound to ``log``."""
+class _FakeConsumer:
+    """Single long-lived ``AIOKafkaConsumer`` stand-in over one terminal topic."""
 
-    async def _fake_open(
-        *, event_bus: object, terminal_topic: str
-    ) -> _FakeConsumerHandle:
-        # seek_to_end NOW: capture the current end offset.
-        return _FakeConsumerHandle(log, log.current_end())
+    log: ClassVar[FakeTerminalLog | None] = None
 
-    async def _fake_poll(
-        *,
-        consumer: _FakeConsumerHandle,
-        terminal_topic: str,
-        correlation_id: str,
-        timeout_seconds: float,
-    ) -> dict[str, Any] | None:
-        # Poll from the offset captured at open; blocking wait runs off-thread.
-        return await asyncio.to_thread(
-            consumer.log.poll,
-            consumer.start_offset,
-            correlation_id,
-            timeout_seconds,
-        )
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self._client = _FakeClient()
+        self._assigned: set[Any] = set()
+        self._cursor = 0
 
-    return _fake_open, _fake_poll
+    async def start(self) -> None:
+        return None
+
+    def partitions_for_topic(self, topic: str) -> set[int]:
+        self._client.tracked.add(topic)
+        return {0}
+
+    def assign(self, partitions: Any) -> None:
+        self._assigned = set(partitions)
+
+    def assignment(self) -> set[Any]:
+        return set(self._assigned)
+
+    async def seek_to_end(self, *assignment: object) -> None:
+        return None
+
+    async def end_offsets(self, partitions: Any) -> dict[Any, int]:
+        assert type(self).log is not None
+        return dict.fromkeys(partitions, type(self).log.partition.hwm)
+
+    def seek(self, partition: Any, offset: int) -> None:
+        self._cursor = offset
+
+    async def getone(self) -> SimpleNamespace:
+        assert type(self).log is not None
+        while True:
+            record = type(self).log.partition.read_at(self._cursor)
+            if record is not None:
+                self._cursor += 1
+                _cid, value = record
+                return SimpleNamespace(topic=_TERMINAL_TOPIC, value=value)
+            await asyncio.sleep(0.002)
+
+    async def stop(self) -> None:
+        return None
 
 
 # ----------------------------------------------------------------------------
-# Handler shapes
+# Handler shape (two-phase open/register/wait — the only live shape)
 # ----------------------------------------------------------------------------
-
-
-class HandlerRoiRunnerSingleCall:
-    """Legacy seek-after-publish shape: publish, THEN single-call consume.
-
-    This is the OMN-13005 form. Against a fast terminal (appended immediately
-    after publish) it loses the race because the consumer opens — and so seeks
-    to end — only when the single call is made, i.e. after the terminal is
-    already in the log.
-
-    The active ``FakeTerminalLog`` is bound on the class (``_TEST_LOG``) by the
-    test driver before dispatch; the constructor keeps the runtime-known
-    ``event_publisher``/``event_consumer`` shape so the resolver introspects and
-    materializes both injected deps exactly as it does for the real handler.
-    """
-
-    ROW_TOPIC = "onex.evt.omnimarket.context-roi-run-completed.v1"
-    _TEST_LOG: FakeTerminalLog | None = None
-
-    def __init__(
-        self,
-        event_publisher: Callable[[str, bytes], None] | None = None,
-        event_consumer: Callable[[str, str, float], dict[str, Any] | None]
-        | None = None,
-    ) -> None:
-        self._event_publisher = event_publisher
-        self._event_consumer = event_consumer or (lambda _t, _c, _to: None)
-
-    async def handle(self, envelope: object) -> None:
-        correlation_id = "cid-roi-runner-1"
-        if self._event_publisher is not None:
-            self._event_publisher(_COMMAND_TOPIC, b'{"task":"invoice"}')
-        # Fast terminal: appended the instant after publish, before the consume
-        # call seeks to end.
-        if self._TEST_LOG is not None:
-            self._TEST_LOG.append(_terminal_payload(correlation_id))
-        terminal = self._event_consumer(_TERMINAL_TOPIC, correlation_id, 5.0)
-        _emit_row(self._event_publisher, self.ROW_TOPIC, terminal)
 
 
 class HandlerRoiRunnerTwoPhase:
-    """Subscribe-before-publish shape (OMN-13012): open, publish, then wait.
-
-    Opens the terminal session (assign + seek_to_end NOW) BEFORE publishing, so
-    a terminal appended immediately after publish is at-or-after the captured
-    offset and is delivered by ``wait``.
-    """
+    """Subscribe-before-publish shape: open + register, publish, then wait."""
 
     ROW_TOPIC = "onex.evt.omnimarket.context-roi-run-completed.v1"
     _TEST_LOG: FakeTerminalLog | None = None
@@ -212,16 +203,17 @@ class HandlerRoiRunnerTwoPhase:
 
     async def handle(self, envelope: object) -> None:
         correlation_id = "cid-roi-runner-1"
-        # Two-phase: open BEFORE publishing.
         session = None
         opener = getattr(self._event_consumer, "open", None)
         if callable(opener):
             session = opener(_TERMINAL_TOPIC)
+            register = getattr(session, "register", None)
+            if callable(register):
+                register(correlation_id)
         if self._event_publisher is not None:
             self._event_publisher(_COMMAND_TOPIC, b'{"task":"invoice"}')
-        # Fast terminal: appended immediately after publish.
         if self._TEST_LOG is not None:
-            self._TEST_LOG.append(_terminal_payload(correlation_id))
+            self._TEST_LOG.append(correlation_id, _terminal_payload(correlation_id))
         if session is not None:
             terminal = session.wait(correlation_id, 5.0)
         elif self._event_consumer is not None:
@@ -294,10 +286,10 @@ async def _drive_handler(
 ) -> list[dict[str, Any]]:
     """Wire ``handler_cls`` through the real injection path and dispatch once.
 
-    Binds the active ``FakeTerminalLog`` on the handler class (``_TEST_LOG``) so
-    the constructor keeps the exact runtime-known dependency shape the resolver
-    introspects, and patches the two Kafka seams so the real
-    ``TerminalEventConsumer`` two-phase logic runs against the in-memory log.
+    Patches the single Kafka seam the correlator builds its consumer through
+    (``service_pattern_b_broker.AIOKafkaConsumer``) so the REAL
+    ``TerminalEventConsumer`` / ``LongLivedTerminalCorrelator`` logic runs against
+    the in-memory log.
     """
     contract = _make_roi_runner_contract()
     event_bus = RecordingEventBus()
@@ -305,7 +297,7 @@ async def _drive_handler(
     ownership_query = ServiceLocalHandlerOwnershipQuery(
         local_node_names=frozenset({contract.name})
     )
-    fake_open, fake_poll = install_fake_kafka(log)
+    _FakeConsumer.log = log
     handler_cls._TEST_LOG = log  # type: ignore[attr-defined]
 
     with (
@@ -314,12 +306,8 @@ async def _drive_handler(
             return_value=handler_cls,
         ),
         patch(
-            "omnibase_infra.runtime.service_terminal_event_consumer._open_positioned_consumer",
-            side_effect=fake_open,
-        ),
-        patch(
-            "omnibase_infra.runtime.service_terminal_event_consumer._poll_correlated_terminal",
-            side_effect=fake_poll,
+            "omnibase_infra.runtime.service_pattern_b_broker.AIOKafkaConsumer",
+            _FakeConsumer,
         ),
     ):
         prepared = _prepare_handler_wiring(
@@ -349,43 +337,20 @@ async def _drive_handler(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_single_call_consumer_loses_fast_terminal_race() -> None:
-    """RED for OMN-13012: seek-after-publish misses a terminal emitted at t+0.
+async def test_two_phase_consumer_catches_fast_terminal_in_gap() -> None:
+    """OMN-13118: a terminal landing in the open->wait gap is demuxed and returned.
 
-    The legacy single-call consumer opens (and seeks to end) only when the call
-    is made — after the handler has already published AND the terminal has landed.
-    seek_to_end skips past the terminal, so the poll times out and the row is
-    degenerate. This is the exact probe3 failure; it MUST be red so the two-phase
-    fix below cannot be a no-op.
-    """
-    log = FakeTerminalLog()
-    rows = await _drive_handler(HandlerRoiRunnerSingleCall, log)
-    assert rows, "handler never emitted a result row"
-    row = rows[-1]
-    assert row["failure_stage"] == "generation", (
-        "single-call seek-after-publish unexpectedly caught the fast terminal — "
-        "the race this ticket fixes is not being exercised"
-    )
-    assert row["attempt_count"] == 0
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_two_phase_consumer_catches_fast_terminal_race() -> None:
-    """GREEN for OMN-13012: open-before-publish captures the t+0 terminal.
-
-    The two-phase session seeks to end BEFORE the handler publishes, so a terminal
-    appended immediately after publish is at-or-after the captured offset and is
-    delivered by ``wait`` — a NON-degenerate row. With the pre-fix single-call
-    consumer this assertion fails (see the RED test above).
+    The correlator registers the cid before publish, so the always-running poll
+    loop delivers the gap-landed COMPLETED terminal to the registered future — a
+    NON-degenerate row through the real wiring path.
     """
     log = FakeTerminalLog()
     rows = await _drive_handler(HandlerRoiRunnerTwoPhase, log)
     assert rows, "handler never emitted a result row"
     row = rows[-1]
     assert row["failure_stage"] != "generation", (
-        "two-phase open-before-publish failed to catch the fast terminal — the "
-        "subscribe-after-publish race (OMN-13012) is not closed"
+        "two-phase open/register/wait failed to catch the gap-landed terminal — "
+        "the long-lived correlator did not demux it to the registered future"
     )
     assert row["attempt_count"] >= 1
     assert row["model_id"] == "Qwen3.6-35B-A3B"
@@ -396,13 +361,7 @@ async def test_two_phase_consumer_catches_fast_terminal_race() -> None:
 async def test_auto_wired_event_consumer_blocks_and_returns_non_degenerate_row() -> (
     None
 ):
-    """OMN-13005 preserved: a delayed terminal is still correlated and returned.
-
-    Drives the trial through the real wiring with the two-phase session and a
-    terminal that arrives shortly after the wait begins (a delayed append rather
-    than a t+0 one). Asserts a NON-DEGENERATE row, proving the injected consumer
-    blocks-and-correlates (the OMN-13005 contract) under the new two-phase shape.
-    """
+    """OMN-13005 preserved: a delayed terminal is still correlated and returned."""
     log = FakeTerminalLog()
 
     class _DelayedTerminalTwoPhase(HandlerRoiRunnerTwoPhase):
@@ -412,18 +371,18 @@ async def test_auto_wired_event_consumer_blocks_and_returns_non_degenerate_row()
             opener = getattr(self._event_consumer, "open", None)
             if callable(opener):
                 session = opener(_TERMINAL_TOPIC)
+                register = getattr(session, "register", None)
+                if callable(register):
+                    register(correlation_id)
             if self._event_publisher is not None:
                 self._event_publisher(_COMMAND_TOPIC, b'{"task":"invoice"}')
 
             active_log = self._TEST_LOG
 
-            # Terminal arrives AFTER a short delay, while wait() is blocking.
             def _delayed_append() -> None:
-                import time
-
                 time.sleep(0.05)
                 if active_log is not None:
-                    active_log.append(_terminal_payload(correlation_id))
+                    active_log.append(correlation_id, _terminal_payload(correlation_id))
 
             threading.Thread(target=_delayed_append, daemon=True).start()
             terminal = (
