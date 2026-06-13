@@ -532,7 +532,7 @@ def test_open_pins_end_offset_before_publish(
         assert fake._cursor == pre_publish_hwm, (
             "open() did not pin the pre-publish end offset synchronously — the "
             f"read cursor is {fake._cursor!r}, expected {pre_publish_hwm} "
-            "(an unresolved cursor means a deferred LATEST reset that races the "
+            "(an unresolved cursor means a lazy LATEST reset that races the "
             "publish)"
         )
     finally:
