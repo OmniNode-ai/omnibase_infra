@@ -43,6 +43,14 @@ _DIRECT_TERMINAL_SESSION_TIMEOUT_MS = 45000
 _DIRECT_TERMINAL_HEARTBEAT_INTERVAL_MS = 15000
 _DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS = 300000
 
+# Bounded grace for a reply topic that EXISTS but is slow to surface partition
+# metadata. A topic that has never been produced to (e.g. the FAILED terminal
+# topic in a run where nothing fails) legitimately advertises no partitions; it
+# must NOT burn the whole assign cap on every trial (OMN-13118 battery wedge).
+# After this grace window of forced refreshes the broker's answer is taken as
+# authoritative: assign whatever partitions exist (possibly none) and return.
+_DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS = 2.0
+
 
 def _broker_group_id(command_topic: str) -> str:
     normalized = command_topic.replace(".", "-")
@@ -202,7 +210,7 @@ async def _assign_direct_terminal_partitions(
     terminal_topic: str,
     assign_cap_seconds: float,
 ) -> None:
-    """Track the reply topic, wait for its metadata, then assign all partitions.
+    """Track the reply topic, wait briefly for its metadata, then assign.
 
     The first ``set_topics`` registers the topic and forces the initial metadata
     fetch (awaited). If partitions are still not visible (slow broker metadata),
@@ -210,9 +218,29 @@ async def _assign_direct_terminal_partitions(
     — NOT a repeat ``set_topics([same_topic])``, which aiokafka treats as a
     no-op and never re-fetches (the OMN-13012 consume-leg wedge: only one of the
     two ephemeral terminal consumers ever surfaced partitions).
+
+    Partition-less reply topics are a VALID steady state (OMN-13118)
+    --------------------------------------------------------------------
+    A terminal topic that has never been produced to — the FAILED reply topic in
+    a run where every generation passes — legitimately advertises no partitions
+    (Redpanda auto-creates topics on first produce). Blocking the FULL
+    ``assign_cap_seconds`` (30s live) on it and then RAISING was the load-
+    dependent battery wedge: the runner opens one ephemeral consumer per terminal
+    topic BEFORE publishing, serially, so EVERY trial stalled ~30s on the
+    partition-less FAILED open before it could correlate the COMPLETED terminal —
+    a 160-trial battery needed >80 min and never completed.
+
+    The fix: give a bounded grace window for a topic that EXISTS but is slow to
+    surface metadata; after it, take the broker's answer as authoritative and
+    assign whatever partitions exist — possibly none. A consumer with an empty
+    assignment is positioned (``seek_to_end`` is a no-op) and ``poll`` treats it
+    as "no terminal will arrive here" (returns None on its own timeout) without
+    blocking the open phase. The COMPLETED-topic session, opened separately and
+    assigned its real partition, wins the cross-topic race and correlates fast.
     """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + assign_cap_seconds
+    grace = min(_DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS, assign_cap_seconds)
+    deadline = loop.time() + grace
     await _force_terminal_topic_metadata(consumer, terminal_topic)
     while True:
         partitions = consumer.partitions_for_topic(terminal_topic) or set()
@@ -220,11 +248,14 @@ async def _assign_direct_terminal_partitions(
             consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
             return
         if loop.time() >= deadline:
-            raise TimeoutError(
-                "terminal-event consumer: reply topic "
-                f"{terminal_topic!r} surfaced no partitions within "
-                f"{assign_cap_seconds:.1f}s (broker metadata never advertised it)"
-            )
+            # The broker has had the grace window to advertise partitions and
+            # surfaced none: the topic has not been produced to yet. Assign the
+            # empty set and return promptly rather than burning the cap. A real
+            # terminal on this topic would have created its partition before the
+            # correlated event was published, so a partition-less topic at this
+            # point carries no terminal for this correlation.
+            consumer.assign([])
+            return
         await asyncio.sleep(_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS)
         await _refresh_terminal_topic_metadata(consumer)
 
@@ -267,6 +298,20 @@ async def poll_direct_terminal_consumer(
     """Poll a positioned terminal consumer for the correlated terminal payload."""
     loop = asyncio.get_running_loop()
     try:
+        # A partition-less reply topic assigns the empty set (OMN-13118): the
+        # broker never advertised a partition because the topic has not been
+        # produced to. ``getone()`` on an unassigned consumer raises
+        # ``IllegalStateError`` immediately; instead, treat this leg as "no
+        # terminal will arrive here" — sleep out the caller's timeout so the
+        # cross-topic race lets the COMPLETED-topic consumer win — and return
+        # None on genuine timeout. The losing leg is unblocked early when its
+        # session is closed by the race winner.
+        if not handle.consumer.assignment():
+            try:
+                await asyncio.sleep(timeout_seconds)
+            except asyncio.CancelledError:
+                pass
+            return None
         deadline = loop.time() + timeout_seconds
         while True:
             remaining = deadline - loop.time()
