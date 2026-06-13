@@ -116,6 +116,10 @@ class _FakeAIOKafkaConsumer:
         self.topics_calls = 0
         self.set_topics_calls: list[tuple[str, ...]] = []
         self.seeked_to_end = False
+        # True once the consume leg has pinned its read position to the current
+        # end — either the legacy lazy ``seek_to_end`` or, post-OMN-13118, the
+        # synchronous ``end_offsets`` + ``seek`` pinning.
+        self.positioned = False
         self.started = False
         self.stopped = False
         type(self).created.append(self)
@@ -155,6 +159,18 @@ class _FakeAIOKafkaConsumer:
     async def seek_to_end(self, *_assignment: object) -> None:
         await asyncio.sleep(0)
         self.seeked_to_end = True
+        self.positioned = True
+
+    async def end_offsets(self, partitions: object) -> dict[object, int]:
+        # Synchronous broker round-trip returning the current HWM per partition
+        # (queue-backed fake delivers regardless of offset, so 0 is faithful for
+        # the "next message" offset here). Does not change position.
+        await asyncio.sleep(0)
+        return dict.fromkeys(partitions, 0)
+
+    def seek(self, _partition: object, _offset: int) -> None:
+        # Synchronous pin (OMN-13118): the position is fixed at open() time.
+        self.positioned = True
 
     async def getone(self) -> SimpleNamespace:
         return await self.messages.get()
@@ -235,7 +251,7 @@ class _FakeKafkaTransport:
         assert self._consumers
         consumer = self._consumers[-1]
         if self._assert_seeked:
-            assert consumer.seeked_to_end is True
+            assert consumer.positioned is True
 
         command_envelope = ModelEventEnvelope[object].model_validate_json(value)
         terminal_topic = self._terminal_topic or self._route.terminal_event or "unknown"
@@ -391,7 +407,7 @@ async def test_service_pattern_b_broker_returns_failed_for_failure_terminal() ->
 
 
 @pytest.mark.asyncio
-async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
+async def test_service_pattern_b_broker_kafka_waiter_pins_end_offset_before_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route = _route()
@@ -820,8 +836,10 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
 
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
-        lambda packages: captured.setdefault("packages", packages)
-        and {"session_orchestrator": route},
+        lambda packages: (
+            captured.setdefault("packages", packages)
+            and {"session_orchestrator": route}
+        ),
     )
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
@@ -936,8 +954,10 @@ async def test_runtime_host_process_broker_package_names_ignore_active_runtime_e
     monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra")
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
-        lambda packages: captured.setdefault("packages", packages)
-        and {"session_orchestrator": route},
+        lambda packages: (
+            captured.setdefault("packages", packages)
+            and {"session_orchestrator": route}
+        ),
     )
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
