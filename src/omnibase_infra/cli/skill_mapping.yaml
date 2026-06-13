@@ -1,0 +1,255 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Declarative `onex skill <name>` -> backing-node mapping (OMN-13097).
+#
+# Phase 4a of the skill-output-suppression slice
+# (docs/plans/2026-06-12-skill-output-suppression-plan.md Phase 4 item 1).
+#
+# This is DATA, not code: `onex skill` loads it into ModelSkillMappingRegistry
+# and uses it to build each backing node's input payload from the skill's CLI
+# args, then dispatches through the proven receipt-mode path. Adding a skill is
+# a YAML edit + a fixture, never a CLI code change (ticket deliverable 2).
+#
+# Per entry:
+#   skill_name     – name as invoked: `onex skill <skill_name>`
+#   node_name      – backing node (onex.nodes entry-point group)
+#   result_model   – FQN of the node's typed handler result (receipt schema
+#                    identity; ticket deliverable 3) — verified against the
+#                    live handler `handle()` return type on origin/dev.
+#   event_bus      – backend override (default inmemory)
+#   timeout        – dispatch timeout seconds (default 300)
+#   args           – CLI arg -> payload field specs
+#   static_payload – payload fields injected regardless of args
+#   classifiers    – keyword classification for unset fields (delegate)
+#
+# arg_type: string | integer | boolean | string_list
+#   boolean args are presence flags (--dry-run); string_list splits on commas.
+skills:
+  - skill_name: aislop_sweep
+    node_name: node_aislop_sweep
+    result_model: omnimarket.nodes.node_aislop_sweep.handlers.handler_aislop_sweep.AislopSweepResult
+    args:
+      - {name: target-dirs, payload_field: target_dirs, arg_type: string_list}
+      - {name: checks, payload_field: checks, arg_type: string_list}
+      - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: data_flow_sweep
+    node_name: node_data_flow_sweep
+    result_model: omnimarket.nodes.node_data_flow_sweep.handlers.handler_data_flow_sweep.DataFlowSweepResult
+    args:
+      - {name: flows, payload_field: flows, arg_type: string_list}
+      - {name: collect, payload_field: collect, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: auto_merge
+    node_name: node_auto_merge_effect
+    result_model: omnimarket.nodes.node_auto_merge_effect.models.model_auto_merge_result.ModelAutoMergeResult
+    args:
+      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: strategy, payload_field: strategy, arg_type: string}
+      - {name: delete-branch, payload_field: delete_branch, arg_type: boolean, default: false}
+      - {name: ticket-id, payload_field: ticket_id, arg_type: string}
+      - {name: gate-timeout-hours, payload_field: gate_timeout_hours, arg_type: integer}
+  - skill_name: build_loop
+    node_name: node_build_loop
+    result_model: omnimarket.nodes.node_build_loop.models.model_loop_state.ModelLoopState
+    args:
+      - {name: max-cycles, payload_field: max_cycles, arg_type: integer}
+      - {name: skip-closeout, payload_field: skip_closeout, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: coderabbit_triage
+    node_name: node_coderabbit_triage
+    result_model: omnimarket.nodes.node_coderabbit_triage.handlers.handler_coderabbit_triage.ModelCoderabbitTriageResult
+    args:
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: compliance_sweep
+    node_name: node_compliance_sweep
+    result_model: omnimarket.nodes.node_compliance_sweep.handlers.handler_compliance_sweep.ComplianceSweepResult
+    args:
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: checks, payload_field: checks, arg_type: string_list}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: coverage_sweep
+    node_name: node_coverage_sweep
+    result_model: omnimarket.nodes.node_coverage_sweep.handlers.handler_coverage_sweep.CoverageSweepResult
+    args:
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: target-pct, payload_field: target_pct, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: create_ticket
+    node_name: node_create_ticket
+    result_model: omnimarket.nodes.node_create_ticket.handlers.handler_create_ticket.ModelCreateTicketResult
+    args:
+      - {name: title, payload_field: title, arg_type: string}
+      - {name: from-contract, payload_field: from_contract, arg_type: string}
+      - {name: from-plan, payload_field: from_plan, arg_type: string}
+      - {name: milestone, payload_field: milestone, arg_type: string}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: parent, payload_field: parent, arg_type: string}
+      - {name: blocked-by, payload_field: blocked_by, arg_type: string_list}
+      - {name: project, payload_field: project, arg_type: string}
+      - {name: team, payload_field: team, arg_type: string}
+      - {name: allow-arch-violation, payload_field: allow_arch_violation, arg_type: boolean, default: false}
+  - skill_name: database_sweep
+    node_name: node_database_sweep
+    result_model: omnimarket.nodes.node_database_sweep.handlers.handler_database_sweep.DatabaseSweepResult
+    args:
+      - {name: omni-home, payload_field: omni_home, arg_type: string}
+      - {name: table, payload_field: table, arg_type: string}
+      - {name: staleness-threshold-hours, payload_field: staleness_threshold_hours, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: design_to_plan
+    node_name: node_design_to_plan
+    result_model: omnimarket.nodes.node_design_to_plan.models.model_design_to_plan_phase3_launch.ModelDesignToPlanPhase3LaunchResult
+    args:
+      - {name: phase, payload_field: phase, arg_type: string}
+      - {name: topic, payload_field: topic, arg_type: string}
+      - {name: plan-path, payload_field: plan_path, arg_type: string}
+      - {name: no-launch, payload_field: no_launch, arg_type: boolean, default: false}
+      - {name: plan-only, payload_field: plan_only, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: doc_freshness_sweep
+    node_name: node_doc_freshness_sweep
+    result_model: omnimarket.nodes.node_doc_freshness_sweep.handlers.handler_doc_freshness_sweep.DocFreshnessSweepResult
+    args:
+      - {name: omni-home, payload_field: omni_home, arg_type: string}
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: claude-md-only, payload_field: claude_md_only, arg_type: boolean, default: false}
+      - {name: broken-only, payload_field: broken_only, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: dod_verify
+    node_name: node_dod_verify
+    result_model: omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState
+    args:
+      - {name: ticket-id, payload_field: ticket_id, arg_type: string, positional: true, required: true}
+      - {name: contract-path, payload_field: contract_path, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: duplication_sweep
+    node_name: node_duplication_sweep
+    result_model: omnimarket.nodes.node_duplication_sweep.handlers.handler_duplication_sweep.DuplicationSweepResult
+    args:
+      - {name: omni-home, payload_field: omni_home, arg_type: string}
+      - {name: checks, payload_field: checks, arg_type: string_list}
+  - skill_name: hostile_reviewer
+    node_name: node_hostile_reviewer
+    result_model: omnimarket.nodes.node_hostile_reviewer.models.model_hostile_reviewer_completed_event.ModelHostileReviewerCompletedEvent
+    args:
+      - {name: pr-number, payload_field: pr_number, arg_type: integer}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: file-path, payload_field: file_path, arg_type: string}
+      - {name: models, payload_field: models, arg_type: string_list}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: linear_housekeeping
+    node_name: node_linear_triage
+    result_model: omnimarket.nodes.node_linear_triage.models.model_linear_triage_state.ModelLinearTriageResult
+    args:
+      - {name: threshold-days, payload_field: threshold_days, arg_type: integer}
+      - {name: flag-only, payload_field: flag_only, arg_type: boolean, default: false}
+      - {name: team, payload_field: team, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: merge_sweep
+    node_name: node_pr_lifecycle_orchestrator
+    result_model: omnimarket.nodes.node_pr_lifecycle_orchestrator.handlers.handler_pr_lifecycle_orchestrator.ModelPrLifecycleResult
+    args:
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: inventory-only, payload_field: inventory_only, arg_type: boolean, default: false}
+      - {name: fix-only, payload_field: fix_only, arg_type: boolean, default: false}
+      - {name: merge-only, payload_field: merge_only, arg_type: boolean, default: false}
+      - {name: max-parallel-polish, payload_field: max_parallel_polish, arg_type: integer}
+      - {name: admin-fallback-threshold-minutes, payload_field: admin_fallback_threshold_minutes, arg_type: integer}
+      - {name: verify, payload_field: verify, arg_type: boolean, default: false}
+      - {name: verify-timeout-seconds, payload_field: verify_timeout_seconds, arg_type: integer}
+  - skill_name: plan_to_tickets
+    node_name: node_plan_to_tickets
+    result_model: omnimarket.nodes.node_plan_to_tickets.handlers.handler_plan_to_tickets.ModelPlanToTicketsResult
+    args:
+      - {name: plan-path, payload_field: plan_path, arg_type: string, positional: true, required: true}
+      - {name: project, payload_field: project, arg_type: string}
+      - {name: epic-title, payload_field: epic_title, arg_type: string}
+      - {name: no-create-epic, payload_field: no_create_epic, arg_type: boolean, default: false}
+      - {name: skip-existing, payload_field: skip_existing, arg_type: boolean, default: false}
+      - {name: team, payload_field: team, arg_type: string}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: allow-arch-violation, payload_field: allow_arch_violation, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: platform_readiness
+    node_name: node_platform_readiness
+    result_model: omnimarket.nodes.node_platform_readiness.handlers.handler_platform_readiness.ModelPlatformReadinessResult
+    args: []
+  - skill_name: pr_polish
+    node_name: node_pr_polish
+    result_model: omnimarket.nodes.node_pr_polish.models.model_pr_polish_completed_event.ModelPrPolishCompletedEvent
+    args:
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
+      - {name: ticket-id, payload_field: ticket_id, arg_type: string}
+      - {name: required-clean-runs, payload_field: required_clean_runs, arg_type: integer}
+      - {name: max-iterations, payload_field: max_iterations, arg_type: integer}
+      - {name: skip-conflicts, payload_field: skip_conflicts, arg_type: boolean, default: false}
+      - {name: skip-pr-review, payload_field: skip_pr_review, arg_type: boolean, default: false}
+      - {name: skip-local-review, payload_field: skip_local_review, arg_type: boolean, default: false}
+      - {name: no-ci, payload_field: no_ci, arg_type: boolean, default: false}
+      - {name: no-push, payload_field: no_push, arg_type: boolean, default: false}
+      - {name: no-automerge, payload_field: no_automerge, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: pr_review
+    node_name: node_pr_review_bot
+    result_model: omnimarket.nodes.node_pr_review_bot.models.models.ReviewVerdict
+    args:
+      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
+      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
+      - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: pr_review_bot
+    node_name: node_pr_review_bot
+    result_model: omnimarket.nodes.node_pr_review_bot.models.models.ReviewVerdict
+    args:
+      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
+      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
+      - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: session
+    node_name: node_session_orchestrator
+    result_model: omnimarket.nodes.node_session_orchestrator.handlers.handler_session_orchestrator.ModelSessionOrchestratorResult
+    args:
+      - {name: mode, payload_field: mode, arg_type: string}
+      - {name: phase, payload_field: phase, arg_type: string}
+      - {name: skip-health, payload_field: skip_health, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: shim_audit
+    node_name: node_shim_scanner
+    result_model: omnimarket.nodes.node_shim_scanner.models.model_shim_scan_result.ModelShimScanResult
+    args:
+      - {name: paths, payload_field: paths, arg_type: string_list}
+      - {name: reference-date, payload_field: reference_date, arg_type: string}
+      - {name: warn-days-before-expiry, payload_field: warn_days_before_expiry, arg_type: integer}
+  - skill_name: delegate
+    node_name: node_delegate_skill_orchestrator
+    result_model: omnimarket.models.delegation.wire.model_delegate_skill_response.ModelDelegateSkillResponse
+    static_payload:
+      source: claude-code
+    args:
+      - {name: prompt, payload_field: prompt, arg_type: string, positional: true, required: true}
+      - {name: task-type, payload_field: task_type, arg_type: string}
+      - {name: max-tokens, payload_field: max_tokens, arg_type: integer, default: 2048}
+    classifiers:
+      - target_field: task_type
+        source_field: prompt
+        fallback: research
+        rules:
+          - [["test", "pytest", "unit test", "assert"], test]
+          - [["document", "docstring", "readme", "explain how"], document]
+          - [["write", "create", "implement", "build", "generate"], code_generation]
+          - [["refactor", "cleanup", "simplify"], refactor]
+          - [["review", "audit", "check"], review]
+          - [["reason", "think through", "decide", "compare"], reasoning]
