@@ -811,18 +811,26 @@ class RuntimeLocal:
                 entry.handler_module, entry.handler_class
             )
 
-            # Import the input model class
-            try:
-                em_mod = importlib.import_module(entry.event_model_module)
-                input_model_cls = getattr(em_mod, entry.event_model_class)
-            except (ImportError, AttributeError) as exc:
-                msg = (
-                    f"Failed to resolve event model "
-                    f"{entry.event_model_module}.{entry.event_model_class}: {exc}"
-                )
-                logger.exception("RuntimeLocal: %s", msg)
-                self._result = EnumWorkflowResult.FAILED
-                return
+            # Resolve the input model class. operation_match entries route by the
+            # `operation` field and declare no event_model, so event_model_module is
+            # empty — skip the import and forward the raw payload (OMN-13141). Only
+            # payload_type_match entries carry a typed event model to import.
+            input_model_type: type[BaseModel] | None = None
+            if entry.event_model_module:
+                try:
+                    em_mod = importlib.import_module(entry.event_model_module)
+                    input_model_type = cast(
+                        "type[BaseModel]",
+                        getattr(em_mod, entry.event_model_class),
+                    )
+                except (ImportError, AttributeError) as exc:
+                    msg = (
+                        f"Failed to resolve event model "
+                        f"{entry.event_model_module}.{entry.event_model_class}: {exc}"
+                    )
+                    logger.exception("RuntimeLocal: %s", msg)
+                    self._result = EnumWorkflowResult.FAILED
+                    return
 
             def _make_fail_cb(name: str) -> Callable[[], None]:
                 def _cb() -> None:
@@ -831,7 +839,6 @@ class RuntimeLocal:
 
                 return _cb
 
-            input_model_type: type[BaseModel] = cast("type[BaseModel]", input_model_cls)
             adapter = LocalRuntimeBusAdapter(
                 handler=cast("ProtocolLocalRuntimeCallableTarget", handler_instance),
                 handler_name=entry.handler_name,
