@@ -1594,7 +1594,14 @@ run_runtime_migration_preflight() {
         log_cmd "${cmd[*]}"
         "${cmd[@]}"
         if [[ "${service}" == "forward-migration" ]]; then
-            local wait_cmd=(docker wait omnibase-forward-migration)
+            # Derive the container name from the compose project so the wait
+            # targets the lane being deployed, not a fixed name. The base
+            # compose names it <compose-project>-forward-migration and each
+            # lane overlay follows the same form (OMN-12987), so this resolves
+            # to omnibase-infra-forward-migration for dev and
+            # omnibase-infra-stability-test-forward-migration for stability.
+            local forward_migration_container="${compose_project}-forward-migration"
+            local wait_cmd=(docker wait "${forward_migration_container}")
             log_cmd "${wait_cmd[*]}"
             if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
                 log_error "forward-migration did not complete successfully."
@@ -1603,9 +1610,15 @@ run_runtime_migration_preflight() {
         fi
     done
 
+    # Postgres follows the same lane-derivable naming as forward-migration:
+    # <compose-project>-postgres (omnibase-infra-postgres for dev,
+    # omnibase-infra-stability-test-postgres for stability). Deriving it keeps
+    # the projection-table probe pointed at the lane being deployed instead of
+    # always hitting the dev-lane postgres (OMN-12987).
+    local postgres_container="${compose_project}-postgres"
     for table_name in "${REQUIRED_PROJECTION_TABLES[@]}"; do
         local check_cmd=(
-            docker exec omnibase-infra-postgres
+            docker exec "${postgres_container}"
             psql
             -U postgres
             -d omnidash_analytics

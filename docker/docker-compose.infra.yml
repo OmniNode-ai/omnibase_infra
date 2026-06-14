@@ -608,7 +608,14 @@ services:
   # successfully before checking the sentinel flag.
   forward-migration:
     image: postgres:16-alpine
-    container_name: omnibase-forward-migration
+    # Project-namespaced to match the omnibase-infra-* convention used by every
+    # other base service (postgres, redpanda, valkey, ...). The bare
+    # "omnibase-forward-migration" name was the one base container_name NOT
+    # carrying the lane prefix, so it collided across compose projects on the
+    # same host (e.g. a leftover dev-lane container blocked a stability rebuild).
+    # Lane overlays append their lane segment, yielding the derivable form
+    # <compose-project>-forward-migration that deploy-runtime.sh waits on (OMN-12987).
+    container_name: omnibase-infra-forward-migration
     profiles: ["runtime", "full"]
     depends_on:
       postgres:
