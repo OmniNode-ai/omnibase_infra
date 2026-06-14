@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -14,6 +15,35 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
+
+# Matches a COPY directive's argument list. We discard `--from=<stage>` lines
+# (those copy from a prior build stage, not the host build context) and any
+# remaining `--flag` tokens (e.g. `--chown=...`), then keep the source operands
+# that pull from the workspace/ tree.
+_COPY_LINE_RE = re.compile(r"^COPY\s+(?P<args>.+)$", re.MULTILINE)
+
+
+def _dockerfile_workspace_copy_sources() -> list[str]:
+    """Every Dockerfile.runtime COPY source that pulls from the workspace/ tree.
+
+    The deployed build context is assembled by deploy-runtime.sh's sync_files;
+    each of these paths must be rsynced (or generated) into that context or the
+    workspace-mode `docker build` fails with "failed to calculate checksum ...:
+    not found" (the OMN-12987 regression). This list is derived from the live
+    Dockerfile so a future COPY workspace/<x> without a matching rsync is caught.
+    """
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    sources: list[str] = []
+    for match in _COPY_LINE_RE.finditer(dockerfile):
+        tokens = match.group("args").split()
+        # `--from=<stage>` copies from a build stage, never the host context.
+        if any(tok.startswith("--from=") for tok in tokens):
+            continue
+        # Drop flag tokens (--chown=, --link, ...); the last operand is the
+        # destination, everything before it is a build-context source.
+        operands = [tok for tok in tokens if not tok.startswith("--")]
+        sources.extend(src for src in operands[:-1] if src.startswith("workspace/"))
+    return sources
 
 
 @pytest.mark.unit
@@ -31,6 +61,47 @@ def test_deploy_runtime_syncs_runtime_dockerfile_copy_sources() -> None:
 
     assert '"${repo_root}/workspace/sibling-repos/"' in deploy_script
     assert '"${repo_root}/scripts/runtime_build/"' in deploy_script
+
+
+@pytest.mark.unit
+def test_deploy_runtime_stages_every_workspace_copy_source() -> None:
+    """Every `COPY workspace/<x>` in Dockerfile.runtime must be staged.
+
+    Regression guard for OMN-12987: Dockerfile.runtime COPYs
+    workspace/sibling-pin-comparison.json (and workspace/sibling-repos/), but an
+    earlier deploy-runtime.sh only rsynced workspace/sibling-repos/ into the
+    deployed build context. The root-level comparison file was never carried
+    over, so every workspace-mode `docker build` failed with "failed to
+    calculate checksum of ref ...:/workspace/sibling-pin-comparison.json: not
+    found". The dev compose build masked this because it runs from the repo root
+    where the committed placeholder exists.
+
+    This test derives the workspace/ COPY sources from the live Dockerfile and
+    asserts deploy-runtime.sh references each as an rsync source for the deployed
+    context, so a future Dockerfile COPY without a matching rsync fails CI.
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    workspace_sources = _dockerfile_workspace_copy_sources()
+    # The Dockerfile must at minimum COPY the two known workspace/ paths; a regex
+    # that silently matched nothing would make this guard vacuously pass.
+    assert "workspace/sibling-repos/" in workspace_sources
+    assert "workspace/sibling-pin-comparison.json" in workspace_sources
+
+    missing: list[str] = []
+    for source in workspace_sources:
+        # A directory source (trailing slash) and a file source both appear in
+        # deploy-runtime.sh as an rsync argument quoted under ${repo_root}.
+        staged = f'"${{repo_root}}/{source}"' in deploy_script
+        if not staged:
+            missing.append(source)
+
+    assert not missing, (
+        "Dockerfile.runtime COPYs these workspace/ paths but deploy-runtime.sh "
+        f"does not stage them into the deployed build context: {missing}. Add an "
+        "rsync of each into sync_files() or workspace-mode `docker build` will "
+        "fail with 'failed to calculate checksum ...: not found' (OMN-12987)."
+    )
 
 
 def _init_git_repo(path: Path, marker: str) -> str:

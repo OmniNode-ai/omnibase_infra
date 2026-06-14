@@ -1273,6 +1273,24 @@ if spec and spec.origin:
     # .sibling-lock-pins.json, so the rsync above already carries it into the
     # build context for the in-image provenance merge.
 
+    # Carry the root-level workspace/ file that Dockerfile.runtime COPYs
+    # (workspace/sibling-pin-comparison.json, line ~278). The sibling-repos/
+    # rsync above only covers the subdirectory; without this the deployed build
+    # context lacks the comparison file and `docker build` fails with
+    # "failed to calculate checksum of ref ...:/workspace/sibling-pin-comparison.json:
+    # not found" -- the bug fixed in OMN-12987 (the dev compose build only worked
+    # because it runs from the repo root where the committed placeholder exists).
+    # Release mode ships the committed placeholder; workspace mode ships the real
+    # expected-vs-actual comparison stage_workspace.sh wrote into the repo root
+    # (OMN-12977). The regression test
+    # tests/scripts/test_deploy_runtime_build_context.py asserts every
+    # COPY-from-workspace path the Dockerfile references is staged here, so a
+    # future Dockerfile COPY without a matching rsync fails CI.
+    log_cmd "rsync -a workspace/sibling-pin-comparison.json -> deployed"
+    rsync -a \
+        "${repo_root}/workspace/sibling-pin-comparison.json" \
+        "${deploy_target}/workspace/sibling-pin-comparison.json"
+
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
