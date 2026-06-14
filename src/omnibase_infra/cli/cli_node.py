@@ -15,6 +15,7 @@ See ``docs/plans/2026-04-16-prove-core-runtime-standalone.md`` § Task 3.
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from importlib.metadata import entry_points
@@ -22,6 +23,7 @@ from pathlib import Path
 
 import click
 
+from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
@@ -29,6 +31,31 @@ from omnibase_infra.cli.receipt_mode import (
 )
 from omnibase_infra.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+
+def _emit_skill_routing_error(
+    node_id: str,
+    result: EnumWorkflowResult,
+    last_error: str | None,
+) -> None:
+    """Emit the documented ``SkillRoutingError`` JSON envelope to stdout.
+
+    Skill shells (e.g. ``golden_chain_sweep``) dispatch via ``onex node`` and
+    document that a non-zero exit surfaces a ``SkillRoutingError`` JSON envelope
+    rather than a raw traceback (OMN-8724). The default (non-receipt) path
+    previously left only the runtime's stderr traceback, so callers had no
+    machine-readable envelope to surface. This emits the same envelope shape as
+    ``omnibase_core.cli.cli_run_node._emit_error`` so both dispatch surfaces are
+    consistent.
+    """
+    envelope: dict[str, str] = {
+        "error_type": "SkillRoutingError",
+        "message": last_error
+        or f"Node '{node_id}' run did not complete (result={result.value}).",
+        "node_id": node_id,
+        "result": result.value,
+    }
+    click.echo(json.dumps(envelope, indent=2))
 
 
 def _resolve_packaged_contract(node_name: str) -> Path:
@@ -220,5 +247,7 @@ def run_node_by_name(
         input_path=input_path,
         timeout=timeout,
     )
-    runtime.run()
+    result = runtime.run()
+    if result is not EnumWorkflowResult.COMPLETED:
+        _emit_skill_routing_error(node_name, result, runtime.last_error)
     sys.exit(runtime.exit_code)
