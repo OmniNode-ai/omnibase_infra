@@ -46,13 +46,16 @@ class LocalRuntimeBusAdapter:
         self,
         handler: ProtocolLocalRuntimeCallableTarget,
         handler_name: str,
-        input_model_cls: type[BaseModel],
+        input_model_cls: type[BaseModel] | None,
         output_topic: str | None,
         bus: ProtocolLocalRuntimeBus,
         on_error: Callable[[], None] | None = None,
     ) -> None:
         self.handler = handler
         self.handler_name = handler_name
+        # None when the routing entry declares no payload model — operation_match
+        # entries route by `operation`, not a typed event model (OMN-13141). The
+        # raw decoded dict is forwarded to the handler in that case.
         self.input_model_cls = input_model_cls
         self.output_topic = output_topic
         self.bus = bus
@@ -71,7 +74,14 @@ class LocalRuntimeBusAdapter:
             correlation_id = (
                 correlation_value if isinstance(correlation_value, str) else None
             )
-            input_model = self.input_model_cls(**payload_dict)
+            # operation_match entries declare no payload model (OMN-13141): forward
+            # the raw decoded dict. payload_type_match validates against the model.
+            # Typed `object` (model or dict) — helpers narrow with isinstance.
+            input_payload: object = (
+                self.input_model_cls(**payload_dict)
+                if self.input_model_cls is not None
+                else payload_dict
+            )
         except Exception:  # fallback-ok: local runtime adapter records handler failure and continues shutdown
             logger.exception(
                 "LocalRuntimeBusAdapter: deserialization failed for %s (correlation_id=%s)",
@@ -91,7 +101,7 @@ class LocalRuntimeBusAdapter:
         start = time.monotonic()
         try:
             handle_method = self.handler.handle
-            maybe_result = _invoke_handle_method(handle_method, input_model)
+            maybe_result = _invoke_handle_method(handle_method, input_payload)
             if inspect.isawaitable(maybe_result):
                 awaitable_result: Awaitable[object] = cast(
                     "Awaitable[object]", maybe_result
@@ -157,17 +167,30 @@ class LocalRuntimeBusAdapter:
 
 def _invoke_handle_method(
     handle_method: Callable[..., object],
-    input_model: BaseModel,
+    input_payload: object,
 ) -> object:
-    """Invoke a local-runtime handler using its declared calling convention."""
+    """Invoke a local-runtime handler using its declared calling convention.
+
+    ``input_payload`` is a validated model for payload_type_match entries, or the
+    raw decoded dict for operation_match entries that declare no payload model
+    (OMN-13141). Keyword-fanout uses ``model_dump`` for models and the dict
+    directly; single-model-parameter handlers receive the object itself.
+    """
+    kwargs: dict[str, object] = (
+        input_payload.model_dump(mode="json")
+        if isinstance(input_payload, BaseModel)
+        else input_payload
+        if isinstance(input_payload, dict)
+        else {}
+    )
     try:
         signature = inspect.signature(handle_method)
     except (TypeError, ValueError):
-        return handle_method(input_model)
+        return handle_method(input_payload)
 
     parameters = tuple(signature.parameters.values())
     if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
-        return handle_method(**input_model.model_dump(mode="json"))
+        return handle_method(**kwargs)
 
     positional_parameters = tuple(
         param
@@ -183,24 +206,25 @@ def _invoke_handle_method(
 
     if len(positional_parameters) == 1 and _parameter_expects_model(
         positional_parameters[0],
-        type(input_model),
+        input_payload,
     ):
-        return handle_method(input_model)
+        return handle_method(input_payload)
 
-    return handle_method(**input_model.model_dump(mode="json"))
+    return handle_method(**kwargs)
 
 
 def _parameter_expects_model(
     parameter: inspect.Parameter,
-    input_model_cls: type[BaseModel],
+    input_payload: object,
 ) -> bool:
-    """Return True when a single handle parameter expects the request model."""
+    """Return True when a single handle parameter expects the whole request object."""
     if parameter.name in {"request", "payload", "event", "input_model"}:
         return True
 
     annotation = parameter.annotation
     return (
-        isinstance(annotation, type)
+        isinstance(input_payload, BaseModel)
+        and isinstance(annotation, type)
         and issubclass(annotation, BaseModel)
-        and issubclass(input_model_cls, annotation)
+        and issubclass(type(input_payload), annotation)
     )
