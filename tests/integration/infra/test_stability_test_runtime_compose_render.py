@@ -84,7 +84,7 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-postgres",
     "omnibase-infra-redpanda",
     "omnibase-infra-valkey",
-    "omnibase-forward-migration",
+    "omnibase-infra-forward-migration",
     "omnibase-infra-infisical",
     "omninode-agent-actions-consumer",
     "omninode-skill-lifecycle-consumer",

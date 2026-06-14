@@ -2,7 +2,7 @@ name: forward-migration
 description: One-shot runner for pending forward SQL migrations
 image: postgres:16-alpine
 layer: infrastructure
-container_name: omnibase-forward-migration
+container_name: omnibase-infra-forward-migration
 required_env:
   - POSTGRES_PASSWORD
 hardcoded_env:
