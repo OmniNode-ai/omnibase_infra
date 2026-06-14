@@ -1,0 +1,85 @@
+# Node Migration Vendor Sync Gate (OMN-13124)
+#
+# WHY THIS EXISTS
+#   omnimarket projection nodes ship SQL under
+#     src/omnimarket/nodes/<node>/migrations/*.sql
+#   which must be vendored into omnibase_infra under
+#     docker/migrations/forward/nodes/<node>/  (by scripts/sync-node-migrations.sh)
+#   so the forward-migration runner recreates the projection tables on a clean
+#   redeploy. The local pre-commit hook (onex-check-node-migration-sync) only
+#   runs in the infra repo and only when an infra commit is made; an omnimarket
+#   PR that adds a node migration cannot fire it. OMN-13124's
+#   node_projection_pattern_learning merged WITHOUT its vendored copy, so
+#   pattern_learning_artifacts was absent from omnidash_analytics on a clean
+#   redeploy and the golden-chain pattern_learning chain only passed via a live
+#   hot-fix (golden-chain sweep run12 Finding). This gate is the enforcement
+#   layer: every infra PR (and merge_group) re-runs the vendor --check against
+#   the current omnimarket dev tip, so an un-vendored or drifted node migration
+#   fails CI before merge.
+
+name: node-migration-sync
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  node-migration-sync:
+    name: node-migration-sync
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout omnimarket (sibling — node migration source of truth)
+        uses: actions/checkout@v6
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: omnimarket-src
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          # Sparse checkout: only the node tree carrying migrations/*.sql.
+          sparse-checkout: |
+            src/omnimarket/nodes
+          sparse-checkout-cone-mode: false
+
+      - name: Run node migration vendor sync --check
+        shell: bash
+        env:
+          # The script's resolution order prefers OMNIMARKET_SRC (a repo root that
+          # contains src/omnimarket/nodes). Point it at the sibling checkout so the
+          # gate compares the vendored tree against the omnimarket dev tip and never
+          # silently passes on an unresolvable source.
+          OMNIMARKET_SRC: ${{ github.workspace }}/omnimarket-src
+        run: |
+          set -euo pipefail
+          echo "::group::node migration vendor sync --check"
+          if bash scripts/sync-node-migrations.sh --check; then
+            echo "::endgroup::"
+            echo "::notice::node migration vendor tree is in sync with omnimarket dev tip."
+          else
+            rc=$?
+            echo "::endgroup::"
+            if [[ "${rc}" -eq 2 ]]; then
+              echo "::error::Could not resolve the omnimarket source tree (exit 2). The sibling checkout is missing or empty."
+            else
+              echo "::error::Vendored node migrations under docker/migrations/forward/nodes/ are OUT OF SYNC with omnimarket. Run 'scripts/sync-node-migrations.sh' locally and commit the diff. An un-vendored node migration means its projection table will be MISSING after a clean redeploy (golden-chain run12 Finding)."
+            fi
+            exit "${rc}"
+          fi

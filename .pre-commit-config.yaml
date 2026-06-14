@@ -149,14 +149,22 @@ repos:
         pass_filenames: false
         always_run: false
         stages: [pre-commit]
-      # OMN-12559: vendored omnimarket node migrations must stay in sync with
-      # source. Skips silently when omnimarket source is not checked out.
+      # OMN-12559 / OMN-13124: vendored omnimarket node migrations must stay in
+      # sync with source. MUST always_run — the prior files:-scoped trigger only
+      # fired when a file under docker/migrations/forward/nodes/ (or the sync
+      # script) was staged. A node migration added in the *omnimarket* repo
+      # (e.g. node_projection_pattern_learning, OMN-13124) never touches those
+      # infra paths, so the hook silently passed and the un-vendored migration
+      # merged — the table was missing in omnidash_analytics on a clean redeploy
+      # (golden-chain run12 Finding). always_run closes that gap. The script
+      # itself returns exit 2 (gate fires) when the omnimarket source is
+      # unresolvable unless SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
       - id: onex-check-node-migration-sync
         name: ONEX Node Migration Vendor Sync Check
         entry: bash scripts/sync-node-migrations.sh --check
         language: system
         pass_filenames: false
-        files: ^(docker/migrations/forward/nodes/|scripts/sync-node-migrations\.sh)
+        always_run: true
         stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
