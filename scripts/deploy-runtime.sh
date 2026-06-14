@@ -599,16 +599,38 @@ check_sibling_lock_pins() {
         exit 1
     fi
 
-    log_cmd "OMNI_HOME=${omni_home} ${guard} --provenance-out ${provenance_out}"
+    # The check_sibling_lock_pins.py interface changed under OMN-12977/12987:
+    # the original single-output flag was removed in favor of --lock (required,
+    # the pin authority), repeatable --repo PACKAGE=PATH (the canonical clones
+    # the build vendors), and --output (where to write the comparison JSON).
+    # The consuming repo's uv.lock (omnimarket) is the pin authority.
+    local lock_path="${omni_home}/omnimarket/uv.lock"
+    local guard_args=(
+        --lock "${lock_path}"
+        --repo "omnibase-infra=${omni_home}/omnibase_infra"
+        --repo "omnibase-core=${omni_home}/omnibase_core"
+        --repo "omnibase-spi=${omni_home}/omnibase_spi"
+        --repo "omnibase-compat=${omni_home}/omnibase_compat"
+        --repo "onex-change-control=${omni_home}/onex_change_control"
+        --output "${provenance_out}"
+    )
+    # Operator override (OMN-12977): ALLOW_SIBLING_PIN_DRIFT=1 records drift in
+    # the provenance artifact and proceeds instead of aborting. Never the default.
+    if [[ "${ALLOW_SIBLING_PIN_DRIFT:-0}" == "1" ]]; then
+        guard_args+=(--allow-drift)
+        log_warn "ALLOW_SIBLING_PIN_DRIFT=1 -- passing --allow-drift to sibling lock-pin preflight (OMN-12977)"
+    fi
+
+    log_cmd "OMNI_HOME=${omni_home} ${guard} ${guard_args[*]}"
     if [[ "${python_bin}" == "uv-run" ]]; then
         if ! OMNI_HOME="${omni_home}" uv run --project "${repo_root}" python "${guard}" \
-            --provenance-out "${provenance_out}"; then
+            "${guard_args[@]}"; then
             log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
             exit 1
         fi
     else
         if ! OMNI_HOME="${omni_home}" "${python_bin}" "${guard}" \
-            --provenance-out "${provenance_out}"; then
+            "${guard_args[@]}"; then
             log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
             exit 1
         fi

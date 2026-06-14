@@ -163,6 +163,46 @@ def test_deploy_runtime_runs_sibling_lock_pin_preflight() -> None:
 
 
 @pytest.mark.unit
+def test_deploy_runtime_uses_current_lock_pin_preflight_interface() -> None:
+    """The preflight caller must match check_sibling_lock_pins.py's current CLI.
+
+    Regression guard: OMN-12977/12987 replaced the original ``--provenance-out``
+    flag with ``--lock`` (required pin authority), repeatable ``--repo
+    PACKAGE=PATH`` (the canonical clones the build vendors), and ``--output``
+    (where to write the comparison JSON). The deploy-runtime.sh caller was left
+    pinned to the removed ``--provenance-out`` flag, so EVERY workspace
+    ``--execute`` deploy failed at argparse (``the following arguments are
+    required: --lock``) before any build started. This test pins the corrected
+    interface so the stale-flag invocation can never come back.
+    """
+    deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    # Removed flag must be gone — its presence is the exact regression we hit.
+    assert "--provenance-out" not in deploy_script
+
+    # Current required + supported flags must be wired into the guard_args.
+    assert '--lock "${lock_path}"' in deploy_script
+    assert "--repo " in deploy_script
+    assert '--output "${provenance_out}"' in deploy_script
+
+    # The consuming repo's omnimarket uv.lock is the pin authority, and every
+    # vendored sibling must be passed as a --repo PACKAGE=PATH entry.
+    assert 'lock_path="${omni_home}/omnimarket/uv.lock"' in deploy_script
+    for package in (
+        "omnibase-infra",
+        "omnibase-core",
+        "omnibase-spi",
+        "omnibase-compat",
+        "onex-change-control",
+    ):
+        assert f'--repo "{package}=' in deploy_script
+
+    # The OMN-12977 operator override must be honored via --allow-drift.
+    assert "ALLOW_SIBLING_PIN_DRIFT" in deploy_script
+    assert "--allow-drift" in deploy_script
+
+
+@pytest.mark.unit
 def test_stage_workspace_emits_build_sha_marker() -> None:
     """stage_workspace.sh must record each sibling's HEAD SHA (OMN-12987).
 
