@@ -1,0 +1,62 @@
+# OMN-13141 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13141"
+title: "fix(OMN-13141): runtime executor skips event_model import for operation_match entries"
+summary: >-
+  Executor companion to OMN-13137's validator half (#1973, merged). _run_event_driven
+  unconditionally imported entry.event_model_module for every resolved routing entry.
+  operation_match entries declare no event_model, so event_model_module is empty and
+  importlib.import_module("") raised ValueError: Empty module name — not caught by the
+  (ImportError, AttributeError) clause, swallowed by the outer except in run_async ->
+  result FAILED. The node never booted end-to-end (e.g. node_integration_sweep_orchestrator).
+  Fix gates the import on a non-empty event_model_module: operation_match forwards the raw
+  decoded payload (input_model_cls=None); only payload_type_match resolves a typed event
+  model. _validate_routing (the OMN-13137 half) is left untouched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "operation_match boot e2e test passes; payload_type_match regression guard holds"
+    command: "uv run pytest tests/unit/runtime/test_run_event_driven_operation_match.py -q"
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR"
+    command: "gh pr checks <PR> --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-13141"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-13141.yaml"
+  - id: "dod-boot-e2e"
+    description: >-
+      operation_match contract boots end-to-end through RuntimeLocal.run_async()
+      with no empty-module ValueError, and the payload_type_match import path is
+      unchanged (regression guard). This boot test is the CI gate for the fix.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/test_run_event_driven_operation_match.py -q"
+  - id: "dod-runtime-suite"
+    description: "Full runtime unit suite passes — no regression in the event-driven executor or adapter."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/ -q"
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation: change is an internal correctness fix to the local-runtime
+      event-driven executor (_run_event_driven) and its bus adapter. No new Kafka topics,
+      no schema changes, no container image changes, no API surface changes. Runtime
+      restart picks up the change automatically on next deploy.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-13141 is an internal runtime-executor correctness fix; no new topics, schema, or container changes; runtime restart picks it up on next deploy'"
