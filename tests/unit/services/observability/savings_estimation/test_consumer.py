@@ -12,16 +12,41 @@ Tracking:
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
 
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
 )
 from omnibase_infra.services.observability.savings_estimation.consumer import (
     ServiceSavingsEstimator,
+    decode_event_message,
 )
+
+
+def _build_event_message(topic: str, payload: dict[str, object]) -> ModelEventMessage:
+    """Build a typed ModelEventMessage exactly as the event bus delivers it.
+
+    The Kafka and in-memory buses both encode the payload as JSON bytes in the
+    ``value`` field and deliver the typed model to the ``on_message`` callback.
+    """
+    return ModelEventMessage(
+        topic=topic,
+        key=None,
+        value=json.dumps(payload).encode("utf-8"),
+        headers=ModelEventHeaders(
+            source="test-producer",
+            event_type=topic,
+            timestamp=datetime.now(UTC),
+        ),
+    )
+
 
 # Base monotonic time for deterministic clock control in tests.
 _T0 = 1000.0
@@ -404,3 +429,124 @@ async def test_llm_only_session_produces_zero_savings_estimate(
     assert results[0]["session_id"] == "sess-llm-only"
     assert results[0]["direct_tokens_saved"] == 0
     assert results[0]["direct_savings_usd"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# OMN-13149: typed ModelEventMessage ingestion (regression)
+#
+# The Kafka and in-memory event buses deliver a typed ModelEventMessage to the
+# consumer's on_message callback — never a raw dict or str. The original
+# service_kernel wiring passed the typed message straight to ingest_event, whose
+# correlation path calls payload.get("session_id"). ModelEventMessage has no
+# .get(), so the live consumer raised:
+#     AttributeError: 'ModelEventMessage' object has no attribute 'get'
+# These tests pin the typed-message decode path through the REAL consumer.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ingest_event_rejects_typed_message_documents_bug(
+    service: ServiceSavingsEstimator,
+) -> None:
+    """Passing a typed ModelEventMessage to ingest_event reproduces the bug.
+
+    This is the exact failure OMN-13149 fixes: the typed model has no ``.get()``,
+    so the dict-style correlation path raises AttributeError. decode_event_message
+    must be used to obtain the payload first (see tests below).
+    """
+    message = _build_event_message(
+        "onex.evt.omniintelligence.llm-call-completed.v1",
+        {
+            "session_id": "sess-typed-bug",
+            "model_id": "claude-opus-4-6",
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+        },
+    )
+    with pytest.raises(AttributeError, match="get"):
+        # Why: ModelEventMessage is not a Mapping; the correlation path calls
+        # payload.get(). This is the pre-fix crash being pinned.
+        service.ingest_event(message.topic, message)  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_decode_event_message_correlates_typed_message(
+    service: ServiceSavingsEstimator,
+) -> None:
+    """decode_event_message reads the typed value field; ingest_event correlates."""
+    message = _build_event_message(
+        "onex.evt.omniintelligence.llm-call-completed.v1",
+        {
+            "session_id": "sess-typed-ok",
+            "model_id": "qwen3-coder-30b-a3b",
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+        },
+    )
+
+    topic, payload = decode_event_message(message)
+    service.ingest_event(topic, payload)
+
+    assert service.active_session_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_decode_event_message_rejects_non_object_payload() -> None:
+    """A non-object JSON payload fails fast — no silent drop, no dict coercion."""
+    message = ModelEventMessage(
+        topic="onex.evt.omniintelligence.llm-call-completed.v1",
+        key=None,
+        value=b"[1, 2, 3]",
+        headers=ModelEventHeaders(
+            source="test-producer",
+            event_type="onex.evt.omniintelligence.llm-call-completed.v1",
+            timestamp=datetime.now(UTC),
+        ),
+    )
+    with pytest.raises(TypeError, match="must be a JSON object"):
+        decode_event_message(message)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_real_bus_delivers_typed_message_to_consumer(
+    service: ServiceSavingsEstimator,
+) -> None:
+    """End-to-end: the real in-memory bus delivers a typed ModelEventMessage.
+
+    This pins the REAL consumer path the kernel wires (event bus subscribe ->
+    on_message(ModelEventMessage) -> decode_event_message -> ingest_event), not
+    handler isolation. The callback mirrors service_kernel._savings_on_message.
+    Before the fix this raised AttributeError inside the subscriber callback;
+    after the fix the session is correlated.
+    """
+    bus = EventBusInmemory(environment="test", group="savings-test")
+    await bus.start()
+    try:
+        topic = "onex.evt.omniintelligence.llm-call-completed.v1"
+
+        async def _savings_on_message(message: ModelEventMessage) -> None:
+            _topic, _payload = decode_event_message(message)
+            service.ingest_event(_topic, _payload)
+
+        await bus.subscribe(
+            topic,
+            on_message=_savings_on_message,
+            group_id=f"savings-estimator.{topic}",
+        )
+
+        payload = {
+            "session_id": "sess-real-bus",
+            "model_id": "claude-opus-4-6",
+            "prompt_tokens": 1200,
+            "completion_tokens": 300,
+        }
+        await bus.publish(topic, None, json.dumps(payload).encode("utf-8"))
+
+        assert service.active_session_count == 1
+        assert service.is_finalized("sess-real-bus") is False
+    finally:
+        await bus.close()
