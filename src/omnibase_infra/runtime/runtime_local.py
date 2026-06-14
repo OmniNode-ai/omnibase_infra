@@ -1505,6 +1505,16 @@ class RuntimeLocal:
         return _exit_code_for(self._result)
 
     @property
+    def last_error(self) -> str | None:
+        """Human-readable description of the failure that ended the run, if any.
+
+        Set when a wired handler fails or a routing/boot error aborts the run;
+        ``None`` on a clean completion. Consumed by the ``onex node`` CLI to
+        populate the ``SkillRoutingError`` envelope on non-zero exit (OMN-8724).
+        """
+        return self._last_error
+
+    @property
     def handler_result(self) -> object | None:
         """The terminal handler's result object, if the run produced one.
 
