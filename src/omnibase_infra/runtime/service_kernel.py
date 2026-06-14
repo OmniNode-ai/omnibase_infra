@@ -98,6 +98,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
@@ -1484,6 +1485,7 @@ async def bootstrap() -> int:
                 )
                 from omnibase_infra.services.observability.savings_estimation.consumer import (
                     ServiceSavingsEstimator,
+                    decode_event_message,
                 )
                 from omnibase_infra.topics import topic_keys
                 from omnibase_infra.topics.service_topic_registry import (
@@ -1510,30 +1512,25 @@ async def bootstrap() -> int:
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""
-                    import json as _json
-
                     _poll_interval = 2.0
 
                     for _input_topic in _savings_input_topics:
                         try:
 
                             async def _savings_on_message(
-                                msg: object,
-                                *,
-                                _topic: str = _input_topic,
+                                message: ModelEventMessage,
                             ) -> None:
-                                _savings_estimator.ingest_event(
-                                    _topic,
-                                    # Why: Runtime wiring validates and narrows this payload shape before use.
-                                    _json.loads(msg)  # type: ignore[arg-type]
-                                    if isinstance(msg, (str, bytes))
-                                    else msg,
-                                )
+                                # The event bus delivers a typed ModelEventMessage,
+                                # not a raw dict/str. decode_event_message reads the
+                                # JSON payload off the typed `.value` field — it
+                                # must never call `.get()` on the message, which
+                                # has no such method (OMN-13149).
+                                _topic, _payload = decode_event_message(message)
+                                _savings_estimator.ingest_event(_topic, _payload)
 
                             await event_bus.subscribe(
                                 _input_topic,
-                                # Why: Runtime wiring validates and narrows this payload shape before use.
-                                on_message=_savings_on_message,  # type: ignore[arg-type]
+                                on_message=_savings_on_message,
                                 group_id=f"savings-estimator.{_input_topic}",
                             )
                         except Exception:  # noqa: BLE001
@@ -3229,10 +3226,6 @@ async def bootstrap() -> int:
                     service=config.name or "onex-kernel",
                     node_name="runtime-error-triage",
                     version="v1",
-                )
-
-                from omnibase_infra.event_bus.models.model_event_message import (
-                    ModelEventMessage,
                 )
 
                 async def _triage_on_message(

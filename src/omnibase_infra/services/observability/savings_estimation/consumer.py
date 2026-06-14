@@ -32,6 +32,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections import OrderedDict
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from uuid import UUID
 
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
     HandlerSavingsEstimation,
 )
@@ -456,6 +458,41 @@ def _ingest_dispatch_eval(buf: SessionBuffer, payload: dict[str, object]) -> Non
     buf.outcome_received_at = time.monotonic()
 
 
+def decode_event_message(message: ModelEventMessage) -> tuple[str, dict[str, object]]:
+    """Decode a typed event-bus message into a (topic, payload) pair.
+
+    Both the Kafka and in-memory event buses deliver a
+    :class:`ModelEventMessage` to a consumer's ``on_message`` callback — never a
+    raw ``dict`` or ``str``. The message body is the JSON payload carried in the
+    typed ``value`` field (bytes). This decodes that field directly off the
+    typed model. It does NOT call ``.get()`` on the message, which has no such
+    method — the pre-fix wiring did, raising
+    ``AttributeError: 'ModelEventMessage' object has no attribute 'get'``
+    (OMN-13149).
+
+    Args:
+        message: The typed event-bus message delivered by the consumer callback.
+            ``message.topic`` is the correlation topic and ``message.value`` is
+            the JSON-encoded payload.
+
+    Returns:
+        A ``(topic, payload)`` pair ready for
+        :meth:`ServiceSavingsEstimator.ingest_event`.
+
+    Raises:
+        TypeError: If the decoded payload is not a JSON object. The savings
+            correlation logic requires a mapping keyed by ``session_id``; a
+            non-object payload is a contract violation and fails fast.
+    """
+    payload = json.loads(message.value)
+    if not isinstance(payload, dict):
+        raise TypeError(
+            "savings estimation payload must be a JSON object, "
+            f"got {type(payload).__name__} on topic {message.topic!r}"
+        )
+    return message.topic, payload
+
+
 class ServiceSavingsEstimator:
     """Session-event correlator producing savings-estimated.v1 events.
 
@@ -737,4 +774,4 @@ class ServiceSavingsEstimator:
         self._finalized[session_id] = True
 
 
-__all__: list[str] = ["ServiceSavingsEstimator"]
+__all__: list[str] = ["ServiceSavingsEstimator", "decode_event_message"]
