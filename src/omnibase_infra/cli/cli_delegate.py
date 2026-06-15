@@ -50,7 +50,6 @@ from omnibase_infra.cli.receipt_mode import (
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
-    "DEFAULT_MAX_TOKENS",
     "DEFAULT_TASK_TYPE",
     "TASK_TYPE_CHOICES",
     "classify_task_type",
@@ -64,10 +63,6 @@ DELEGATE_NODE_NAME = "node_delegate_skill_orchestrator"
 
 # Registered adapter source for ``ModelDelegateSkillRequest`` (Literal field).
 DELEGATE_SOURCE = "claude-code"
-
-# Default response budget when ``--max-tokens`` is omitted. Matches the
-# historical delegate-shim default; the node enforces its own hard ceiling.
-DEFAULT_MAX_TOKENS = 2048
 
 # Fallback classification when no keyword matches (the prompt.md default).
 DEFAULT_TASK_TYPE = "research"
@@ -115,7 +110,12 @@ def classify_task_type(prompt: str) -> str:
 
 
 def _write_payload(
-    *, prompt: str, task_type: str, max_tokens: int, state_root: Path, run_id: uuid.UUID
+    *,
+    prompt: str,
+    task_type: str,
+    max_tokens: int | None,
+    state_root: Path,
+    run_id: uuid.UUID,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -123,19 +123,24 @@ def _write_payload(
     ``feedback_no_tmp_use_workspace``). The payload validates against the
     delegate node's input model (``ModelDelegateSkillRequest``); only the
     fields the consumer supplies are set.
+
+    When ``max_tokens`` is ``None`` (no explicit ``--max-tokens`` override) the
+    key is omitted from the payload entirely, so the delegate node resolves the
+    response budget per-backend from its routing contract rather than from a
+    CLI-side default.
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     payload_path = tmp_dir / f"delegate-input-{run_id}.json"
+    payload: dict[str, object] = {
+        "prompt": prompt,
+        "task_type": task_type,
+        "source": DELEGATE_SOURCE,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
     payload_path.write_text(
-        json.dumps(
-            {
-                "prompt": prompt,
-                "task_type": task_type,
-                "source": DELEGATE_SOURCE,
-                "max_tokens": max_tokens,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
     return payload_path
@@ -157,9 +162,12 @@ def _write_payload(
     "--max-tokens",
     "max_tokens",
     type=click.IntRange(min=1),
-    default=DEFAULT_MAX_TOKENS,
-    show_default=True,
-    help="Maximum tokens for the delegated LLM response.",
+    default=None,
+    help=(
+        "Optional explicit override for the delegated LLM response budget. "
+        "Omit to let the delegate node resolve max_tokens per-backend from its "
+        "routing contract (no CLI-side default)."
+    ),
 )
 @click.option(
     "--state-root",
@@ -196,7 +204,7 @@ def _write_payload(
 def delegate_command(
     prompt: str,
     task_type: str | None,
-    max_tokens: int,
+    max_tokens: int | None,
     state_root: Path,
     timeout: int,
     verbose: bool,
@@ -232,7 +240,7 @@ def run_delegate(
     *,
     prompt: str,
     task_type: str | None,
-    max_tokens: int,
+    max_tokens: int | None,
     state_root: Path,
     timeout: int,
     verbose: bool,
