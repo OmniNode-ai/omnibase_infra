@@ -241,7 +241,10 @@ skills:
     args:
       - {name: prompt, payload_field: prompt, arg_type: string, positional: true, required: true}
       - {name: task-type, payload_field: task_type, arg_type: string}
-      - {name: max-tokens, payload_field: max_tokens, arg_type: integer, default: 2048}
+      # No default: when --max-tokens is omitted the field is left out of the
+      # payload so the delegate node resolves it per-backend from its routing
+      # contract (OMN-13161). Pass --max-tokens only as an explicit override.
+      - {name: max-tokens, payload_field: max_tokens, arg_type: integer}
     classifiers:
       - target_field: task_type
         source_field: prompt

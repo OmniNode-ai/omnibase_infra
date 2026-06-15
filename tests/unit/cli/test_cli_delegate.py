@@ -10,7 +10,10 @@ The acceptance probe is STRUCTURAL (no size assertions, plan Phase 2 item 1):
 - ``run_delegate`` writes its scratch payload under ``<state-root>/tmp/`` with
   a run_id-suffixed name — never ``/tmp`` (``feedback_no_tmp_use_workspace``);
 - the payload validates against the delegate node's input model
-  (``ModelDelegateSkillRequest``) — prompt, task_type, source, max_tokens;
+  (``ModelDelegateSkillRequest``) — prompt, task_type, source, and
+  ``max_tokens`` ONLY when an explicit ``--max-tokens`` override is supplied
+  (omitted otherwise so the node resolves it per-backend from the routing
+  contract, OMN-13161);
 - the command dispatches through receipt mode so stdout is exactly ONE
   ``ModelSkillResult`` JSON with zero RuntimeLocal log leakage.
 
@@ -33,7 +36,6 @@ from click.testing import CliRunner
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
-    DEFAULT_MAX_TOKENS,
     DEFAULT_TASK_TYPE,
     DELEGATE_SOURCE,
     classify_task_type,
@@ -108,7 +110,7 @@ class TestPayloadScratch:
         run_delegate(
             prompt="implement an HTTP server",
             task_type=None,
-            max_tokens=DEFAULT_MAX_TOKENS,
+            max_tokens=None,
             state_root=state_root,
             timeout=60,
             verbose=False,
@@ -121,6 +123,11 @@ class TestPayloadScratch:
         assert len(payloads) == 1, "exactly one run_id-suffixed scratch payload"
         # No scratch leaked to the system temp dir.
         assert not list(Path(tempfile.gettempdir()).glob("delegate-input-*.json"))
+        # With no explicit --max-tokens override, the key is omitted entirely so
+        # the delegate node resolves it per-backend from its routing contract
+        # (OMN-13161 — no CLI-side default).
+        payload = json.loads(payloads[0].read_text(encoding="utf-8"))
+        assert "max_tokens" not in payload
 
     def test_payload_validates_against_delegate_request_model(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -147,11 +154,13 @@ class TestPayloadScratch:
 
         payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
-        # The payload carries exactly the fields the delegate node's input
-        # model (ModelDelegateSkillRequest) requires from a consumer: prompt,
-        # task_type, source, max_tokens. omnibase_infra does NOT depend on
-        # omnimarket (layering), so the node owns model validation at dispatch;
-        # the CLI's contract here is the payload shape.
+        # With an EXPLICIT --max-tokens override the payload carries exactly the
+        # fields the delegate node's input model (ModelDelegateSkillRequest)
+        # requires from a consumer: prompt, task_type, source, max_tokens.
+        # omnibase_infra does NOT depend on omnimarket (layering), so the node
+        # owns model validation at dispatch; the CLI's contract here is the
+        # payload shape. (When no override is supplied, max_tokens is omitted —
+        # see test_payload_written_under_state_root_tmp_not_slash_tmp, OMN-13161.)
         assert payload == {
             "prompt": "refactor the loop",
             "task_type": "refactor",
@@ -176,7 +185,7 @@ class TestPayloadScratch:
         run_delegate(
             prompt="write an HTTP server",
             task_type="research",
-            max_tokens=DEFAULT_MAX_TOKENS,
+            max_tokens=None,
             state_root=state_root,
             timeout=60,
             verbose=False,

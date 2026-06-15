@@ -309,7 +309,10 @@ def test_delegate_mapping_classifies_and_builds_payload() -> None:
     _apply_classifiers(delegate, payload)
     assert payload["prompt"] == "write a unit test for the parser"
     assert payload["source"] == "claude-code"
-    assert payload["max_tokens"] == 2048
+    # No --max-tokens override supplied: the field is omitted from the payload so
+    # the delegate node resolves it per-backend from its routing contract
+    # (OMN-13161 — no hardcoded CLI-side default).
+    assert "max_tokens" not in payload
     # "unit test" / "test" keyword group wins.
     assert payload["task_type"] == "test"
 
