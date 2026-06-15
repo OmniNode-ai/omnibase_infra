@@ -3,10 +3,12 @@
 """Render the deployed Bifrost delegation contract for runtime boot.
 
 The source ``bifrost_delegation.yaml`` intentionally keeps ``endpoint_url``
-empty. Runtime deployments provide endpoint locations through the provider
-backend named by each backend's ``base_url_env`` field. This module materializes
-the deployed contract once at container startup so delegation code reads a
-contract artifact, not scattered environment variables.
+empty. Runtime deployments provide the COMPLETE endpoint URL (incl. the full
+/v1/chat/completions path, OMN-12815) through the env var named by each backend's
+``endpoint_url_env`` field. This module materializes the deployed contract once
+at container startup so delegation code reads a contract artifact, not scattered
+environment variables. The env value is used VERBATIM — there is no base+path
+construction (OMN-13159).
 
 OMN-12864 — committed overlay authority
     BIFROST_LOCAL_*_ENDPOINT_URL values are now committed deployment bindings
@@ -173,7 +175,7 @@ def _populate_backend_endpoint(
     existing_url = backend.get("endpoint_url", "")
     endpoint_url = existing_url.strip() if isinstance(existing_url, str) else ""
 
-    env_key = backend.get("base_url_env")
+    env_key = backend.get("endpoint_url_env")
     if not endpoint_url and isinstance(env_key, str) and env_key.strip():
         endpoint_url = env.get(env_key, "").strip()
 
@@ -202,7 +204,7 @@ def _populate_backend_endpoint(
     return True
 
 
-_RENDER_HINT_FIELDS = frozenset({"required", "base_url_env"})
+_RENDER_HINT_FIELDS = frozenset({"required", "endpoint_url_env"})
 
 
 def _endpoint_url_completeness_errors(
@@ -421,7 +423,7 @@ def _target_satisfies_declared_env_backends(
             continue
 
         backend_id = source_backend.get("backend_id")
-        env_key = source_backend.get("base_url_env")
+        env_key = source_backend.get("endpoint_url_env")
         if not (
             isinstance(backend_id, str)
             and backend_id.strip()
@@ -639,7 +641,7 @@ def render_bifrost_delegation_contract(
     for backend in backends:
         if isinstance(backend, dict):
             backend.pop("required", None)
-            backend.pop("base_url_env", None)
+            backend.pop("endpoint_url_env", None)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     staged_target = target.with_suffix(f"{target.suffix}.tmp")
