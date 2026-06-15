@@ -19,6 +19,21 @@ Design Decisions:
       is unavailable, prefetch fails loudly. When not enforced, missing values
       are logged as warnings and skipped.
 
+Precedence Rules (OMN-13070):
+    On **controlled lanes** (``infisical_required=True``):
+        1. Fetched/overlay config (Infisical) **always wins** over ambient env.
+        2. When Infisical returns ``None`` for a key, ambient env is used as a
+           **declared bootstrap fallback** — but only if the key is present, and
+           a ``INFO``-level provenance log line is emitted identifying that the
+           value came from ambient env rather than the controlled store.
+        3. A key missing from both Infisical and ambient env is reported as an
+           error (not silently dropped).
+
+    On **uncontrolled lanes** (``infisical_required=False``, the default):
+        - Keys already present in the process environment are skipped; the
+          ambient value is used directly (legacy behaviour — local dev
+          without Infisical continues to work).
+
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
 
@@ -30,6 +45,11 @@ Design Decisions:
     ``BaseModel`` (``ConfigDict(frozen=True, extra="forbid")``).  The
     ``missing`` field type changed from ``list[str]`` to ``tuple[str, ...]``
     to satisfy immutability requirements.
+
+.. versionchanged:: 0.10.3
+    OMN-13070: On controlled lanes (``infisical_required=True``) fetched config
+    wins over ambient env.  Ambient env is now only a declared bootstrap
+    fallback on controlled lanes, with a provenance log line.
 """
 
 from __future__ import annotations
@@ -169,15 +189,95 @@ class ConfigPrefetcher:
             )
             return None
 
+    def _resolve_key(
+        self,
+        key: str,
+        spec: ModelTransportConfigSpec,
+        *,
+        is_env_dep: bool = False,
+    ) -> tuple[str, SecretStr | None, str | None]:
+        """Resolve a single config key and return the outcome to the caller.
+
+        Returns a 3-tuple ``(outcome, value, error)`` where:
+        - ``outcome`` is one of ``"resolved"``, ``"missing"``, or ``"error"``
+        - ``value`` is the ``SecretStr`` when ``outcome == "resolved"``
+        - ``error`` is the error message string when ``outcome == "error"``
+
+        On controlled lanes (``infisical_required=True``), Infisical is
+        always consulted first.  Ambient env is used only as a declared
+        bootstrap fallback when Infisical returns ``None``, and a provenance
+        ``INFO`` log line is emitted in that case.
+
+        On uncontrolled lanes (``infisical_required=False``), a key already
+        present in the process environment is used directly (legacy behaviour
+        — local dev without Infisical continues to work unchanged).
+
+        Args:
+            key: The config key name.
+            spec: The transport config spec (provides the Infisical folder).
+            is_env_dep: ``True`` when the key comes from an explicit
+                ``dependencies[]`` declaration rather than a transport spec.
+
+        Returns:
+            ``(outcome, value, error)`` 3-tuple; callers record into accumulators.
+        """
+        if self._infisical_required:
+            # Controlled lane: Infisical/overlay WINS over ambient env.
+            # Always attempt the fetch; fall back to ambient env only when
+            # Infisical returns None, with an explicit provenance log line.
+            value = self._fetch_key(key, spec)
+            if value is not None:
+                return ("resolved", value, None)
+            if key in os.environ:
+                # Declared bootstrap fallback — log provenance explicitly.
+                logger.info(
+                    "Key %s not found in Infisical; using ambient env as "
+                    "bootstrap fallback (controlled lane) — "
+                    "provenance: process environment",
+                    key,
+                )
+                return ("resolved", SecretStr(os.environ[key]), None)
+            # Missing from both Infisical and ambient env on a controlled
+            # lane: record as error, not silently dropped.
+            if is_env_dep or spec.required:
+                return (
+                    "error",
+                    None,
+                    f"Required key {key} not found at"
+                    f" {spec.infisical_folder} and absent from ambient env",
+                )
+            return ("missing", None, None)
+
+        # Uncontrolled lane: ambient env takes precedence (legacy).
+        if key in os.environ:
+            logger.debug(
+                "Key %s already in environment, skipping prefetch",
+                key,
+            )
+            return ("resolved", SecretStr(os.environ[key]), None)
+
+        value = self._fetch_key(key, spec)
+        if value is not None:
+            return ("resolved", value, None)
+        return ("missing", None, None)
+
     def prefetch(
         self,
         requirements: ModelConfigRequirements,
     ) -> ModelPrefetchResult:
         """Prefetch all configuration values for the given requirements.
 
-        Builds transport specs from the requirements' transport types,
-        then fetches each key via the handler. Keys already present in
-        the process environment are skipped (env always takes precedence).
+        Builds transport specs from the requirements' transport types, then
+        fetches each key via the handler.
+
+        Precedence on controlled lanes (``infisical_required=True``):
+            Infisical/overlay config **wins** over ambient env.  Ambient env is
+            used only as a declared bootstrap fallback when Infisical returns
+            ``None``, and a provenance ``INFO`` log line is emitted.
+
+        Precedence on uncontrolled lanes (``infisical_required=False``):
+            Keys already present in the process environment are skipped; the
+            ambient value is used directly (legacy behaviour for local dev).
 
         Args:
             requirements: Config requirements extracted from contracts.
@@ -216,33 +316,20 @@ class ConfigPrefetcher:
                 env_keys.append(req.key)
 
         logger.info(
-            "Prefetching config: %d transport specs, %d env keys",
+            "Prefetching config: %d transport specs, %d env keys (controlled_lane=%s)",
             len(specs),
             len(env_keys),
+            self._infisical_required,
         )
 
         # Fetch transport-based keys
         for spec in specs:
             for key in spec.keys:
-                # Skip if already in environment (env overrides Infisical).
-                # Use ``key in os.environ`` (not ``os.environ.get(key)``) so
-                # that intentionally empty values are respected and not
-                # overwritten by Infisical.
-                if key in os.environ:
-                    logger.debug(
-                        "Key %s already in environment, skipping prefetch",
-                        key,
-                    )
-                    resolved[key] = SecretStr(os.environ[key])
-                    continue
-
-                value = self._fetch_key(key, spec)
-                if value is not None:
+                outcome, value, error = self._resolve_key(key, spec)
+                if outcome == "resolved" and value is not None:
                     resolved[key] = value
-                elif self._infisical_required and spec.required:
-                    errors[key] = (
-                        f"Required key {key} not found at {spec.infisical_folder}"
-                    )
+                elif outcome == "error" and error is not None:
+                    errors[key] = error
                 else:
                     missing.append(key)
 
@@ -257,18 +344,13 @@ class ConfigPrefetcher:
                 keys=tuple(env_keys),
             )
             for key in env_keys:
-                if key in os.environ:
-                    resolved[key] = SecretStr(os.environ[key])
-                    continue
-
-                value = self._fetch_key(key, env_spec)
-                if value is not None:
+                outcome, value, error = self._resolve_key(
+                    key, env_spec, is_env_dep=True
+                )
+                if outcome == "resolved" and value is not None:
                     resolved[key] = value
-                elif self._infisical_required:
-                    errors[key] = (
-                        f"Required env dependency key {key} not found at"
-                        f" {env_spec.infisical_folder}"
-                    )
+                elif outcome == "error" and error is not None:
+                    errors[key] = error
                 else:
                     missing.append(key)
 
@@ -316,25 +398,45 @@ class ConfigPrefetcher:
     def apply_to_environment(self, result: ModelPrefetchResult) -> int:
         """Apply prefetched values to the process environment.
 
-        Only sets keys that are NOT already in the environment (environment
-        variables always take precedence over Infisical values).
+        On controlled lanes (``infisical_required=True``), fetched config
+        **always wins**: existing ambient env values are overwritten so that
+        stale shell or compose state cannot survive the prefetch boundary.
+
+        On uncontrolled lanes (``infisical_required=False``), only keys that
+        are NOT already present in the environment are set (legacy behaviour
+        — local dev without Infisical continues to work unchanged).
 
         Args:
             result: The prefetch result to apply.
 
         Returns:
-            Number of keys actually set in the environment.
+            Number of keys actually set (or overwritten) in the environment.
         """
         applied = 0
         for key, value in result.resolved.items():
-            if key not in os.environ:
+            if self._infisical_required:
+                # Controlled lane: fetched config wins — overwrite ambient env.
+                existing = os.environ.get(key)
+                os.environ[key] = value.get_secret_value()
+                applied += 1
+                if existing is not None:
+                    logger.info(
+                        "Applied prefetched key %s to environment "
+                        "(controlled lane — overwrote ambient env value)",
+                        key,
+                    )
+                else:
+                    logger.debug("Applied prefetched key %s to environment", key)
+            # Uncontrolled lane: ambient env takes precedence (legacy).
+            elif key not in os.environ:
                 os.environ[key] = value.get_secret_value()
                 applied += 1
                 logger.debug("Applied prefetched key %s to environment", key)
 
         logger.info(
-            "Applied %d/%d prefetched keys to environment",
+            "Applied %d/%d prefetched keys to environment (controlled_lane=%s)",
             applied,
             len(result.resolved),
+            self._infisical_required,
         )
         return applied

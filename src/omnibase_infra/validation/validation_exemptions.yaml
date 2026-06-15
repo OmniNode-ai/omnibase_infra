@@ -324,6 +324,51 @@ pattern_exemptions:
     documentation:
       - OMN-11546 concrete-node audit
     ticket: OMN-11570
+  - file_pattern: 'cli_delegate\.py'
+    method_pattern: "Function 'delegate_command'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Click injects command arguments and options directly into the command callback (same contract as run_node_by_name). The callback immediately forwards those values to run_delegate; replacing the signature with an intermediate model would obscure the Click contract without reducing runtime complexity.
+
+    documentation:
+      - OMN-13096 onex delegate single-command rewrite
+    ticket: OMN-13096
+  # ==========================================================================
+  # onex skill subcommand Exemptions (OMN-13097)
+  # ==========================================================================
+  # Same Click-callback pattern as run_node_by_name above: Click injects the
+  # skill name plus dispatch options directly into the command callback, which
+  # immediately delegates to run_receipt_mode. An intermediate options model
+  # would obscure the Click contract without reducing complexity.
+  - file_pattern: 'cli_skill\.py'
+    method_pattern: "Function 'run_skill_by_name'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Click injects command arguments and options directly into the command callback (identical pattern to cli_node.py run_node_by_name). The body normalizes them and delegates to run_receipt_mode; an intermediate model would obscure the Click contract without reducing complexity.
+
+    documentation:
+      - docs/plans/2026-06-12-skill-output-suppression-plan.md (Phase 4)
+    ticket: OMN-13097
+  # skill_name / node_name in the declarative skill->node mapping are literal
+  # identifiers (the skill name as invoked, the onex.nodes entry-point name),
+  # not foreign-key references to entities with separate ID + display_name. No
+  # such entity exists in this domain — the mapping IS the registry.
+  - file_pattern: 'model_skill_mapping\.py'
+    violation_pattern: "Field 'skill_name' might reference an entity"
+    reason: >
+      skill_name is the literal skill identifier as invoked ('onex skill <skill_name>'), not a foreign key to a skill entity. It is the registry key itself; no separate skill entity with ID + display_name exists.
+
+    documentation:
+      - docs/plans/2026-06-12-skill-output-suppression-plan.md (Phase 4)
+    ticket: OMN-13097
+  - file_pattern: 'model_skill_mapping\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the onex.nodes entry-point identifier resolved exactly like 'onex node <node_name>', used to locate the packaged contract. It is a routing identifier, not a foreign key to a node entity with ID + display_name.
+
+    documentation:
+      - docs/plans/2026-06-12-skill-output-suppression-plan.md (Phase 4)
+    ticket: OMN-13097
   # ==========================================================================
   # KafkaContractCache Exemptions (OMN-1989)
   # ==========================================================================
@@ -726,6 +771,19 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-1139
+  # ==========================================================================
+  # ModelConfigProvenance config_name Exemption (OMN-12958)
+  # ==========================================================================
+  # config_name is the logical config identifier string (e.g., "bifrost_delegation"),
+  # not an entity reference requiring ID + display_name.
+  - file_pattern: 'config_provenance\.py'
+    violation_pattern: "Field 'config_name' might reference an entity"
+    reason: >
+      config_name is a logical config identifier string (e.g., "bifrost_delegation") used to label which runtime-rendered contract a provenance record describes. It is not an entity reference and does not require the ID + display_name pattern.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-12958
   # ==========================================================================
   # ModelIntrospectionConfig node_name Exemption (omnibase-core 0.14.0 upgrade)
   # ==========================================================================

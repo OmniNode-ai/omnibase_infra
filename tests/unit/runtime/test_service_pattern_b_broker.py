@@ -116,6 +116,10 @@ class _FakeAIOKafkaConsumer:
         self.topics_calls = 0
         self.set_topics_calls: list[tuple[str, ...]] = []
         self.seeked_to_end = False
+        # True once the consume leg has pinned its read position to the current
+        # end — either the legacy lazy ``seek_to_end`` or, post-OMN-13118, the
+        # synchronous ``end_offsets`` + ``seek`` pinning.
+        self.positioned = False
         self.started = False
         self.stopped = False
         type(self).created.append(self)
@@ -155,6 +159,18 @@ class _FakeAIOKafkaConsumer:
     async def seek_to_end(self, *_assignment: object) -> None:
         await asyncio.sleep(0)
         self.seeked_to_end = True
+        self.positioned = True
+
+    async def end_offsets(self, partitions: object) -> dict[object, int]:
+        # Synchronous broker round-trip returning the current HWM per partition
+        # (queue-backed fake delivers regardless of offset, so 0 is faithful for
+        # the "next message" offset here). Does not change position.
+        await asyncio.sleep(0)
+        return dict.fromkeys(partitions, 0)
+
+    def seek(self, _partition: object, _offset: int) -> None:
+        # Synchronous pin (OMN-13118): the position is fixed at open() time.
+        self.positioned = True
 
     async def getone(self) -> SimpleNamespace:
         return await self.messages.get()
@@ -233,12 +249,28 @@ class _FakeKafkaTransport:
         _headers: object | None = None,
     ) -> None:
         assert self._consumers
-        consumer = self._consumers[-1]
-        if self._assert_seeked:
-            assert consumer.seeked_to_end is True
-
         command_envelope = ModelEventEnvelope[object].model_validate_json(value)
         terminal_topic = self._terminal_topic or self._route.terminal_event or "unknown"
+
+        # OMN-13128: the broker opens one INDEPENDENT consumer per terminal topic.
+        # Deliver the terminal to the consumer that actually holds the terminal
+        # topic's partition (mirrors the real broker producing to a topic and the
+        # subscribed consumer reading it). Fall back to the last-created consumer
+        # for the single-terminal-topic routes where there is exactly one.
+        target = next(
+            (
+                consumer
+                for consumer in self._consumers
+                if any(
+                    getattr(partition, "topic", "") == terminal_topic
+                    for partition in consumer.assigned_partitions
+                )
+            ),
+            self._consumers[-1],
+        )
+        if self._assert_seeked:
+            assert all(consumer.positioned is True for consumer in self._consumers)
+
         terminal_envelope = ModelEventEnvelope[object](
             payload=self._terminal_payload,
             correlation_id=command_envelope.correlation_id,
@@ -246,7 +278,7 @@ class _FakeKafkaTransport:
             event_type=terminal_topic,
             source_tool="session_orchestrator",
         )
-        await consumer.messages.put(
+        await target.messages.put(
             SimpleNamespace(
                 topic=terminal_topic,
                 value=terminal_envelope.model_dump_json().encode(),
@@ -391,7 +423,7 @@ async def test_service_pattern_b_broker_returns_failed_for_failure_terminal() ->
 
 
 @pytest.mark.asyncio
-async def test_service_pattern_b_broker_kafka_waiter_seeks_before_dispatch(
+async def test_service_pattern_b_broker_kafka_waiter_pins_end_offset_before_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route = _route()
@@ -481,43 +513,83 @@ async def test_service_pattern_b_broker_kafka_waiter_consumes_failure_terminal(
     resolved_route, result = await broker.dispatch_request(command)
 
     assert resolved_route == route
-    assert created_consumers[0].topics == ()
-    assert created_consumers[0].kwargs["group_id"] is None
-    assert {
-        getattr(partition, "topic", "")
-        for partition in created_consumers[0].assigned_partitions
-    } == set(route.terminal_events)
+    # OMN-13128: one INDEPENDENT consumer per terminal topic, never one consumer
+    # holding both subscriptions. The broker opens completed then failed, so two
+    # consumers are created, each assigned the partitions of EXACTLY ONE topic.
+    assert len(created_consumers) == len(route.terminal_events)
+    assert all(consumer.topics == () for consumer in created_consumers)
+    assert all(consumer.kwargs["group_id"] is None for consumer in created_consumers)
+    per_consumer_topics = [
+        {getattr(partition, "topic", "") for partition in consumer.assigned_partitions}
+        for consumer in created_consumers
+    ]
+    # Each consumer's assignment is confined to a single terminal topic, and the
+    # union across the independent consumers covers both terminal topics.
+    assert all(len(topics) == 1 for topics in per_consumer_topics)
+    assert set().union(*per_consumer_topics) == set(route.terminal_events)
     assert result.status == "failed"
     assert result.error_message == "routing contract missing"
-    assert created_consumers[0].stopped is True
+    assert all(consumer.stopped is True for consumer in created_consumers)
 
 
 @pytest.mark.asyncio
-async def test_service_pattern_b_broker_kafka_waiter_requires_all_terminal_topics(
+async def test_service_pattern_b_broker_correlates_completed_when_failed_topic_partitionless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """OMN-13128: a never-produced FAILED topic must not block the COMPLETED win.
+
+    The runtime opens ONE independent consumer per terminal topic. When the FAILED
+    reply topic has never been produced to (zero partitions advertised — the
+    Redpanda auto-create-on-produce steady state, #1970), its consumer assigns the
+    empty set and its poll sleeps out the timeout, while the COMPLETED consumer —
+    its own independent subscription, positioned pre-publish — correlates the
+    terminal and wins the race. The prior single-consumer-both-topics shape could
+    not express this: it assigned both topics to one consumer and required BOTH to
+    surface partitions before it would assign at all.
+    """
     route = _route_with_failure_terminal()
-    _install_fake_aiokafka_consumer(monkeypatch)
+    completed_topic, failed_topic = route.terminal_events
+    created_consumers = _install_fake_aiokafka_consumer(monkeypatch)
+    # COMPLETED has a partition (produced to); FAILED never has (partition-less).
     _FakeAIOKafkaConsumer.topic_partitions_by_topic = {
-        route.terminal_events[0]: {0},
-        route.terminal_events[1]: set(),
+        completed_topic: {0},
+        failed_topic: set(),
     }
-    consumer = _FakeAIOKafkaConsumer()
-    await consumer.start()
+    _FakeAIOKafkaConsumer.require_metadata_refresh = True
+
     broker = RuntimePatternBBroker(
-        _FakeKafkaTransport(route, [consumer]),
+        _FakeKafkaTransport(route, created_consumers, terminal_topic=completed_topic),
         command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
         routes={"session_orchestrator": route},
     )
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
 
-    with pytest.raises(TimeoutError):
-        await broker._assign_terminal_topic_partitions(
-            consumer,
-            route.terminal_events,
-            timeout_seconds=0,
+    resolved_route, result = await broker.dispatch_request(command)
+
+    assert resolved_route == route
+    # Two independent consumers were opened, one per terminal topic.
+    assert len(created_consumers) == len(route.terminal_events)
+    completed_consumer = next(
+        c
+        for c in created_consumers
+        if any(
+            getattr(p, "topic", "") == completed_topic for p in c.assigned_partitions
         )
-
-    assert consumer.assigned_partitions == set()
+    )
+    failed_consumer = next(c for c in created_consumers if c is not completed_consumer)
+    # The COMPLETED consumer holds its real partition; the partition-less FAILED
+    # consumer assigns the empty set and never blocks the COMPLETED win.
+    assert completed_consumer.assigned_partitions
+    assert not failed_consumer.assigned_partitions
+    assert result.status == "completed"
+    assert result.payload == {"status": "complete", "dispatch_count": 5}
+    assert all(consumer.stopped is True for consumer in created_consumers)
 
 
 @pytest.mark.asyncio
@@ -820,8 +892,10 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
 
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
-        lambda packages: captured.setdefault("packages", packages)
-        and {"session_orchestrator": route},
+        lambda packages: (
+            captured.setdefault("packages", packages)
+            and {"session_orchestrator": route}
+        ),
     )
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",
@@ -936,8 +1010,10 @@ async def test_runtime_host_process_broker_package_names_ignore_active_runtime_e
     monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra")
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.discover_runtime_local_ingress_routes",
-        lambda packages: captured.setdefault("packages", packages)
-        and {"session_orchestrator": route},
+        lambda packages: (
+            captured.setdefault("packages", packages)
+            and {"session_orchestrator": route}
+        ),
     )
     monkeypatch.setattr(
         "omnibase_infra.runtime.runtime_host_process.RuntimePatternBBroker",

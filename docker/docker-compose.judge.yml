@@ -14,7 +14,6 @@
 # Running containers or mutating a remote host is outside this file's proof
 # boundary unless a cold-clone/cold-compose run is explicitly approved.
 name: omnibase-infra-judge
-
 x-omninode-contract-overlay:
   judge-redpanda:
     advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:49092"
@@ -26,19 +25,16 @@ x-omninode-contract-overlay:
     optional_secret_refs:
       - OPEN_ROUTER_API_KEY
       - LLM_GLM_API_KEY
-
 x-healthcheck-defaults: &healthcheck-defaults
   interval: 30s
   timeout: 10s
   retries: 3
   start_period: 10s
-
 x-logging-defaults: &logging-defaults
   driver: json-file
   options:
     max-size: "10m"
     max-file: "3"
-
 x-runtime-base: &runtime-base
   build:
     context: ..
@@ -59,7 +55,6 @@ x-runtime-base: &runtime-base
       reservations:
         cpus: "0.25"
         memory: 256M
-
 x-judge-runtime-env: &judge-runtime-env
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
@@ -128,7 +123,6 @@ x-judge-runtime-env: &judge-runtime-env
   QDRANT_PORT: "6333"
   QDRANT_API_KEY: ""
   KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -146,11 +140,10 @@ services:
     networks:
       - omnibase-infra-judge-network
     healthcheck:
-      <<: *healthcheck-defaults
+      !!merge <<: *healthcheck-defaults
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
     logging: *logging-defaults
     restart: unless-stopped
-
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-judge-redpanda
@@ -193,12 +186,11 @@ services:
     networks:
       - omnibase-infra-judge-network
     healthcheck:
-      <<: *healthcheck-defaults
+      !!merge <<: *healthcheck-defaults
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
       start_period: 30s
     logging: *logging-defaults
     restart: unless-stopped
-
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-judge-redpanda-partition-cap
@@ -215,7 +207,6 @@ services:
     networks:
       - omnibase-infra-judge-network
     restart: "no"
-
   valkey:
     image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-judge-valkey
@@ -231,11 +222,10 @@ services:
     networks:
       - omnibase-infra-judge-network
     healthcheck:
-      <<: *healthcheck-defaults
+      !!merge <<: *healthcheck-defaults
       test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
     logging: *logging-defaults
     restart: unless-stopped
-
   forward-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-forward-migration
@@ -259,7 +249,6 @@ services:
       - omnibase-infra-judge-network
     restart: "no"
     logging: *logging-defaults
-
   migration-gate:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-migration-gate
@@ -290,7 +279,6 @@ services:
       start_period: 10s
     logging: *logging-defaults
     restart: unless-stopped
-
   intelligence-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-intelligence-migration
@@ -312,9 +300,8 @@ services:
       - omnibase-infra-judge-network
     restart: "no"
     logging: *logging-defaults
-
   omninode-runtime:
-    <<: *runtime-base
+    !!merge <<: *runtime-base
     container_name: omninode-judge-runtime
     depends_on:
       migration-gate:
@@ -328,7 +315,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      <<: *judge-runtime-env
+      !!merge <<: *judge-runtime-env
       RUNTIME_PROFILE: main
       OTEL_SERVICE_NAME: omninode-judge-runtime-main
       ONEX_RUNTIME_ID: judge-main
@@ -361,9 +348,8 @@ services:
       - "com.omninode.ticket=OMN-12924"
       - "com.omninode.runtime.address=runtime://judge-local/judge/main"
       - "com.omninode.runtime.id=judge-main"
-
   runtime-effects:
-    <<: *runtime-base
+    !!merge <<: *runtime-base
     container_name: omninode-judge-runtime-effects
     depends_on:
       omninode-runtime:
@@ -371,7 +357,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      <<: *judge-runtime-env
+      !!merge <<: *judge-runtime-env
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-judge-runtime-effects
       ONEX_RUNTIME_ID: judge-effects
@@ -404,9 +390,8 @@ services:
       - "com.omninode.ticket=OMN-12924"
       - "com.omninode.runtime.address=runtime://judge-local/judge/effects"
       - "com.omninode.runtime.id=judge-effects"
-
   projection-api:
-    <<: *runtime-base
+    !!merge <<: *runtime-base
     container_name: omnimarket-judge-projection-api
     command: ["omnimarket-projection-api"]
     depends_on:
@@ -417,7 +402,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      <<: *judge-runtime-env
+      !!merge <<: *judge-runtime-env
       RUNTIME_PROFILE: projection-api
       OTEL_SERVICE_NAME: omnimarket-judge-projection-api
       BIFROST_CONTRACT_PATH: ""
@@ -436,12 +421,10 @@ services:
       - "com.omninode.lane=judge"
       - "com.omninode.ticket=OMN-12924"
       - "com.omninode.service=projection-api"
-
 networks:
   omnibase-infra-judge-network:
     name: omnibase-infra-judge-network
     driver: bridge
-
 volumes:
   judge_postgres_data:
     name: omnibase-infra-judge-postgres-data

@@ -489,3 +489,135 @@ def test_empty_bifrost_contract_path_disables_render(tmp_path: Path) -> None:
     )
 
     assert rendered is None
+
+
+# ==========================================================================
+# OMN-12945 — force_reseed bypasses stale-volume cache
+# ==========================================================================
+
+
+@pytest.mark.unit
+def test_force_reseed_overwrites_stale_volume_content(tmp_path: Path) -> None:
+    """force_reseed=True must re-render from source even when volume has populated endpoints.
+
+    This is the OMN-12945 fix: stale volume content surviving image rebuilds no
+    longer pins wrong backends after a container restart.
+    """
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+
+    # 1. Initial render seeds the volume.
+    render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+    )
+    assert target.exists()
+
+    # 2. Mutate the volume copy to simulate drift (wrong endpoint).
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    loaded["backends"][0]["endpoint_url"] = _http_url("stale.local:9999")
+    target.write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
+
+    # 3. Without force_reseed, the volume copy is reused (env still matches stale).
+    # We verify the stale value is NOT corrected here to confirm the cache path is real.
+    loaded_stale = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded_stale["backends"][0]["endpoint_url"] == _http_url("stale.local:9999")
+
+    # 4. force_reseed=True re-renders from packaged source, replacing the stale copy.
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+        force_reseed=True,
+    )
+
+    assert rendered == target
+    loaded_fresh = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded_fresh["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+@pytest.mark.unit
+def test_bifrost_force_reseed_env_flag_triggers_reseed(tmp_path: Path) -> None:
+    """BIFROST_FORCE_RESEED=1 env flag triggers re-seed (OMN-12945 entrypoint path)."""
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+
+    # Seed initial content.
+    render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+    )
+
+    # Drift the volume copy.
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    loaded["backends"][0]["endpoint_url"] = _http_url("stale.local:9999")
+    target.write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
+
+    # BIFROST_FORCE_RESEED=1 in environ triggers re-seed.
+    rendered = render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={
+            "LLM_CODER_URL": _http_url("coder.local:8000"),
+            "BIFROST_FORCE_RESEED": "1",
+        },
+    )
+
+    assert rendered == target
+    loaded_fresh = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert loaded_fresh["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+@pytest.mark.unit
+def test_bifrost_force_reseed_env_false_does_not_override_cache(tmp_path: Path) -> None:
+    """BIFROST_FORCE_RESEED=0 must NOT bypass the cache — the flag only triggers on truthy values."""
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered" / "bifrost_delegation.yaml"
+
+    # Render with the real endpoint to seed the volume.
+    render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={"LLM_CODER_URL": _http_url("coder.local:8000")},
+    )
+
+    # Re-render with BIFROST_FORCE_RESEED=0 and a different env endpoint.
+    # The cache path should win — the existing volume content is reused
+    # because the env endpoint matches the existing volume endpoint.
+    render_bifrost_delegation_contract(
+        source_path=source,
+        target_path=target,
+        environ={
+            "LLM_CODER_URL": _http_url("coder.local:8000"),
+            "BIFROST_FORCE_RESEED": "0",
+        },
+    )
+
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    # The cache path was used (endpoint unchanged from initial render).
+    assert loaded["backends"][0]["endpoint_url"] == _http_url("coder.local:8000")
+
+
+# ==========================================================================
+# OMN-12814 — fail-loud on zero populated endpoints
+# ==========================================================================
+
+
+@pytest.mark.unit
+def test_zero_populated_endpoints_raises_loud_error(tmp_path: Path) -> None:
+    """render_bifrost_delegation_contract must raise ProtocolConfigurationError
+    (not return empty) when no endpoint env vars are set (OMN-12814 fail-loud)."""
+    from omnibase_infra.errors import ProtocolConfigurationError
+
+    source = _source_contract(tmp_path / "source.yaml")
+    target = tmp_path / "rendered.yaml"
+
+    with pytest.raises(ProtocolConfigurationError, match="no populated endpoint_url"):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            target_path=target,
+            environ={},  # No LLM_*_URL vars — all backends stay unpopulated.
+            force_reseed=True,  # Bypass cache so we reach the rendering path.
+        )

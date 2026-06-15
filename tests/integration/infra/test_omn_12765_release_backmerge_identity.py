@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Release backmerge identity checks for OMN-12765."""
 
@@ -15,7 +15,9 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    expected_core = "c7d6b5ec010692b6724de1d49a0ee5a599d7ee06"
+    # OMN-13094: pin advanced to the merged ArtifactStore slice (OMN-13093) —
+    # receipt mode consumes omnibase_core.artifacts + ModelSkillResult.
+    expected_core = "ae8793bdad96c12a0b47e2f4d1d0f179618553b8"
 
     assert expected_core in pyproject
     assert expected_core in uv_lock
@@ -28,5 +30,9 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    assert lock["identity_digest"] == "7f4a28050457a278a6712b05de154cb8"
-    assert lock["shared_env_digest"] == "83c23e55321a8c8cb95d48c1"
+    # OMN-13096: identity regenerated after adding the 'delegate' onex.cli
+    # entry point to pyproject.toml, merged with the 'skill' entry point from
+    # OMN-13097 (both digests bind pyproject.toml + uv.lock; same mechanical
+    # regeneration OMN-13094 did for the advanced core pin).
+    assert lock["identity_digest"] == "efc067283a47eb66bfae03322e966b0c"
+    assert lock["shared_env_digest"] == "215aa5ffa92e228bf703615d"

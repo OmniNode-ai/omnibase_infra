@@ -95,17 +95,20 @@ PY
 
 OMK_RESOLVED="$(resolve_omnimarket_src || true)"
 if [ -z "${OMK_RESOLVED}" ]; then
-  # In --check mode (pre-commit / CI), the omnimarket source tree is frequently
-  # not checked out. The vendored files are the durable source of truth and are
-  # validated independently by the migration tests; a drift check is only
-  # meaningful when the source is present. Skip (success) rather than fail so the
-  # gate never produces false negatives on runners without omnimarket.
-  if [ "${CHECK_MODE}" -eq 1 ]; then
-    echo "[sync-node-migrations] omnimarket source not resolvable — skipping drift check." >&2
-    exit 0
-  fi
   echo "[sync-node-migrations] ERROR: could not resolve omnimarket source tree." >&2
   echo "  Set OMNIMARKET_SRC=<omnimarket repo root>, or OMNI_HOME=<omni_home>, or pip install omnimarket." >&2
+  if [ "${CHECK_MODE}" -eq 1 ]; then
+    # OMN-13062 (retro A-10): --check with unresolvable source is a vacuous gate.
+    # Silently passing when the source is absent means drift is never detected.
+    # Exit 2 (source-unresolvable) so the CI gate fires and the operator is
+    # required to either supply OMNIMARKET_SRC / OMNI_HOME or explicitly skip
+    # this check via SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
+    if [ "${SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE:-0}" = "1" ]; then
+      echo "[sync-node-migrations] SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1 — skipping unresolvable-source error." >&2
+      exit 0
+    fi
+    exit 2
+  fi
   exit 2
 fi
 

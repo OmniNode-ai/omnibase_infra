@@ -21,11 +21,18 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
-  # Stub implementation detection — sourced from omnibase_core (OMN-4473)
+  # Stub implementation detection + transport-mock lint — sourced from omnibase_core.
+  # Rev bumped to OMN-13026 (transport-mock-lint hook added).
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 30a06f85bb5849902d33c8d0bdb90fc6cba0c346 # pragma: allowlist secret
+    rev: cfaa6ec863c3026b5e65196151ed76cdad13dae3 # pragma: allowlist secret
     hooks:
       - id: check-stub-implementations
+      # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
+      # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
+      # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
+      # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
+      - id: transport-mock-lint
+        args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   - repo: https://github.com/OmniNode-ai/onex_change_control
@@ -106,6 +113,16 @@ repos:
         files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-12965: enforce runtime image identity stamping (version + revision).
+      # A blank/placeholder identity degrades every proof packet. Guards both the
+      # Dockerfile workspace-mode identity guard and the cmd_up build-arg wiring.
+      - id: check-runtime-image-identity
+        name: Enforce runtime image identity labels (OMN-12965)
+        entry: uv run --frozen python scripts/check_runtime_image_identity.py
+        language: system
+        files: ^(docker/Dockerfile\.runtime|src/omnibase_infra/docker/catalog/cli\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
       - id: check-env-reads
         name: Block new os.environ reads (use overlay-resolved config)
@@ -132,14 +149,22 @@ repos:
         pass_filenames: false
         always_run: false
         stages: [pre-commit]
-      # OMN-12559: vendored omnimarket node migrations must stay in sync with
-      # source. Skips silently when omnimarket source is not checked out.
+      # OMN-12559 / OMN-13124: vendored omnimarket node migrations must stay in
+      # sync with source. MUST always_run — the prior files:-scoped trigger only
+      # fired when a file under docker/migrations/forward/nodes/ (or the sync
+      # script) was staged. A node migration added in the *omnimarket* repo
+      # (e.g. node_projection_pattern_learning, OMN-13124) never touches those
+      # infra paths, so the hook silently passed and the un-vendored migration
+      # merged — the table was missing in omnidash_analytics on a clean redeploy
+      # (golden-chain run12 Finding). always_run closes that gap. The script
+      # itself returns exit 2 (gate fires) when the omnimarket source is
+      # unresolvable unless SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
       - id: onex-check-node-migration-sync
         name: ONEX Node Migration Vendor Sync Check
         entry: bash scripts/sync-node-migrations.sh --check
         language: system
         pass_filenames: false
-        files: ^(docker/migrations/forward/nodes/|scripts/sync-node-migrations\.sh)
+        always_run: true
         stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
@@ -194,6 +219,22 @@ repos:
         entry: uv run --frozen python scripts/validate.py contracts
         language: system
         files: '\.yaml$'
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-12957: runtime_profiles contract validator (omnibase_core).
+      # Enforces three rules on every node contract.yaml:
+      #   - runtime_profiles_missing (OMN-9886)
+      #   - runtime_profile_unregistered (declared profile not in the canonical
+      #     omnibase_core REGISTERED_RUNTIME_PROFILES registry)
+      #   - runtime_profile_no_consumer_lane (subscribing REDUCER/EFFECT names
+      #     no consumer-attached profile, so subscriptions are never drained)
+      # Pre-existing violators are frozen in validation/runtime_profiles_allowlist.yaml
+      # (discovered by repo-root walk; drain tracked by OMN-12982).
+      - id: onex-validate-runtime-profiles
+        name: Validate runtime_profiles on node contracts (OMN-12957)
+        entry: uv run --frozen python -m omnibase_core.validation.validator_runtime_profiles src/
+        language: system
+        files: 'contract\.yaml$'
         pass_filenames: false
         stages: [pre-commit]
       # Pattern validation - naming conventions

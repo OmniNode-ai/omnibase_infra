@@ -14,6 +14,7 @@ Covers the 5 CLI migration branches:
 from __future__ import annotations
 
 import importlib.util
+import json
 from importlib.machinery import ModuleSpec
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -174,6 +175,55 @@ def test_packaged_contract_resolution_does_not_import_node_module(
 
     assert contract == fake_pkg / "contract.yaml"
     find_spec.assert_called_once_with("fake_pkg")
+
+
+def test_default_mode_failure_emits_skill_routing_error_envelope(
+    tmp_path: Path,
+) -> None:
+    """A non-zero default-mode run emits a ``SkillRoutingError`` JSON envelope.
+
+    The ``golden_chain_sweep`` skill (and others) document that ``onex node``
+    surfaces a ``SkillRoutingError`` JSON envelope on non-zero exit rather than a
+    raw traceback (OMN-8724). This drives a FAILED run via a bogus handler module
+    and asserts the documented envelope is on stdout with the expected keys.
+    """
+    node_name = _first_resolvable_packaged_node_name()
+    if node_name is None:
+        pytest.skip("No resolvable onex.nodes packaged contract registered in this env")
+
+    override = tmp_path / "custom_contract.yaml"
+    override.write_text(
+        "---\n"
+        "name: custom\n"
+        "node_type: compute\n"
+        "handler:\n"
+        "  module: does.not.exist.anywhere_zzzqqq\n"
+        "  class: Nope\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        run_node_by_name,
+        [
+            node_name,
+            "--contract",
+            str(override),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--timeout",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 1
+    # The last JSON object in stdout is the SkillRoutingError envelope.
+    start = result.output.rfind("{")
+    assert start != -1, f"no JSON envelope in output: {result.output!r}"
+    envelope = json.loads(result.output[start:])
+    assert envelope["error_type"] == "SkillRoutingError"
+    assert envelope["node_id"] == node_name
+    assert envelope["result"] == "failed"
+    assert envelope["message"]
 
 
 def test_input_file_not_found_surfaces_cli_error(tmp_path: Path) -> None:

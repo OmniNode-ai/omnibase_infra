@@ -1,0 +1,68 @@
+# Additive Infisical for the stability-test lane (OMN-12966 / P1.2b-A).
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The Infisical service declared in docker-compose.infra.yml is disabled in the
+# stability-test and prod lane overlays via `profiles: !override [...-disabled]`,
+# so no Infisical instance is reachable from the runtime/effect containers — the
+# container environment becomes the de-facto secret store. P1.2b ("config
+# authority end-state") requires a real Infisical value store reachable from the
+# runtime boundary. This compose project stands one up ADDITIVELY:
+#
+#   * Own compose project name — does NOT modify or restart any lane container.
+#   * Joins the EXISTING stability-test network as `external`, so runtime/effect
+#     containers reach it in-network at `omnibase-infra-infisical-stability:8080`
+#     and operators reach it at host port 8880.
+#   * Reuses the already-present stability-test postgres (`infisical_db`) and
+#     valkey — no new stateful services.
+#
+# NO SECRETS IN THIS FILE. All credentials are resolved from the operator
+# environment (~/.omnibase/.env), matching the discipline in
+# docker-compose.infra.yml. The required vars are the same ones the canonical
+# infisical service consumes; the only difference is that the connection URIs
+# must point at the stability-test-namespaced service hostnames
+# (omnibase-infra-stability-test-postgres / -valkey), supplied via env.
+#
+# Usage (on .201):
+#   cd <this repo>/docker
+#   INFISICAL_STABILITY_DB_CONNECTION_URI=... \
+#   INFISICAL_STABILITY_REDIS_URL=... \
+#   INFISICAL_ENCRYPTION_KEY=... INFISICAL_AUTH_SECRET=... \
+#   docker compose -f docker-compose.infisical-stability.yml up -d
+#
+# Then provision identity + folders + secrets:
+#   uv run python scripts/provision-infisical.py --addr http://192.168.86.201:8880 \
+#     --org omninode --project onex-platform
+#   uv run python scripts/seed-infisical.py --import-env <env> --set-values \
+#     --create-missing-keys --execute
+name: omnibase-infra-infisical-stability
+services:
+  infisical:
+    image: infisical/infisical:v0.146.0-postgres
+    container_name: omnibase-infra-infisical-stability
+    environment:
+      # Must point at the stability-test-namespaced postgres/valkey hostnames.
+      DB_CONNECTION_URI: ${INFISICAL_STABILITY_DB_CONNECTION_URI:?INFISICAL_STABILITY_DB_CONNECTION_URI must be set (postgresql://...@omnibase-infra-stability-test-postgres:5432/infisical_db)}
+      REDIS_URL: ${INFISICAL_STABILITY_REDIS_URL:?INFISICAL_STABILITY_REDIS_URL must be set (redis://:...@omnibase-infra-stability-test-valkey:6379)}
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY must be set in ~/.omnibase/.env}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET must be set in ~/.omnibase/.env}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://192.168.86.201:8880}
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "${INFISICAL_EXTERNAL_PORT:-8880}:8080"
+    networks:
+      - stability
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=infisical"
+      - "com.omninode.lane=stability-test-additive"
+networks:
+  stability:
+    name: omnibase-infra-stability-test-network
+    external: true

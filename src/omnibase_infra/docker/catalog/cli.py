@@ -17,9 +17,11 @@ Usage:
 
 from __future__ import annotations
 
+import datetime
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -27,6 +29,9 @@ import yaml
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
+from omnibase_infra.docker.catalog.validator_healthcheck_start_period import (
+    validate_migration_gate_start_period,
+)
 
 _OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
 
@@ -183,6 +188,66 @@ def _current_git_sha() -> str:
         return "unknown"
 
 
+def _runtime_version() -> str:
+    """Return the runtime package version stamped as the OCI image version.
+
+    Read from the repo ``pyproject.toml`` so ``org.opencontainers.image.version``
+    reflects the real package version rather than the Dockerfile placeholder
+    default (``0.1.0``). Fails fast if the version cannot be resolved so a build
+    never silently stamps a placeholder identity (OMN-12965).
+    """
+    pyproject = _REPO_ROOT / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        version = str(data["project"]["version"]).strip()
+    except (FileNotFoundError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(
+            f"Could not resolve RUNTIME_VERSION from {pyproject}; "
+            "refusing to build an image with placeholder identity (OMN-12965)."
+        ) from exc
+    if not version:
+        raise RuntimeError(
+            f"Empty RUNTIME_VERSION in {pyproject}; "
+            "refusing to build an image with placeholder identity (OMN-12965)."
+        )
+    return version
+
+
+def _image_identity_build_args() -> list[str]:
+    """Return the OCI image-identity ``--build-arg`` pairs for a runtime build.
+
+    Stamps the full quad consumed by the runtime-stage OCI labels and provenance
+    manifest: ``GIT_SHA`` (busts the COPY src/ layer + builder-stage revision
+    label), ``VCS_REF`` (runtime-stage ``org.opencontainers.image.revision``),
+    ``RUNTIME_VERSION`` (``org.opencontainers.image.version``), and ``BUILD_DATE``
+    (``org.opencontainers.image.created``).
+
+    Fails fast when the git SHA is unresolved: a blank/``unknown`` revision
+    produces a blank-identity image that degrades every proof packet (the runtime
+    SHA + image digest are required citations in accepted evidence). This is the
+    enforcement point for OMN-12965 — never stamp a placeholder identity.
+    """
+    git_sha = _current_git_sha()
+    if not git_sha or git_sha == "unknown":
+        raise RuntimeError(
+            "Cannot resolve git revision for the runtime image build. A blank or "
+            "'unknown' org.opencontainers.image.revision degrades every proof "
+            "packet (OMN-12965). Run the build from a clean git checkout of "
+            f"{_REPO_ROOT}."
+        )
+    build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [
+        "--build-arg",
+        f"GIT_SHA={git_sha}",
+        "--build-arg",
+        f"VCS_REF={git_sha}",
+        "--build-arg",
+        f"RUNTIME_VERSION={_runtime_version()}",
+        "--build-arg",
+        f"BUILD_DATE={build_date}",
+    ]
+
+
 def cmd_seed(_args: list[str]) -> int:
     """Seed Infisical with config keys from contracts."""
     return _run_seed()
@@ -236,7 +301,6 @@ def cmd_up(args: list[str]) -> int:
     # Build if requested (OMN-7214)
     if force_build:
         print("Rebuilding images (--build)...")
-        git_sha = _current_git_sha()
         build_proc = subprocess.run(
             [
                 "docker",
@@ -244,8 +308,7 @@ def cmd_up(args: list[str]) -> int:
                 "-f",
                 _DEFAULT_OUTPUT,
                 "build",
-                "--build-arg",
-                f"GIT_SHA={git_sha}",
+                *_image_identity_build_args(),
             ],
             cwd=str(_REPO_ROOT),
             check=False,
@@ -338,6 +401,12 @@ def cmd_validate_runtime(args: list[str]) -> int:
                 f"{svc_name}: {key!r} appears in both operational_defaults and required_env"
                 " (required_env wins — consider removing from operational_defaults)"
             )
+
+    # Migration-completion gates must keep start_period above the floor so a
+    # still-applying gate is reported `starting`, not UNHEALTHY (OMN-12973).
+    start_period_result = validate_migration_gate_start_period(resolved.manifests)
+    for violation in start_period_result.violations:
+        errors.append(violation.message())
 
     if warnings:
         for w in warnings:

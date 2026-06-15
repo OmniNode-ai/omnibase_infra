@@ -266,6 +266,16 @@ COPY workspace/sibling-repos/ /workspace/sibling-repos/
 
 # Copy provenance helper (always present — used in workspace mode, no-op otherwise)
 COPY scripts/runtime_build/compute_workspace_provenance.py /workspace/compute_workspace_provenance.py
+# Pin-resolution helper imported by the provenance script (OMN-12989): enforces
+# that staged siblings honor the consuming repo's uv.lock pins. Must sit beside
+# the provenance script so its sys.path-relative import resolves inside the image.
+COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspace_pins.py
+
+# Copy the sibling-pin comparison emitted by the preflight (OMN-12977). A
+# committed placeholder makes this COPY always valid; workspace mode overwrites
+# it via stage_workspace.sh so compute_workspace_provenance.py can fold the
+# expected-vs-actual pin proof into build-provenance.json for deploy verifiers.
+COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.json
 
 # workspace mode installs omnibase_compat, onex_change_control, omnimarket from
 # the staged local trees.  release mode installs from pinned remote sources.
@@ -320,7 +330,7 @@ RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
     else \
-        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": []\n}\n' \
+        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": [],\n  "lock_pin_comparison": []\n}\n' \
             "${BUILD_DATE:-unknown}" "${VCS_REF:-unknown}" > /app/build-provenance.json; \
     fi
 
@@ -432,6 +442,25 @@ RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ] && [ -z "${OMNI_HOME}" ]; then \
       echo "BUILD_SOURCE=workspace requires OMNI_HOME" >&2; \
       exit 64; \
+    fi
+
+# OMN-12965: workspace-mode builds must stamp a real image identity. A blank
+# VCS_REF (-> blank org.opencontainers.image.revision) or the placeholder
+# RUNTIME_VERSION default (0.1.0) degrades every proof packet, since the runtime
+# SHA + image digest are required citations in accepted evidence. Fail the build
+# here rather than ship a blank-identity image. Release-mode builds may rely on
+# the placeholder default (operator-driven release tooling pins them explicitly),
+# so the guard is scoped to workspace mode.
+RUN set -eu; \
+    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
+      if [ -z "${VCS_REF}" ] || [ "${VCS_REF}" = "unknown" ]; then \
+        echo "workspace build requires a non-empty VCS_REF for org.opencontainers.image.revision (OMN-12965)" >&2; \
+        exit 64; \
+      fi; \
+      if [ -z "${RUNTIME_VERSION}" ] || [ "${RUNTIME_VERSION}" = "0.1.0" ]; then \
+        echo "workspace build requires RUNTIME_VERSION from pyproject (not placeholder 0.1.0) for org.opencontainers.image.version (OMN-12965)" >&2; \
+        exit 64; \
+      fi; \
     fi
 
 # OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)

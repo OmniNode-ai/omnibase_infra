@@ -1369,12 +1369,13 @@ def _make_handler_entry(
 def test_validate_routing_map_based_happy_path() -> None:
     """Map-based validation passes when all handlers have input topics in subscribe_topics."""
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             _make_handler_entry(
                 "EventA", handler_name="HandlerA", output_events=["EventB"]
             ),
             _make_handler_entry("EventB", handler_name="HandlerB"),
-        ]
+        ],
     }
     errors = RuntimeLocal._validate_routing(
         routing,
@@ -1388,6 +1389,7 @@ def test_validate_routing_map_based_happy_path() -> None:
 def test_validate_routing_terminal_reducer_no_padding() -> None:
     """Terminal reducer with explicit subscribe_topic requires no padding of subscribe_topics."""
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             _make_handler_entry(
                 "EventA",
@@ -1399,7 +1401,7 @@ def test_validate_routing_terminal_reducer_no_padding() -> None:
                 handler_name="HandlerB",
                 subscribe_topic="topic.b.v1",
             ),
-        ]
+        ],
     }
     # Only one subscribe_topic declared (for HandlerA); HandlerB uses explicit field.
     errors = RuntimeLocal._validate_routing(
@@ -1414,11 +1416,12 @@ def test_validate_routing_terminal_reducer_no_padding() -> None:
 def test_validate_routing_terminal_reducer_no_input_topic() -> None:
     """Terminal reducer with no subscribe_topic and no positional slot is valid (no bus wiring)."""
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             _make_handler_entry("EventA", handler_name="HandlerA"),
             # Handler at index 1, but subscribe_topics only has 1 entry — no slot.
             _make_handler_entry("EventB", handler_name="TerminalReducer"),
-        ]
+        ],
     }
     errors = RuntimeLocal._validate_routing(
         routing,
@@ -1432,13 +1435,14 @@ def test_validate_routing_terminal_reducer_no_input_topic() -> None:
 def test_validate_routing_explicit_subscribe_topic_not_in_list() -> None:
     """Explicit subscribe_topic that is not in subscribe_topics is an error."""
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             _make_handler_entry(
                 "EventA",
                 handler_name="HandlerA",
                 subscribe_topic="topic.unknown.v1",
             ),
-        ]
+        ],
     }
     errors = RuntimeLocal._validate_routing(
         routing,
@@ -1472,15 +1476,16 @@ def test_validate_routing_orphan_output_still_detected() -> None:
 
 @pytest.mark.unit
 def test_validate_routing_missing_required_fields() -> None:
-    """Missing event_model.name / handler.module are still caught."""
+    """Missing event_model.name / handler.module are still caught for payload_type_match."""
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             {
                 "event_model": {"module": "mod.events"},
                 "handler": {"name": "HandlerA"},
                 "output_events": [],
             }
-        ]
+        ],
     }
     errors = RuntimeLocal._validate_routing(
         routing,

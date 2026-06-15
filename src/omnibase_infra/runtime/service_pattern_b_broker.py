@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -35,6 +36,20 @@ from omnibase_infra.utils.util_error_sanitization import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS = 30.0
+_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS = 0.05
+_DIRECT_TERMINAL_SESSION_TIMEOUT_MS = 45000
+_DIRECT_TERMINAL_HEARTBEAT_INTERVAL_MS = 15000
+_DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS = 300000
+
+# Bounded grace for a reply topic that EXISTS but is slow to surface partition
+# metadata. A topic that has never been produced to (e.g. the FAILED terminal
+# topic in a run where nothing fails) legitimately advertises no partitions; it
+# must NOT burn the whole assign cap on every trial (OMN-13118 battery wedge).
+# After this grace window of forced refreshes the broker's answer is taken as
+# authoritative: assign whatever partitions exist (possibly none) and return.
+_DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS = 2.0
 
 
 def _broker_group_id(command_topic: str) -> str:
@@ -66,6 +81,384 @@ def _error_result(
 class TerminalPayload:
     payload: object
     topic: str
+
+
+@dataclass(
+    frozen=True, slots=True
+)  # internal-dataclass-ok: module-internal Kafka boundary handle
+class DirectTerminalConsumer:
+    consumer: AIOKafkaConsumer
+
+
+def _direct_terminal_bootstrap_servers(event_bus: object) -> str:
+    servers = getattr(event_bus, "_bootstrap_servers", None)
+    if not isinstance(servers, str) or not servers:
+        raise RuntimeError(
+            "terminal-event consumer: runtime event_bus exposes no string "
+            "_bootstrap_servers; cannot build a Kafka correlate consumer."
+        )
+    return servers
+
+
+def _direct_terminal_auth_kwargs(event_bus: object) -> dict[str, object]:
+    build_auth_kwargs = getattr(event_bus, "_build_auth_kwargs", None)
+    if not callable(build_auth_kwargs):
+        return {}
+    auth = cast("Callable[[], Mapping[str, object] | None]", build_auth_kwargs)()
+    return dict(auth or {})
+
+
+def _direct_terminal_client_version_kwargs(event_bus: object) -> dict[str, object]:
+    config = getattr(event_bus, "config", SimpleNamespace())
+    api_version = getattr(config, "api_version", None)
+    if api_version is None:
+        return {}
+    try:
+        parameters = inspect.signature(AIOKafkaConsumer.__init__).parameters
+    except (TypeError, ValueError):
+        return {}
+    if "api_version" not in parameters:
+        return {}
+    return {"api_version": api_version}
+
+
+def _extract_direct_terminal_correlation_id(payload: dict[str, object]) -> str | None:
+    value = payload.get("correlation_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def _build_direct_terminal_consumer(event_bus: object) -> AIOKafkaConsumer:
+    config = getattr(event_bus, "config", SimpleNamespace())
+    return AIOKafkaConsumer(
+        bootstrap_servers=_direct_terminal_bootstrap_servers(event_bus),
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+        session_timeout_ms=getattr(
+            config,
+            "session_timeout_ms",
+            _DIRECT_TERMINAL_SESSION_TIMEOUT_MS,
+        ),
+        heartbeat_interval_ms=getattr(
+            config,
+            "heartbeat_interval_ms",
+            _DIRECT_TERMINAL_HEARTBEAT_INTERVAL_MS,
+        ),
+        max_poll_interval_ms=getattr(
+            config,
+            "max_poll_interval_ms",
+            _DIRECT_TERMINAL_MAX_POLL_INTERVAL_MS,
+        ),
+        retry_backoff_ms=getattr(config, "reconnect_backoff_ms", 2000),
+        **_direct_terminal_client_version_kwargs(event_bus),
+        **_direct_terminal_auth_kwargs(event_bus),
+    )
+
+
+async def _await_metadata_op(result: object) -> None:
+    """Await a client metadata operation result if it is awaitable.
+
+    ``AIOKafkaClient.set_topics`` / ``force_metadata_update`` return a future
+    that resolves when the broker metadata fetch completes. Awaiting it is what
+    makes partition metadata actually surface; ignoring it (the prior bug) left
+    the assign loop spinning on a stale, empty partition view. Test fakes return
+    a plain ``bool``, so only await when the result is awaitable.
+    """
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _force_terminal_topic_metadata(
+    consumer: AIOKafkaConsumer,
+    terminal_topic: str,
+) -> None:
+    """Track the reply topic and force a fresh broker metadata fetch.
+
+    ``set_topics`` only forces a metadata refresh when the requested topic set
+    DIFFERS from the currently-tracked set (aiokafka 0.13.0
+    ``AIOKafkaClient.set_topics``). Re-calling ``set_topics([same_topic])`` each
+    loop iteration therefore took the no-refresh branch after the first call, so
+    a consumer whose first metadata fetch had not yet surfaced partitions never
+    re-fetched and burned the whole assign cap, raising a bare ``TimeoutError``
+    (the empty-message ``wait failed`` seen live in OMN-13012). We register the
+    topic once, await that fetch, and on each subsequent miss force a refresh via
+    ``force_metadata_update`` (which always fetches) rather than the no-op
+    ``set_topics`` repeat.
+    """
+    client = getattr(consumer, "_client", None)
+    if client is None:
+        return
+    set_topics = getattr(client, "set_topics", None)
+    if callable(set_topics):
+        await _await_metadata_op(set_topics([terminal_topic]))
+
+
+async def _refresh_terminal_topic_metadata(consumer: AIOKafkaConsumer) -> None:
+    """Force a broker metadata fetch for the already-tracked reply topic."""
+    client = getattr(consumer, "_client", None)
+    if client is None:
+        return
+    force_metadata_update = getattr(client, "force_metadata_update", None)
+    if callable(force_metadata_update):
+        await _await_metadata_op(force_metadata_update())
+
+
+async def _assign_direct_terminal_partitions(
+    consumer: AIOKafkaConsumer,
+    terminal_topic: str,
+    assign_cap_seconds: float,
+) -> None:
+    """Track the reply topic, wait briefly for its metadata, then assign.
+
+    The first ``set_topics`` registers the topic and forces the initial metadata
+    fetch (awaited). If partitions are still not visible (slow broker metadata),
+    each subsequent iteration forces a fresh fetch via ``force_metadata_update``
+    — NOT a repeat ``set_topics([same_topic])``, which aiokafka treats as a
+    no-op and never re-fetches (the OMN-13012 consume-leg wedge: only one of the
+    two ephemeral terminal consumers ever surfaced partitions).
+
+    Partition-less reply topics are a VALID steady state (OMN-13118)
+    --------------------------------------------------------------------
+    A terminal topic that has never been produced to — the FAILED reply topic in
+    a run where every generation passes — legitimately advertises no partitions
+    (Redpanda auto-creates topics on first produce). Blocking the FULL
+    ``assign_cap_seconds`` (30s live) on it and then RAISING was the load-
+    dependent battery wedge: the runner opens one ephemeral consumer per terminal
+    topic BEFORE publishing, serially, so EVERY trial stalled ~30s on the
+    partition-less FAILED open before it could correlate the COMPLETED terminal —
+    a 160-trial battery needed >80 min and never completed.
+
+    The fix: give a bounded grace window for a topic that EXISTS but is slow to
+    surface metadata; after it, take the broker's answer as authoritative and
+    assign whatever partitions exist — possibly none. A consumer with an empty
+    assignment is positioned (``seek_to_end`` is a no-op) and ``poll`` treats it
+    as "no terminal will arrive here" (returns None on its own timeout) without
+    blocking the open phase. The COMPLETED-topic session, opened separately and
+    assigned its real partition, wins the cross-topic race and correlates fast.
+    """
+    loop = asyncio.get_running_loop()
+    grace = min(_DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS, assign_cap_seconds)
+    deadline = loop.time() + grace
+    await _force_terminal_topic_metadata(consumer, terminal_topic)
+    while True:
+        partitions = consumer.partitions_for_topic(terminal_topic) or set()
+        if partitions:
+            consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
+            return
+        if loop.time() >= deadline:
+            # The broker has had the grace window to advertise partitions and
+            # surfaced none: the topic has not been produced to yet. Assign the
+            # empty set and return promptly rather than burning the cap. A real
+            # terminal on this topic would have created its partition before the
+            # correlated event was published, so a partition-less topic at this
+            # point carries no terminal for this correlation.
+            consumer.assign([])
+            return
+        await asyncio.sleep(_DIRECT_TERMINAL_METADATA_POLL_INTERVAL_SECONDS)
+        await _refresh_terminal_topic_metadata(consumer)
+
+
+async def _pin_direct_terminal_end_offsets(
+    consumer: AIOKafkaConsumer,
+    *,
+    timeout_seconds: float,
+) -> None:
+    """Resolve the current end offsets SYNCHRONOUSLY and pin them via ``seek``.
+
+    Why not ``seek_to_end`` (OMN-13118 strike-three)
+    ------------------------------------------------
+    ``AIOKafkaConsumer.seek_to_end`` is LAZY: it calls
+    ``Fetcher.request_offset_reset(partitions, LATEST)``, which only marks the
+    partition "awaiting reset" and registers a position future. The actual LATEST
+    offset is resolved by a ``ListOffsets`` round-trip that happens on the FIRST
+    ``getone`` — which is AFTER the caller has published its command. With
+    generation completing in ~1s (dispatch loop freed, OMN-13010), the correlated
+    terminal lands in the gap between this open() and the first poll, so the
+    lazily-resolved LATEST position is the high-water-mark AFTER the record and
+    the poll starts reading PAST it. The terminal is never read, the trial never
+    correlates, and the experiment matrix re-fires the same cell forever — the
+    consume-leg wedge that survived PR #1969 (set_topics no-op) and PR #1970
+    (partition-less assign-cap) because neither addressed the seek timing.
+
+    ``end_offsets`` is a SYNCHRONOUS broker round-trip that returns the HWM
+    observed NOW (without changing the consumer position); ``seek`` then pins each
+    partition's read offset to that value deterministically. The resume position
+    is therefore fixed at open() time, BEFORE the publish, so any terminal emitted
+    at-or-after this offset is delivered to the subsequent poll. This is the real
+    subscribe-before-publish guarantee the two-phase protocol promised.
+
+    An empty assignment (partition-less reply topic, OMN-13118) has no offsets to
+    resolve, so this is a no-op for that leg.
+
+    ``end_offsets`` is a broker ``ListOffsets`` round-trip that aiokafka documents
+    as able to block indefinitely. It is bounded by ``timeout_seconds`` (the same
+    cap as ``start`` and partition assignment) so a stalled broker fails fast here
+    instead of hanging the pre-publish positioning and reintroducing a wait wedge
+    in a new spot.
+    """
+    assignment = consumer.assignment()
+    if not assignment:
+        return
+    end_offsets = await asyncio.wait_for(
+        consumer.end_offsets(list(assignment)),
+        timeout=timeout_seconds,
+    )
+    for topic_partition, offset in end_offsets.items():
+        consumer.seek(topic_partition, offset)
+
+
+async def open_direct_terminal_consumer(
+    *,
+    event_bus: object,
+    terminal_topic: str,
+) -> DirectTerminalConsumer:
+    """Start, assign, and pin an ephemeral terminal consumer to the current end.
+
+    The read position is captured SYNCHRONOUSLY via ``end_offsets`` + ``seek`` (not
+    the lazy ``seek_to_end``) so it is fixed at open() time, before the caller
+    publishes — the subscribe-before-publish guarantee that closes the
+    seek-past-the-terminal race (OMN-13118).
+    """
+    consumer = _build_direct_terminal_consumer(event_bus)
+    try:
+        await asyncio.wait_for(
+            consumer.start(),
+            timeout=_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
+        await _assign_direct_terminal_partitions(
+            consumer,
+            terminal_topic,
+            _DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
+        await _pin_direct_terminal_end_offsets(
+            consumer,
+            timeout_seconds=_DIRECT_TERMINAL_ASSIGN_TIMEOUT_CAP_SECONDS,
+        )
+    except BaseException:
+        await close_direct_terminal_consumer(
+            DirectTerminalConsumer(consumer),
+            terminal_topic=terminal_topic,
+            log_prefix="terminal-event consumer open cleanup",
+        )
+        raise
+    return DirectTerminalConsumer(consumer)
+
+
+async def poll_direct_terminal_consumer(
+    *,
+    handle: DirectTerminalConsumer,
+    terminal_topic: str,
+    correlation_id: str,
+    timeout_seconds: float,
+) -> dict[str, object] | None:
+    """Poll a positioned terminal consumer for the correlated terminal payload."""
+    loop = asyncio.get_running_loop()
+    try:
+        # A partition-less reply topic assigns the empty set (OMN-13118): the
+        # broker never advertised a partition because the topic has not been
+        # produced to. ``getone()`` on an unassigned consumer raises
+        # ``IllegalStateError`` immediately; instead, treat this leg as "no
+        # terminal will arrive here" — sleep out the caller's timeout so the
+        # cross-topic race lets the COMPLETED-topic consumer win — and return
+        # None on genuine timeout. The losing leg is unblocked early when its
+        # session is closed by the race winner.
+        if not handle.consumer.assignment():
+            try:
+                await asyncio.sleep(timeout_seconds)
+            except asyncio.CancelledError:
+                pass
+            return None
+        deadline = loop.time() + timeout_seconds
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                message = await asyncio.wait_for(
+                    handle.consumer.getone(),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                return None
+            if message.value is None:
+                continue
+            try:
+                body: dict[str, object] = json.loads(message.value.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if _extract_direct_terminal_correlation_id(body) == correlation_id:
+                return body
+    finally:
+        await close_direct_terminal_consumer(handle, terminal_topic=terminal_topic)
+
+
+async def _poll_terminal_without_close(
+    *,
+    handle: DirectTerminalConsumer,
+    terminal_topic: str,
+    correlation_id: str,
+    timeout_seconds: float,
+) -> dict[str, object] | None:
+    """Poll one positioned consumer for the correlated terminal, WITHOUT closing.
+
+    ``poll_direct_terminal_consumer`` stops its consumer in a ``finally`` because
+    its single-topic callers own one consumer for the whole open→wait→close
+    lifecycle. The Pattern B broker races MULTIPLE independent consumers and tears
+    them ALL down together after the race resolves (so the losing leg is unblocked
+    by ``close`` rather than waiting out its own timeout). This thin wrapper runs
+    the same correlate-and-wait body without the inner close so the broker keeps a
+    single teardown point.
+    """
+    loop = asyncio.get_running_loop()
+    if not handle.consumer.assignment():
+        # Partition-less reply topic (OMN-13118): nothing will arrive here. Sleep
+        # out the caller timeout so the race lets a real-partition topic win; the
+        # broker cancels this task the moment the winner correlates.
+        try:
+            await asyncio.sleep(timeout_seconds)
+        except asyncio.CancelledError:
+            pass
+        return None
+    deadline = loop.time() + timeout_seconds
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return None
+        try:
+            message = await asyncio.wait_for(
+                handle.consumer.getone(),
+                timeout=remaining,
+            )
+        except TimeoutError:
+            return None
+        if message.value is None:
+            continue
+        try:
+            body: dict[str, object] = json.loads(message.value.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if _extract_direct_terminal_correlation_id(body) == correlation_id:
+            return body
+
+
+async def close_direct_terminal_consumer(
+    handle: DirectTerminalConsumer,
+    *,
+    terminal_topic: str,
+    log_prefix: str = "terminal-event consumer",
+) -> None:
+    """Stop a direct terminal consumer, logging cleanup failures at the boundary."""
+    try:
+        await handle.consumer.stop()
+    except Exception as exc:  # noqa: BLE001 — boundary: best-effort cleanup
+        _LOGGER.warning(
+            "%s: failed to stop consumer for %s: %s",
+            log_prefix,
+            terminal_topic,
+            sanitize_error_message(exc),
+        )
 
 
 class RuntimePatternBBroker:
@@ -244,111 +637,117 @@ class RuntimePatternBBroker:
         command: ModelDispatchBusCommand,
         route: ModelRuntimeLocalIngressRoute,
     ) -> TerminalPayload:
+        """Wait for the correlated terminal with ONE consumer PER terminal topic.
+
+        Independent consumers, not one shared subscription (OMN-13128/13118 strike-5)
+        ----------------------------------------------------------------------------
+        The generation consumer emits exactly one terminal per command —
+        ``completed`` (``contract_passed=True``) or ``failed``
+        (``contract_passed=False``) — on DIFFERENT topics, so the broker must wait
+        on BOTH within the single per-command timeout. The prior shape assigned
+        BOTH topics' partitions to a SINGLE ephemeral ``group_id=None`` consumer.
+        A single aiokafka consumer holds ONE manual subscription
+        (``ManualSubscription`` over its assigned partitions); the live battery
+        diagnosis (HALT_K10_WEDGE_PERSISTS, strikes 3+4) showed that consumer's
+        COMPLETED-topic delivery window collapsing before it could surface the
+        correlated record, so the trial never correlated and the K>=10 matrix
+        re-fired cell 1 forever.
+
+        The fix gives EACH terminal topic its OWN independent
+        ``open_direct_terminal_consumer`` — each started, assigned, and
+        offset-pinned (``end_offsets()`` + ``seek()``, #1971) at open() BEFORE the
+        worker command is published (subscribe-before-publish). The two waits then
+        run CONCURRENTLY via ``asyncio.wait(..., FIRST_COMPLETED)``; the first
+        correlated terminal wins and the losing wait is cancelled. No consumer ever
+        holds two subscriptions, so there is no subscription to tear down out from
+        under the COMPLETED delivery.
+
+        The #1970 partition-less no-op and the #1971 synchronous offset pin are
+        preserved: they live in ``open_direct_terminal_consumer`` /
+        ``poll_direct_terminal_consumer``, which each consumer goes through. A
+        never-produced FAILED topic assigns the empty set, ``poll`` sleeps out its
+        timeout returning ``None``, and the COMPLETED consumer wins the race fast.
+        """
         terminal_topics = _terminal_topics(route)
         if not terminal_topics:
             raise RuntimeError(f"Route '{command.command_name}' has no terminal event")
 
-        kafka_event_bus = self._kafka_event_bus()
-        config = getattr(kafka_event_bus, "config", SimpleNamespace())
-        consumer = AIOKafkaConsumer(
-            bootstrap_servers=self._kafka_bootstrap_servers(),
-            group_id=None,
-            auto_offset_reset="latest",
-            enable_auto_commit=False,
-            session_timeout_ms=getattr(config, "session_timeout_ms", 45000),
-            heartbeat_interval_ms=getattr(config, "heartbeat_interval_ms", 15000),
-            max_poll_interval_ms=getattr(config, "max_poll_interval_ms", 300000),
-            retry_backoff_ms=getattr(config, "reconnect_backoff_ms", 2000),
-            **self._direct_kafka_client_version_kwargs(AIOKafkaConsumer),
-            **self._direct_kafka_auth_kwargs(),
-        )
-
+        event_bus = self._event_bus
+        handles: dict[str, DirectTerminalConsumer] = {}
         try:
-            await asyncio.wait_for(
-                consumer.start(), timeout=min(30, command.timeout_seconds)
-            )
-            await self._assign_terminal_topic_partitions(
-                consumer,
-                terminal_topics,
-                command.timeout_seconds,
-            )
-            await consumer.seek_to_end(*consumer.assignment())
+            # Open one independent consumer per terminal topic, each positioned at
+            # the current end BEFORE we publish. Open serially so a partition-less
+            # FAILED topic's bounded grace does not race the COMPLETED open; both
+            # are positioned before any command is on the wire.
+            for terminal_topic in terminal_topics:
+                handles[terminal_topic] = await open_direct_terminal_consumer(
+                    event_bus=event_bus,
+                    terminal_topic=terminal_topic,
+                )
+
             await self._publish_worker_command(command, route)
 
-            deadline = asyncio.get_running_loop().time() + command.timeout_seconds
-            while True:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    raise TimeoutError
-                message = await asyncio.wait_for(consumer.getone(), timeout=remaining)
-                terminal_envelope = ModelEventEnvelope[object].model_validate_json(
-                    message.value
-                )
-                if terminal_envelope.correlation_id == command.correlation_id:
-                    topic = getattr(message, "topic", None)
-                    if not isinstance(topic, str) or not topic:
-                        topic = str(
-                            terminal_envelope.event_type or route.terminal_event
-                        )
-                    return TerminalPayload(
-                        payload=terminal_envelope.payload,
-                        topic=topic,
-                    )
+            return await self._race_correlated_terminals(
+                handles,
+                correlation_id=str(command.correlation_id),
+                timeout_seconds=float(command.timeout_seconds),
+            )
         finally:
-            try:
-                await consumer.stop()
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.warning(
-                    "Failed to stop Pattern B terminal Kafka consumer: %s",
-                    sanitize_error_message(exc),
+            for terminal_topic, handle in handles.items():
+                await close_direct_terminal_consumer(
+                    handle,
+                    terminal_topic=terminal_topic,
+                    log_prefix="Pattern B terminal Kafka consumer",
                 )
 
-    async def _assign_terminal_topic_partitions(
+    async def _race_correlated_terminals(
         self,
-        consumer: AIOKafkaConsumer,
-        topics: tuple[str, ...],
-        timeout_seconds: int,
-    ) -> None:
-        deadline = asyncio.get_running_loop().time() + min(30, timeout_seconds)
-        expected_topics = set(topics)
-        while True:
-            await self._refresh_terminal_topic_metadata(consumer, topics)
-            partitions: set[TopicPartition] = set()
-            ready_topics: set[str] = set()
-            for topic in topics:
-                topic_partitions = consumer.partitions_for_topic(topic) or set()
-                if topic_partitions:
-                    ready_topics.add(topic)
-                partitions.update(
-                    TopicPartition(topic, partition) for partition in topic_partitions
+        handles: Mapping[str, DirectTerminalConsumer],
+        *,
+        correlation_id: str,
+        timeout_seconds: float,
+    ) -> TerminalPayload:
+        """Poll every terminal consumer concurrently; first correlated wins.
+
+        Each topic's poll runs as its own task. ``asyncio.wait(FIRST_COMPLETED)``
+        returns as soon as one task finishes; a task that found the correlated
+        record yields the payload, a task that timed out yields ``None`` (and we
+        keep waiting on the rest until one correlates or all are exhausted). The
+        losing tasks are cancelled on the way out so the winner returns
+        immediately without joining a full-timeout sleep on the partition-less leg.
+        """
+        tasks: dict[asyncio.Task[dict[str, object] | None], str] = {}
+        for terminal_topic, handle in handles.items():
+            task = asyncio.ensure_future(
+                _poll_terminal_without_close(
+                    handle=handle,
+                    terminal_topic=terminal_topic,
+                    correlation_id=correlation_id,
+                    timeout_seconds=timeout_seconds,
                 )
-            if ready_topics == expected_topics:
-                consumer.assign(partitions)
-                return
-            if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError
-            await asyncio.sleep(0.05)
+            )
+            tasks[task] = terminal_topic
 
-    async def _refresh_terminal_topic_metadata(
-        self,
-        consumer: AIOKafkaConsumer,
-        topics: tuple[str, ...],
-    ) -> None:
-        client = getattr(consumer, "_client", None)
-        set_topics = getattr(client, "set_topics", None)
-        if callable(set_topics):
-            set_topics(list(topics))
-            return
-
-        add_topic = getattr(client, "add_topic", None)
-        if callable(add_topic):
-            for topic in topics:
-                add_topic(topic)
-            return
-
-        topics_method = getattr(type(consumer), "topics", None)
-        if callable(topics_method):
-            await topics_method(consumer)
+        pending = set(tasks)
+        try:
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    body = task.result()
+                    if body is None:
+                        continue
+                    return TerminalPayload(
+                        payload=body.get("payload", body),
+                        topic=tasks[task],
+                    )
+            raise TimeoutError
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _supports_direct_kafka_terminal_consumer(self) -> bool:
         return (
@@ -356,44 +755,6 @@ class RuntimePatternBBroker:
             and hasattr(self._event_bus, "_build_auth_kwargs")
             and hasattr(self._event_bus, "config")
         )
-
-    def _direct_kafka_auth_kwargs(self) -> dict[str, object]:
-        build_auth_kwargs = getattr(  # noqa: B009
-            self._kafka_event_bus(),
-            "_build_auth_kwargs",
-        )
-        auth_kwargs = cast(
-            "Callable[[], Mapping[str, object] | None]",
-            build_auth_kwargs,
-        )()
-        return dict(auth_kwargs or {})
-
-    def _direct_kafka_client_version_kwargs(
-        self, client_cls: type[object]
-    ) -> dict[str, object]:
-        config = getattr(self._kafka_event_bus(), "config", SimpleNamespace())
-        api_version = getattr(config, "api_version", None)
-        if api_version is None:
-            return {}
-        try:
-            parameters = inspect.signature(client_cls.__init__).parameters
-        except (TypeError, ValueError):
-            return {}
-        if "api_version" not in parameters:
-            return {}
-        return {"api_version": api_version}
-
-    def _kafka_bootstrap_servers(self) -> str:
-        bootstrap_servers = getattr(  # noqa: B009
-            self._kafka_event_bus(),
-            "_bootstrap_servers",
-        )
-        if not isinstance(bootstrap_servers, str):
-            raise RuntimeError("Kafka event bus bootstrap servers are not configured")
-        return bootstrap_servers
-
-    def _kafka_event_bus(self) -> object:
-        return self._event_bus
 
     async def _publish_worker_command(
         self,

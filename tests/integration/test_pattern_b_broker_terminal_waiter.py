@@ -46,6 +46,9 @@ class _TerminalConsumer:
         self.topics_calls = 0
         self.set_topics_calls: list[tuple[str, ...]] = []
         self.seeked_to_end = False
+        # True once the read position is pinned to the current end (synchronous
+        # end_offsets + seek, OMN-13118).
+        self.positioned = False
         self.started = False
         self.stopped = False
         type(self).created.append(self)
@@ -72,6 +75,16 @@ class _TerminalConsumer:
 
     async def seek_to_end(self, *_assignment: object) -> None:
         self.seeked_to_end = True
+        self.positioned = True
+
+    async def end_offsets(self, partitions: object) -> dict[object, int]:
+        # Synchronous HWM round-trip (OMN-13118). Queue-backed fake delivers
+        # regardless of offset, so 0 is faithful for the next-message offset.
+        return dict.fromkeys(partitions, 0)
+
+    def seek(self, _partition: object, _offset: int) -> None:
+        # Synchronous position pin (OMN-13118).
+        self.positioned = True
 
     async def getone(self) -> SimpleNamespace:
         return await self.messages.get()
@@ -117,7 +130,7 @@ class _KafkaLikeTransport:
         assert consumer.kwargs["group_id"] is None
         assert consumer.topics == ()
         assert consumer.assigned_partitions
-        assert consumer.seeked_to_end is True
+        assert consumer.positioned is True
 
         command_envelope = ModelEventEnvelope[object].model_validate_json(value)
         terminal_envelope = ModelEventEnvelope[object](

@@ -14,6 +14,27 @@
 # mechanism for keeping warm Postgres volumes up-to-date with new migrations.
 #
 # Ticket: OMN-4175 (Forward migration runner for warm Postgres volumes)
+# Ticket: OMN-13062 (migration-gate vacuity fix — retro A-10)
+#
+# ---------------------------------------------------------------------------
+# Sentinel discipline (OMN-13062)
+# ---------------------------------------------------------------------------
+# migrations_complete is cleared to FALSE at the start of every runner
+# invocation and set to TRUE only as the FINAL act after all infra and
+# node migrations apply without error. Any nonzero exit from any migration
+# leaves the flag FALSE, making the migration-gate healthcheck UNHEALTHY.
+#
+# The committed per-migration skip-manifest is the SOLE escape for migrations
+# that must be intentionally skipped:
+#   docker/migrations/skip-manifest.yaml
+# Format:
+#   skipped_migrations:
+#     - id: "docker/NNN_name.sql"
+#       reason: "..."
+#       ticket: "OMN-XXXX"
+# The runner reads this at startup; a listed migration_id is treated as
+# already-applied without executing the SQL. New entries must be committed
+# in the same PR that deems the migration unrunnable.
 #
 # ---------------------------------------------------------------------------
 # Node-owned migration auto-discovery (OMN-12559)
@@ -40,6 +61,7 @@
 #   MIGRATIONS_DIR    (default: /migrations/forward)
 #   NODE_MIGRATIONS_DIR (default: ${MIGRATIONS_DIR}/nodes)
 #   NODE_POSTGRES_DB  (default: POSTGRES_DB; compose sets omnidash_analytics)
+#   PG_WAIT_RETRIES   (default: 30 — number of 2s waits for postgres ready)
 
 set -e
 
@@ -50,8 +72,49 @@ PGDB="${POSTGRES_DB:-omnibase_infra}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 NODE_MIGRATIONS_DIR="${NODE_MIGRATIONS_DIR:-${MIGRATIONS_DIR}/nodes}"
 NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"
+PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+# ---------------------------------------------------------------------------
+# Skip-manifest: load intentionally-skipped migration ids (OMN-13062)
+# ---------------------------------------------------------------------------
+# Format: YAML file with a top-level list "skipped_migrations" each entry has
+# "id" (e.g. "docker/038_placeholder.sql") and optionally "reason" / "ticket".
+# Only a committed manifest is honoured — operator env cannot inject skips.
+SKIP_MANIFEST="${MIGRATIONS_DIR%/forward}/skip-manifest.yaml"
+SKIPPED_IDS=""
+if [ -f "${SKIP_MANIFEST}" ]; then
+  echo "[forward-migration] Loading skip-manifest: ${SKIP_MANIFEST}"
+  # Extract quoted id: values from YAML using portable sed (no yq/python/gawk).
+  # Handles lines of the form:  - id: "docker/NNN_name.sql"
+  SKIPPED_IDS="$(sed -n 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "${SKIP_MANIFEST}" 2>/dev/null || true)"
+fi
+
+is_skipped_by_manifest() {
+  migration_id="$1"
+  if [ -z "${SKIPPED_IDS}" ]; then
+    return 1
+  fi
+  echo "${SKIPPED_IDS}" | grep -Fxq "${migration_id}"
+}
+
+# ---------------------------------------------------------------------------
+# 0. Wait for Postgres to be ready (first-boot initdb race guard, OMN-13062)
+# ---------------------------------------------------------------------------
+echo "[forward-migration] Waiting for Postgres to accept connections..."
+retries=0
+until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -c "SELECT 1" >/dev/null 2>&1; do
+  retries=$((retries + 1))
+  if [ "$retries" -ge "$PG_WAIT_RETRIES" ]; then
+    echo "[forward-migration] ERROR: Postgres not ready after ${PG_WAIT_RETRIES} retries. Aborting." >&2
+    exit 1
+  fi
+  echo "[forward-migration]   postgres not ready (attempt ${retries}/${PG_WAIT_RETRIES}), retrying in 2s..."
+  sleep 2
+done
+echo "[forward-migration] Postgres is ready."
 
 validate_database_identifier() {
   database="$1"
@@ -97,6 +160,33 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
 "
 
 # ---------------------------------------------------------------------------
+# 1a. Clear the sentinel at the start of every run (OMN-13062)
+# ---------------------------------------------------------------------------
+# This ensures that any mid-run failure leaves migrations_complete=FALSE so
+# the migration-gate healthcheck stays UNHEALTHY. The sentinel is only set
+# TRUE as the very last act of this script (after all migrations succeed).
+# We use a conditional UPDATE so this is a no-op on volumes that have not
+# yet applied migration 037 (migrations_complete column may not exist yet).
+echo "[forward-migration] Clearing migration sentinel (will be re-set on successful completion)..."
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -c "
+DO \$\$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'db_metadata'
+      AND column_name = 'migrations_complete'
+  ) THEN
+    UPDATE public.db_metadata
+    SET migrations_complete = FALSE,
+        updated_at = NOW()
+    WHERE id = TRUE;
+  END IF;
+END;
+\$\$;
+" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # 2. Apply pending migrations in sorted order
 # ---------------------------------------------------------------------------
 echo "[forward-migration] Scanning ${MIGRATIONS_DIR} for pending migrations..."
@@ -107,6 +197,18 @@ SKIPPED=0
 for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   filename=$(basename "$migration_file")
   migration_id="docker/${filename}"
+
+  # Honour skip-manifest: treat manifest-listed migrations as already applied
+  if is_skipped_by_manifest "${migration_id}"; then
+    echo "[forward-migration]   skip  ${filename} (skip-manifest)"
+    SKIPPED=$((SKIPPED + 1))
+    # Record in schema_migrations so the table stays consistent.
+    psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      -c "INSERT INTO public.schema_migrations (migration_id, checksum, source_set)
+          VALUES ('${migration_id}', 'skip-manifest', 'docker')
+          ON CONFLICT (migration_id) DO NOTHING;"
+    continue
+  fi
 
   # Check if already applied
   already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
@@ -199,3 +301,18 @@ else
 fi
 
 echo "[forward-migration] Complete: ${APPLIED} infra applied, ${SKIPPED} infra skipped; ${NODE_APPLIED} node applied, ${NODE_SKIPPED} node skipped."
+
+# ---------------------------------------------------------------------------
+# 4. Set the sentinel TRUE only after ALL migrations succeed (OMN-13062)
+# ---------------------------------------------------------------------------
+# This is the FINAL act. Any earlier failure leaves migrations_complete=FALSE.
+# runner_completed_at records the timestamp of this successful completion.
+echo "[forward-migration] All migrations complete. Setting sentinel TRUE..."
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -c "
+UPDATE public.db_metadata
+SET migrations_complete = TRUE,
+    runner_completed_at = NOW(),
+    updated_at = NOW()
+WHERE id = TRUE;
+"
+echo "[forward-migration] Sentinel set. Migration gate will report HEALTHY."

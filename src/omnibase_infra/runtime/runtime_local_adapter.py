@@ -46,13 +46,16 @@ class LocalRuntimeBusAdapter:
         self,
         handler: ProtocolLocalRuntimeCallableTarget,
         handler_name: str,
-        input_model_cls: type[BaseModel],
+        input_model_cls: type[BaseModel] | None,
         output_topic: str | None,
         bus: ProtocolLocalRuntimeBus,
         on_error: Callable[[], None] | None = None,
     ) -> None:
         self.handler = handler
         self.handler_name = handler_name
+        # None when the routing entry declares no payload model — operation_match
+        # entries route by `operation`, not a typed event model (OMN-13141). The
+        # raw decoded dict is forwarded to the handler in that case.
         self.input_model_cls = input_model_cls
         self.output_topic = output_topic
         self.bus = bus
@@ -71,7 +74,14 @@ class LocalRuntimeBusAdapter:
             correlation_id = (
                 correlation_value if isinstance(correlation_value, str) else None
             )
-            input_model = self.input_model_cls(**payload_dict)
+            # operation_match entries declare no payload model (OMN-13141): forward
+            # the raw decoded dict. payload_type_match validates against the model.
+            # Typed `object` (model or dict) — helpers narrow with isinstance.
+            input_payload: object = (
+                self.input_model_cls(**payload_dict)
+                if self.input_model_cls is not None
+                else payload_dict
+            )
         except Exception:  # fallback-ok: local runtime adapter records handler failure and continues shutdown
             logger.exception(
                 "LocalRuntimeBusAdapter: deserialization failed for %s (correlation_id=%s)",
@@ -91,7 +101,7 @@ class LocalRuntimeBusAdapter:
         start = time.monotonic()
         try:
             handle_method = self.handler.handle
-            maybe_result = _invoke_handle_method(handle_method, input_model)
+            maybe_result = _invoke_handle_method(handle_method, input_payload)
             if inspect.isawaitable(maybe_result):
                 awaitable_result: Awaitable[object] = cast(
                     "Awaitable[object]", maybe_result
@@ -157,17 +167,50 @@ class LocalRuntimeBusAdapter:
 
 def _invoke_handle_method(
     handle_method: Callable[..., object],
-    input_model: BaseModel,
+    input_payload: object,
 ) -> object:
-    """Invoke a local-runtime handler using its declared calling convention."""
+    """Invoke a local-runtime handler using its declared calling convention.
+
+    ``input_payload`` is a validated model for payload_type_match entries, or the
+    raw decoded dict for operation_match entries that declare no payload model
+    (OMN-13141). Keyword-fanout uses ``model_dump`` for models and the dict
+    directly; single-model-parameter handlers receive the object itself.
+
+    When the handler's sole positional parameter is annotated with a concrete
+    ``BaseModel`` subclass but ``input_payload`` is still the raw decoded dict
+    (the operation_match case — no contract-declared event model to validate
+    against upstream), the dict is validated into that annotated type here
+    before the call (OMN-8724). Without this coercion a typed single-parameter
+    handler such as ``handle(self, request: GoldenChainSweepRequest)`` receives
+    a bare ``dict`` and crashes on the first attribute access. This is the
+    systemic fix for the dict-not-typed dispatch-boundary class (same family as
+    OMN-13141 / the savings_estimation ``.get()`` bug).
+    """
+    kwargs: dict[str, object] = (
+        input_payload.model_dump(mode="json")
+        if isinstance(input_payload, BaseModel)
+        else input_payload
+        if isinstance(input_payload, dict)
+        else {}
+    )
+    # eval_str=True resolves PEP 563 string annotations (``from __future__ import
+    # annotations`` is used by every node handler, so without this the parameter
+    # annotation is the literal string "GoldenChainSweepRequest" and the
+    # BaseModel-subclass check below never matches — the OMN-8724 root cause).
     try:
-        signature = inspect.signature(handle_method)
-    except (TypeError, ValueError):
-        return handle_method(input_model)
+        signature = inspect.signature(handle_method, eval_str=True)
+    except (TypeError, ValueError, NameError):
+        # NameError: an annotation referenced a name not importable in the
+        # handler module globals. Fall back to unevaluated annotations rather
+        # than aborting dispatch.
+        try:
+            signature = inspect.signature(handle_method)
+        except (TypeError, ValueError):
+            return handle_method(input_payload)
 
     parameters = tuple(signature.parameters.values())
     if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
-        return handle_method(**input_model.model_dump(mode="json"))
+        return handle_method(**kwargs)
 
     positional_parameters = tuple(
         param
@@ -181,26 +224,59 @@ def _invoke_handle_method(
     if len(positional_parameters) == 0:
         return handle_method()
 
-    if len(positional_parameters) == 1 and _parameter_expects_model(
-        positional_parameters[0],
-        type(input_model),
-    ):
-        return handle_method(input_model)
+    if len(positional_parameters) == 1:
+        model_type = _coercion_target_model_type(
+            positional_parameters[0],
+            input_payload,
+        )
+        if model_type is not None:
+            # Annotation is a concrete BaseModel subclass and the payload is a
+            # raw dict: validate the dict into the declared type before calling.
+            return handle_method(model_type.model_validate(input_payload))
+        if _parameter_expects_model(positional_parameters[0], input_payload):
+            return handle_method(input_payload)
 
-    return handle_method(**input_model.model_dump(mode="json"))
+    return handle_method(**kwargs)
+
+
+def _coercion_target_model_type(
+    parameter: inspect.Parameter,
+    input_payload: object,
+) -> type[BaseModel] | None:
+    """Return the annotated ``BaseModel`` subclass to coerce a raw dict payload into.
+
+    Returns ``None`` unless ``input_payload`` is a raw ``dict`` and the
+    parameter's annotation is a concrete ``BaseModel`` subclass. This is the only
+    coercion trigger (OMN-8724): a real annotation, not a parameter-name
+    heuristic, drives it — so a model-typed single-parameter handler reached via
+    ``operation_match`` (no upstream event-model validation) gets a validated
+    model instead of the raw dict that previously crashed it.
+    """
+    if not isinstance(input_payload, dict):
+        return None
+    annotation = parameter.annotation
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    return None
 
 
 def _parameter_expects_model(
     parameter: inspect.Parameter,
-    input_model_cls: type[BaseModel],
+    input_payload: object,
 ) -> bool:
-    """Return True when a single handle parameter expects the request model."""
+    """Return True when a single handle parameter should receive the payload object.
+
+    Only reached after dict→model coercion has been considered
+    (``_coercion_target_model_type``), so this governs the already-a-model and
+    name-heuristic pass-through paths that pre-date OMN-8724.
+    """
     if parameter.name in {"request", "payload", "event", "input_model"}:
         return True
 
     annotation = parameter.annotation
     return (
-        isinstance(annotation, type)
+        isinstance(input_payload, BaseModel)
+        and isinstance(annotation, type)
         and issubclass(annotation, BaseModel)
-        and issubclass(input_model_cls, annotation)
+        and issubclass(type(input_payload), annotation)
     )

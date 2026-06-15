@@ -564,6 +564,78 @@ stage_workspace_if_needed() {
     log_step "Stage Workspace Sibling Repos"
     log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
     (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
+
+    check_sibling_lock_pins "${repo_root}" "${omni_home}"
+}
+
+check_sibling_lock_pins() {
+    # Fail-fast preflight (OMN-12987): every vendored sibling's version/SHA must
+    # match the consuming repo's (omnimarket) uv.lock pin. The 2026-06-11
+    # stability crash shipped a 13-day-stale infra 0.37.0 because the build
+    # ignored the dev lock; this guard refuses to build a stale image.
+    local repo_root="$1"
+    local omni_home="$2"
+    local guard="${repo_root}/scripts/runtime_build/check_sibling_lock_pins.py"
+    if [[ ! -f "${guard}" ]]; then
+        log_error "Sibling lock-pin preflight not found: ${guard}"
+        log_error "Cannot verify vendored siblings match the consuming lock. Aborting."
+        exit 1
+    fi
+
+    log_step "Sibling Lock-Pin Preflight (OMN-12987)"
+    # Write under sibling-repos/ so it rides along with the directory the
+    # Dockerfile already COPYs into the build image (no extra COPY needed).
+    mkdir -p "${repo_root}/workspace/sibling-repos"
+    local provenance_out="${repo_root}/workspace/sibling-repos/.sibling-lock-pins.json"
+    local python_bin
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the sibling lock-pin preflight."
+        exit 1
+    fi
+
+    # The check_sibling_lock_pins.py interface changed under OMN-12977/12987:
+    # the original single-output flag was removed in favor of --lock (required,
+    # the pin authority), repeatable --repo PACKAGE=PATH (the canonical clones
+    # the build vendors), and --output (where to write the comparison JSON).
+    # The consuming repo's uv.lock (omnimarket) is the pin authority.
+    local lock_path="${omni_home}/omnimarket/uv.lock"
+    local guard_args=(
+        --lock "${lock_path}"
+        --repo "omnibase-infra=${omni_home}/omnibase_infra"
+        --repo "omnibase-core=${omni_home}/omnibase_core"
+        --repo "omnibase-spi=${omni_home}/omnibase_spi"
+        --repo "omnibase-compat=${omni_home}/omnibase_compat"
+        --repo "onex-change-control=${omni_home}/onex_change_control"
+        --output "${provenance_out}"
+    )
+    # Operator override (OMN-12977): ALLOW_SIBLING_PIN_DRIFT=1 records drift in
+    # the provenance artifact and proceeds instead of aborting. Never the default.
+    if [[ "${ALLOW_SIBLING_PIN_DRIFT:-0}" == "1" ]]; then
+        guard_args+=(--allow-drift)
+        log_warn "ALLOW_SIBLING_PIN_DRIFT=1 -- passing --allow-drift to sibling lock-pin preflight (OMN-12977)"
+    fi
+
+    log_cmd "OMNI_HOME=${omni_home} ${guard} ${guard_args[*]}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! OMNI_HOME="${omni_home}" uv run --project "${repo_root}" python "${guard}" \
+            "${guard_args[@]}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    else
+        if ! OMNI_HOME="${omni_home}" "${python_bin}" "${guard}" \
+            "${guard_args[@]}"; then
+            log_error "Sibling lock-pin preflight FAILED. Refusing to build a stale image."
+            exit 1
+        fi
+    fi
+    log_info "Sibling lock-pin preflight passed: all vendored siblings match the lock."
 }
 
 check_git_dirty() {
@@ -632,6 +704,88 @@ guard_prod_promotion_lineage() {
     fi
 
     log_info "Prod promotion-lineage guard passed: source clean + promoted."
+}
+
+guard_hotpatch_ledger() {
+    # Hot-patch ledger rebuild preflight (OMN-13014, retro B-1).
+    #
+    # In-container hot-patches (.prepatch sibling discipline) silently revert
+    # on any image rebuild / force-recreate. When a hot-patch ledger exists on
+    # this host, refuse to build a lane whose recorded patches have source PRs
+    # not merged into the build ref, or whose containers carry unledgered
+    # .prepatch files. Delegates to scripts/preflight_hotpatch_ledger.py.
+    # Sole bypass: HOTPATCH_PREFLIGHT_BYPASS with a Rule-10 user-approval
+    # receipt ('# skip-token-allowed: <receipt-id>'), validated by the gate.
+    local repo_root="$1"
+    local git_sha="$2"
+    local compose_project="$3"
+
+    log_step "Hot-Patch Ledger Preflight (OMN-13014)"
+
+    local ledger_path="${HOTPATCH_LEDGER_PATH:-/data/omninode/hotpatch-ledger/ledger.yaml}"
+    if [[ ! -f "${ledger_path}" ]]; then
+        log_warn "No hot-patch ledger at ${ledger_path} — nothing recorded on this host; gate skipped."
+        log_warn "If containers here carry live hot-patches, STOP and write the ledger first."
+        return 0
+    fi
+
+    local gate="${repo_root}/scripts/preflight_hotpatch_ledger.py"
+    if [[ ! -f "${gate}" ]]; then
+        log_error "Hot-patch ledger exists at ${ledger_path} but the gate script is missing: ${gate}"
+        log_error "Refusing to rebuild over recorded hot-patches without the preflight."
+        exit 1
+    fi
+
+    # Lane = compose project suffix (omnibase-infra-stability-test -> stability-test);
+    # the bare dev project (omnibase-infra) maps to lane 'dev'.
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+    if [[ -z "${lane}" ]]; then
+        lane="dev"
+    fi
+
+    # Workspace builds vendor sibling repos from OMNI_HOME clones; the gate
+    # resolves each ledger row's repo build ref (clone HEAD unless overridden
+    # via --build-ref) and runs git merge-base --is-ancestor per merge commit.
+    local clones_root="${OMNI_HOME:-}"
+    if [[ -z "${clones_root}" ]]; then
+        log_error "Hot-patch ledger present but OMNI_HOME is unset."
+        log_error "Cannot resolve build-input clones for the hot-patch preflight."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        python_bin="uv-run"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the hot-patch ledger preflight."
+        exit 1
+    fi
+
+    local gate_args=(
+        --lane "${lane}"
+        --ledger "${ledger_path}"
+        --clones-root "${clones_root}"
+        --build-ref "omnibase_infra=${git_sha}"
+    )
+    log_cmd "${gate} ${gate_args[*]}"
+    if [[ "${python_bin}" == "uv-run" ]]; then
+        if ! uv run --project "${repo_root}" python "${gate}" "${gate_args[@]}"; then
+            log_error "Hot-patch ledger preflight FAILED. Refusing to rebuild over live hot-patches."
+            exit 1
+        fi
+    else
+        if ! "${python_bin}" "${gate}" "${gate_args[@]}"; then
+            log_error "Hot-patch ledger preflight FAILED. Refusing to rebuild over live hot-patches."
+            exit 1
+        fi
+    fi
+
+    log_info "Hot-patch ledger preflight passed: all recorded patches merged into the build ref."
 }
 
 # =============================================================================
@@ -1115,6 +1269,27 @@ if spec and spec.origin:
     log_cmd "rsync -a --delete workspace/sibling-repos/ -> deployed"
     rsync -a --delete \
         "${repo_root}/workspace/sibling-repos/" "${deploy_target}/workspace/sibling-repos/"
+    # The lock-pin preflight result (OMN-12987) lives under sibling-repos/ as
+    # .sibling-lock-pins.json, so the rsync above already carries it into the
+    # build context for the in-image provenance merge.
+
+    # Carry the root-level workspace/ file that Dockerfile.runtime COPYs
+    # (workspace/sibling-pin-comparison.json, line ~278). The sibling-repos/
+    # rsync above only covers the subdirectory; without this the deployed build
+    # context lacks the comparison file and `docker build` fails with
+    # "failed to calculate checksum of ref ...:/workspace/sibling-pin-comparison.json:
+    # not found" -- the bug fixed in OMN-12987 (the dev compose build only worked
+    # because it runs from the repo root where the committed placeholder exists).
+    # Release mode ships the committed placeholder; workspace mode ships the real
+    # expected-vs-actual comparison stage_workspace.sh wrote into the repo root
+    # (OMN-12977). The regression test
+    # tests/scripts/test_deploy_runtime_build_context.py asserts every
+    # COPY-from-workspace path the Dockerfile references is staged here, so a
+    # future Dockerfile COPY without a matching rsync fails CI.
+    log_cmd "rsync -a workspace/sibling-pin-comparison.json -> deployed"
+    rsync -a \
+        "${repo_root}/workspace/sibling-pin-comparison.json" \
+        "${deploy_target}/workspace/sibling-pin-comparison.json"
 
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
@@ -1349,6 +1524,11 @@ build_images() {
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    # OMN-12965: stamp org.opencontainers.image.version from pyproject so the
+    # runtime image carries a real version instead of the Dockerfile placeholder
+    # (0.1.0). A placeholder version degrades every proof packet.
+    local runtime_version
+    runtime_version="$(read_version "${deploy_target}")"
     local omni_home="${OMNI_HOME:-}"
     local build_source
     build_source="$(resolve_build_source)"
@@ -1375,7 +1555,9 @@ build_images() {
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
+        --build-arg "GIT_SHA=${git_sha}"
         --build-arg "VCS_REF=${git_sha}"
+        --build-arg "RUNTIME_VERSION=${runtime_version}"
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
         --build-arg "COMPOSE_PROJECT=${compose_project}"
@@ -1387,7 +1569,7 @@ build_images() {
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     )
 
-    log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -1430,7 +1612,14 @@ run_runtime_migration_preflight() {
         log_cmd "${cmd[*]}"
         "${cmd[@]}"
         if [[ "${service}" == "forward-migration" ]]; then
-            local wait_cmd=(docker wait omnibase-forward-migration)
+            # Derive the container name from the compose project so the wait
+            # targets the lane being deployed, not a fixed name. The base
+            # compose names it <compose-project>-forward-migration and each
+            # lane overlay follows the same form (OMN-12987), so this resolves
+            # to omnibase-infra-forward-migration for dev and
+            # omnibase-infra-stability-test-forward-migration for stability.
+            local forward_migration_container="${compose_project}-forward-migration"
+            local wait_cmd=(docker wait "${forward_migration_container}")
             log_cmd "${wait_cmd[*]}"
             if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
                 log_error "forward-migration did not complete successfully."
@@ -1439,9 +1628,15 @@ run_runtime_migration_preflight() {
         fi
     done
 
+    # Postgres follows the same lane-derivable naming as forward-migration:
+    # <compose-project>-postgres (omnibase-infra-postgres for dev,
+    # omnibase-infra-stability-test-postgres for stability). Deriving it keeps
+    # the projection-table probe pointed at the lane being deployed instead of
+    # always hitting the dev-lane postgres (OMN-12987).
+    local postgres_container="${compose_project}-postgres"
     for table_name in "${REQUIRED_PROJECTION_TABLES[@]}"; do
         local check_cmd=(
-            docker exec omnibase-infra-postgres
+            docker exec "${postgres_container}"
             psql
             -U postgres
             -d omnidash_analytics
@@ -1551,6 +1746,20 @@ verify_deployment() {
     else
         log_warn "Could not read image label (container may not exist yet)."
     fi
+
+    # OMN-12965: verify org.opencontainers.image.version is a real version, not
+    # the Dockerfile placeholder (0.1.0) or blank. A placeholder/blank identity
+    # degrades every proof packet (runtime SHA + image digest are required
+    # citations in accepted evidence).
+    local version_label
+    version_label="$(docker inspect "${container_id}" \
+        --format='{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null || true)"
+    if [[ -z "${version_label}" || "${version_label}" == "0.1.0" ]]; then
+        log_error "Image version label is blank/placeholder: org.opencontainers.image.version='${version_label}'"
+        log_error "Runtime image identity is degraded (OMN-12965). Rebuild with RUNTIME_VERSION from pyproject."
+        exit 1
+    fi
+    log_info "Image version label OK: org.opencontainers.image.version=${version_label}"
 
     # 4. Log sentinel: entrypoint ran
     log_info "Checking log sentinels..."
@@ -1758,6 +1967,11 @@ main() {
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+
+    # Hot-patch ledger preflight: refuse to rebuild over live in-container
+    # hot-patches whose source PRs are not merged into the build ref.
+    # Runs in both dry-run and execute modes (OMN-13014, retro B-1).
+    guard_hotpatch_ledger "${repo_root}" "${git_sha}" "${compose_project}"
 
     # --print-compose-cmd: show commands and exit
     if [[ "${PRINT_COMPOSE_CMD}" == true ]]; then

@@ -122,9 +122,11 @@ onex-status = "omnibase_infra.tui.__main__:run_status_tui"
 verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:main"
 
 [project.entry-points."onex.cli"]
+delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
 run = "omnibase_infra.cli.cli_node:run_node_by_name"
+skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
 [project.entry-points."onex.backends"]
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
@@ -169,9 +171,10 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-12763: bump core pin to dev HEAD (c7d6b5ec, OMN-12762)
-# which accepts quality-gate DoD overlay criteria in delegation wire requests.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c7d6b5ec010692b6724de1d49a0ee5a599d7ee06" }
+# OMN-13094: pin core to the merged ArtifactStore (OMN-13093) +
+# ModelArtifactRef/ModelSkillResult (OMN-13091) so `onex node --output receipt`
+# consumes the canonical content-addressed capture surface.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "ae8793bdad96c12a0b47e2f4d1d0f179618553b8" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
@@ -464,6 +467,7 @@ node_baseline_comparison_compute = "omnibase_infra.nodes.node_baseline_compariso
 node_baselines_batch_compute = "omnibase_infra.nodes.node_baselines_batch_compute"
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
+node_bus_forwarder_effect = "omnibase_infra.nodes.node_bus_forwarder_effect"
 node_chain_orchestrator = "omnibase_infra.nodes.node_chain_orchestrator"
 node_chain_replay_compute = "omnibase_infra.nodes.node_chain_replay_compute"
 node_chain_retrieval_effect = "omnibase_infra.nodes.node_chain_retrieval_effect"

@@ -627,16 +627,26 @@ class RuntimeLocal:
         handlers = RuntimeLocal._as_workflow_maps(routing.get("handlers", []))
         errors: list[str] = []
         input_topic_set = set(subscribe_topics)
+        strategy = str(routing.get("routing_strategy", ""))
 
         # Per-entry field and topic validation
         for i, entry in enumerate(handlers):
             prefix = f"handlers[{i}]"
             em = RuntimeLocal._as_workflow_map(entry.get("event_model", {}))
             hd = RuntimeLocal._as_workflow_map(entry.get("handler", {}))
-            if not em.get("name"):
-                errors.append(f"{prefix}.event_model.name is missing")
-            if not em.get("module"):
-                errors.append(f"{prefix}.event_model.module is missing")
+            if strategy == "payload_type_match":
+                # payload_type_match routes by model type — event_model is required.
+                if not em.get("name"):
+                    errors.append(f"{prefix}.event_model.name is missing")
+                if not em.get("module"):
+                    errors.append(f"{prefix}.event_model.module is missing")
+            else:
+                # operation_match (and any future non-payload strategies) route by
+                # the `operation` field — event_model is not used and must not be
+                # required here. Require `operation` instead.
+                op = entry.get("operation")
+                if not op:
+                    errors.append(f"{prefix}.operation is missing")
             if not hd.get("name"):
                 errors.append(f"{prefix}.handler.name is missing")
             if not hd.get("module"):
@@ -801,18 +811,26 @@ class RuntimeLocal:
                 entry.handler_module, entry.handler_class
             )
 
-            # Import the input model class
-            try:
-                em_mod = importlib.import_module(entry.event_model_module)
-                input_model_cls = getattr(em_mod, entry.event_model_class)
-            except (ImportError, AttributeError) as exc:
-                msg = (
-                    f"Failed to resolve event model "
-                    f"{entry.event_model_module}.{entry.event_model_class}: {exc}"
-                )
-                logger.exception("RuntimeLocal: %s", msg)
-                self._result = EnumWorkflowResult.FAILED
-                return
+            # Resolve the input model class. operation_match entries route by the
+            # `operation` field and declare no event_model, so event_model_module is
+            # empty — skip the import and forward the raw payload (OMN-13141). Only
+            # payload_type_match entries carry a typed event model to import.
+            input_model_type: type[BaseModel] | None = None
+            if entry.event_model_module:
+                try:
+                    em_mod = importlib.import_module(entry.event_model_module)
+                    input_model_type = cast(
+                        "type[BaseModel]",
+                        getattr(em_mod, entry.event_model_class),
+                    )
+                except (ImportError, AttributeError) as exc:
+                    msg = (
+                        f"Failed to resolve event model "
+                        f"{entry.event_model_module}.{entry.event_model_class}: {exc}"
+                    )
+                    logger.exception("RuntimeLocal: %s", msg)
+                    self._result = EnumWorkflowResult.FAILED
+                    return
 
             def _make_fail_cb(name: str) -> Callable[[], None]:
                 def _cb() -> None:
@@ -821,7 +839,6 @@ class RuntimeLocal:
 
                 return _cb
 
-            input_model_type: type[BaseModel] = cast("type[BaseModel]", input_model_cls)
             adapter = LocalRuntimeBusAdapter(
                 handler=cast("ProtocolLocalRuntimeCallableTarget", handler_instance),
                 handler_name=entry.handler_name,
@@ -1486,6 +1503,26 @@ class RuntimeLocal:
     def exit_code(self) -> int:
         """CLI exit code corresponding to the current result."""
         return _exit_code_for(self._result)
+
+    @property
+    def last_error(self) -> str | None:
+        """Human-readable description of the failure that ended the run, if any.
+
+        Set when a wired handler fails or a routing/boot error aborts the run;
+        ``None`` on a clean completion. Consumed by the ``onex node`` CLI to
+        populate the ``SkillRoutingError`` envelope on non-zero exit (OMN-8724).
+        """
+        return self._last_error
+
+    @property
+    def handler_result(self) -> object | None:
+        """The terminal handler's result object, if the run produced one.
+
+        Receipt mode (OMN-13094) uses the concrete type of this object as
+        the receipt's ``result_model`` schema identity; the JSON-serialized
+        form lives in ``workflow_result.json`` under ``handler_result``.
+        """
+        return self._handler_result
 
     # Prevent resource leaks — reserved for future bus/container teardown.
     del_alias = None  # placeholder for __del__ if needed

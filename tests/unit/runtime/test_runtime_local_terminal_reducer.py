@@ -41,6 +41,7 @@ def test_terminal_reducer_no_padding_validates_cleanly() -> None:
     is valid for a terminal reducer (gets no bus subscription).
     """
     routing = {
+        "routing_strategy": "payload_type_match",
         "handlers": [
             {
                 "event_model": {"name": "EventA", "module": "mod.events"},
@@ -52,7 +53,7 @@ def test_terminal_reducer_no_padding_validates_cleanly() -> None:
                 "handler": {"name": "TerminalReducer", "module": "mod.handlers"},
                 "output_events": [],
             },
-        ]
+        ],
     }
     errors = RuntimeLocal._validate_routing(
         routing,

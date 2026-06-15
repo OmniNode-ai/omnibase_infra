@@ -70,6 +70,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": ",".join(
             contract.llm_cloud_endpoint_host_allowlist
         ),
+        "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": contract.bifrost_vertex_gemini_endpoint_url,
+        "GOOGLE_CLOUD_PROJECT": contract.google_cloud_project,
+        "GOOGLE_CLOUD_LOCATION": contract.google_cloud_location,
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
     }
 
@@ -106,6 +109,12 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         for process_name, process in profile.processes.items():
             process_prefix = _PROCESS_ENV_PREFIX[process_name]
             prefix = f"{profile_prefix}_RUNTIME_{process_prefix}"
+            if process_name == "worker":
+                # OMN-12990: pin the worker replica count in the ledgered config
+                # surface so a plain compose recreate cannot silently drop the
+                # worker via the base ${WORKER_REPLICAS:-0} default. The lane
+                # overrides reference ${<PROFILE>_WORKER_REPLICAS:?...} fail-fast.
+                env[f"{profile_prefix}_WORKER_REPLICAS"] = str(process.replicas)
             env[f"{prefix}_CAPABILITIES"] = ",".join(process.capabilities)
             env[f"{prefix}_BIFROST_VERIFY_ENDPOINTS"] = _bifrost_text(
                 process.bifrost_verify_endpoints

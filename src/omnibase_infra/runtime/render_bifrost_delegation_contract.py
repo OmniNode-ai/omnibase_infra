@@ -7,6 +7,31 @@ empty. Runtime deployments provide endpoint locations through the provider
 backend named by each backend's ``base_url_env`` field. This module materializes
 the deployed contract once at container startup so delegation code reads a
 contract artifact, not scattered environment variables.
+
+OMN-12864 — committed overlay authority
+    BIFROST_LOCAL_*_ENDPOINT_URL values are now committed deployment bindings
+    in docker/lane-overlays/dev.bifrost.yaml (and per-lane siblings). They are
+    no longer ambient shell exports. A clean-shell compose up picks them up via
+    the lane overlay env_file.
+
+OMN-12814 — fail-loud loader
+    ``render_bifrost_delegation_contract`` raises ``ProtocolConfigurationError``
+    on any error that previously produced a silent empty result:
+    - FileNotFoundError on missing source contract
+    - yaml.YAMLError on malformed source YAML
+    - ValidationError on schema violations
+    - zero populated endpoints after rendering
+    There is no lru_cache on the render result. Every restart re-renders from
+    the packaged source (OMN-12945), so a stale cache can never pin a broken
+    result across a deploy.
+
+OMN-12945 — re-seed from packaged source on deploy
+    The ``force_reseed`` parameter (and the ``BIFROST_FORCE_RESEED`` env flag)
+    bypasses the stale-volume early-return path and always rebuilds the volume
+    copy from the packaged bifrost_delegation.yaml merged with the committed
+    lane overlay env-var endpoints. The entrypoint sets ``BIFROST_FORCE_RESEED``
+    so every container restart re-seeds, eliminating the named-volume drift
+    defect (OMN-12945).
 """
 
 from __future__ import annotations
@@ -24,6 +49,10 @@ from urllib.request import Request, urlopen
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.config_provenance import (
+    build_config_provenance,
+    write_provenance_sidecar,
+)
 
 _LEGACY_SOURCE_PATH = Path("/app/src/omnibase_infra/configs/bifrost_delegation.yaml")
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
@@ -494,13 +523,53 @@ def render_bifrost_delegation_contract(
     environ: Mapping[str, str] | None = None,
     verify_endpoints: bool | None = None,
     endpoint_probe: EndpointProbe | None = None,
+    force_reseed: bool | None = None,
 ) -> Path | None:
-    """Render the deployed Bifrost delegation contract and return its path."""
+    """Render the deployed Bifrost delegation contract and return its path.
+
+    Args:
+        source_path: Path to the packaged bifrost_delegation.yaml source.
+            Defaults to the omnimarket-bundled copy.
+        target_path: Path to write the rendered contract on the runtime volume.
+            Defaults to /app/data/delegation/bifrost_delegation.yaml.
+            Pass ``None`` to accept the env-configured target; returns None
+            when BIFROST_CONTRACT_PATH resolves to an empty path (services
+            that deliberately skip rendering, e.g. projection-api).
+        environ: Mapping used for env-var reads. Defaults to os.environ.
+        verify_endpoints: When True, probe each populated endpoint via
+            GET /v1/models and reject backends whose model is not listed.
+            Defaults to the BIFROST_VERIFY_ENDPOINTS env flag.
+        endpoint_probe: Probe callable used for endpoint verification. Defaults
+            to _probe_openai_model_endpoint.
+        force_reseed: When True (or when BIFROST_FORCE_RESEED=1 is set), always
+            re-render from the packaged source, ignoring any existing volume
+            content (OMN-12945). This is the correct mode on container restart:
+            the volume copy is never an authority on a fresh boot.
+
+    Returns:
+        Path to the rendered contract, or None when rendering is explicitly
+        disabled for this service.
+
+    Raises:
+        ProtocolConfigurationError: On any rendering failure — missing source,
+            malformed YAML, schema validation failure, or zero populated
+            endpoints (OMN-12814: fail-loud, never returns a silent empty result).
+        FileNotFoundError: If the source contract cannot be found.
+        ValueError: If the source YAML fails schema validation.
+    """
     env = environ if environ is not None else os.environ
     should_verify = (
         _env_flag(env.get("BIFROST_VERIFY_ENDPOINTS"), default=False)
         if verify_endpoints is None
         else verify_endpoints
+    )
+    # OMN-12945: BIFROST_FORCE_RESEED bypasses the stale-volume early-return path.
+    # The entrypoint sets this flag so every container restart re-seeds from the
+    # packaged source. Callers may also pass force_reseed=True explicitly.
+    should_force_reseed = (
+        _env_flag(env.get("BIFROST_FORCE_RESEED"), default=False)
+        if force_reseed is None
+        else force_reseed
     )
     probe = endpoint_probe or _probe_openai_model_endpoint
     _source_env = env.get("BIFROST_SOURCE_CONTRACT_PATH", "").strip()
@@ -509,7 +578,15 @@ def render_bifrost_delegation_contract(
     if target is None:
         return None
 
-    if not should_verify and _has_populated_endpoint(target):
+    # Cache-hit path: skip re-rendering when the volume already contains a
+    # valid, up-to-date contract AND we are not forcing a re-seed.
+    # OMN-12945: force_reseed/BIFROST_FORCE_RESEED bypasses this entirely —
+    # the entrypoint sets it on every restart to eliminate named-volume drift.
+    if (
+        not should_force_reseed
+        and not should_verify
+        and _has_populated_endpoint(target)
+    ):
         source_data = _load_yaml(source) if source.exists() else None
         data = _load_yaml(target)
         _validate_bifrost_delegation_data(
@@ -528,6 +605,9 @@ def render_bifrost_delegation_contract(
             _strip_render_hint_fields(target)
             return target
 
+    # Re-seed path: always render from the packaged source.
+    # OMN-12814: every error below raises ProtocolConfigurationError — no silent
+    # empty-result fallback.
     data = _load_render_source(
         should_verify=should_verify, target=target, source=source
     )
@@ -546,8 +626,11 @@ def render_bifrost_delegation_contract(
     if populated == 0:
         raise ProtocolConfigurationError(
             "Bifrost delegation contract rendered with no populated endpoint_url "
-            "values. Add base_url_env fields to the source contract or provide a "
-            "pre-rendered contract via BIFROST_CONTRACT_PATH."
+            "values. Set the four BIFROST_LOCAL_*_ENDPOINT_URL vars from the "
+            "committed lane overlay (docker/lane-overlays/<lane>.bifrost.env) "
+            "or provide a pre-rendered contract at BIFROST_CONTRACT_PATH. "
+            "OMN-12864: these values must come from the committed overlay, "
+            "not ephemeral shell exports."
         )
 
     # Strip render-only hint fields before writing the deployed contract —
@@ -566,6 +649,31 @@ def render_bifrost_delegation_contract(
     return target
 
 
+def _emit_config_provenance(rendered: Path, *, env: Mapping[str, str]) -> None:
+    """Compute, log, and persist config provenance for the rendered contract.
+
+    Provenance compares the deployed (volume) contract that the runtime actually
+    loaded against the packaged source resolved from the same rules the renderer
+    uses. The single-line summary is logged to stdout so it appears in container
+    startup logs; the sidecar JSON lets the drift sweep and proof packets read
+    provenance without re-resolving the packaged source path (OMN-12958).
+    """
+    source_env = env.get("BIFROST_SOURCE_CONTRACT_PATH", "").strip()
+    source = Path(source_env) if source_env else _DEFAULT_SOURCE_PATH
+    provenance = build_config_provenance(
+        config_name="bifrost_delegation",
+        deployed_path=rendered,
+        source_path=source,
+    )
+    sys.stdout.write(f"[entrypoint] {provenance.provenance_line()}\n")
+    if provenance.has_drifted:
+        sys.stdout.write(
+            "[entrypoint] WARNING: deployed Bifrost delegation config drifted "
+            "from packaged source; re-seed required (OMN-12958)\n"
+        )
+    write_provenance_sidecar(provenance, deployed_path=rendered)
+
+
 def main() -> int:
     rendered = render_bifrost_delegation_contract()
     if rendered is None:
@@ -575,6 +683,7 @@ def main() -> int:
         )
         return 0
     sys.stdout.write(f"[entrypoint] Bifrost delegation contract ready: {rendered}\n")
+    _emit_config_provenance(rendered, env=os.environ)
     return 0
 
 
