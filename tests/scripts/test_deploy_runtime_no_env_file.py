@@ -84,6 +84,20 @@ def test_sources_omnibase_env_at_top() -> None:
 
 
 @pytest.mark.unit
+def test_omnibase_env_cannot_override_runtime_health_url() -> None:
+    """A stale ~/.omnibase/.env HEALTH_CHECK_URL must not redirect deploy verify."""
+    text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"' in text
+    assert 'export HEALTH_CHECK_URL="${OPERATOR_HEALTH_CHECK_URL}"' in text
+    assert "unset HEALTH_CHECK_URL" in text
+    assert (
+        'readonly HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://${INFRA_HOST:?INFRA_HOST required}:8085/health}"'
+        in text
+    )
+
+
+@pytest.mark.unit
 def test_compose_project_defaults_to_live_runtime_project() -> None:
     """deploy-runtime.sh must target the canonical live runtime compose project."""
     text = "\n".join(_read_script_lines())
