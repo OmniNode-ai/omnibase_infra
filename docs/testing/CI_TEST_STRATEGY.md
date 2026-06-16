@@ -1,6 +1,6 @@
 # CI Test Strategy
 
-> **Status**: Current | **Last Updated**: 2026-02-19
+> **Status**: Current | **Last Updated**: 2026-06-16
 
 Test organization, pytest markers, coverage requirements, and common test commands for `omnibase_infra`. Read this before writing new tests or diagnosing CI failures.
 
@@ -206,6 +206,50 @@ pytestmark = [pytest.mark.asyncio(loop_scope="session")]
 
 ---
 
+## CI Gate Inventory
+
+The following CI workflows ship as merge gates in addition to the standard `ci.yml` test suite. All are wired to the `pull_request` and `merge_group` triggers unless noted.
+
+### dispatcher-route-coverage (OMN-12858 / OMN-12879 / OMN-12880)
+
+**File**: `.github/workflows/dispatcher-route-coverage.yml`
+
+Asserts that every `contract.yaml` in omnibase_infra and omnimarket that subscribes to a command topic (`onex.cmd.*`) also declares a dispatcher route via `handler_routing` or `runtime_dispatch`. Missing wiring causes commands to go to DLQ silently. Introduced after two incidents: the June 9 2026 DLQ regression (OMN-12858) and the DEL-01 delegation live finding (June 12 2026). In changed-command-topic mode (OMN-12879) the gate rescans only changed contracts on PRs for faster feedback.
+
+**Failure**: Means a subscribed command topic has no dispatcher route — commands will silently DLQ in the runtime. Fix: add `handler_routing` or `runtime_dispatch` entries to the relevant contract.
+
+### transport-mock-lint (OMN-13026)
+
+**File**: `.pre-commit-config.yaml` (hook `transport-mock-lint` from `omnibase_core`) + `.github/workflows/ci.yml`
+
+Detects test code that directly imports or instantiates live Kafka/EventBus/transport surfaces instead of mock substitutes. The existing violation count is frozen in `config/validation/transport_mock_baseline.yaml` (218 violations across 63 files as of introduction). New violations are blocked; existing ones are drained per-site via OMN-13026 sub-tickets.
+
+**Failure**: A new test file directly uses a real transport surface. Fix: replace with the appropriate mock or in-memory bus fixture.
+
+### node-migration-sync (OMN-13124)
+
+**File**: `.github/workflows/node-migration-sync.yml`
+
+Checks that every node migration SQL file under `src/omnimarket/nodes/<node>/migrations/*.sql` has been vendored into `docker/migrations/forward/nodes/<node>/` via `scripts/sync-node-migrations.sh`. An un-vendored node migration was the root cause of `pattern_learning_artifacts` being absent from `omnidash_analytics` on a clean redeploy (OMN-13124 post-mortem). The gate re-runs the `--check` against the current omnimarket dev tip on every infra PR.
+
+**Failure**: An omnimarket node migration exists that has not been vendored into the infra forward-migration directory. Fix: run `scripts/sync-node-migrations.sh` and commit the vendored files.
+
+### stale-todo-gate (OMN-5688)
+
+**File**: `.github/workflows/stale-todo-gate.yml`
+
+Checks that `TODO`/`FIXME`/`HACK` comments in changed Python files do not reference Linear tickets in terminal states (Done or Canceled). Requires `LINEAR_API_KEY` as a repository secret; gracefully skips (exit 0 with a warning) if the secret is absent.
+
+**Failure**: A changed file contains a TODO referencing a ticket that is already Done or Canceled. Fix: remove or update the comment.
+
+### seed-provenance-check (OMN-11208)
+
+**File**: `.github/workflows/seed-provenance-check.yml`
+
+**Advisory only** (`continue-on-error: true`). Warns when seed or demo scripts publish Kafka events without setting `data_provenance` in the payload. This gate never blocks a merge.
+
+---
+
 ## See Also
 
 | Topic | Document |
@@ -214,3 +258,4 @@ pytestmark = [pytest.mark.asyncio(loop_scope="session")]
 | Infrastructure topology | `~/.claude/CLAUDE.md` (Shared Standards) |
 | Pytest configuration | `pyproject.toml` (`[tool.pytest.ini_options]`) |
 | Coverage configuration | `pyproject.toml` (`[tool.coverage.*]`) |
+| Vendored node migrations runbook | [../runbooks/vendored-node-migrations.md](../runbooks/vendored-node-migrations.md) |

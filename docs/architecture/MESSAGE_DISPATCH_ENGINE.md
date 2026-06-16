@@ -486,11 +486,48 @@ Remaining Targets:
 2. Complete H1 Legacy Migration
 ```
 
+## Terminal Correlator Pattern (OMN-13118)
+
+Some EFFECT handlers drive a request/response interaction over the bus: they publish a command, then block until the correlated terminal event arrives on a reply topic (correlating by `correlation_id`). The `HandlerContextRoiRunner` is the motivating case: per (task x arm x trial) it publishes `node-generation-requested.v1` and must wait for `node-generation-completed.v1` or `node-generation-failed.v1` before recording an attempt-reduction row.
+
+### Why per-trial ephemeral consumers fail
+
+The earlier design built a brand-new OS thread + asyncio event loop + `AIOKafkaConsumer` + `AIOKafkaClient` (full bootstrap / metadata fetch / partition coordination) for EVERY trial, and tore each down right after. Five offset/subscription patches (#1969–#1972) tuned this per-trial-ephemeral substrate and all failed the live K>=10 battery gate with the same wedge: a new client per trial races its own bootstrap and teardown against the fast terminal, so the COMPLETED leg silently never delivers while only the empty-set FAILED leg times out.
+
+### Long-lived correlator (OMN-13118 Tier B)
+
+**Implementation**: `src/omnibase_infra/runtime/service_terminal_event_consumer.py`
+
+One `TerminalEventConsumer` instance lives for the full process lifetime. It owns:
+
+- **One dedicated worker thread** with its own asyncio event loop (separate from the runtime dispatch loop to avoid deadlock).
+- **One `AIOKafkaConsumer` subscribed once** to both terminal topics for the lifetime of the batch, eliminating per-trial bootstrap/teardown races.
+- **A `correlation_id → asyncio.Future` registry**: a trial registers its `correlation_id` BEFORE publishing its command (preserving the subscribe-before-publish guarantee from prior patches), then calls `session.wait(correlation_id, timeout)` which blocks the calling thread on the future resolved by the correlator's poll loop.
+
+The design eliminates the entire timing-bug class structurally rather than tuning around it.
+
+### Key behavioral details
+
+| Behavior | Detail |
+|----------|--------|
+| Subscribe-before-publish | Trial registers `correlation_id` in the future registry, then publishes its command. The correlator already has its subscription open; no subscribe/assign window between publish and subscribe. |
+| Synchronous partition-offset pinning | The correlator performs a synchronous `seek-to-end` after subscription to ensure it does not replay stale terminals from before the batch started. |
+| Partition-less reply topics | Some reply topics may have no committed partitions at startup. The correlator tolerates this by using manual assignment only after the topic exists, rather than failing at subscribe time. |
+| Worker thread isolation | `handle()` runs synchronously on the runtime dispatch loop. The correlator runs on its own dedicated loop to avoid deadlock. `session.wait()` blocks the calling thread via `concurrent.futures.Future` resolved across loops. |
+| Fan-out safe | Multiple trials may await different `correlation_id`s concurrently. The registry is keyed by `correlation_id`; the poll loop demuxes each terminal to its waiting trial. |
+
+### Architecture constraint (ARCH-002)
+
+Nodes and handlers never touch the Kafka client directly. The `TerminalEventConsumer` is the contract-declared consume dependency materialized by runtime auto-wiring (`handler_wiring.py`). Handlers call the injected `event_consumer`; the runtime owns all Kafka plumbing.
+
+---
+
 ## Related Documentation
 
 ### Implementation
 
 - **Dispatch Engine**: `src/omnibase_infra/runtime/message_dispatch_engine.py`
+- **Terminal Correlator**: `src/omnibase_infra/runtime/service_terminal_event_consumer.py`
 - **Dispatcher Registry**: `src/omnibase_infra/runtime/dispatcher_registry.py`
 - **Runtime Host**: `src/omnibase_infra/runtime/runtime_host_process.py`
 - **Dispatch Models**: `src/omnibase_infra/models/dispatch/`
