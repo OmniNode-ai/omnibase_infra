@@ -32,5 +32,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-13187: identity regenerated after the dependency refresh changed the
     # runner image lock binding inputs.
-    assert lock["identity_digest"] == "ed3959f72f344a14f60e2923c1e1f814"
-    assert lock["shared_env_digest"] == "597e3b7b1166f8097fc725e3"
+    assert lock["identity_digest"] == "a9b134c16ae5a2b6a322fba4a6e219e4"
+    assert lock["shared_env_digest"] == "bcc8bacedd620800c62b693c"
