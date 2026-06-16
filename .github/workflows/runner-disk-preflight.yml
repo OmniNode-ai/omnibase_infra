@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# runner-disk-preflight.yml — OMN-13040 (retro B-5)
+#
+# WHY: When runner disk fills, jobs skip or fail with misleading errors
+# (e.g. "Kafka Schema Handshake FAILURE" that is actually a disk casualty).
+# This job MUST run as the very first step so any subsequent failure can be
+# attributed correctly — an infra failure never masquerades as a domain failure.
+#
+# Behavior:
+#   - Checks free disk on the runner (all mounts listed by df).
+#   - If free space on ANY mount is below RUNNER_DISK_WARN_GB (default 5 GB),
+#     emits a GitHub Actions error annotation:
+#       ::error title=RUNNER-DISK:<free>GB::...
+#     and exits non-zero so the check BLOCKS rather than warns.
+#   - Emits runner name in the annotation so the infra team knows WHICH runner
+#     to drain (context for the OMN-13045 runner-1 wedge class).
+#   - On GitHub-hosted (ubuntu-latest) runners, the root partition is typically
+#     ~14 GB total; on self-hosted omnibase-ci runners it is the data volume.
+#
+# Integration with merge-sweep (OMN-13040 §3):
+#   - The merge-sweep infra-signature auto-rerun script matches on the annotation
+#     title prefix "RUNNER-DISK:" to identify disk-casualty runs and schedule a
+#     rerun once recovery is detected.
+---
+name: Runner Disk Preflight
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      warn_gb:
+        description: "Warn threshold in GB (default: 5)"
+        required: false
+        default: "5"
+
+# No concurrency cancellation — this job is lightweight and must run on every
+# event to provide a consistent baseline for failure attribution.
+concurrency:
+  group: runner-disk-preflight-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # runner-disk-preflight — named distinctly so logs, PR checks, and the
+  # merge-sweep auto-rerun script can identify it unambiguously.
+  # ---------------------------------------------------------------------------
+  runner-disk-preflight:
+    name: Runner Disk Preflight
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
+    # public fork PRs use ubuntu-latest (no secrets, disk check still runs).
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Check runner disk space
+        env:
+          # Configurable via workflow_dispatch; defaults to 5 GB.
+          RUNNER_DISK_WARN_GB: ${{ inputs.warn_gb || '5' }}
+        run: |
+          set -euo pipefail
+
+          RUNNER_NAME="${RUNNER_NAME:-${HOSTNAME:-unknown}}"
+          WARN_GB="${RUNNER_DISK_WARN_GB}"
+          WARN_KB=$(( WARN_GB * 1024 * 1024 ))
+
+          echo "Runner: ${RUNNER_NAME}"
+          echo "Disk threshold: ${WARN_GB} GB free (${WARN_KB} KB)"
+          echo ""
+
+          # Capture df output for all real (non-tmpfs/devtmpfs/overlay) mounts.
+          # Exclude pseudo-filesystems so we focus on actual storage.
+          df_output="$(df -k | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|none|Filesystem)' || true)"
+          echo "Disk usage:"
+          df -h | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|none|Filesystem)' || true
+          echo ""
+
+          failed=0
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            # df -k columns: Filesystem 1K-blocks Used Available Use% Mounted
+            avail_kb="$(echo "$line" | awk '{print $4}')"
+            mount="$(echo "$line" | awk '{print $6}')"
+            used_pct="$(echo "$line" | awk '{print $5}' | tr -d '%')"
+
+            if ! [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+              continue
+            fi
+
+            avail_gb=$(( avail_kb / 1024 / 1024 ))
+            avail_gb_frac="$(awk "BEGIN {printf \"%.1f\", ${avail_kb}/1024/1024}")"
+
+            if (( avail_kb < WARN_KB )); then
+              echo "::error title=RUNNER-DISK:${avail_gb_frac}GB::Runner '${RUNNER_NAME}' mount '${mount}' has only ${avail_gb_frac} GB free (${used_pct}% used). Below threshold of ${WARN_GB} GB. Infra failure — do not attribute downstream job failures to domain bugs until disk is freed. Drain or recycle ${RUNNER_NAME}."
+              failed=1
+            else
+              echo "OK  ${mount}: ${avail_gb_frac} GB free (${used_pct}% used)"
+            fi
+          done <<< "$df_output"
+
+          if (( failed == 1 )); then
+            echo ""
+            echo "RUNNER-DISK: one or more mounts are below the ${WARN_GB} GB threshold."
+            echo "Runner name: ${RUNNER_NAME}"
+            echo "This is an INFRA failure — downstream failures (Kafka, compose, pytest) may"
+            echo "be disk casualties, not code defects. The merge-sweep auto-rerun will"
+            echo "schedule a rerun once the runner is recovered (OMN-13040)."
+            exit 1
+          fi
+
+          echo "All mounts have sufficient free space (>= ${WARN_GB} GB)."
