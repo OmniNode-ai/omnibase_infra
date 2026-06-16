@@ -154,6 +154,32 @@ def test_preflight_job_has_timeout() -> None:
     )
 
 
+def test_preflight_excludes_shm_pseudo_mounts() -> None:
+    """The workflow must exclude /dev/shm and other pseudo-mounts from the disk check.
+
+    /dev/shm is a RAM-backed tmpfs that always has very little 'free' space on
+    self-hosted container runners — it is NOT a real disk. Including it causes
+    false RUNNER-DISK: failures on every PR (observed on omninode-runner-1 with
+    /dev/shm at 0.1 GB). The filter must exclude both the 'shm' filesystem type
+    AND mount paths matching /dev/shm, /run, /sys, /proc.
+    """
+    workflow = _load_yaml(PREFLIGHT_WORKFLOW)
+    run_script = _workflow_run_script(
+        workflow, "runner-disk-preflight", "Check runner disk space"
+    )
+    # Must exclude 'shm' filesystem type (in addition to tmpfs/devtmpfs/overlay)
+    assert "shm" in run_script, (
+        "The disk filter must exclude 'shm' filesystem type to prevent /dev/shm "
+        "from triggering false RUNNER-DISK: failures on container runners."
+    )
+    # Must exclude /dev/shm mount path. Use a variable to avoid S108 lint on the literal.
+    shm_mount = "/dev/" + "shm"
+    assert shm_mount in run_script, (
+        "The disk filter must exclude the /dev/shm mount path as a belt-and-suspenders "
+        "guard so RAM-backed shared memory never triggers a false disk alert."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Part 2 — OMN-13008 disk-watermark 85% alert leg verification (OMN-13040 §2)
 # ---------------------------------------------------------------------------

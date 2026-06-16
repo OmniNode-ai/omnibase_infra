@@ -79,11 +79,16 @@ jobs:
           echo "Disk threshold: ${WARN_GB} GB free (${WARN_KB} KB)"
           echo ""
 
-          # Capture df output for all real (non-tmpfs/devtmpfs/overlay) mounts.
-          # Exclude pseudo-filesystems so we focus on actual storage.
-          df_output="$(df -k | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|none|Filesystem)' || true)"
+          # Capture df output for real (non-pseudo) mounts only.
+          # Exclude: pseudo filesystem types (tmpfs, devtmpfs, overlay, squashfs, udev, shm)
+          # AND pseudo mount-path prefixes (/dev/shm, /run, /sys, /proc) so RAM-backed
+          # shared-memory mounts do not trigger false RUNNER-DISK: failures.
+          # See OMN-13040: /dev/shm is a RAM-backed tmpfs; runners always report it near 0 free.
+          df_output="$(df -k | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|shm|none|Filesystem)' \
+            | awk '$6 !~ /^(\/dev\/shm|\/run|\/sys|\/proc)/' || true)"
           echo "Disk usage:"
-          df -h | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|none|Filesystem)' || true
+          df -h | grep -Ev '^(tmpfs|devtmpfs|overlay|udev|squashfs|shm|none|Filesystem)' \
+            | awk '$6 !~ /^(\/dev\/shm|\/run|\/sys|\/proc)/' || true
           echo ""
 
           failed=0
