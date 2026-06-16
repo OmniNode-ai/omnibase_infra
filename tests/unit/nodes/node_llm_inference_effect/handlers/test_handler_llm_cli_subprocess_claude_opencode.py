@@ -8,6 +8,7 @@ OMN-13158: Register Codex as the primary headless CLI subprocess backend.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -125,6 +126,97 @@ def test_codex_cli_subprocess_resolves_from_request_model() -> None:
         _, status, detail = handler.execute_cli_inference(req)
     assert status == EnumCliBackendStatus.UNAVAILABLE
     assert detail == "codex not found on PATH"
+
+
+@pytest.mark.unit
+def test_codex_cli_subprocess_uses_headless_oauth_safe_argv() -> None:
+    from omnibase_infra.models.llm.model_llm_inference_request import (
+        ModelLlmInferenceRequest,
+    )
+    from omnibase_infra.models.llm.model_llm_message import ModelLlmMessage
+    from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess import (
+        EnumCliBackendStatus,
+        HandlerLlmCliSubprocess,
+    )
+
+    handler = HandlerLlmCliSubprocess()
+    req = ModelLlmInferenceRequest(
+        base_url="http://localhost:1",
+        messages=[ModelLlmMessage(role="user", content="hi")],
+        model="codex-cli",
+    )
+    completed = subprocess.CompletedProcess(
+        args=["codex"],
+        returncode=0,
+        stdout="codex response\n",
+        stderr="",
+    )
+    with (
+        patch("shutil.which", return_value="/opt/homebrew/bin/codex"),
+        patch("subprocess.run", return_value=completed) as mock_run,
+    ):
+        response, status, detail = handler.execute_cli_inference(req)
+
+    assert status == EnumCliBackendStatus.SUCCESS
+    assert detail == ""
+    assert response is not None
+    assert response.generated_text == "codex response"
+    assert mock_run.call_args.args[0] == [
+        "codex",
+        "--sandbox",
+        "read-only",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "hi",
+    ]
+
+
+@pytest.mark.unit
+def test_claude_cli_subprocess_resolves_headless_oauth_argv_from_request_model() -> (
+    None
+):
+    from omnibase_infra.models.llm.model_llm_inference_request import (
+        ModelLlmInferenceRequest,
+    )
+    from omnibase_infra.models.llm.model_llm_message import ModelLlmMessage
+    from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess import (
+        EnumCliBackendStatus,
+        HandlerLlmCliSubprocess,
+    )
+
+    handler = HandlerLlmCliSubprocess()
+    req = ModelLlmInferenceRequest(
+        base_url="http://localhost:1",
+        messages=[ModelLlmMessage(role="user", content="hi")],
+        model="claude-cli",
+    )
+    completed = subprocess.CompletedProcess(
+        args=["claude"],
+        returncode=0,
+        stdout="claude response\n",
+        stderr="",
+    )
+    with (
+        patch("shutil.which", return_value="/opt/homebrew/bin/claude"),
+        patch("subprocess.run", return_value=completed) as mock_run,
+    ):
+        response, status, detail = handler.execute_cli_inference(req)
+
+    assert status == EnumCliBackendStatus.SUCCESS
+    assert detail == ""
+    assert response is not None
+    assert response.generated_text == "claude response"
+    assert mock_run.call_args.args[0] == [
+        "claude",
+        "-p",
+        "--output-format",
+        "text",
+        "--permission-mode",
+        "dontAsk",
+        "--no-session-persistence",
+        "hi",
+    ]
 
 
 @pytest.mark.unit

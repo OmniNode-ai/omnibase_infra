@@ -61,9 +61,19 @@ _CLI_CONFIG_BY_MODEL: dict[str, tuple[str, list[str]]] = {
     "gemini-cli": ("gemini", ["-p"]),
     "codex-cli": (
         "codex",
-        ["exec", "--ask-for-approval", "never", "--sandbox", "workspace-write"],
+        ["--sandbox", "read-only", "--ask-for-approval", "never", "exec"],
     ),
-    "claude-cli": ("claude", ["-p", "--output-format", "json"]),
+    "claude-cli": (
+        "claude",
+        [
+            "-p",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "dontAsk",
+            "--no-session-persistence",
+        ],
+    ),
     "opencode-cli": ("opencode", ["run", "--format", "json", "--pure"]),
 }
 
