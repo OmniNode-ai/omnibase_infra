@@ -85,6 +85,17 @@ tiers:
   # Availability confirmed at dispatch time via shutil.which inside HandlerLlmCliSubprocess.
   - name: cli_agents
     models:
+      - id: codex-cli
+        backend_id: cli-codex
+        max_context_tokens: 200000
+        use_for:
+          - agent_delegation
+          - code_generation
+          - complex_reasoning
+          - reasoning
+          - planning
+          - test
+          - research
       - id: claude-cli
         backend_id: cli-claude
         max_context_tokens: 200000

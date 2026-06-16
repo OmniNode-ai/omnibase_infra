@@ -32,6 +32,7 @@ set -euo pipefail
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
+OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 set -a
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
 source "${HOME}/.omnibase/.env"
@@ -39,7 +40,13 @@ set +a
 if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${OPERATOR_OMNI_HOME}"
 fi
+if [[ -n "${OPERATOR_HEALTH_CHECK_URL}" ]]; then
+    export HEALTH_CHECK_URL="${OPERATOR_HEALTH_CHECK_URL}"
+else
+    unset HEALTH_CHECK_URL
+fi
 unset OPERATOR_OMNI_HOME
+unset OPERATOR_HEALTH_CHECK_URL
 
 # =============================================================================
 # Constants

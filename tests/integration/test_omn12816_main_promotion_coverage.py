@@ -18,5 +18,5 @@ def test_omn12816_llm_inference_contract_declares_extra_body() -> None:
 
     contract: dict[str, Any] = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
 
-    assert contract["contract_version"] == {"major": 1, "minor": 4, "patch": 1}
+    assert contract["contract_version"] == {"major": 1, "minor": 4, "patch": 2}
     assert "extra_body" in contract["input_model"]["description"]
