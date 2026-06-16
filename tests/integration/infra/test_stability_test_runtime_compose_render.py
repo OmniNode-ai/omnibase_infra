@@ -129,12 +129,8 @@ COMPOSE_RENDER_ENV = {
     "BIFROST_LOCAL_REASONER_ENDPOINT_URL": _chat_url("llm-coder-fast.invalid"),
     "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": _chat_url("llm-embedding.invalid"),
     "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": _chat_url("llm-deepseek.invalid"),
-    "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
-    "GEMINI_API_KEY": "render-only-gemini-api-key",
-    "GOOGLE_API_KEY": "render-only-google-api-key",
-    "OPEN_ROUTER_API_KEY": "render-only-openrouter-api-key",
     "LLM_ENDPOINT_CIDR_ALLOWLIST": _cidr("192.168.86", "0/24"),
     "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": "generativelanguage.googleapis.com,api.z.ai",
     "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",
@@ -577,7 +573,9 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
     assert "llm.openrouter.api_key" in policy_text
     assert "llm.glm.api_key" in policy_text
     assert "llm.gemini.api_key" in policy_text
-    assert "OPENROUTER_API_KEY" not in policy_text
+    assert "OPENROUTER_API_KEY" in policy_text
+    assert "OPEN_ROUTER_API_KEY" not in policy_text
+    assert "llm.vertex.access_token" not in policy_text
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
         environment = services[service_name]["environment"]
@@ -589,18 +587,19 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
 
         assert resolver_config["enable_convention_fallback"] is False
         assert mappings["llm.openrouter.api_key"] == {
-            "source_type": "env",
-            "source_path": "OPEN_ROUTER_API_KEY",
+            "source_type": "infisical",
+            "source_path": "OPENROUTER_API_KEY",
         }
         assert mappings["llm.glm.api_key"] == {
-            "source_type": "env",
+            "source_type": "infisical",
             "source_path": "LLM_GLM_API_KEY",
         }
         assert mappings["llm.gemini.api_key"] == {
-            "source_type": "env",
+            "source_type": "infisical",
             "source_path": "GEMINI_API_KEY",
         }
-        assert "OPENROUTER_API_KEY" not in json.dumps(resolver_config)
+        assert "OPEN_ROUTER_API_KEY" not in json.dumps(resolver_config)
+        assert "llm.vertex.access_token" not in json.dumps(resolver_config)
 
 
 @pytest.mark.integration

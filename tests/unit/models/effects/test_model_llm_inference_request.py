@@ -252,6 +252,16 @@ class TestBaseUrlValidator:
         req = _chat_request(base_url="https://api.openai.com/v1")
         assert req.base_url == "https://api.openai.com/v1"
 
+    def test_cli_base_url_valid(self) -> None:
+        """Test that cli:// routing sentinels are accepted."""
+        req = _chat_request(base_url="cli://codex")
+        assert req.base_url == "cli://codex"
+
+    def test_cli_base_url_without_name_rejected(self) -> None:
+        """Test that cli:// routing sentinels require a backend name."""
+        with pytest.raises(ValidationError, match="CLI name"):
+            _chat_request(base_url="cli://")
+
 
 # ==============================================================================
 # System Prompt Validator

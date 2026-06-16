@@ -465,7 +465,7 @@ class TestBaseUrlValidation:
 
     def test_ftp_scheme_rejected(self) -> None:
         """Non-HTTP scheme is rejected."""
-        with pytest.raises(ValidationError, match="base_url must start with http"):
+        with pytest.raises(ValidationError, match="base_url must start"):
             ModelLlmInferenceRequest(
                 **_chat_kwargs(base_url="ftp://192.168.86.201:8000")
             )
@@ -486,6 +486,16 @@ class TestBaseUrlValidation:
             **_chat_kwargs(base_url="https://api.openai.com"),
         )
         assert req.base_url == "https://api.openai.com"
+
+    def test_cli_base_url_accepted(self) -> None:
+        """CLI routing sentinels are accepted for subprocess handlers."""
+        req = ModelLlmInferenceRequest(**_chat_kwargs(base_url="cli://codex"))
+        assert req.base_url == "cli://codex"
+
+    def test_cli_base_url_without_name_rejected(self) -> None:
+        """CLI routing sentinels must include a backend name."""
+        with pytest.raises(ValidationError, match="CLI name"):
+            ModelLlmInferenceRequest(**_chat_kwargs(base_url="cli://"))
 
 
 # =============================================================================

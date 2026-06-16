@@ -58,3 +58,28 @@ class TestRuntimeContractsDockerAccessibility:
             "x-runtime-env must declare ONEX_RUNTIME_CONTRACTS_DIR "
             "so runtime containers can find omnibase_core contract YAMLs"
         )
+
+    def test_runtime_effects_mounts_codex_oauth_state(self) -> None:
+        """cli://codex runs in runtime-effects and needs OAuth state mounted."""
+        import yaml
+
+        compose_path = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "docker"
+            / "docker-compose.infra.yml"
+        )
+        with open(compose_path) as f:
+            data = yaml.safe_load(f)
+
+        volumes = data["services"]["runtime-effects"]["volumes"]
+        assert (
+            "${CODEX_OAUTH_DIR:?CODEX_OAUTH_DIR must point to host Codex OAuth directory}/auth.json:/home/omniinfra/.codex/auth.json"
+            in volumes
+        )
+        assert not any(
+            volume.endswith(":/home/omniinfra/.codex:ro") for volume in volumes
+        )
+        assert not any(
+            volume.endswith(":/home/omniinfra/.codex/auth.json:ro")
+            for volume in volumes
+        )

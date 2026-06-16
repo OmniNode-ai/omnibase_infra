@@ -209,11 +209,17 @@ class ModelLlmInferenceRequest(BaseModel):
             The validated base_url value (unchanged).
 
         Raises:
-            ValueError: If the URL does not start with ``http://`` or ``https://``.
+            ValueError: If the URL does not start with ``http://``, ``https://``,
+                or a non-empty ``cli://`` routing sentinel.
         """
+        if v.startswith("cli://"):
+            if not v.removeprefix("cli://"):
+                raise ValueError("base_url must include a CLI name after 'cli://'")
+            return v
         if not v.startswith(("http://", "https://")):
             raise ValueError(
-                f"base_url must start with 'http://' or 'https://', got: {v!r}"
+                "base_url must start with 'http://', 'https://', or 'cli://', "
+                f"got: {v!r}"
             )
         return v
 

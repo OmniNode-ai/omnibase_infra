@@ -70,9 +70,6 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": ",".join(
             contract.llm_cloud_endpoint_host_allowlist
         ),
-        "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": contract.bifrost_vertex_gemini_endpoint_url,
-        "GOOGLE_CLOUD_PROJECT": contract.google_cloud_project,
-        "GOOGLE_CLOUD_LOCATION": contract.google_cloud_location,
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
     }
 

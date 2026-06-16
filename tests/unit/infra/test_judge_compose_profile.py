@@ -118,6 +118,10 @@ def test_judge_runtime_identity_and_secret_refs_are_contract_owned() -> None:
     )
     assert (
         "OPENROUTER_API_KEY"
+        in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPEN_ROUTER_API_KEY"
         not in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
 
@@ -190,8 +194,10 @@ def test_judge_redpanda_can_host_full_contract_topic_catalog() -> None:
 def test_judge_example_env_contains_only_operator_inputs() -> None:
     example_env = _load_env(JUDGE_ENV_EXAMPLE)
 
-    assert example_env["GEMINI_API_KEY"] == "replace-with-gemini-api-key"
-    assert example_env["GOOGLE_API_KEY"] == "replace-with-gemini-api-key"
+    assert "GEMINI_API_KEY" not in example_env
+    assert "GOOGLE_API_KEY" not in example_env
+    assert "OPEN_ROUTER_API_KEY" not in example_env
+    assert "LLM_GLM_API_KEY" not in example_env
     assert example_env["OMNICLAUDE_SKILLS_DIR"] == "../omnimarket/plugins/onex/skills"
     assert "POSTGRES_PASSWORD" in example_env
     assert "VALKEY_PASSWORD" in example_env

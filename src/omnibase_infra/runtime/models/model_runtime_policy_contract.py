@@ -24,9 +24,6 @@ class ModelRuntimePolicyContract(BaseModel):
     version: int = Field(ge=1)
     active_runtime_packages: tuple[str, ...] = Field(min_length=1)
     llm_cloud_endpoint_host_allowlist: tuple[str, ...] = Field(default=())
-    bifrost_vertex_gemini_endpoint_url: str = Field(min_length=1)
-    google_cloud_project: str = Field(min_length=1)
-    google_cloud_location: str = Field(min_length=1)
     omnimemory_memgraph_port: int = Field(ge=1, le=65535)
     auxiliary_services_omnimemory_enabled: bool
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]

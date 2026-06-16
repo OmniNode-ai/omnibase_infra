@@ -117,14 +117,8 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     assert env["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
     assert (
         env["LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST"]
-        == "generativelanguage.googleapis.com,api.z.ai,aiplatform.googleapis.com"
+        == "generativelanguage.googleapis.com,api.z.ai"
     )
-    assert (
-        env["BIFROST_VERTEX_GEMINI_ENDPOINT_URL"]
-        == "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
-    )
-    assert env["GOOGLE_CLOUD_PROJECT"] == "gen-lang-client-0084338881"
-    assert env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
     assert env["DEV_RUNTIME_MAIN_PORT"] == "8085"
     assert env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
     assert env["STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
@@ -152,9 +146,30 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
         "llm.openrouter.api_key" in env["DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
     assert (
+        '"source_type":"infisical"'
+        in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
         "OPENROUTER_API_KEY"
+        in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
+        "OPEN_ROUTER_API_KEY"
         not in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
+    assert (
+        "llm.vertex.access_token"
+        not in env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+
+
+def test_runtime_policy_llm_secret_refs_resolve_from_infisical_only() -> None:
+    contract = _load_contract()
+
+    for profile_name, profile in contract.profiles.items():
+        for mapping in profile.secret_resolver_mappings:
+            assert mapping.source.source_type == "infisical", profile_name
+            assert mapping.logical_name != "llm.vertex.access_token", profile_name
 
 
 def test_compose_consumes_policy_env_instead_of_hardcoded_policy_values() -> None:

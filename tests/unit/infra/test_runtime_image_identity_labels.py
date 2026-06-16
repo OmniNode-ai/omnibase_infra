@@ -64,6 +64,26 @@ def test_runtime_version_matches_pyproject() -> None:
     )
 
 
+def test_runtime_image_bakes_headless_codex_cli() -> None:
+    """Runtime image must carry codex for cli://codex delegation."""
+    dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "ARG CODEX_CLI_VERSION=0.140.0" in dockerfile
+    assert "FROM node:22-bookworm-slim AS node-bin" in dockerfile
+    assert 'npm install -g "@openai/codex@${CODEX_CLI_VERSION}"' in dockerfile
+    assert "COPY --from=node-bin /usr/local/bin/node /usr/local/bin/node" in dockerfile
+    assert (
+        "COPY --from=node-bin /usr/local/lib/node_modules /usr/local/lib/node_modules"
+    ) in dockerfile
+    assert (
+        "ln -sf ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex"
+    ) in dockerfile
+    assert "codex --version" in dockerfile
+    assert "CODEX_HOME=/home/omniinfra/.codex" in dockerfile
+    assert "install -d -o omniinfra -g omniinfra" in dockerfile
+    assert "/home/omniinfra/.codex" in dockerfile
+
+
 def test_identity_build_args_stamp_full_quad(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

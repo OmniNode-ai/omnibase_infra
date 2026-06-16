@@ -61,7 +61,7 @@ def test_compose_env_unquotes_runtime_policy_json(
     policy_env = tmp_path / "runtime-policy.env"
     policy_env.write_text(
         "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON="
-        '\'{"enable_convention_fallback":false,"mappings":[{"logical_name":"llm.openrouter.api_key","source":{"source_type":"env","source_path":"OPEN_ROUTER_API_KEY"}}]}\'\n',
+        '\'{"enable_convention_fallback":false,"mappings":[{"logical_name":"llm.openrouter.api_key","source":{"source_type":"infisical","source_path":"OPENROUTER_API_KEY"}}]}\'\n',
         encoding="utf-8",
     )
     monkeypatch.setattr("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy_env)

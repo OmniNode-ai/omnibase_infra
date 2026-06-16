@@ -118,7 +118,7 @@ def test_codex_cli_subprocess_resolves_from_request_model() -> None:
 
     handler = HandlerLlmCliSubprocess()
     req = ModelLlmInferenceRequest(
-        base_url="http://localhost:1",
+        base_url="cli://codex",
         messages=[ModelLlmMessage(role="user", content="hi")],
         model="codex-cli",
     )
@@ -141,7 +141,7 @@ def test_codex_cli_subprocess_uses_headless_oauth_safe_argv() -> None:
 
     handler = HandlerLlmCliSubprocess()
     req = ModelLlmInferenceRequest(
-        base_url="http://localhost:1",
+        base_url="cli://codex",
         messages=[ModelLlmMessage(role="user", content="hi")],
         model="codex-cli",
     )
@@ -168,6 +168,9 @@ def test_codex_cli_subprocess_uses_headless_oauth_safe_argv() -> None:
         "--ask-for-approval",
         "never",
         "exec",
+        "--skip-git-repo-check",
+        "-m",
+        "gpt-5.5",
         "hi",
     ]
 

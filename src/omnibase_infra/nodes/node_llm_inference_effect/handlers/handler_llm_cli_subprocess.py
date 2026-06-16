@@ -61,7 +61,16 @@ _CLI_CONFIG_BY_MODEL: dict[str, tuple[str, list[str]]] = {
     "gemini-cli": ("gemini", ["-p"]),
     "codex-cli": (
         "codex",
-        ["--sandbox", "read-only", "--ask-for-approval", "never", "exec"],
+        [
+            "--sandbox",
+            "read-only",
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--skip-git-repo-check",
+            "-m",
+            "gpt-5.5",
+        ],
     ),
     "claude-cli": (
         "claude",

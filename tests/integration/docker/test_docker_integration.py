@@ -1077,11 +1077,11 @@ class TestDockerComposeProfiles:
         _secret_resolver_config_json = (
             '{"enable_convention_fallback":false,"mappings":['
             '{"logical_name":"llm.openrouter.api_key",'
-            '"source":{"source_path":"OPEN_ROUTER_API_KEY","source_type":"env"}},'
+            '"source":{"source_path":"OPENROUTER_API_KEY","source_type":"infisical"}},'
             '{"logical_name":"llm.glm.api_key",'
-            '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
+            '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"infisical"}},'
             '{"logical_name":"llm.gemini.api_key",'
-            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
+            '"source":{"source_path":"GEMINI_API_KEY","source_type":"infisical"}}]}'
         )
         _secret_resolver_config_path = "/app/data/delegation/secret_resolver.yaml"
         env = os.environ.copy()
@@ -1107,6 +1107,7 @@ class TestDockerComposeProfiles:
                 "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
                 "LINEAR_API_KEY": "test-linear-api-key",
                 "GITHUB_TOKEN": "test-github-token",
+                "CODEX_OAUTH_DIR": str(project_root),
                 # OMN-7979: LLM endpoint URLs added with :? fail-fast to
                 # activate PluginLlm in runtime containers.
                 "LLM_CODER_URL": "http://llm-coder.test:8000",
@@ -1127,15 +1128,6 @@ class TestDockerComposeProfiles:
                 ),
                 "LLM_GLM_URL": "http://llm-glm.test:8102",
                 "LLM_GLM_MODEL_NAME": "glm-4.5",
-                "LLM_GLM_API_KEY": "render-only-glm-api-key",
-                "GEMINI_API_KEY": "render-only-gemini-api-key",
-                "GOOGLE_API_KEY": "render-only-google-api-key",
-                "BIFROST_VERTEX_GEMINI_ENDPOINT_URL": (
-                    "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
-                    "gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions"
-                ),
-                "GOOGLE_CLOUD_PROJECT": "gen-lang-client-0084338881",
-                "GOOGLE_CLOUD_LOCATION": "us-central1",
                 # OMN-10943: HTTP request signing and CIDR allowlist for the
                 # local LLM HTTP transport added with :? fail-fast.
                 "LOCAL_LLM_SHARED_SECRET": "render-only-local-llm-secret",

@@ -238,13 +238,18 @@ class ModelLlmInferenceRequest(BaseModel):
     @field_validator("base_url")
     @classmethod
     def _validate_base_url(cls, v: str) -> str:
-        """Ensure base_url uses an HTTP(S) scheme with a valid host.
+        """Ensure base_url uses an HTTP(S) URL or a CLI routing sentinel.
 
         Uses ``urllib.parse.urlparse`` for robust host extraction instead of
         naive string-prefix checks alone.
         """
+        if v.startswith("cli://"):
+            parsed_cli = urlparse(v)
+            if not parsed_cli.netloc:
+                raise ValueError("cli base_url must include a CLI name after cli://")
+            return v
         if not v.startswith(("http://", "https://")):
-            raise ValueError("base_url must start with http:// or https://")
+            raise ValueError("base_url must start with http://, https://, or cli://")
         # Ensure there's content after the scheme
         scheme_end = v.index("://") + 3
         if len(v) <= scheme_end or not v[scheme_end:].strip("/"):

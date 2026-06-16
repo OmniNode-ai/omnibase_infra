@@ -6,13 +6,6 @@ active_runtime_packages:
 llm_cloud_endpoint_host_allowlist:
   - generativelanguage.googleapis.com
   - api.z.ai
-  # OMN-12971: Vertex AI OpenAI-compatible endpoint host. The region prefix is
-  # part of the host (e.g. us-central1-aiplatform.googleapis.com); the suffix
-  # below allows region-prefixed Vertex hosts for the ADC ($500-credit) path.
-  - aiplatform.googleapis.com
-bifrost_vertex_gemini_endpoint_url: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/gen-lang-client-0084338881/locations/us-central1/endpoints/openapi/chat/completions
-google_cloud_project: gen-lang-client-0084338881
-google_cloud_location: us-central1
 omnimemory_memgraph_port: 7687
 auxiliary_services_omnimemory_enabled: false
 profiles:
@@ -25,29 +18,16 @@ profiles:
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
         source:
-          source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_type: infisical
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: LLM_GLM_API_KEY
       - logical_name: llm.gemini.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: GEMINI_API_KEY
-      # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
-      # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
-      # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
-      # boundary posts Authorization: Bearer <value>, so the resolved VALUE is a
-      # short-lived OAuth access token (NOT the raw ADC JSON). source_type=file →
-      # the ref resolves to the mounted token FILE; the operator/bootstrap mints
-      # the token from ADC (`gcloud auth application-default print-access-token`)
-      # and refreshes the file (tokens expire ~1h). The token VALUE is never
-      # committed — only the ref name and the in-container path live here.
-      - logical_name: llm.vertex.access_token
-        source:
-          source_type: file
-          source_path: /run/secrets/vertex_access_token
     services:
       main:
         runtime_id: dev-main
@@ -93,29 +73,16 @@ profiles:
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
         source:
-          source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_type: infisical
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: LLM_GLM_API_KEY
       - logical_name: llm.gemini.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: GEMINI_API_KEY
-      # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
-      # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
-      # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
-      # boundary posts Authorization: Bearer <value>, so the resolved VALUE is a
-      # short-lived OAuth access token (NOT the raw ADC JSON). source_type=file →
-      # the ref resolves to the mounted token FILE; the operator/bootstrap mints
-      # the token from ADC (`gcloud auth application-default print-access-token`)
-      # and refreshes the file (tokens expire ~1h). The token VALUE is never
-      # committed — only the ref name and the in-container path live here.
-      - logical_name: llm.vertex.access_token
-        source:
-          source_type: file
-          source_path: /run/secrets/vertex_access_token
     services:
       main:
         runtime_id: stability-test-main
@@ -161,29 +128,16 @@ profiles:
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
         source:
-          source_type: env
-          source_path: OPEN_ROUTER_API_KEY
+          source_type: infisical
+          source_path: OPENROUTER_API_KEY
       - logical_name: llm.glm.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: LLM_GLM_API_KEY
       - logical_name: llm.gemini.api_key
         source:
-          source_type: env
+          source_type: infisical
           source_path: GEMINI_API_KEY
-      # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
-      # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
-      # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
-      # boundary posts Authorization: Bearer <value>, so the resolved VALUE is a
-      # short-lived OAuth access token (NOT the raw ADC JSON). source_type=file →
-      # the ref resolves to the mounted token FILE; the operator/bootstrap mints
-      # the token from ADC (`gcloud auth application-default print-access-token`)
-      # and refreshes the file (tokens expire ~1h). The token VALUE is never
-      # committed — only the ref name and the in-container path live here.
-      - logical_name: llm.vertex.access_token
-        source:
-          source_type: file
-          source_path: /run/secrets/vertex_access_token
     services:
       main:
         runtime_id: judge-main

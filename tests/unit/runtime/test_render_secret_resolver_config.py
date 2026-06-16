@@ -28,14 +28,14 @@ def _resolver_config_payload() -> dict[str, object]:
             {
                 "logical_name": "llm.openrouter.api_key",
                 "source": {
-                    "source_type": "env",
-                    "source_path": "OPEN_ROUTER_API_KEY",
+                    "source_type": "infisical",
+                    "source_path": "OPENROUTER_API_KEY",
                 },
             },
             {
                 "logical_name": "llm.glm.api_key",
                 "source": {
-                    "source_type": "env",
+                    "source_type": "infisical",
                     "source_path": "LLM_GLM_API_KEY",
                 },
             },
@@ -66,8 +66,8 @@ def test_render_secret_resolver_config_from_lane_overlay_json(tmp_path: Path) ->
         "llm.openrouter.api_key",
         "llm.glm.api_key",
     ]
-    assert config.mappings[0].source.source_type == "env"
-    assert config.mappings[0].source.source_path == "OPEN_ROUTER_API_KEY"
+    assert config.mappings[0].source.source_type == "infisical"
+    assert config.mappings[0].source.source_path == "OPENROUTER_API_KEY"
     assert stat.S_IMODE(target.stat().st_mode) == stat.S_IRUSR | stat.S_IWUSR
 
 

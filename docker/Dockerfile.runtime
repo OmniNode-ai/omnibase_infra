@@ -72,6 +72,7 @@
 ARG PYTHON_VERSION=3.12
 # Pin uv version for reproducible builds (must match CI: .github/workflows/*.yml)
 ARG UV_VERSION=0.6.14
+ARG CODEX_CLI_VERSION=0.140.0
 
 # ============================================================================
 # uv Binary Stage - Named stage so COPY --from can reference it
@@ -81,6 +82,16 @@ ARG UV_VERSION=0.6.14
 # this limitation. The ARG declarations above are visible here because
 # they appear before any FROM directive.
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
+
+# ============================================================================
+# Codex CLI Stage - OAuth-backed terminal delegation
+# ============================================================================
+FROM node:22-bookworm-slim AS node-bin
+
+ARG CODEX_CLI_VERSION
+
+RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+    && codex --version
 
 # ============================================================================
 # Builder Stage - Install dependencies with uv
@@ -481,6 +492,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     # Add virtual environment to PATH
     PATH="/app/.venv/bin:$PATH" \
+    # Codex CLI reads OAuth state from the runtime user's home directory.
+    HOME=/home/omniinfra \
+    CODEX_HOME=/home/omniinfra/.codex \
     # Python path for module resolution
     PYTHONPATH=/app/src \
     # Workspace root used by ONEX probe and repo-sync nodes inside the runtime
@@ -537,6 +551,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # checks. Keep uv in the final image as an explicit runtime tool.
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
+# Headless Codex delegation uses OAuth state mounted at /home/omniinfra/.codex.
+# The CLI itself is baked into the image so runtime escalation does not depend
+# on a host binary being present inside the container.
+COPY --from=node-bin /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-bin /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
+    && codex --version
+
 # Security: upgrade setuptools in the runtime base image to clear CVE-2025-47273.
 # The builder venv already has the patched wheel. Copy it into system
 # site-packages instead of fetching again from the runtime stage, which keeps
@@ -591,7 +613,11 @@ RUN chmod +x /app/entrypoint-runtime.sh
 # Avoid a recursive chown over /app here: the venv and copied artifacts already
 # preserve ownership at COPY time, and the recursive walk can dominate Docker
 # builds on the large runtime image.
-RUN install -d -o omniinfra -g omniinfra /app/logs /app/data /app/tmp
+RUN install -d -o omniinfra -g omniinfra \
+    /app/logs \
+    /app/data \
+    /app/tmp \
+    /home/omniinfra/.codex
 
 # Start as root only for entrypoint volume bootstrap. The entrypoint repairs
 # mounted runtime volumes, then re-execs itself as omniinfra before schema

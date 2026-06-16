@@ -144,7 +144,7 @@ models:
     provider: openrouter
     transport: http
     base_url_env: LLM_OPENROUTER_URL
-    api_key_env: OPEN_ROUTER_API_KEY
+    api_key_env: OPENROUTER_API_KEY
     capabilities:
       - code_generation
       - reasoning
