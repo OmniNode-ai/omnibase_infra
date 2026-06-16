@@ -40,6 +40,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _assert_is_ownership_query,
     _build_topic_migration_executor_dependencies,
@@ -442,7 +443,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             local_node_names=frozenset({contract.name})
         )
         resolver = ServiceHandlerResolver()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         with patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=HandlerWithDispatchPort,
@@ -494,7 +495,7 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             local_node_names=frozenset({contract.name})
         )
         resolver = ServiceHandlerResolver()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         with patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=HandlerWithOptionalDispatchPort,

@@ -47,6 +47,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_core.models.notifications import ModelStateTransitionNotification
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import (
     ModelTransitionNotificationOutboxConfig,
     ModelTransitionNotificationOutboxMetrics,
@@ -101,7 +102,7 @@ def mock_publisher() -> AsyncMock:
     Returns an AsyncMock simulating a notification publisher interface
     with publish() and publish_batch() methods.
     """
-    publisher = AsyncMock()
+    publisher = AsyncMock(spec=ProtocolEventBusLike)
     publisher.publish = AsyncMock(return_value=None)
     publisher.publish_batch = AsyncMock(return_value=None)
     return publisher
@@ -1492,7 +1493,7 @@ def mock_dlq_publisher() -> AsyncMock:
     Returns an AsyncMock simulating a DLQ notification publisher interface
     for dead letter queue functionality.
     """
-    publisher = AsyncMock()
+    publisher = AsyncMock(spec=ProtocolEventBusLike)
     publisher.publish = AsyncMock(return_value=None)
     return publisher
 

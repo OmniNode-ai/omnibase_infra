@@ -31,6 +31,7 @@ from omnibase_infra.models.projection.model_cursor_contract import ModelCursorCo
 from omnibase_infra.models.projection.model_projection_contract import (
     ModelProjectionContract,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.freshness_monitor import ServiceFreshnessMonitor
 
 # ---------------------------------------------------------------------------
@@ -163,7 +164,7 @@ class TestDegradationEvent:
         async def query(table: str, field: str) -> datetime:
             return stale_ts
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
         monitor = _make_monitor((contract,), query, event_bus=bus)
         await monitor.run_once()
@@ -217,7 +218,7 @@ class TestRecoveryEvent:
             call_count += 1
             return stale_ts if call_count == 1 else fresh_ts
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
         monitor = _make_monitor((contract,), query, event_bus=bus)
 

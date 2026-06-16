@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from omnibase_infra.runtime.registry.registry_event_bus_binding import (
+    RegistryEventBusBinding,
+)
+
 
 def test_wire_default_handlers_registers_core_handlers() -> None:
     """Test that wire_default_handlers registers the core handlers (no intent)."""
@@ -23,7 +27,7 @@ def test_wire_default_handlers_registers_core_handlers() -> None:
         "mcp",
     ]
 
-    mock_event_bus_registry = MagicMock()
+    mock_event_bus_registry = MagicMock(spec=RegistryEventBusBinding)
     mock_event_bus_registry.is_registered.return_value = False
     mock_event_bus_registry.list_bus_kinds.return_value = ["inmemory"]
 
@@ -54,7 +58,7 @@ def test_wire_default_handlers_returns_expected_structure() -> None:
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = ["http", "db"]
 
-    mock_event_bus_registry = MagicMock()
+    mock_event_bus_registry = MagicMock(spec=RegistryEventBusBinding)
     mock_event_bus_registry.is_registered.return_value = False
     mock_event_bus_registry.list_bus_kinds.return_value = ["inmemory"]
 
@@ -154,7 +158,7 @@ def test_wire_default_handlers_includes_inmemory_event_bus() -> None:
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = ["http"]
 
-    mock_event_bus_registry = MagicMock()
+    mock_event_bus_registry = MagicMock(spec=RegistryEventBusBinding)
     mock_event_bus_registry.is_registered.return_value = False
     mock_event_bus_registry.list_bus_kinds.return_value = [EVENT_BUS_INMEMORY]
 

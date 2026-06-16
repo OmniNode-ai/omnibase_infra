@@ -31,6 +31,7 @@ from omnibase_infra.models.health.model_runtime_health_check_event import (
 from omnibase_infra.models.health.model_runtime_health_dimension import (
     ModelRuntimeHealthDimension,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -395,7 +396,7 @@ class TestRunOnceWithKafka:
             [live_group, stale_empty_group],
             empty_groups={stale_empty_group},
         )
-        bus = MagicMock()
+        bus = MagicMock()  # transport-mock-ok: needs get_consumer_groups() duck-typed extension not in ProtocolEventBusLike
         bus.get_consumer_groups.return_value = {
             (topic, "runtime.projection.consume.v1"): live_group
         }
@@ -468,7 +469,7 @@ class TestRunOnceWithKafka:
 class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emits_to_event_bus(self):
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         manifest = _make_manifest()
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=bus, bootstrap_servers="", boot_grace_seconds=0.0
@@ -488,7 +489,7 @@ class TestEventEmission:
 
     @pytest.mark.asyncio
     async def test_emission_failure_does_not_crash(self):
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         bus.publish_envelope.side_effect = RuntimeError("kafka down")
         manifest = _make_manifest()
         monitor = ServiceRuntimeHealthMonitor(
@@ -621,7 +622,7 @@ class TestBootGracePeriod:
 
     @pytest.mark.asyncio
     async def test_start_anchors_boot_grace_timer(self):
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=mock_bus,
             bootstrap_servers="",
@@ -641,7 +642,7 @@ class TestBootGracePeriod:
     @pytest.mark.asyncio
     async def test_emit_suppressed_during_grace(self):
         """_emit() must not call publish_envelope while inside the grace window."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=mock_bus,
             boot_grace_seconds=9999.0,  # effectively infinite
@@ -657,7 +658,7 @@ class TestBootGracePeriod:
     @pytest.mark.asyncio
     async def test_emit_fires_after_grace_expires(self):
         """_emit() must call publish_envelope once the grace window has passed."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=mock_bus,
             boot_grace_seconds=0.0,  # grace already expired at first emit

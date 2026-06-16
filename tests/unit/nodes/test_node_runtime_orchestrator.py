@@ -33,7 +33,9 @@ async def test_boot_sequence_ordering() -> None:
         side_effect=lambda: call_order.append("registry")
     )
     mock_node_graph = AsyncMock(side_effect=lambda: call_order.append("graph"))
-    mock_event_bus_wiring = AsyncMock(side_effect=lambda: call_order.append("wiring"))
+    mock_event_bus_wiring = AsyncMock(  # transport-mock-ok: BootStep callable (Callable[[], Awaitable[None]]), not a bus surface
+        side_effect=lambda: call_order.append("wiring")
+    )
 
     handler = HandlerRuntimeLifecycle(
         MagicMock(),
@@ -65,7 +67,7 @@ async def test_fail_fast_on_step_failure() -> None:
     mock_contract_loader = AsyncMock(side_effect=RuntimeError("scan failed"))
     mock_contract_registry = AsyncMock()
     mock_node_graph = AsyncMock()
-    mock_event_bus_wiring = AsyncMock()
+    mock_event_bus_wiring = AsyncMock()  # transport-mock-ok: event_bus_wiring is a BootStep callable (Callable[[], Awaitable[None]]), not an event bus surface
 
     handler = HandlerRuntimeLifecycle(
         MagicMock(),

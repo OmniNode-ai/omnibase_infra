@@ -24,6 +24,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
+
 pytestmark = pytest.mark.integration
 
 
@@ -135,7 +137,7 @@ class TestPluginWireDispatchersNoDuplicateRegistration:
 
         config = ModelDomainPluginConfig(
             container=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             correlation_id=uuid4(),
             input_topic="onex.evt.platform.node-introspection.v1",
             output_topic="onex.evt.platform.node-registration-accepted.v1",

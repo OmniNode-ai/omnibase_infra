@@ -44,6 +44,7 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec 
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 # ==============================================================================
 # Skip conditions
@@ -188,7 +189,8 @@ class TestRewardBinderKafkaIntegration:
     async def test_publish_failure_propagates(self) -> None:
         """Kafka publish failure propagates -- not swallowed silently."""
         broken_publisher = AsyncMock(
-            side_effect=ConnectionError("Kafka unavailable for test")
+            spec=ProtocolEventBusLike,
+            side_effect=ConnectionError("Kafka unavailable for test"),
         )
         handler = HandlerRewardBinder(
             container=_FakeContainer(),  # type: ignore[arg-type]

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
     wire_from_manifest,
@@ -94,7 +95,7 @@ class TestWireFromManifestCallsSubscribe:
 
         # Mock event_bus with async subscribe that returns an async unsubscribe callable
         unsubscribe = AsyncMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=unsubscribe)
 
         with patch(
@@ -123,7 +124,7 @@ class TestWireFromManifestCallsSubscribe:
         engine = MessageDispatchEngine()
 
         unsubscribe = AsyncMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=unsubscribe)
 
         with patch(
@@ -144,7 +145,7 @@ class TestWireFromManifestCallsSubscribe:
         engine = MessageDispatchEngine()
 
         unsubscribe = AsyncMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=unsubscribe)
 
         with patch(
@@ -185,7 +186,7 @@ class TestWireFromManifestCallsSubscribe:
         engine = MessageDispatchEngine()
 
         unsubscribe = AsyncMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=unsubscribe)
 
         with patch(
@@ -235,7 +236,7 @@ class TestSubscribeCallbackRoutesToDispatchEngine:
             captured_callbacks.append(kwargs.get("on_message"))
             return AsyncMock()
 
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(side_effect=fake_subscribe)
 
         with patch(

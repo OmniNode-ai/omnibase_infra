@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -92,7 +93,7 @@ async def test_async_pre_resolution_succeeds_when_sync_raises_runtime_error() ->
     )
     container.get_service_async = AsyncMock(return_value=resolved_instance)
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
 
     dispatch_engine = MagicMock()
@@ -164,7 +165,7 @@ async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
     container.get_service = MagicMock(side_effect=ServiceResolutionError("sync miss"))
     container.get_service_async = AsyncMock(side_effect=ServiceResolutionError("miss"))
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
     dispatch_engine = MagicMock()
     dispatch_engine._routes = {}

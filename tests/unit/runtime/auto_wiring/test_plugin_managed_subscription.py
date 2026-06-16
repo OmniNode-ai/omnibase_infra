@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
     wire_from_manifest,
@@ -91,7 +92,7 @@ class TestPluginManagedSkipsSubscription:
         )
         manifest = ModelAutoWiringManifest(contracts=(contract,))
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(
@@ -112,7 +113,7 @@ class TestPluginManagedSkipsSubscription:
         contract = _contract(plugin_managed=True)
         manifest = ModelAutoWiringManifest(contracts=(contract,))
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(
@@ -132,7 +133,7 @@ class TestPluginManagedSkipsSubscription:
         contract = _contract(plugin_managed=True)
         manifest = ModelAutoWiringManifest(contracts=(contract,))
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(
@@ -154,7 +155,7 @@ class TestPluginManagedSkipsSubscription:
         contract = _contract(subscribe_topics=(topic,), plugin_managed=False)
         manifest = ModelAutoWiringManifest(contracts=(contract,))
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(
@@ -184,7 +185,7 @@ class TestPluginManagedSkipsSubscription:
             contracts=(managed_contract, normal_contract)
         )
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(
@@ -220,7 +221,7 @@ class TestPluginManagedSkipsSubscription:
             contracts=(managed_contract, normal_contract)
         )
         engine = MessageDispatchEngine()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
         with patch(

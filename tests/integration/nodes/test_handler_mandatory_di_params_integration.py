@@ -14,6 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
+
 pytestmark = [pytest.mark.integration]
 
 
@@ -62,7 +64,7 @@ def test_handler_runtime_error_triage_constructable_with_event_bus() -> None:
         HandlerRuntimeErrorTriage,
     )
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     handler = HandlerRuntimeErrorTriage(event_bus=event_bus)
     assert handler is not None
 

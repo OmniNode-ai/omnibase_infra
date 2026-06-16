@@ -112,6 +112,7 @@ def _make_envelope(payload: object) -> object:
     return envelope
 
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
 
 
@@ -128,7 +129,7 @@ class TestHandleAsyncPreference:
     @pytest.mark.asyncio
     async def test_handle_async_called_when_present(self) -> None:
         """Dispatch callback calls handle_async, not handle, when handle_async exists."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         handler = _HandlerWithHandleAsync(bus=mock_bus)
 
         payload_obj = {
@@ -158,7 +159,7 @@ class TestHandleAsyncPreference:
     @pytest.mark.asyncio
     async def test_side_effect_publishes_execute(self) -> None:
         """Bus.publish inside handle_async is actually called (not dropped)."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         handler = _HandlerWithHandleAsync(bus=mock_bus)
 
         payload_obj = {
@@ -207,7 +208,7 @@ class TestHandleAsyncPreference:
                     await self._bus.publish(topic=topic, key=None, value=b"{}")
                 return {}
 
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         handler = _MultiPublishHandler(bus=mock_bus)
 
         payload_obj = {}

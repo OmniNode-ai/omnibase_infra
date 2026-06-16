@@ -22,6 +22,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.emit_daemon.topics import TOPIC_BASELINES_COMPUTED
 from omnibase_infra.services.observability.baselines.models.model_batch_compute_baselines_result import (
     ModelBatchComputeBaselinesResult,
@@ -332,7 +333,7 @@ class TestServiceBatchComputeBaselines:
         # _emit_snapshot reads back rows via conn.fetch; return empty lists
         conn.fetch = AsyncMock(return_value=[])
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.publish_envelope = AsyncMock()
 
         batch = ServiceBatchComputeBaselines(
@@ -370,7 +371,7 @@ class TestServiceBatchComputeBaselines:
 
         conn.execute = AsyncMock(side_effect=execute_side_effect)
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.publish_envelope = AsyncMock()
 
         batch = ServiceBatchComputeBaselines(
