@@ -1081,7 +1081,9 @@ class TestDockerComposeProfiles:
             '{"logical_name":"llm.glm.api_key",'
             '"source":{"source_path":"LLM_GLM_API_KEY","source_type":"env"}},'
             '{"logical_name":"llm.gemini.api_key",'
-            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}}]}'
+            '"source":{"source_path":"GEMINI_API_KEY","source_type":"env"}},'
+            '{"logical_name":"llm.anthropic.api_key",'
+            '"source":{"source_path":"ANTHROPIC_API_KEY","source_type":"env"}}]}'
         )
         _secret_resolver_config_path = "/app/data/delegation/secret_resolver.yaml"
         env = os.environ.copy()

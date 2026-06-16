@@ -268,3 +268,7 @@ def test_judge_secret_refs_are_rendered_from_runtime_policy() -> None:
             "source_type": "env",
             "source_path": "LLM_GLM_API_KEY",
         }
+        assert mappings["llm.anthropic.api_key"] == {
+            "source_type": "env",
+            "source_path": "ANTHROPIC_API_KEY",
+        }

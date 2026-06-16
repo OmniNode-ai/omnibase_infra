@@ -35,6 +35,10 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      - logical_name: llm.anthropic.api_key
+        source:
+          source_type: env
+          source_path: ANTHROPIC_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
@@ -103,6 +107,10 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      - logical_name: llm.anthropic.api_key
+        source:
+          source_type: env
+          source_path: ANTHROPIC_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
@@ -171,6 +179,10 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      - logical_name: llm.anthropic.api_key
+        source:
+          source_type: env
+          source_path: ANTHROPIC_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect

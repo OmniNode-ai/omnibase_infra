@@ -117,6 +117,10 @@ def test_judge_runtime_identity_and_secret_refs_are_contract_owned() -> None:
         in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
     assert (
+        "llm.anthropic.api_key"
+        in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert (
         "OPENROUTER_API_KEY"
         not in policy_env["JUDGE_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"]
     )
