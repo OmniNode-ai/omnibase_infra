@@ -59,7 +59,7 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@b4a423efb853fdfdfb821ae6af5c7a694a585e36
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@35fce1b6ae16a8fefec8996e26c1d66a3fb693c2
     with:
       python-version: "3.12"
 
