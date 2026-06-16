@@ -152,7 +152,7 @@ dev = [
     # Test infrastructure dependencies
     "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
     "testcontainers>=4.9.0,<5.0.0",  # Integration testing with real database containers
-    "kafka-python>=2.0.2,<3.0.0",  # Kafka client for integration testing
+    "kafka-python>=2.0.2,<4.0.0",  # Kafka client for integration testing
     "pytest-httpserver>=1.1.0,<2.0.0",  # Local mock HTTP server for integration tests
 
     # Additional type stubs for better mypy coverage
