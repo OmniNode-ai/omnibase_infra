@@ -30,9 +30,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13096: identity regenerated after adding the 'delegate' onex.cli
-    # entry point to pyproject.toml, merged with the 'skill' entry point from
-    # OMN-13097 (both digests bind pyproject.toml + uv.lock; same mechanical
-    # regeneration OMN-13094 did for the advanced core pin).
-    assert lock["identity_digest"] == "efc067283a47eb66bfae03322e966b0c"
-    assert lock["shared_env_digest"] == "215aa5ffa92e228bf703615d"
+    # OMN-13187: identity regenerated after the dependency refresh changed the
+    # runner image lock binding inputs.
+    assert lock["identity_digest"] == "ed3959f72f344a14f60e2923c1e1f814"
+    assert lock["shared_env_digest"] == "597e3b7b1166f8097fc725e3"

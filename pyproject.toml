@@ -49,7 +49,7 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.137.0",
+    "fastapi>=0.120.1,<0.138.0",
     "uvicorn>=0.32.0,<0.50.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
@@ -75,7 +75,7 @@ dependencies = [
     # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
-    "cryptography>=46.0.3,<49.0.0",
+    "cryptography>=46.0.3,<50.0.0",
     "sigstore>=4.0.0,<5.0.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
@@ -152,7 +152,7 @@ dev = [
     # Test infrastructure dependencies
     "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
     "testcontainers>=4.9.0,<5.0.0",  # Integration testing with real database containers
-    "kafka-python>=2.0.2,<3.0.0",  # Kafka client for integration testing
+    "kafka-python>=2.0.2,<4.0.0",  # Kafka client for integration testing
     "pytest-httpserver>=1.1.0,<2.0.0",  # Local mock HTTP server for integration tests
 
     # Additional type stubs for better mypy coverage
