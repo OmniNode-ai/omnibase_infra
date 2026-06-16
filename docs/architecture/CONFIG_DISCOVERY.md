@@ -1,6 +1,6 @@
 # Config Discovery Architecture
 
-> **Status**: Current | **Last Updated**: 2026-02-19
+> **Status**: Current | **Last Updated**: 2026-06-16
 
 Config discovery is the system that reads ONEX contract YAML files at runtime, extracts which infrastructure transports each node depends on, and prefetches those configuration values from Infisical before the node starts handling requests. This eliminates the need for a sprawling `.env` file listing every config key across every service.
 
@@ -414,6 +414,36 @@ The full resolution order for any config key:
 ```
 
 This means a developer can always override any value by setting the corresponding env var before the service starts, without modifying Infisical.
+
+---
+
+## Controlled-Lane Overlay Behavior (OMN-13070)
+
+Introduced in version 0.10.3. The `ConfigPrefetcher` now distinguishes between controlled and uncontrolled lanes based on the `infisical_required` flag.
+
+### Controlled lanes (`infisical_required=True`)
+
+On controlled lanes (production, stability-test), Infisical is the authoritative config store. The precedence rules are:
+
+1. **Infisical value wins** over any ambient environment variable of the same key.
+2. When Infisical returns `None` for a key (the key is absent from the project), the ambient environment variable is used as a **declared bootstrap fallback** — but only if the key is present, and an `INFO`-level provenance log line is emitted identifying that the value came from ambient env rather than the controlled store.
+3. A key missing from both Infisical and ambient env is reported as an error in `ModelPrefetchResult.errors` and is not silently dropped.
+
+This behavior ensures that a runtime value that was changed in Infisical takes effect immediately on the next deployment, without the operator needing to also update `.env` files.
+
+### Uncontrolled lanes (`infisical_required=False`, the default)
+
+The legacy behavior is preserved for local development and CI:
+
+- Keys already present in `os.environ` are skipped; the ambient value is used directly.
+- Missing keys are logged as warnings and skipped — they are not errors.
+- This allows local development to work identically to the pre-Infisical `.env`-based approach.
+
+### Project-namespace isolation (OMN-12987)
+
+Multi-lane deployments (`dev`, `stability-test`, `prod`) each run under a distinct Docker Compose project name (e.g., `omnibase-infra`, `omnibase-infra-stability-test`, `omnibase-infra-prod`). This project-namespace isolation prevents container-name collisions when multiple lanes run on the same host — each lane's `forward-migration`, `postgres`, and `omninode-runtime` containers carry the project prefix and do not interfere with each other.
+
+The `deploy-runtime.sh` script and the `forward-migration` service both use `COMPOSE_PROJECT_NAME` to scope their `docker compose wait` and migration sentinel checks. Do not override `COMPOSE_PROJECT_NAME` without also updating the waiter configuration.
 
 ---
 

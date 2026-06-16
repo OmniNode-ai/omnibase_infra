@@ -55,7 +55,36 @@ When creating operational documentation:
 3. Provide concrete examples and recommended settings
 4. Link to related source code and documentation
 
+## Recently Fixed Runtime Defects
+
+Quick lookup for defects fixed on `dev` since 2026-06-01. If a deployed runtime version predates the PR listed, apply the update to resolve the symptom.
+
+### Dispatch savings-consumer typed-decode failure (OMN-13149)
+
+**Symptom**: The `savings-estimation-consumer` service logs decode errors for `ModelSavingsEstimationEvent` payloads and silently drops events; the savings projection table stops updating.
+
+**Root cause**: The consumer used an untyped `dict` decode path for the event payload instead of the declared Pydantic model. A schema change to `ModelSavingsEstimationEvent` added a required field that the untyped path did not populate, causing a `ValidationError` at projection time.
+
+**Fix**: PR merged to `dev`. The consumer now decodes through the typed Pydantic model. Existing rows in `savings_estimation_projection` are not back-filled — only events received after the fix are processed correctly.
+
+**Verification**: After deploying the fix, publish a synthetic `ModelSavingsEstimationEvent` to the savings topic and confirm the `savings_estimation_projection` table receives a new row within the consumer lag window.
+
+---
+
+### Runtime executor `operation_match` import-skip failure (OMN-13141)
+
+**Symptom**: The runtime executor silently skips handlers whose contracts declare `routing_strategy: operation_match`. The handler is loaded but never invoked; the operation returns an empty result without error.
+
+**Root cause**: The `operation_match` routing path imported `ModelHandlerRoutingEntry` from `omnibase_core.models.routing` but the live contracts declared `ModelHandlerRoutingEntry` from `omnibase_infra.models.routing` — two different classes. The isinstance check failed silently, the operation was not matched, and the handler was skipped.
+
+**Fix**: PR merged to `dev` (commit `b56a3ffa3`). The executor now imports from the canonical infra routing model. OCC #2620 was armed to propagate the fix.
+
+**Verification**: After deploying, trigger an `operation_match`-routed handler (e.g., `register_node` on `node_registry_effect`) and confirm the handler is invoked and the response contains the expected fields.
+
+---
+
 ## Related Documentation
 
 - [Architecture Documentation](../architecture/)
 - [Validation Documentation](../validation/)
+- [Message Dispatch Engine — terminal correlator](../architecture/MESSAGE_DISPATCH_ENGINE.md#terminal-correlator-pattern-omn-13118)

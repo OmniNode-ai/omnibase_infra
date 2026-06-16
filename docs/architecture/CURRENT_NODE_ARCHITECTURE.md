@@ -321,7 +321,7 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 | `node_validation_ledger_projection_compute` | COMPUTE | `ModelEventMessage` | `ModelValidationLedgerEntry` |
 | `node_validation_orchestrator` | ORCHESTRATOR | `ModelPatternCandidate` | `ModelValidationPlan` |
 
-**Total: 29 nodes** across 4 archetypes.
+**Total: 29 documented nodes** across 4 archetypes. The live repository contains 103 `contract.yaml` files across 106 node directories; the additional nodes are in functional sub-packages (e.g., `services/`, `projections/`) not covered in the inventory sections above. Section 3 covers the primary canonical nodes; the full census is maintained by `scripts/validate.py contracts`.
 
 ---
 
@@ -348,6 +348,28 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 
 ---
 
+## Vendored Node Migration Pattern (OMN-13124)
+
+Nodes that own projection tables ship their SQL migrations under:
+
+```text
+src/omnimarket/nodes/<node>/migrations/*.sql
+```
+
+These must be vendored into the infra repo at:
+
+```text
+docker/migrations/forward/nodes/<node>/
+```
+
+via `scripts/sync-node-migrations.sh`. The forward-migration runner discovers and applies vendored node migrations under namespaced IDs (`node:<node>:<file>`) so a clean redeploy re-creates all projection tables without manual intervention.
+
+The `node-migration-sync` CI gate (`.github/workflows/node-migration-sync.yml`) enforces this on every PR: it re-runs the vendor `--check` against the current omnimarket `dev` tip. An un-vendored migration fails CI before merge.
+
+See the [vendored-node-migrations runbook](../runbooks/vendored-node-migrations.md) for the full procedure.
+
+---
+
 ## Related Documentation
 
 | Topic | Document |
@@ -359,4 +381,5 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 | Dispatcher resilience | [../patterns/dispatcher_resilience.md](../patterns/dispatcher_resilience.md) |
 | Registration walkthrough | [../guides/registration-example.md](../guides/registration-example.md) |
 | Message dispatch engine | [MESSAGE_DISPATCH_ENGINE.md](MESSAGE_DISPATCH_ENGINE.md) |
+| Vendored node migrations | [../runbooks/vendored-node-migrations.md](../runbooks/vendored-node-migrations.md) |
 | Coding standards (authoritative) | [../../CLAUDE.md](../../CLAUDE.md) |
