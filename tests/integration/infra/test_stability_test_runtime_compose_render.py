@@ -577,7 +577,6 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
     assert "llm.openrouter.api_key" in policy_text
     assert "llm.glm.api_key" in policy_text
     assert "llm.gemini.api_key" in policy_text
-    assert "llm.anthropic.api_key" in policy_text
     assert "OPENROUTER_API_KEY" not in policy_text
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
@@ -600,10 +599,6 @@ def test_stability_secret_refs_are_contract_overlay_owned() -> None:
         assert mappings["llm.gemini.api_key"] == {
             "source_type": "env",
             "source_path": "GEMINI_API_KEY",
-        }
-        assert mappings["llm.anthropic.api_key"] == {
-            "source_type": "env",
-            "source_path": "ANTHROPIC_API_KEY",
         }
         assert "OPENROUTER_API_KEY" not in json.dumps(resolver_config)
 

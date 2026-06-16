@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for claude and opencode CLI backend registration in omnibase_infra.
+"""Unit tests for OAuth/headless CLI backend registration in omnibase_infra.
 
 OMN-10137: Register claude and opencode as CLI subprocess backends.
+OMN-13158: Register Codex as the primary headless CLI subprocess backend.
 """
 
 from __future__ import annotations
@@ -58,6 +59,17 @@ def test_cli_agents_tier_contains_claude_cli_model() -> None:
 
 
 @pytest.mark.unit
+def test_cli_agents_tier_contains_codex_cli_model() -> None:
+    tiers_path = (
+        Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
+    )
+    data = yaml.safe_load(tiers_path.read_text())
+    cli_tier = next(t for t in data["tiers"] if t["name"] == "cli_agents")
+    model_ids = [m["id"] for m in cli_tier["models"]]
+    assert model_ids[0] == "codex-cli"
+
+
+@pytest.mark.unit
 def test_cli_agents_tier_contains_opencode_cli_model() -> None:
     tiers_path = (
         Path(__file__).parents[5] / "src/omnibase_infra/configs/routing_tiers.yaml"
@@ -90,6 +102,29 @@ def test_claude_cli_subprocess_unavailable_when_binary_missing() -> None:
     with patch("shutil.which", return_value=None):
         _, status, _ = handler.execute_cli_inference(req)
     assert status == EnumCliBackendStatus.UNAVAILABLE
+
+
+@pytest.mark.unit
+def test_codex_cli_subprocess_resolves_from_request_model() -> None:
+    from omnibase_infra.models.llm.model_llm_inference_request import (
+        ModelLlmInferenceRequest,
+    )
+    from omnibase_infra.models.llm.model_llm_message import ModelLlmMessage
+    from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess import (
+        EnumCliBackendStatus,
+        HandlerLlmCliSubprocess,
+    )
+
+    handler = HandlerLlmCliSubprocess()
+    req = ModelLlmInferenceRequest(
+        base_url="http://localhost:1",
+        messages=[ModelLlmMessage(role="user", content="hi")],
+        model="codex-cli",
+    )
+    with patch("shutil.which", return_value=None):
+        _, status, detail = handler.execute_cli_inference(req)
+    assert status == EnumCliBackendStatus.UNAVAILABLE
+    assert detail == "codex not found on PATH"
 
 
 @pytest.mark.unit

@@ -94,7 +94,6 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "llm.openrouter.api_key",
         "llm.glm.api_key",
         "llm.gemini.api_key",
-        "llm.anthropic.api_key",
         "llm.vertex.access_token",
     }
     assert judge_logical_names == logical_names
