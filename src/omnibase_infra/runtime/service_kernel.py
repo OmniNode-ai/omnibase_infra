@@ -849,6 +849,58 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # 1d. Load overlay config for feature gating (OMN-12634).
+        # Resolves the operator's overlay YAML into a flat key-value dict that is
+        # passed to domain plugins via ModelDomainPluginConfig.overlay_config.
+        # Plugins (e.g. PluginDlq) read their activation flags from this dict
+        # instead of env vars.  Gracefully absent: if the overlay file is not
+        # present the kernel continues without it and plugins that require an
+        # overlay will skip activation silently.
+        _boot_overlay_config: dict[str, str] | None = None
+        try:
+            from pathlib import Path as _Path
+
+            from omnibase_infra.runtime.overlay.boot_overlay import (
+                load_overlay_config as _load_overlay_config,
+            )
+            from omnibase_infra.runtime.overlay.errors import (
+                OverlayNotFoundError as _OverlayNotFoundError,
+            )
+
+            _overlay_path = _Path.home() / ".omnibase" / "overlay.yaml"
+            _overlay_result = _load_overlay_config(
+                overlay_path=_overlay_path,
+                contracts_dir=contracts_dir,
+                require_overlay=False,
+            )
+            if _overlay_result is not None:
+                _boot_overlay_config = dict(_overlay_result.resolved)
+                logger.info(
+                    "Overlay config loaded from %s (%d keys) (correlation_id=%s)",
+                    _overlay_path,
+                    len(_boot_overlay_config),
+                    correlation_id,
+                )
+            else:
+                logger.debug(
+                    "Overlay file absent — running without overlay config "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
+        except _OverlayNotFoundError:
+            logger.debug(
+                "Overlay file not found — running without overlay config "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — graceful degradation; overlay is optional
+            logger.warning(
+                "Failed to load overlay config, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # 2. Load runtime configuration (may raise ProtocolConfigurationError)
         # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
@@ -1990,6 +2042,7 @@ async def bootstrap() -> int:
             node_identity=plugin_node_identity,
             kafka_bootstrap_servers=kafka_bootstrap_servers,
             runtime_profile=kernel_profile.name,
+            overlay_config=_boot_overlay_config,
         )
 
         # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)

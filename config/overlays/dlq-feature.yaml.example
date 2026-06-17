@@ -1,0 +1,30 @@
+# DLQ feature overlay example (OMN-12634)
+#
+# Copy the services.dlq block below into your ~/.omnibase/overlay.yaml
+# to activate the DLQ plugin.  The overlay.yaml must conform to ModelOverlayFile
+# schema (overlay_version: "1.0.0").
+#
+# DLQ keys live under services.dlq so they are cleanly namespaced and do not
+# collide with transport-level keys (postgres.*, kafka.*, etc.).
+#
+# Keys:
+#   DLQ_ENABLED  — Set to "true" to activate PluginDlq at kernel boot.
+#                  Any of "true" / "1" / "yes" (case-insensitive) enables.
+#                  Absent or any other value disables the plugin.
+#   DLQ_DB_URL   — PostgreSQL DSN for the DLQ tracking table.
+#                  Required when DLQ_ENABLED is truthy; kernel raises ValueError
+#                  if enabled without a DSN (fail-fast, no silent default).
+#
+# Example ~/.omnibase/overlay.yaml snippet:
+#
+# overlay_version: "1.0.0"
+# environment: local
+# scope: env
+# transports:
+#   db:
+#     POSTGRES_HOST: localhost
+#     POSTGRES_PORT: "5436"
+# services:
+#   dlq:
+#     DLQ_ENABLED: "true"
+#     DLQ_DB_URL: "postgresql://postgres:secret@localhost:5436/onex_dlq"

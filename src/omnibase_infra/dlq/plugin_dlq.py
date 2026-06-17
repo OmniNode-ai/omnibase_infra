@@ -7,20 +7,30 @@ Wires ServiceDlqTracking (replay history) and ServiceRetryWorker
 (poll-and-retry loop) into the kernel lifecycle via the
 ProtocolDomainPlugin protocol.
 
-Activation:
-    The plugin activates when ``OMNIBASE_INFRA_DLQ_ENABLED`` is set to a
-    truthy value **and** ``OMNIBASE_INFRA_DB_URL`` is available for the
-    DLQ PostgreSQL table.
+Activation (OMN-12634):
+    The plugin activates when ``DLQ_ENABLED`` is set to a truthy value AND
+    ``DLQ_DB_URL`` is present in ``config.overlay_config``.  Both keys are
+    resolved from the contract overlay; environment variables are no longer
+    consulted for feature gating.
+
+    If ``overlay_config`` is ``None`` (kernel not yet overlay-capable) the
+    plugin skips silently.  If ``DLQ_ENABLED`` is truthy but ``DLQ_DB_URL``
+    is absent the plugin raises ``ValueError`` — fail-fast, no silent default.
 
 Lifecycle:
-    1. should_activate() — checks env vars
+    1. should_activate() — reads overlay_config, raises on misconfiguration
     2. initialize() — creates asyncpg pool, initializes ServiceDlqTracking
     3. wire_handlers() — no-op (DLQ has no handlers)
     4. wire_dispatchers() — no-op (DLQ has no dispatch routes)
     5. start_consumers() — starts ServiceRetryWorker as asyncio background task
     6. shutdown() — stops retry worker, shuts down DLQ tracking, closes pool
 
+Overlay keys:
+    DLQ_ENABLED  — "true" / "1" / "yes" (case-insensitive) to activate
+    DLQ_DB_URL   — PostgreSQL DSN for the DLQ tracking table (required when enabled)
+
 Related:
+    - OMN-12634: Move DLQ feature gating from env vars to contract overlay
     - OMN-6601: Wire DLQ + retry worker into kernel lifecycle
     - OMN-1032: PostgreSQL tracking integration
     - OMN-1454: RetryWorker for subscription notification delivery
@@ -30,7 +40,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -72,35 +81,47 @@ class PluginDlq:
         return "DLQ"
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
-        """Activate when DLQ is enabled and DB URL is available."""
-        enabled = (
-            os.environ.get(  # ONEX_FLAG_EXEMPT: activation gate
-                "OMNIBASE_INFRA_DLQ_ENABLED", ""
-            ).lower()
-            in _TRUTHY
-        )
-        self._dsn = os.environ.get(
-            "OMNIBASE_INFRA_DB_URL", ""
-        )  # ONEX_FLAG_EXEMPT: activation gate
+        """Activate when DLQ_ENABLED and DLQ_DB_URL are set in overlay_config.
 
+        Reads activation state exclusively from ``config.overlay_config`` — env
+        vars are never consulted (OMN-12634).
+
+        Returns False when:
+        - ``overlay_config`` is ``None`` (kernel not yet overlay-capable)
+        - ``DLQ_ENABLED`` key is absent or falsy
+
+        Raises ValueError when:
+        - ``DLQ_ENABLED`` is truthy but ``DLQ_DB_URL`` is missing — fail-fast,
+          no silent default.
+        """
+        overlay = getattr(config, "overlay_config", None)
+        if overlay is None:
+            logger.debug(
+                "PluginDlq: overlay_config not present, skipping (correlation_id=%s)",
+                config.correlation_id,
+            )
+            return False
+
+        enabled = overlay.get("DLQ_ENABLED", "").lower() in _TRUTHY
         if not enabled:
             logger.debug(
-                "PluginDlq: OMNIBASE_INFRA_DLQ_ENABLED not set, skipping "
+                "PluginDlq: DLQ_ENABLED not set in overlay, skipping "
                 "(correlation_id=%s)",
                 config.correlation_id,
             )
             return False
 
-        if not self._dsn:
-            logger.warning(
-                "PluginDlq: DLQ enabled but OMNIBASE_INFRA_DB_URL not set, skipping "
-                "(correlation_id=%s)",
-                config.correlation_id,
+        db_url = overlay.get("DLQ_DB_URL", "").strip()
+        if not db_url:
+            raise ValueError(
+                "PluginDlq: DLQ_ENABLED is true in overlay but DLQ_DB_URL is "
+                "missing or empty — set DLQ_DB_URL in the overlay config "
+                f"(correlation_id={config.correlation_id})"
             )
-            return False
 
+        self._dsn = db_url
         logger.info(
-            "PluginDlq: activating (correlation_id=%s)",
+            "PluginDlq: activating from overlay config (correlation_id=%s)",
             config.correlation_id,
         )
         return True
