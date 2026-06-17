@@ -38,8 +38,11 @@ repos:
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
   # exclude — the hook already approves that basename via its internal
   # APPROVED_BASENAMES (check_hardcoded_topics.py), so the path-regex exclude was
-  # a no-op. The 3 remaining kept literals in that file stay covered by the hook's
-  # basename approval; full removal is the A5-full follow-up (OMN-13199).
+  # a no-op.
+  # OMN-13199 (phase A5): topic_constants.py is now fully un-allowlisted from the
+  # local topic-literal gate (check_topic_literals.py) after OMN-13202 deleted its
+  # last TOPIC_* literals. The file holds DLQ builders only and the gate now fails
+  # closed on any reintroduced literal — A5-full is complete.
   - repo: https://github.com/OmniNode-ai/onex_change_control
     rev: 8d7e85bc00e7f1b1306d1cb40949be1ab6e7e91a # pragma: allowlist secret
     hooks:
@@ -455,13 +458,17 @@ repos:
         always_run: true
         stages: [pre-commit]
       # OMN-3254: Topic enum drift check — verify generated enums include all topics
-      # from contracts AND supplementary sources (topic_constants.py)
+      # from contracts and the contract-declarative runtime/topics.yaml manifest.
+      # OMN-13199 (phase A5): dropped the `topic_constants.py` trigger — OMN-13202
+      # emptied generate_topic_enums.py's _DEFAULT_SUPPLEMENTARY_SOURCES, so the
+      # codegen no longer reads that file's AST; re-running the drift check on
+      # topic_constants.py changes was a dead trigger.
       - id: topic-enum-drift-check
         name: Topic Enum Drift Check
         entry: uv run --frozen python scripts/generate_topic_enums.py --check
         language: system
         types_or: [yaml, python]
-        files: (contract.*\.yaml|topic_constants\.py|enums/generated/)
+        files: (contract.*\.yaml|topics\.yaml|enums/generated/)
         pass_filenames: false
         stages: [pre-commit]
       # OMN-3777: Block cloud bus references in source code

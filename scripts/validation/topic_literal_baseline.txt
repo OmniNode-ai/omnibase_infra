@@ -7,9 +7,10 @@
 # exemptions: the TOPIC_SESSION_COORDINATION_SIGNAL and TOPIC_DELEGATE_SKILL_*
 # constants were deleted after the enum codegen was migrated to read the
 # contract-declarative runtime/topics.yaml manifest. topic_constants.py now holds
-# zero TOPIC_* literals (only DLQ builders/format helpers remain). Full
-# un-allowlisting of the file from check_topic_literals.py _EXCLUDED_FILENAMES is
-# tracked separately in OMN-13199 (A5).
+# zero TOPIC_* literals (only DLQ builders/format helpers remain). OMN-13199 (A5)
+# completed the un-allowlisting: topic_constants.py is not in
+# check_topic_literals.py _EXCLUDED_FILENAMES and has no entries in this baseline;
+# the gate fails closed on any reintroduced literal in that file.
 # Total entries: 123 grandfathered
 src/omnibase_infra/cli/git_hook_relay.py:72
 src/omnibase_infra/cli/git_hook_relay.py:74
