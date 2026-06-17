@@ -551,6 +551,18 @@ repos:
         language: system
         pass_filenames: false
         stages: [manual]
+      # OMN-13034 (retro B-6): Lane-boundary attestation gate.
+      # Rejects any staged file that contains lane-boundary attestation language
+      # (markdown lane tables, compose_project declarations, GENERATED_LANE_TABLE
+      # blocks) WITHOUT a same-session 'verified: <date> via <command>' annotation.
+      # Phantom-lane boilerplate is unwritable. See scripts/check_lane_attestation.py.
+      - id: check-lane-attestation
+        name: Lane-boundary attestation requires verified annotation (OMN-13034)
+        entry: uv run --frozen python scripts/check_lane_attestation.py --staged
+        language: system
+        pass_filenames: false
+        types_or: [markdown, yaml]
+        stages: [pre-commit]
       # Skip-token rejection gate (OMN-11412 / OMN-10414)
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
       # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.

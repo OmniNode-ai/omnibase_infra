@@ -3,6 +3,9 @@
 #
 # lane-manifest.yaml — Versioned DESIRED-STATE census for the .201 runtime lanes (OMN-13011).
 #
+# verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
+# (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
+#
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
 # actual lane state:
 #   - volume config drift (OMN-12945 family)
@@ -42,12 +45,9 @@
 # resolved runtime version; absence of a resolved tag relaxes the check to the
 # default pattern (never a hard failure on an unresolvable tag — that is a
 # separate signal, not a census drift).
-
 schema_version: "1.0.0"
-
 # Default image-tag pattern applied to a lane that does not override it.
 default_image_tag_pattern: '.+'
-
 lanes:
   stability-test:
     compose_file: docker/docker-compose.stability-test.yml
@@ -89,7 +89,6 @@ lanes:
       - name: omninode-stability-test-runtime-worker
         kind: service
         replicas: 1
-
   prod:
     compose_file: docker/docker-compose.prod.yml
     compose_project: omnibase-infra-prod
@@ -126,7 +125,6 @@ lanes:
       - name: omninode-prod-runtime-worker
         kind: service
         replicas: 1
-
   judge:
     compose_file: docker/docker-compose.judge.yml
     compose_project: omnibase-infra-judge
@@ -159,7 +157,6 @@ lanes:
       - name: omnimarket-judge-projection-api
         kind: service
         replicas: 1
-
   # The dev lane (compose project `omnibase-infra`, the default infra stack) uses
   # generated compose with non-prefixed container names; its census is the
   # deploy-agent RUNTIME-scope verifier (OMN-12988). The lane manifest treats dev
