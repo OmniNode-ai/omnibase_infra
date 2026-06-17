@@ -63,9 +63,23 @@ _DEFAULT_CONTRACTS_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 _DEFAULT_OUTPUT_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "enums" / "generated"
 
 # Supplementary Python source files containing hardcoded topic constants
-# that are not declared in contract.yaml files (OMN-3254).
-_DEFAULT_SUPPLEMENTARY_SOURCES: tuple[Path, ...] = (
-    _REPO_ROOT / "src" / "omnibase_infra" / "event_bus" / "topic_constants.py",
+# that are not declared in contract.yaml files.
+#
+# Empty since OMN-13202: the former source (the TOPIC_DELEGATE_SKILL_* literals in
+# event_bus/topic_constants.py, scanned via AST) was migrated to the
+# contract-declarative runtime topic manifest below. No remaining Python module
+# holds topic literals that need codegen coverage.
+_DEFAULT_SUPPLEMENTARY_SOURCES: tuple[Path, ...] = ()
+
+# Contract-declarative topic manifests (topics.yaml flat lists) scanned by
+# ContractTopicExtractor.extract_from_skill_manifests(). The runtime manifest
+# mirrors the omnimarket node_delegate_skill_orchestrator published_events so the
+# EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1 members consumed by
+# runtime/service_kernel.py (OMN-11996) are generated from a contract source
+# rather than a Python AST (OMN-13202). omnimarket is not a build dependency of
+# omnibase_infra, so its contract.yaml cannot be read directly in CI.
+_DEFAULT_TOPIC_MANIFEST_ROOTS: tuple[Path, ...] = (
+    _REPO_ROOT / "src" / "omnibase_infra" / "runtime",
 )
 
 # Pattern for stale-file detection (only these may be removed)
@@ -175,8 +189,9 @@ Examples:
         action="store_true",
         default=False,
         help=(
-            "Skip supplementary Python source files (e.g., topic_constants.py). "
-            "By default, these are included to capture hardcoded topic constants."
+            "Skip supplementary Python source files. There are no default "
+            "supplementary sources since OMN-13202; this flag only matters when "
+            "--supplementary-sources is passed explicitly."
         ),
     )
     parser.add_argument(
@@ -187,6 +202,26 @@ Examples:
         help=(
             "Additional Python source files to scan for topic constants. "
             "Overrides the default supplementary sources."
+        ),
+    )
+    parser.add_argument(
+        "--no-manifests",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip contract-declarative topic manifests (topics.yaml). By default "
+            "the runtime topic manifest is scanned so cross-repo terminal topics "
+            "(e.g. delegate-skill) are generated from a contract source."
+        ),
+    )
+    parser.add_argument(
+        "--manifest-roots",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help=(
+            "Directories to scan for topics.yaml manifests. "
+            "Overrides the default manifest roots."
         ),
     )
     return parser
@@ -201,6 +236,7 @@ def _run_generate(
     contracts_root: Path,
     output_dir: Path,
     supplementary_sources: list[Path] | None = None,
+    skill_manifests_roots: list[Path] | None = None,
 ) -> int:
     """
     Generate per-producer enum files.
@@ -217,7 +253,9 @@ def _run_generate(
     try:
         extractor = ContractTopicExtractor()
         entries = extractor.extract_all(
-            contracts_root, supplementary_sources=supplementary_sources
+            contracts_root,
+            supplementary_sources=supplementary_sources,
+            skill_manifests_roots=skill_manifests_roots,
         )
     except RuntimeError as exc:
         # Hard-stop: inconsistent parsed components (parser bug)
@@ -293,6 +331,7 @@ def _run_check(
     contracts_root: Path,
     output_dir: Path,
     supplementary_sources: list[Path] | None = None,
+    skill_manifests_roots: list[Path] | None = None,
 ) -> int:
     """
     Check that generated files are up to date with current contracts.
@@ -309,7 +348,9 @@ def _run_check(
     try:
         extractor = ContractTopicExtractor()
         entries = extractor.extract_all(
-            contracts_root, supplementary_sources=supplementary_sources
+            contracts_root,
+            supplementary_sources=supplementary_sources,
+            skill_manifests_roots=skill_manifests_roots,
         )
     except RuntimeError as exc:
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
@@ -403,7 +444,7 @@ def main() -> int:
         )
         return 3
 
-    # Resolve supplementary sources
+    # Resolve supplementary sources (none by default since OMN-13202).
     supplementary_sources: list[Path] | None = None
     if not args.no_supplementary:
         if args.supplementary_sources is not None:
@@ -411,15 +452,34 @@ def main() -> int:
                 Path(p).resolve() for p in args.supplementary_sources
             ]
         else:
-            # Default supplementary sources (topic_constants.py)
             supplementary_sources = [
                 p for p in _DEFAULT_SUPPLEMENTARY_SOURCES if p.exists()
             ]
 
+    # Resolve contract-declarative topic manifest roots (runtime topics.yaml).
+    skill_manifests_roots: list[Path] | None = None
+    if not args.no_manifests:
+        if args.manifest_roots is not None:
+            skill_manifests_roots = [Path(p).resolve() for p in args.manifest_roots]
+        else:
+            skill_manifests_roots = [
+                p for p in _DEFAULT_TOPIC_MANIFEST_ROOTS if p.exists()
+            ]
+
     if args.generate:
-        return _run_generate(contracts_root, output_dir, supplementary_sources)
+        return _run_generate(
+            contracts_root,
+            output_dir,
+            supplementary_sources,
+            skill_manifests_roots,
+        )
     else:  # args.check
-        return _run_check(contracts_root, output_dir, supplementary_sources)
+        return _run_check(
+            contracts_root,
+            output_dir,
+            supplementary_sources,
+            skill_manifests_roots,
+        )
 
 
 if __name__ == "__main__":

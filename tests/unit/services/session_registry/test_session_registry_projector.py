@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_SESSION_COORDINATION_SIGNAL,
-)
+from omnibase_infra.enums.generated.enum_omniclaude_topic import EnumOmniclaudeTopic
 from omnibase_infra.services.session_registry.enum_session_phase import EnumSessionPhase
 from omnibase_infra.services.session_registry.enum_session_registry_status import (
     EnumSessionRegistryStatus,
@@ -184,5 +182,6 @@ class TestProjectorConstants:
         assert CONSUMER_GROUP == "omnibase_infra.session_registry.project.v1"
 
     def test_coordination_topic_follows_onex_naming(self) -> None:
-        assert TOPIC_SESSION_COORDINATION_SIGNAL.startswith("onex.evt.")
-        assert ".v1" in TOPIC_SESSION_COORDINATION_SIGNAL
+        topic = EnumOmniclaudeTopic.EVT_SESSION_COORDINATION_SIGNAL_V1.value
+        assert topic.startswith("onex.evt.")
+        assert ".v1" in topic

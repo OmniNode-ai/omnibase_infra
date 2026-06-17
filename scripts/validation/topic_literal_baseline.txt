@@ -3,12 +3,14 @@
 # Format: <repo-relative-path>:<lineno>
 # DO NOT add new entries here — fix violations instead.
 #
-# The ONLY exception is the documented "OMN-13195 kept topic_constants.py
-# literals" block at the bottom of this file: those 3 lines replace the former
-# whole-file exemption of topic_constants.py with a narrow per-line allowlist and
-# are removed entirely by the A5-full follow-up (OMN-13202 → OMN-13199). They are
-# intentional, not grandfathered debt.
-# Total entries: 123 grandfathered + 3 OMN-13195 kept-constant exemptions
+# OMN-13202 removed the 3 "OMN-13195 kept topic_constants.py literals" per-line
+# exemptions: the TOPIC_SESSION_COORDINATION_SIGNAL and TOPIC_DELEGATE_SKILL_*
+# constants were deleted after the enum codegen was migrated to read the
+# contract-declarative runtime/topics.yaml manifest. topic_constants.py now holds
+# zero TOPIC_* literals (only DLQ builders/format helpers remain). Full
+# un-allowlisting of the file from check_topic_literals.py _EXCLUDED_FILENAMES is
+# tracked separately in OMN-13199 (A5).
+# Total entries: 123 grandfathered
 src/omnibase_infra/cli/git_hook_relay.py:72
 src/omnibase_infra/cli/git_hook_relay.py:74
 src/omnibase_infra/cli/infra_test/introspect.py:25
@@ -129,17 +131,3 @@ src/omnibase_infra/tui/consumers/consumer_status.py:42
 src/omnibase_infra/runtime/service_kernel.py:2015
 src/omnibase_infra/runtime/service_kernel.py:2016
 src/omnibase_infra/validation/demo_loop_gate.py:76
-#
-# --- OMN-13195: kept topic_constants.py literals (narrowed from whole-file) ---
-# These 3 literals are the only ones remaining in topic_constants.py after the 13
-# orphaned TOPIC_DELEGATION_* constants were deleted. They are unavoidable today:
-#   - TOPIC_SESSION_COORDINATION_SIGNAL: live consumer omnimarket
-#     node_emit_daemon/contract.yaml (publish_topics).
-#   - TOPIC_DELEGATE_SKILL_COMPLETED / TOPIC_DELEGATE_SKILL_FAILED: AST source for
-#     generate_topic_enums.py -> EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1,
-#     consumed at bootstrap by runtime/service_kernel.py (OMN-11996).
-# Removed by the A5-full follow-up (OMN-13202 migrates the codegen to read
-# contracts; OMN-13199 then fully un-allowlists topic_constants.py).
-src/omnibase_infra/event_bus/topic_constants.py:446
-src/omnibase_infra/event_bus/topic_constants.py:472
-src/omnibase_infra/event_bus/topic_constants.py:481

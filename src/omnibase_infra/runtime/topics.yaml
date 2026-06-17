@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Topics emitted by the ONEX runtime kernel on behalf of node orchestrators.
+# Scanned by ContractTopicExtractor.extract_from_skill_manifests().
+#
+# These are the terminal-result topics that runtime/service_kernel.py wires a
+# DispatchResultApplier for (OMN-11996). The canonical owner of these topics is
+# the omnimarket node_delegate_skill_orchestrator contract.yaml (published_events
+# success/failure). omnimarket is NOT a build dependency of omnibase_infra, so the
+# enum generator cannot read that contract directly; this manifest is the in-repo,
+# CI-available contract-declarative mirror used to generate
+# EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1, which service_kernel imports at
+# bootstrap. Mirrors the cross-producer topic declarations already in
+# services/topics.yaml (e.g. omniintelligence/omnimemory/omninode topics).
+#
+# This replaces the former AST-scan source (the TOPIC_DELEGATE_SKILL_* and
+# TOPIC_SESSION_COORDINATION_SIGNAL literals in event_bus/topic_constants.py) per
+# OMN-13202. Keep these strings in sync with their owning omnimarket contracts:
+#   - delegate-skill-*: node_delegate_skill_orchestrator published_events
+#   - session-coordination-signal: node_emit_daemon publish_topics (consumed by
+#     the infra session_registry projector).
+#
+# Ticket: OMN-13202 (follow-up to OMN-13195; unblocks OMN-13199)
+topics:
+  - onex.evt.omnimarket.delegate-skill-completed.v1
+  - onex.evt.omnimarket.delegate-skill-failed.v1
+  - onex.evt.omniclaude.session-coordination-signal.v1
