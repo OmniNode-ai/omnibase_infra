@@ -8,7 +8,7 @@ three categories of performance requirements defined in
 
 1. Memory per 10 nodes < 200 MB
    - 10 EventBusInmemory node instances
-   - 10 ModelOnexEnvelope objects (full production payload)
+   - 10 ModelEventEnvelope objects (full production payload)
    - 10 ModelNodeIdentity objects
 
 2. Envelope throughput > 100 envelopes/sec
@@ -22,7 +22,7 @@ three categories of performance requirements defined in
    - Handler call overhead < 1 ms (trivial no-op)
 
 Implementation Notes:
-    All benchmarks use in-memory components (EventBusInmemory, ModelOnexEnvelope)
+    All benchmarks use in-memory components (EventBusInmemory, ModelEventEnvelope)
     so no external infrastructure is required. Results are deterministic and
     reproducible in CI.
 
@@ -55,11 +55,12 @@ import time
 import tracemalloc
 from datetime import UTC, datetime
 from statistics import mean, median
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
-from omnibase_core.models.core.model_onex_envelope import ModelOnexEnvelope
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
@@ -94,23 +95,23 @@ MAX_HANDLER_OVERHEAD_MS: float = 1.0  # Trivial no-op handler
 
 
 def _make_envelope(
-    source_node: str = "benchmark.node.effect",
+    source_tool: str = "benchmark.node.effect",
     operation: str = "benchmark_operation",
-) -> ModelOnexEnvelope:
-    """Construct a production-representative ModelOnexEnvelope."""
-    return ModelOnexEnvelope(
+) -> ModelEventEnvelope[dict[str, Any]]:
+    """Construct a production-representative ModelEventEnvelope."""
+    return ModelEventEnvelope[dict[str, Any]](
         envelope_id=uuid4(),
         envelope_version=PROD_ENVELOPE_VERSION,
         correlation_id=uuid4(),
-        source_node=source_node,
-        operation=operation,
+        source_tool=source_tool,
+        event_type=operation,
         payload={
             "node_id": str(uuid4()),
             "env": "prod",
             "service": "omnibase-infra",
             "timestamp": datetime.now(UTC).isoformat(),
         },
-        timestamp=datetime.now(UTC),
+        envelope_timestamp=datetime.now(UTC),
     )
 
 
@@ -172,7 +173,7 @@ class TestMemoryPer10Nodes:
 
     @pytest.mark.asyncio
     async def test_10_envelope_objects_under_200mb(self) -> None:
-        """10 ModelOnexEnvelope objects consume < 200 MB total.
+        """10 ModelEventEnvelope objects consume < 200 MB total.
 
         Envelopes are the primary data structure in ONEX event flow. This test
         validates that 10 production-representative envelopes fit well within
@@ -196,7 +197,7 @@ class TestMemoryPer10Nodes:
         # Keep reference alive until measurement complete
         _ = envelopes
 
-        print(f"\n10 ModelOnexEnvelope objects: {allocated_mb:.3f} MB allocated")
+        print(f"\n10 ModelEventEnvelope objects: {allocated_mb:.3f} MB allocated")
         assert allocated_mb < MEMORY_BUDGET_MB_PER_10_NODES, (
             f"10 envelopes used {allocated_mb:.2f} MB, budget is {MEMORY_BUDGET_MB_PER_10_NODES} MB"
         )
@@ -268,7 +269,7 @@ class TestMemoryPer10Nodes:
             )
             # Each node holds a pending envelope
             envelope = _make_envelope(
-                source_node=f"node-{i}.effect",
+                source_tool=f"node-{i}.effect",
                 operation="process_event",
             )
             all_objects.extend([identity, envelope])
@@ -436,7 +437,7 @@ class TestEnvelopeThroughput:
     def test_envelope_construction_throughput_over_100_per_sec(self) -> None:
         """Envelope construction alone achieves > 100/sec.
 
-        Measures pure Python construction overhead (ModelOnexEnvelope creation)
+        Measures pure Python construction overhead (ModelEventEnvelope creation)
         without any I/O. This isolates serialization/validation cost.
         """
         num_envelopes = 500
