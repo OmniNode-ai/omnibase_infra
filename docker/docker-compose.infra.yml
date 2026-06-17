@@ -1119,7 +1119,7 @@ services:
   # service_completed_successfully so it will not start if migration fails.
   intelligence-migration:
     image: postgres:16-alpine
-    container_name: omnibase-intelligence-migration
+    container_name: omnibase-infra-intelligence-migration
     profiles: ["runtime", "full"]
     depends_on:
       postgres:
