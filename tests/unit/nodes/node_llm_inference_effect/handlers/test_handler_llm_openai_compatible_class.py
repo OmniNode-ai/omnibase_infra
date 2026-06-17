@@ -177,6 +177,42 @@ class TestHandlerLlmOpenaiCompatibleInit:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Protocol Conformance Note docstring accuracy (OMN-13204)
+# ---------------------------------------------------------------------------
+
+
+class TestProtocolConformanceNote:
+    """The class docstring's Protocol Conformance Note must name real types.
+
+    OMN-13204 (B5 residual of OMN-13196): ``ModelOnexEnvelope`` was deleted
+    from omnibase_core in B4. The Protocol Conformance Note previously claimed
+    ``ProtocolHandler`` operates on ``ModelOnexEnvelope`` -- which was wrong on
+    two counts: the type no longer exists, and ``ProtocolHandler.execute``
+    actually takes ``ModelProtocolRequest`` and returns ``ModelProtocolResponse``
+    (omnibase_spi protocols/handlers/protocol_handler.py:113-117).
+    ``ProtocolMessageHandler.handle`` takes ``ModelEventEnvelope`` and returns
+    ``ModelHandlerOutput`` (omnibase_core protocols/runtime/protocol_message_handler.py).
+    """
+
+    def test_note_does_not_reference_deleted_envelope(self) -> None:
+        """No reference to the deleted ModelOnexEnvelope symbol remains."""
+        doc = HandlerLlmOpenaiCompatible.__doc__ or ""
+        assert "ModelOnexEnvelope" not in doc
+
+    def test_note_names_protocol_handler_request_response_types(self) -> None:
+        """ProtocolHandler is documented with its real request/response I/O types."""
+        doc = HandlerLlmOpenaiCompatible.__doc__ or ""
+        assert "ModelProtocolRequest" in doc
+        assert "ModelProtocolResponse" in doc
+
+    def test_note_names_message_handler_envelope_output_types(self) -> None:
+        """ProtocolMessageHandler is documented with its real envelope/output types."""
+        doc = HandlerLlmOpenaiCompatible.__doc__ or ""
+        assert "ModelEventEnvelope" in doc
+        assert "ModelHandlerOutput" in doc
+
+
+# ---------------------------------------------------------------------------
 # Tests: Class-level constants
 # ---------------------------------------------------------------------------
 
