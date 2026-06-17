@@ -437,27 +437,50 @@ class TestDelegationTopicRegistryNoDrift:
     """OMN-13191: the applier resolves delegation topics from ServiceTopicRegistry
     (contract-sourced) instead of importing TOPIC_* string constants.
 
-    Proves the three-way equality the migration depends on:
-    registry-resolved string == legacy TOPIC_* constant == contract-declared string.
-    A mismatch on any leg means a topic drifted and the migration is unsafe.
+    Proves the two-way equality the migration depends on:
+    registry-resolved string == contract-declared string.
+    A mismatch on either leg means a topic drifted and the migration is unsafe.
+
+    OMN-13195 (phase A4): the legacy ``TOPIC_DELEGATION_*`` Python constants were
+    deleted once their last production consumers moved to contract-sourced
+    resolution. The expected strings below are the canonical contract-declared
+    values that those constants used to mirror; ``test_applier_resolved_topics_
+    match_owning_contract`` additionally anchors the applier subset to the real
+    ``contract.yaml`` on disk.
     """
 
-    # Logical key -> legacy constant name (the 4 topics the applier resolves
-    # plus the wider delegation family added to the registry for completeness).
-    _KEY_TO_CONSTANT: dict[str, str] = {
-        "DELEGATION_REQUEST": "TOPIC_DELEGATION_REQUEST",
-        "DELEGATION_ROUTING_DECISION": "TOPIC_DELEGATION_ROUTING_DECISION",
-        "DELEGATION_COMPLETED": "TOPIC_DELEGATION_COMPLETED",
-        "DELEGATION_FAILED": "TOPIC_DELEGATION_FAILED",
-        "DELEGATION_QUALITY_GATE_RESULT": "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
-        "DELEGATION_ROUTING_REQUEST": "TOPIC_DELEGATION_ROUTING_REQUEST",
-        "DELEGATION_INVOCATION_COMMAND": "TOPIC_DELEGATION_INVOCATION_COMMAND",
-        "DELEGATION_AGENT_TASK_LIFECYCLE": "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
-        "DELEGATION_QUALITY_GATE_REQUEST": "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
-        "DELEGATION_INFERENCE_REQUEST": "TOPIC_DELEGATION_INFERENCE_REQUEST",
-        "DELEGATION_INFERENCE_RESPONSE": "TOPIC_DELEGATION_INFERENCE_RESPONSE",
-        "DELEGATION_TASK_DELEGATED": "TOPIC_DELEGATION_TASK_DELEGATED",
-        "DELEGATION_BASELINE_COMPARISON": "TOPIC_DELEGATION_BASELINE_COMPARISON",
+    # Logical key -> canonical contract-declared topic string (the 4 topics the
+    # applier resolves plus the wider delegation family added to the registry for
+    # completeness). Formerly mirrored by the deleted ``TOPIC_DELEGATION_*``
+    # constants; now asserted directly against the contract-sourced registry.
+    _KEY_TO_EXPECTED_TOPIC: dict[str, str] = {
+        "DELEGATION_REQUEST": "onex.cmd.omnibase-infra.delegation-request.v1",
+        "DELEGATION_ROUTING_DECISION": "onex.evt.omnibase-infra.routing-decision.v1",
+        "DELEGATION_COMPLETED": "onex.evt.omnibase-infra.delegation-completed.v1",
+        "DELEGATION_FAILED": "onex.evt.omnibase-infra.delegation-failed.v1",
+        "DELEGATION_QUALITY_GATE_RESULT": (
+            "onex.evt.omnibase-infra.quality-gate-result.v1"
+        ),
+        "DELEGATION_ROUTING_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+        ),
+        "DELEGATION_INVOCATION_COMMAND": "onex.cmd.omnibase-infra.invocation.v1",
+        "DELEGATION_AGENT_TASK_LIFECYCLE": (
+            "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+        ),
+        "DELEGATION_QUALITY_GATE_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+        ),
+        "DELEGATION_INFERENCE_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+        ),
+        "DELEGATION_INFERENCE_RESPONSE": (
+            "onex.evt.omnibase-infra.inference-response.v1"
+        ),
+        "DELEGATION_TASK_DELEGATED": "onex.evt.omniclaude.task-delegated.v1",
+        "DELEGATION_BASELINE_COMPARISON": (
+            "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+        ),
     }
 
     # The 4 topics the infra applier actually resolves, mapped to the owning
@@ -469,20 +492,18 @@ class TestDelegationTopicRegistryNoDrift:
         "DELEGATION_ROUTING_REQUEST",
     )
 
-    def test_registry_resolution_equals_legacy_constant(self) -> None:
-        """Every delegation key resolves to the same string as its TOPIC_* constant."""
-        from omnibase_infra.event_bus import topic_constants
+    def test_registry_resolution_equals_expected_contract_topic(self) -> None:
+        """Every delegation key resolves to its canonical contract-declared string."""
         from omnibase_infra.topics import topic_keys
         from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
         registry = ServiceTopicRegistry.from_defaults()
-        for key_name, const_name in self._KEY_TO_CONSTANT.items():
+        for key_name, expected in self._KEY_TO_EXPECTED_TOPIC.items():
             key = getattr(topic_keys, key_name)
             resolved = registry.resolve(key)
-            constant = getattr(topic_constants, const_name)
-            assert resolved == constant, (
+            assert resolved == expected, (
                 f"drift: registry.resolve({key_name})={resolved!r} != "
-                f"{const_name}={constant!r}"
+                f"expected contract string {expected!r}"
             )
 
     def test_applier_resolved_topics_match_owning_contract(self) -> None:

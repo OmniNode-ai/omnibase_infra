@@ -35,11 +35,16 @@ repos:
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
+  # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
+  # exclude — the hook already approves that basename via its internal
+  # APPROVED_BASENAMES (check_hardcoded_topics.py), so the path-regex exclude was
+  # a no-op. The 3 remaining kept literals in that file stay covered by the hook's
+  # basename approval; full removal is the A5-full follow-up (OMN-13199).
   - repo: https://github.com/OmniNode-ai/onex_change_control
     rev: 8d7e85bc00e7f1b1306d1cb40949be1ab6e7e91a # pragma: allowlist secret
     hooks:
       - id: no-hardcoded-topics
-        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|event_bus/topic_constants\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml)
+        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml)
       - id: no-bare-feature-flags
         # YAML formatting (standard across ecosystem)
       - id: no-untracked-todos
