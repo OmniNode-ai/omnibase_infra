@@ -1237,7 +1237,7 @@ jobs:
           enable-cache: false
 
       - name: Install PyYAML (minimal dep for ratchet script)
-        run: uv pip install --system pyyaml
+        run: python3 -m pip install --quiet --user pyyaml
 
       - name: Download all JUnit XML shards
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
