@@ -1,0 +1,121 @@
+# SPDX-FileCopyrightText: 2026 OmniNode Team
+# SPDX-License-Identifier: MIT
+#
+# dev-baseline-publisher.yml — OMN-13027 (retro A-8)
+#
+# Scheduled full-suite run on dev that publishes a machine-readable baseline of
+# currently-failing tests. New failure clusters are auto-filed as Urgent Linear
+# tickets. The baseline is committed back to the dev branch so the
+# test-failure-ratchet PR gate can read it.
+#
+# Runs: daily at 03:00 UTC (after nightly-tests at 02:00) and on dispatch.
+
+name: Dev Baseline Publisher
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — do not file Linear tickets or commit baseline'
+        required: false
+        default: 'false'
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+  ONEX_EVENT_BUS_TYPE: "inmemory"
+  POSTGRES_DATABASE: "omnibase_infra"
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+
+jobs:
+  publish-baseline:
+    name: Publish Dev Test-Failure Baseline
+    # Must run on the trusted self-hosted runner that has access to the repo
+    # write token for committing the baseline back to dev.
+    # OMNI_RUNNER_SELECTOR_V1
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+
+    permissions:
+      contents: write   # needed to push baseline commit back to dev
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Load cached uv environment
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run full test suite and publish baseline
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          DRY_FLAG=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          uv run python scripts/publish_test_failure_baseline.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            ${DRY_FLAG}
+
+      - name: Commit and push updated baseline
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "omninode-bot"
+          git config user.email "bot@omninode.ai"
+
+          # Only commit if the baseline actually changed
+          if git diff --quiet config/validation/test-failure-baseline.yaml; then
+            echo "Baseline unchanged — nothing to commit."
+            exit 0
+          fi
+
+          git add config/validation/test-failure-baseline.yaml
+          git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]"
+          git push origin dev
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "## Dev Baseline Publisher (OMN-13027)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Baseline file: \`config/validation/test-failure-baseline.yaml\`" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f config/validation/test-failure-baseline.yaml ]; then
+            CLUSTER_COUNT=$(python3 -c "
+          import yaml
+          with open('config/validation/test-failure-baseline.yaml') as f:
+              d = yaml.safe_load(f) or {}
+          print(len(d.get('clusters', {})))
+          " 2>/dev/null || echo "?")
+            echo "Active failure clusters: **${CLUSTER_COUNT}**" >> "${GITHUB_STEP_SUMMARY}"
+          fi

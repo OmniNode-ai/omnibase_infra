@@ -1,0 +1,28 @@
+# Test-failure baseline for omnibase_infra (OMN-13027).
+#
+# This file is machine-maintained by the dev-baseline-publisher workflow.
+# DO NOT edit manually without a corresponding Linear ticket.
+#
+# Format:
+#   generated_at:   ISO-8601 timestamp of last publisher run
+#   generated_by:   "dev-baseline-publisher"
+#   repo:           "OmniNode-ai/omnibase_infra"
+#   ttl_days:       entry TTL (currently 7)
+#   clusters:
+#     <cluster_key>:   # dotted module path prefix of failing tests
+#       ticket:        OMN-XXXXX   # auto-filed Urgent Linear ticket
+#       expires_at:    ISO-8601    # publisher run date + ttl_days
+#       count:         N           # number of failing tests in cluster
+#       examples:      [...]       # first 5 test nodeids
+#       first_seen:    ISO-8601    # when this cluster first appeared
+#
+# A PR check (test-failure-ratchet job in ci.yml) fails if any failure
+# cluster from the PR run is NOT present here. Expired entries (expires_at
+# in the past) also fail the gate — re-run the publisher to refresh.
+#
+# Ticket: OMN-13027
+generated_at: ''
+generated_by: dev-baseline-publisher
+repo: OmniNode-ai/omnibase_infra
+ttl_days: 7
+clusters: {}
