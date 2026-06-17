@@ -12,6 +12,7 @@ Related:
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -430,6 +431,112 @@ class TestDelegationIntentTopicRouting:
         call_kwargs = mock_bus.publish_envelope.call_args.kwargs
         assert call_kwargs["topic"] == completed_topic
         assert call_kwargs["envelope"].payload == terminal_payload
+
+
+class TestDelegationTopicRegistryNoDrift:
+    """OMN-13191: the applier resolves delegation topics from ServiceTopicRegistry
+    (contract-sourced) instead of importing TOPIC_* string constants.
+
+    Proves the three-way equality the migration depends on:
+    registry-resolved string == legacy TOPIC_* constant == contract-declared string.
+    A mismatch on any leg means a topic drifted and the migration is unsafe.
+    """
+
+    # Logical key -> legacy constant name (the 4 topics the applier resolves
+    # plus the wider delegation family added to the registry for completeness).
+    _KEY_TO_CONSTANT: dict[str, str] = {
+        "DELEGATION_REQUEST": "TOPIC_DELEGATION_REQUEST",
+        "DELEGATION_ROUTING_DECISION": "TOPIC_DELEGATION_ROUTING_DECISION",
+        "DELEGATION_COMPLETED": "TOPIC_DELEGATION_COMPLETED",
+        "DELEGATION_FAILED": "TOPIC_DELEGATION_FAILED",
+        "DELEGATION_QUALITY_GATE_RESULT": "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
+        "DELEGATION_ROUTING_REQUEST": "TOPIC_DELEGATION_ROUTING_REQUEST",
+        "DELEGATION_INVOCATION_COMMAND": "TOPIC_DELEGATION_INVOCATION_COMMAND",
+        "DELEGATION_AGENT_TASK_LIFECYCLE": "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
+        "DELEGATION_QUALITY_GATE_REQUEST": "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
+        "DELEGATION_INFERENCE_REQUEST": "TOPIC_DELEGATION_INFERENCE_REQUEST",
+        "DELEGATION_INFERENCE_RESPONSE": "TOPIC_DELEGATION_INFERENCE_RESPONSE",
+        "DELEGATION_TASK_DELEGATED": "TOPIC_DELEGATION_TASK_DELEGATED",
+        "DELEGATION_BASELINE_COMPARISON": "TOPIC_DELEGATION_BASELINE_COMPARISON",
+    }
+
+    # The 4 topics the infra applier actually resolves, mapped to the owning
+    # publisher contract that declares them.
+    _APPLIER_KEYS: tuple[str, ...] = (
+        "DELEGATION_BASELINE_COMPARISON",
+        "DELEGATION_INFERENCE_REQUEST",
+        "DELEGATION_QUALITY_GATE_REQUEST",
+        "DELEGATION_ROUTING_REQUEST",
+    )
+
+    def test_registry_resolution_equals_legacy_constant(self) -> None:
+        """Every delegation key resolves to the same string as its TOPIC_* constant."""
+        from omnibase_infra.event_bus import topic_constants
+        from omnibase_infra.topics import topic_keys
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        registry = ServiceTopicRegistry.from_defaults()
+        for key_name, const_name in self._KEY_TO_CONSTANT.items():
+            key = getattr(topic_keys, key_name)
+            resolved = registry.resolve(key)
+            constant = getattr(topic_constants, const_name)
+            assert resolved == constant, (
+                f"drift: registry.resolve({key_name})={resolved!r} != "
+                f"{const_name}={constant!r}"
+            )
+
+    def test_applier_resolved_topics_match_owning_contract(self) -> None:
+        """The 4 applier topics equal the strings declared in the publisher contract.
+
+        The delegation orchestrator (omnimarket node_delegation_orchestrator) is the
+        publisher that declares all four command topics in its contract.yaml. This
+        anchors the registry value to a contract source, not just a Python constant.
+        """
+        from pathlib import Path
+
+        from omnibase_infra.topics import topic_keys
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        # The omnimarket sibling may live next to this repo (canonical layout) or,
+        # in a per-ticket worktree, only in the canonical omni_home clone. Try the
+        # in-tree sibling first, then fall back to $OMNI_HOME/omnimarket.
+        rel = Path(
+            "omnimarket/src/omnimarket/nodes/node_delegation_orchestrator/contract.yaml"
+        )
+        repo_root = Path(__file__).resolve().parents[3]
+        candidates = [repo_root.parent / rel]
+        omni_home = os.environ.get("OMNI_HOME")  # ONEX_EXCLUDE: env
+        if omni_home:
+            candidates.append(Path(omni_home) / rel)
+        contract_path = next((p for p in candidates if p.exists()), None)
+        if contract_path is None:
+            pytest.skip(
+                "omnimarket node_delegation_orchestrator/contract.yaml not found in "
+                f"any of: {[str(c) for c in candidates]}"
+            )
+
+        contract_text = contract_path.read_text(encoding="utf-8")
+        registry = ServiceTopicRegistry.from_defaults()
+        for key_name in self._APPLIER_KEYS:
+            resolved = registry.resolve(getattr(topic_keys, key_name))
+            assert resolved in contract_text, (
+                f"applier topic {resolved!r} (key {key_name}) is not declared in "
+                f"the owning publisher contract {contract_path}"
+            )
+
+    def test_applier_imports_no_topic_constants(self) -> None:
+        """Regression guard: the applier module must not import TOPIC_* constants."""
+        from pathlib import Path
+
+        applier_src = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "runtime"
+            / "service_dispatch_result_applier.py"
+        ).read_text(encoding="utf-8")
+        assert "from omnibase_infra.event_bus.topic_constants import" not in applier_src
+        assert "TOPIC_DELEGATION_" not in applier_src
 
 
 # ---------------------------------------------------------------------------

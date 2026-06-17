@@ -381,6 +381,27 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniintelligence.quality-assessment-completed.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omnidash pattern_quality_metrics projection | owner: jonah | expiry: 2026-09-01",
     # --- platform registration events (OMN-10592/OMN-10593 triage) ---
     "onex.evt.platform.registration-completed.v1": "pre-contract topic suffix in platform_topic_suffixes.py; no contract.yaml producer yet; add contract entry when node_registration_orchestrator publishes this event | owner: jonah | expiry: 2026-09-01",
+    # --- delegation pipeline topics (OMN-13191): contracts owned cross-repo in omnimarket ---
+    # These 13 topics are declared in omnimarket node contracts (node_delegation_orchestrator,
+    # node_delegation_routing_reducer, node_delegation_quality_gate_reducer,
+    # node_llm_delegation_call_effect). This parity scanner only reads omnibase_infra's own
+    # nodes/, so cross-repo-declared topics are correctly classified as python-only here.
+    # The registry value equals the omnimarket contract-declared string (proven in
+    # tests/unit/runtime/test_dispatch_result_applier_topic_routing.py::
+    # TestDelegationTopicRegistryNoDrift). Mirrors the omniintelligence cross-repo entries above.
+    "onex.cmd.omnibase-infra.delegation-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.routing-decision.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-completed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-failed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.quality-gate-result.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.invocation.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.agent-task-lifecycle.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); remote agent task lifecycle | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-inference-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_llm_delegation_call_effect | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.inference-response.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); LLM inference response | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.task-delegated.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: omnidash delegation projection | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.baseline-comparison-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_orchestrator baseline compute | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 

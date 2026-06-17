@@ -57,15 +57,11 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
 )
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_DELEGATION_BASELINE_COMPARISON,
-    TOPIC_DELEGATION_INFERENCE_REQUEST,
-    TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
-    TOPIC_DELEGATION_ROUTING_REQUEST,
-)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -81,12 +77,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Delegation intent topics are resolved from the contract-sourced topic registry
+# (ServiceTopicRegistry, OMN-5839) rather than importing the legacy TOPIC_*
+# string constants from event_bus/topic_constants.py. Each resolved string equals
+# the topic declared in the owning node contract.yaml (OMN-12803 / OMN-13191).
+_TOPIC_REGISTRY = ServiceTopicRegistry.from_defaults()
+
 _DELEGATION_INTENT_TOPIC_BY_CLASS: dict[str, str] = {
-    "ModelBaselineIntent": TOPIC_DELEGATION_BASELINE_COMPARISON,
-    "ModelInferenceIntent": TOPIC_DELEGATION_INFERENCE_REQUEST,
+    "ModelBaselineIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_BASELINE_COMPARISON
+    ),
+    "ModelInferenceIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_INFERENCE_REQUEST
+    ),
     "ModelInvocationCommand": EnumOmnibaseInfraTopic.CMD_REMOTE_AGENT_INVOKE_V1.value,
-    "ModelQualityGateIntent": TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
-    "ModelRoutingIntent": TOPIC_DELEGATION_ROUTING_REQUEST,
+    "ModelQualityGateIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_QUALITY_GATE_REQUEST
+    ),
+    "ModelRoutingIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_ROUTING_REQUEST
+    ),
 }
 
 
