@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.0",
+  "package_version": "0.38.3",
   "protocol_count": 23,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
@@ -391,8 +391,12 @@
     },
     "ProtocolEventBusLike": {
       "runtime_checkable": true,
-      "method_count": 2,
+      "method_count": 3,
       "methods": {
+        "get_consumer_groups": {
+          "parameters": [],
+          "return_annotation": "dict[tuple[str, str], str]"
+        },
         "publish": {
           "parameters": [
             {
