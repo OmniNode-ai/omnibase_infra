@@ -402,6 +402,38 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.inference-response.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); LLM inference response | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.task-delegated.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: omnidash delegation projection | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.baseline-comparison-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_orchestrator baseline compute | owner: jonah | expiry: 2026-09-01",
+    # --- pre-existing platform-debt parity gaps (OMN-13188 / OMN-12803 family) ---
+    # These suffixes are in ALL_PROVISIONED_SUFFIXES but have no contract.yaml
+    # declaration in omnibase_infra/nodes/ and were never allowlisted. They were
+    # already red on dev HEAD (verified 2026-06-17) and are unrelated to the
+    # OMN-13202 codegen migration; this PR is the first to touch a topics.yaml
+    # since they appeared, which surfaced the pre-commit-only gate. Tracked for
+    # contract-sourcing under the OMN-13188 "all topics from contracts" epic.
+    "onex.cmd.omnibase-infra.build-loop-build.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-classify.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-closeout.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-fill.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-start.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-verify.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-build-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-classify-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-closeout-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-cycle-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-failed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-fill-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-started.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-verify-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.effectiveness-data-changed.v1": "pre-existing parity gap; injection-effectiveness projection event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.llm-endpoint-health.v1": "pre-existing parity gap; declared in services/topics.yaml (service-emitted, not node-owned); needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.routing-decided.v1": "pre-existing parity gap; routing decision event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.context-enrichment.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.hook-context-injected.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.injection-recorded.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.pattern-enforcement.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.session-outcome.v1": "pre-existing parity gap; omniclaude session-outcome event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.validator-catch.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "pre-existing parity gap; omniintelligence evaluation event (cross-repo); contract.yaml owned in omniintelligence | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniweb.waitlist-signup.v1": "pre-existing parity gap; omniweb waitlist signup event (cross-repo); consumer: waitlist-signup-notifier | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
 }
 # fmt: on
 

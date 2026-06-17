@@ -53,14 +53,14 @@ _TOPIC_PATTERN = re.compile(r"^onex\.(evt|cmd)\.[a-z][a-z0-9._-]*$")
 # Files that ARE canonical topic definitions — raw literals are legitimate here.
 #
 # OMN-13195 (phase A4) narrowed this list: ``topic_constants.py`` is no longer a
-# whole-file exemption. After the 13 orphaned ``TOPIC_DELEGATION_*`` constants
-# were deleted, only 3 unavoidable topic literals remain in that file
-# (TOPIC_SESSION_COORDINATION_SIGNAL + the two TOPIC_DELEGATE_SKILL_* codegen-AST
-# sources). Those 3 specific lines are suppressed per-line in
-# ``topic_literal_baseline.txt`` instead — a far narrower allowlist than the
-# whole file. Full un-allowlisting (removing even those 3 baseline lines) is the
-# A5-full follow-up once the codegen reads contracts instead of this AST source
-# (OMN-13202 → OMN-13199).
+# whole-file exemption. OMN-13202 then deleted the last 3 topic literals from that
+# file (TOPIC_SESSION_COORDINATION_SIGNAL + the two TOPIC_DELEGATE_SKILL_*
+# codegen-AST sources) after migrating the enum codegen to read the
+# contract-declarative ``runtime/topics.yaml`` manifest, and removed their per-line
+# entries from ``topic_literal_baseline.txt``. ``topic_constants.py`` now contains
+# zero raw topic literals and needs no exemption here. Removing it from the
+# ``.pre-commit-config.yaml`` allowlist (if any redundancy remains) is the A5-full
+# follow-up (OMN-13199).
 _EXCLUDED_FILENAMES: frozenset[str] = frozenset(
     {
         "topics.py",

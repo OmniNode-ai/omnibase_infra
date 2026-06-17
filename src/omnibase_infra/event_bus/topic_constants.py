@@ -439,55 +439,28 @@ def derive_dlq_topic_for_event_type(
 
 
 # ---------------------------------------------------------------------------
-# Session Coordination Topics (OMN-6854)
-# ---------------------------------------------------------------------------
-
-TOPIC_SESSION_COORDINATION_SIGNAL: Final[str] = (
-    "onex.evt.omniclaude.session-coordination-signal.v1"
-)
-"""Topic for session coordination signals between concurrent sessions."""
-
-
-# ---------------------------------------------------------------------------
-# Delegation Pipeline Topics (OMN-7040)
+# Session Coordination + Delegation Pipeline Topics — all literals removed
 # ---------------------------------------------------------------------------
 #
-# The 13 ``TOPIC_DELEGATION_*`` pipeline constants formerly defined here were
-# removed in OMN-13195 (plan: platform-debt contract-sourced-topics, phase A4).
-# Their production consumers were migrated to contract-sourced resolution in
-# OMN-13191 (infra applier → ``ServiceTopicRegistry``) and OMN-13193 (omnimarket
-# ``node_delegation_orchestrator`` → its own ``contract.yaml``). After those
-# merges every constant had ZERO production (``src/``) importers — verified by
-# per-constant grep across all repos under ``$OMNI_HOME`` on 2026-06-17 — so the
-# Python literals were deleted. The topic strings themselves still live in their
-# owning ``contract.yaml`` files; resolve them via ``ServiceTopicRegistry`` /
-# ``topic_keys`` (infra) or ``contract_publish_topics`` / ``contract_subscribe_topics``
-# (omnimarket), never by re-adding a literal here.
+# All module-level ``TOPIC_*`` literals have been removed from this module:
+#   - 13 orphaned ``TOPIC_DELEGATION_*`` pipeline constants — removed in OMN-13195
+#     after their consumers migrated to contract-sourced resolution (OMN-13191
+#     infra applier → ``ServiceTopicRegistry``; OMN-13193 omnimarket
+#     ``node_delegation_orchestrator`` → its own ``contract.yaml``).
+#   - ``TOPIC_SESSION_COORDINATION_SIGNAL`` + the two ``TOPIC_DELEGATE_SKILL_*``
+#     constants — removed in OMN-13202. These were the AST source for
+#     ``generate_topic_enums.py`` (``EnumOmniclaudeTopic.EVT_SESSION_COORDINATION_SIGNAL_V1``
+#     and ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1``, the latter consumed at
+#     bootstrap by ``runtime/service_kernel.py``, OMN-11996). The codegen now reads
+#     these strings from the contract-declarative ``runtime/topics.yaml`` manifest
+#     (which mirrors the owning omnimarket ``node_delegate_skill_orchestrator`` /
+#     ``node_emit_daemon`` contracts), so the literals are no longer needed here.
 #
-# Two ``TOPIC_DELEGATE_SKILL_*`` constants below are intentionally KEPT: they are
-# the AST source for ``generate_topic_enums.py`` and have no contract-resolution
-# replacement yet (follow-up tracked in OMN-13202 / unblocks A5-full OMN-13199).
-
-TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
-    "onex.evt.omnimarket.delegate-skill-completed.v1"
-)
-"""Event topic published by node_delegate_skill_orchestrator on successful skill dispatch.
-
-Generator source for ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1``, which is
-consumed in ``runtime/service_kernel.py`` to wire the delegate-skill terminal result
-applier (OMN-11996). Keep this constant: deleting it drops the generated enum member.
-"""
-
-TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
-"""Event topic published by node_delegate_skill_orchestrator on skill dispatch failure.
-
-Generator source for ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1``, which is
-consumed in ``runtime/service_kernel.py`` (OMN-11996). Keep this constant.
-"""
+# Resolve topic strings via ``ServiceTopicRegistry`` / ``topic_keys`` (infra) or
+# the owning ``contract.yaml`` (omnimarket), never by re-adding a literal here.
+# Only the DLQ builders/format helpers above remain in this module.
 
 __all__ = [
-    "TOPIC_DELEGATE_SKILL_COMPLETED",
-    "TOPIC_DELEGATE_SKILL_FAILED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",
