@@ -21,7 +21,6 @@
 # in the past) also fail the gate — re-run the publisher to refresh.
 #
 # Ticket: OMN-13027
-
 generated_at: ''
 generated_by: dev-baseline-publisher
 repo: OmniNode-ai/omnibase_infra
