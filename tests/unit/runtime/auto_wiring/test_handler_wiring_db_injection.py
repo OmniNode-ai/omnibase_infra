@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _DB_URL_ENV_MAP,
     _build_sync_db_adapter,
     _make_dispatch_callback,
     _make_projection_dispatch_callback,
@@ -651,3 +652,73 @@ def test_projection_callback_terminal_event_publish_failure_does_not_propagate(
 
     assert result is None
     assert any("projection terminal event" in r.message.lower() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _DB_URL_ENV_MAP parity with the Per-Service Database URL Contract
+# (docs/patterns/db_url_contract.md). OMN-13158 / F3.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_db_url_env_map_matches_per_service_db_url_contract() -> None:
+    """_DB_URL_ENV_MAP must mirror docs/patterns/db_url_contract.md table.
+
+    The canonical contract lists six per-service databases, each owning its own
+    database, dedicated role, and single ``*_DB_URL`` env var. A stale subset
+    here makes auto-wiring reject contracts that name a real per-service DB.
+    """
+    assert _DB_URL_ENV_MAP == {
+        "omnibase_infra": "OMNIBASE_INFRA_DB_URL",
+        "omniintelligence": "OMNIINTELLIGENCE_DB_URL",
+        "omniclaude": "OMNICLAUDE_DB_URL",
+        "omnimemory": "OMNIMEMORY_DB_URL",
+        "omninode_cloud": "OMNINODE_CLOUD_DB_URL",
+        "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
+    }
+
+
+@pytest.mark.unit
+def test_omniintelligence_is_accepted_db_identity_per_db_url_contract() -> None:
+    """omniintelligence resolves to OMNIINTELLIGENCE_DB_URL.
+
+    Authoritative evidence: docs/patterns/db_url_contract.md line 14 names
+    env OMNIINTELLIGENCE_DB_URL -> database omniintelligence ->
+    role role_omniintelligence. node_dispatch_outcome_bridge_effect declares
+    db_io.db_tables[0].database == omniintelligence; building its projection
+    dispatch callback must not raise (regression guard for OMN-13158 F3).
+    """
+    assert _DB_URL_ENV_MAP["omniintelligence"] == "OMNIINTELLIGENCE_DB_URL"
+
+    received: list[dict] = []
+
+    class FakeHandler:
+        def handle(self, input_data: dict) -> dict:
+            received.append(dict(input_data))
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "dispatch_eval_results", "database": "omniintelligence"}]
+    callback = _make_projection_dispatch_callback(
+        FakeHandler(),
+        db_tables,
+        ("onex.evt.omniintelligence.dispatch-outcome.v1",),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniintelligence.dispatch-outcome.v1"
+    envelope.payload = {"correlation_id": "corr-1"}
+    fake_adapter = MagicMock()
+
+    captured_env: list[str] = []
+
+    def _env_get(key: str, default: object = None) -> object:
+        captured_env.append(key)
+        return "postgresql://role_omniintelligence:pw@host:5432/omniintelligence"
+
+    with patch(_PATCH_ENVIRON_GET, side_effect=_env_get):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert "OMNIINTELLIGENCE_DB_URL" in captured_env
+    assert len(received) == 1
+    assert received[0]["_db"] is fake_adapter
