@@ -396,7 +396,7 @@ class TestRunOnceWithKafka:
             [live_group, stale_empty_group],
             empty_groups={stale_empty_group},
         )
-        bus = MagicMock()  # transport-mock-ok: needs get_consumer_groups() duck-typed extension not in ProtocolEventBusLike
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.get_consumer_groups.return_value = {
             (topic, "runtime.projection.consume.v1"): live_group
         }
