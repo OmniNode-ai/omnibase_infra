@@ -248,7 +248,10 @@ class TestRatchetGate:
         )
         assert rc == 0
 
-    def test_missing_baseline_returns_exit_2(self, tmp_path: Path) -> None:
+    def test_missing_baseline_treated_as_empty_strict(self, tmp_path: Path) -> None:
+        """Missing baseline = empty baseline (strictest): a failure with no
+        baseline is a new cluster -> gate blocks (rc 1); zero failures -> rc 0
+        (the bootstrap PR that introduces the gate before dev has a baseline)."""
         junit = tmp_path / "junit.xml"
         _write_junit(junit, [("tests.unit.test_foo", "test_bar")])
         rc = ratchet.main(  # type: ignore[attr-defined]
@@ -259,7 +262,18 @@ class TestRatchetGate:
                 str(tmp_path / "nonexistent.yaml"),
             ]
         )
-        assert rc == 2
+        assert rc == 1
+        empty_junit = tmp_path / "empty.xml"
+        _write_junit(empty_junit, [])
+        rc2 = ratchet.main(  # type: ignore[attr-defined]
+            [
+                "--junit-xml",
+                str(empty_junit),
+                "--baseline",
+                str(tmp_path / "nonexistent.yaml"),
+            ]
+        )
+        assert rc2 == 0
 
     def test_partial_overlap_new_cluster_fails(self, tmp_path: Path) -> None:
         """Some failures in baseline, one new cluster — gate must fail."""

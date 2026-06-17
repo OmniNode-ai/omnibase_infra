@@ -15,7 +15,7 @@ Usage (CI)::
 Exit codes:
     0  — all failures are in the baseline (PR is clean)
     1  — one or more NEW failure clusters detected (PR blocked)
-    2  — baseline file missing or unreadable (gate cannot operate)
+    2  — (reserved) a missing baseline is treated as empty/strict, not exit 2
 """
 
 from __future__ import annotations
@@ -114,14 +114,16 @@ def main(argv: list[str] | None = None) -> int:
     junit_path = Path(args.junit_xml)
     baseline_path = Path(args.baseline)
 
-    # Gate cannot operate without a baseline — fail loudly rather than silently pass.
+    # A missing baseline (the bootstrap PR that introduces this gate, before the
+    # dev-baseline-publisher has run on dev) is treated as an EMPTY baseline — the
+    # strictest mode: zero current failures tolerated. This blocks rather than
+    # silently passes, so it is safe; load_baseline() returns {} for a missing file.
     if not baseline_path.exists():
         print(
-            f"::error::Baseline file not found: {baseline_path}\n"
-            "Run the dev-baseline-publisher workflow to generate it.",
+            f"::warning::Baseline file not found: {baseline_path} — treating as "
+            "empty (strict: zero failures allowed until the publisher runs).",
             file=sys.stderr,
         )
-        return 2
 
     now = datetime.datetime.now(datetime.UTC)
 

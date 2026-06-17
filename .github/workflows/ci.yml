@@ -1296,7 +1296,7 @@ jobs:
 
       - name: Run test-failure ratchet check
         run: |
-          python3 scripts/check_test_failure_ratchet.py \
+          python3 pr-head/scripts/check_test_failure_ratchet.py \
             --junit-xml merged-junit.xml \
             --baseline config/validation/test-failure-baseline.yaml
 
