@@ -1,0 +1,116 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lane-census-staleness.yml — OMN-13034 (retro B-6)
+#
+# WHY: The CLAUDE.md lane table was hand-maintained, allowing phantom lanes
+# (documented as present when absent) and running-but-undocumented lanes
+# (judge was live but absent from the map for hours during 2026-06-11 demo
+# prep). This job is the CI ratchet that makes stale documentation a hard gate.
+#
+# What this checks:
+#   1. STALENESS: deploy/lane-census/census-snapshot.json must be present and
+#      have an emitted_at timestamp within MAX_AGE_DAYS (7) of the PR merge date.
+#      A census older than 7 days means the .201 timer stopped or the snapshot
+#      was never committed — either is a documentation failure.
+#
+#   2. ENV-VS-LIVE DRIFT (E-5 / OMN-13018): lane-manifest.yaml compose_project
+#      names, network declarations, and bootstrap server config must agree with
+#      what the compose files actually declare. Divergence means the manifest
+#      is policing the wrong lane.
+#
+# Trigger: runs on every PR. Also runs on push to dev/main so the gate stays
+# green on both branches. merge_group ensures it blocks the merge queue.
+---
+name: Lane Census Staleness (OMN-13034)
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "deploy/lane-census/**"
+      - "docker/docker-compose*.yml"
+      - "scripts/check_lane_census_age.py"
+      - "scripts/check_lane_env_drift.py"
+      - "scripts/generate_claude_lane_block.py"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "deploy/lane-census/**"
+      - "docker/docker-compose*.yml"
+      - "scripts/check_lane_census_age.py"
+      - "scripts/check_lane_env_drift.py"
+      - "scripts/generate_claude_lane_block.py"
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      max_age_days:
+        description: "Maximum census age in days (default: 7)"
+        required: false
+        default: "7"
+
+concurrency:
+  group: lane-census-staleness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lane-census-staleness:
+    name: Lane Census Staleness + E-5 Env Drift (OMN-13034)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
+    # public fork PRs use ubuntu-latest (no secrets needed — pure file checks).
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: "0.6.0"
+          cache-enabled: "false"
+
+      - name: Check census snapshot staleness
+        env:
+          MAX_AGE_DAYS: ${{ inputs.max_age_days || '7' }}
+        run: |
+          echo "================================================================"
+          echo "Lane Census Staleness Gate — OMN-13034 (retro B-6)"
+          echo "A census > ${MAX_AGE_DAYS} days old fails this gate."
+          echo "================================================================"
+          uv run python scripts/check_lane_census_age.py \
+            --max-age-days "${MAX_AGE_DAYS}" \
+            --snapshot deploy/lane-census/census-snapshot.json
+
+      - name: Check E-5 env-vs-manifest drift (OMN-13018)
+        run: |
+          echo "================================================================"
+          echo "E-5 Env-vs-Manifest Drift Gate — OMN-13018"
+          echo "Lane manifest topology must agree with compose file declarations."
+          echo "================================================================"
+          uv run python scripts/check_lane_env_drift.py \
+            --manifest deploy/lane-census/lane-manifest.yaml \
+            --compose-dir docker/
+
+      - name: Verify lane table generator runs without error
+        run: |
+          echo "================================================================"
+          echo "Lane Table Generator Smoke Test — OMN-13034"
+          echo "generate_claude_lane_block.py must produce valid output."
+          echo "================================================================"
+          uv run python scripts/generate_claude_lane_block.py \
+            --manifest deploy/lane-census/lane-manifest.yaml \
+            --snapshot deploy/lane-census/census-snapshot.json

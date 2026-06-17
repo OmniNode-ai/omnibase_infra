@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "event_type": "lane-census-drift",
+  "topic": "onex.evt.infra.lane-census-drift.v1",
+  "host": "192.168.86.201",
+  "emitted_at": "2026-06-17T13:00:00+00:00",
+  "severity": "warning",
+  "lanes_checked": ["stability-test", "prod", "judge"],
+  "drift_count": 0,
+  "findings": [],
+  "alert_key": "lane-census-drift:192.168.86.201:no-drift",
+  "ticket_title": "lane census: no drift",
+  "ticket_body": "## Lane census\n\nNo drift detected. All declared lanes match live state.\n\nverified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201"
+}
