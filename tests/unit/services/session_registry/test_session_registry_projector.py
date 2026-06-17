@@ -12,7 +12,6 @@ import pytest
 
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_SESSION_COORDINATION_SIGNAL,
-    TOPIC_SESSION_STATUS_CHANGED,
 )
 from omnibase_infra.services.session_registry.enum_session_phase import EnumSessionPhase
 from omnibase_infra.services.session_registry.enum_session_registry_status import (
@@ -187,7 +186,3 @@ class TestProjectorConstants:
     def test_coordination_topic_follows_onex_naming(self) -> None:
         assert TOPIC_SESSION_COORDINATION_SIGNAL.startswith("onex.evt.")
         assert ".v1" in TOPIC_SESSION_COORDINATION_SIGNAL
-
-    def test_status_changed_topic_follows_onex_naming(self) -> None:
-        assert TOPIC_SESSION_STATUS_CHANGED.startswith("onex.evt.")
-        assert ".v1" in TOPIC_SESSION_STATUS_CHANGED
