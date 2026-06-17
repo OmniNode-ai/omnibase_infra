@@ -250,6 +250,49 @@ BUILD_LOOP_CYCLE_COMPLETED: Final[str] = "BUILD_LOOP_CYCLE_COMPLETED"
 BUILD_LOOP_FAILED: Final[str] = "BUILD_LOOP_FAILED"
 """Event: build loop cycle failed (circuit breaker or unrecoverable error)."""
 
+# ==============================================================================
+# Delegation Pipeline Topics (OMN-7040 / OMN-13191)
+# ==============================================================================
+
+DELEGATION_REQUEST: Final[str] = "DELEGATION_REQUEST"
+"""Command topic for delegation requests from /delegate skill."""
+
+DELEGATION_ROUTING_DECISION: Final[str] = "DELEGATION_ROUTING_DECISION"
+"""Event topic for routing decisions from the delegation routing reducer."""
+
+DELEGATION_COMPLETED: Final[str] = "DELEGATION_COMPLETED"
+"""Event topic for successful delegation completions."""
+
+DELEGATION_FAILED: Final[str] = "DELEGATION_FAILED"
+"""Event topic for failed delegation attempts."""
+
+DELEGATION_QUALITY_GATE_RESULT: Final[str] = "DELEGATION_QUALITY_GATE_RESULT"
+"""Event topic for quality gate evaluation results."""
+
+DELEGATION_ROUTING_REQUEST: Final[str] = "DELEGATION_ROUTING_REQUEST"
+"""Command topic for routing reducer invocation from the delegation orchestrator."""
+
+DELEGATION_INVOCATION_COMMAND: Final[str] = "DELEGATION_INVOCATION_COMMAND"
+"""Command topic for typed invocation commands from the delegation orchestrator."""
+
+DELEGATION_AGENT_TASK_LIFECYCLE: Final[str] = "DELEGATION_AGENT_TASK_LIFECYCLE"
+"""Event topic for remote agent task lifecycle updates."""
+
+DELEGATION_QUALITY_GATE_REQUEST: Final[str] = "DELEGATION_QUALITY_GATE_REQUEST"
+"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
+
+DELEGATION_INFERENCE_REQUEST: Final[str] = "DELEGATION_INFERENCE_REQUEST"
+"""Command topic for LLM inference invocation from the delegation orchestrator."""
+
+DELEGATION_INFERENCE_RESPONSE: Final[str] = "DELEGATION_INFERENCE_RESPONSE"
+"""Event topic for LLM inference responses in the delegation pipeline."""
+
+DELEGATION_TASK_DELEGATED: Final[str] = "DELEGATION_TASK_DELEGATED"
+"""Event topic for omnidash delegation projection."""
+
+DELEGATION_BASELINE_COMPARISON: Final[str] = "DELEGATION_BASELINE_COMPARISON"
+"""Command topic for baseline comparison compute from the delegation orchestrator."""
+
 
 __all__: list[str] = [
     "AGENT_STATUS",
@@ -271,6 +314,19 @@ __all__: list[str] = [
     "CIRCUIT_BREAKER_STATE",
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",
+    "DELEGATION_AGENT_TASK_LIFECYCLE",
+    "DELEGATION_BASELINE_COMPARISON",
+    "DELEGATION_COMPLETED",
+    "DELEGATION_FAILED",
+    "DELEGATION_INFERENCE_REQUEST",
+    "DELEGATION_INFERENCE_RESPONSE",
+    "DELEGATION_INVOCATION_COMMAND",
+    "DELEGATION_QUALITY_GATE_REQUEST",
+    "DELEGATION_QUALITY_GATE_RESULT",
+    "DELEGATION_REQUEST",
+    "DELEGATION_ROUTING_DECISION",
+    "DELEGATION_ROUTING_REQUEST",
+    "DELEGATION_TASK_DELEGATED",
     "DISPATCH_OUTCOME_EVALUATED",
     "PROJECTION_FRESHNESS_DEGRADED",
     "PROJECTION_FRESHNESS_RECOVERED",

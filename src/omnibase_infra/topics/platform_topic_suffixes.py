@@ -726,6 +726,69 @@ Consumer: NodeLlmEmbeddingEffect runtime handler
 """
 
 # =============================================================================
+# OMNIBASE_INFRA DELEGATION PIPELINE TOPIC SUFFIXES (OMN-7040 / OMN-13191)
+# =============================================================================
+# Delegation pipeline topics. Owned by the delegation orchestrator + reducer
+# contracts (omnimarket node_delegation_orchestrator, node_delegation_routing_reducer,
+# node_delegation_quality_gate_reducer, node_llm_delegation_call_effect) and the
+# infra bus-forwarder. Resolved at runtime via ServiceTopicRegistry instead of
+# importing the legacy TOPIC_DELEGATION_* constants from
+# event_bus/topic_constants.py (OMN-12803, OMN-13191).
+
+SUFFIX_DELEGATION_REQUEST: str = "onex.cmd.omnibase-infra.delegation-request.v1"
+"""Command topic for delegation requests from /delegate skill."""
+
+SUFFIX_DELEGATION_ROUTING_DECISION: str = "onex.evt.omnibase-infra.routing-decision.v1"
+"""Event topic for routing decisions from the delegation routing reducer."""
+
+SUFFIX_DELEGATION_COMPLETED: str = "onex.evt.omnibase-infra.delegation-completed.v1"
+"""Event topic for successful delegation completions."""
+
+SUFFIX_DELEGATION_FAILED: str = "onex.evt.omnibase-infra.delegation-failed.v1"
+"""Event topic for failed delegation attempts."""
+
+SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
+    "onex.evt.omnibase-infra.quality-gate-result.v1"
+)
+"""Event topic for quality gate evaluation results."""
+
+SUFFIX_DELEGATION_ROUTING_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+)
+"""Command topic for routing reducer invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INVOCATION_COMMAND: str = "onex.cmd.omnibase-infra.invocation.v1"
+"""Command topic for typed invocation commands from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE: str = (
+    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+)
+"""Event topic for remote agent task lifecycle updates."""
+
+SUFFIX_DELEGATION_QUALITY_GATE_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+)
+"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INFERENCE_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+)
+"""Command topic for LLM inference invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INFERENCE_RESPONSE: str = (
+    "onex.evt.omnibase-infra.inference-response.v1"
+)
+"""Event topic for LLM inference responses in the delegation pipeline."""
+
+SUFFIX_DELEGATION_TASK_DELEGATED: str = "onex.evt.omniclaude.task-delegated.v1"
+"""Event topic for omnidash delegation projection."""
+
+SUFFIX_DELEGATION_BASELINE_COMPARISON: str = (
+    "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+)
+"""Command topic for baseline comparison compute from the delegation orchestrator."""
+
+# =============================================================================
 # OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
 # =============================================================================
 
@@ -1201,6 +1264,74 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
+    ),
+    # Delegation pipeline command topics (1 day retention — short-lived commands,
+    # OMN-7040 / OMN-13191)
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_ROUTING_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INVOCATION_COMMAND,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_QUALITY_GATE_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INFERENCE_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_BASELINE_COMPARISON,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    # Delegation pipeline event topics (7 day retention)
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_ROUTING_DECISION,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_QUALITY_GATE_RESULT,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INFERENCE_RESPONSE,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_TASK_DELEGATED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
