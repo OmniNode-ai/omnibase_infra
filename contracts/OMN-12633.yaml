@@ -1,0 +1,63 @@
+# OMN-12633 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-12633"
+title: "feat(OMN-12633): retire ServiceDlqTracking runtime DDL — dlq_replay_history to migration-managed schema"
+summary: >-
+  Removes ServiceDlqTracking._ensure_table_exists() and the CREATE TABLE IF NOT EXISTS
+  call from initialize(). The dlq_replay_history table is now provisioned by the
+  canonical forward migration runner (086_create_dlq_replay_history.sql), making it
+  visible to public.schema_migrations and owned by node_dlq_replay_effect per
+  CONTRACT/NODE/HANDLER (OMN-12525). Adds static-analysis ratchet test preventing
+  re-introduction of imperative DDL.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "DLQ unit tests pass — no runtime DDL in ServiceDlqTracking"
+    command: >-
+      uv run pytest tests/unit/dlq/ -q
+  - kind: "ci"
+    description: "CI gates pass on omnibase_infra PR #2012"
+    command: "gh pr checks 2012 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-contract-artifact"
+    description: "Repo-local deploy evidence contract is present for OMN-12633"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-12633.yaml"
+  - id: "dod-unit-tests"
+    description: "DLQ unit tests pass including no-runtime-DDL ratchet"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/dlq/ -q
+  - id: "dod-no-imperative-ddl"
+    description: "ServiceDlqTracking._ensure_table_exists() removed; no CREATE TABLE in method bodies"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run pytest tests/unit/dlq/test_service_dlq_tracking_no_runtime_ddl.py -q
+  - id: "dod-migration-exists"
+    description: "Forward migration 086_create_dlq_replay_history.sql is present"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test -f docker/migrations/forward/086_create_dlq_replay_history.sql"
+  - id: "dod-deploy"
+    description: >-
+      Deploy validation: tech-debt cleanup removing runtime table creation from ServiceDlqTracking.
+      The table must be pre-created by the forward migration runner before DLQ plugin activates.
+      No new Kafka topics; no API surface changes. Migration 086 is idempotent (IF NOT EXISTS).
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy-gate: migration 086 creates dlq_replay_history idempotently; no topic/API changes"

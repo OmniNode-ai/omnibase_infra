@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # ruff: noqa: S608
-# S608 disabled: All SQL f-strings use storage_table which is validated via:
+# S608 disabled: INSERT/SELECT f-strings use storage_table which is validated via:
 # 1. Pydantic regex pattern (PATTERN_TABLE_NAME) in ModelDlqTrackingConfig
 # 2. Runtime validation in _validate_storage_table() (defense-in-depth)
 # Both use the shared PATTERN_TABLE_NAME constant from constants_dlq.py.
-# This defense-in-depth approach ensures only valid PostgreSQL identifiers are used,
-# preventing SQL injection even if config validation is somehow bypassed.
+# CREATE TABLE IF NOT EXISTS was removed from this class (OMN-12633) — table
+# provisioning now belongs to the canonical forward migration runner.
 """DLQ Replay Tracking Service.
 
 A PostgreSQL-based service for tracking DLQ replay
@@ -15,33 +15,26 @@ operations, enabling persistent history of replay attempts.
 The service uses asyncpg for async database operations and provides
 methods for recording replay attempts and querying replay history.
 
-Table Schema:
-    CREATE TABLE IF NOT EXISTS dlq_replay_history (
-        id UUID PRIMARY KEY,
-        original_message_id UUID NOT NULL,
-        replay_correlation_id UUID NOT NULL,
-        original_topic VARCHAR(255) NOT NULL,
-        target_topic VARCHAR(255) NOT NULL,
-        replay_status VARCHAR(50) NOT NULL,
-        replay_timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-        success BOOLEAN NOT NULL,
-        error_message TEXT,
-        dlq_offset BIGINT NOT NULL,
-        dlq_partition INTEGER NOT NULL,
-        retry_count INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_dlq_replay_message_id ON dlq_replay_history(original_message_id);
-    CREATE INDEX IF NOT EXISTS idx_dlq_replay_timestamp ON dlq_replay_history(replay_timestamp);
+Schema Ownership (OMN-12633):
+    The ``dlq_replay_history`` table is provisioned by the canonical forward
+    migration runner, not by this class.  The DDL lives in:
+
+    * ``src/omnibase_infra/schemas/schema_dlq_replay_history.sql``
+    * ``docker/migrations/forward/086_create_dlq_replay_history.sql``
+
+    This class no longer calls CREATE TABLE IF NOT EXISTS at runtime; the
+    table must already exist when ``initialize()`` is called.
 
 Security Note:
-    - DSN contains credentials - never log the raw value
+    - DSN contains credentials — never log the raw value
     - Use parameterized queries to prevent SQL injection
     - Connection pool handles credential management
     - Table names are validated at both config and runtime level (defense-in-depth)
 
 Related:
-    - scripts/dlq_replay.py - CLI tool that uses this service
-    - OMN-1032 - PostgreSQL tracking integration ticket
+    - scripts/dlq_replay.py — CLI tool that uses this service
+    - OMN-1032  — PostgreSQL tracking integration ticket
+    - OMN-12633 — retire ServiceDlqTracking runtime DDL
 """
 
 from __future__ import annotations
@@ -217,14 +210,15 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
             )
 
     async def initialize(self) -> None:
-        """Initialize the connection pool and ensure table exists.
+        """Initialize the connection pool.
 
-        Creates the asyncpg connection pool and verifies (or creates)
-        the dlq_replay_history table with proper schema.
+        Creates the asyncpg connection pool.  The ``dlq_replay_history``
+        table must already exist — it is owned by ``node_dlq_replay_effect``
+        and provisioned by the canonical forward migration runner (OMN-12633).
 
         Raises:
             InfraConnectionError: If database connection fails.
-            RuntimeHostError: If pool creation or table setup fails.
+            RuntimeHostError: If pool creation fails.
         """
         if self._initialized:
             return
@@ -244,9 +238,6 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                 max_size=self._config.pool_max_size,
                 command_timeout=self._config.command_timeout,
             )
-
-            # Ensure table exists with proper schema
-            await self._ensure_table_exists()
 
             self._initialized = True
             logger.info(
@@ -283,61 +274,6 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                 logger.debug("Cleaning up connection pool after initialization failure")
                 await self._pool.close()
                 self._pool = None
-
-    async def _ensure_table_exists(self) -> None:
-        """Create the DLQ replay history table if it doesn't exist.
-
-        Creates the table with:
-            - UUID primary key
-            - Indexes on original_message_id and replay_timestamp
-            - All required columns for replay tracking
-        """
-        if self._pool is None:
-            raise RuntimeHostError(
-                "Pool not initialized - call initialize() first",
-                context=ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="_ensure_table_exists",
-                    target_name="dlq_tracking_service",
-                ),
-            )
-
-        # Note: Table name is validated in config (alphanumeric + underscore only)
-        # so safe to use in SQL. We still use parameterized queries for data values.
-        create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {self._config.storage_table} (
-                id UUID PRIMARY KEY,
-                original_message_id UUID NOT NULL,
-                replay_correlation_id UUID NOT NULL,
-                original_topic VARCHAR(255) NOT NULL,
-                target_topic VARCHAR(255) NOT NULL,
-                replay_status VARCHAR(50) NOT NULL,
-                replay_timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-                success BOOLEAN NOT NULL,
-                error_message TEXT,
-                dlq_offset BIGINT NOT NULL,
-                dlq_partition INTEGER NOT NULL,
-                retry_count INTEGER NOT NULL DEFAULT 0
-            )
-        """
-
-        create_message_id_index_sql = f"""
-            CREATE INDEX IF NOT EXISTS idx_{self._config.storage_table}_message_id
-            ON {self._config.storage_table}(original_message_id)
-        """
-
-        create_timestamp_index_sql = f"""
-            CREATE INDEX IF NOT EXISTS idx_{self._config.storage_table}_timestamp
-            ON {self._config.storage_table}(replay_timestamp)
-        """
-
-        async with self._pool.acquire() as conn:
-            # Wrap DDL in transaction for atomicity - if index creation fails,
-            # the table creation will be rolled back to avoid partial schema state
-            async with conn.transaction():
-                await conn.execute(create_table_sql)
-                await conn.execute(create_message_id_index_sql)
-                await conn.execute(create_timestamp_index_sql)
 
     async def shutdown(self) -> None:
         """Close the connection pool and release resources."""
