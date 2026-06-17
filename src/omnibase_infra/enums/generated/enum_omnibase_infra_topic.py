@@ -18,16 +18,11 @@ class EnumOmnibaseInfraTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_BASELINE_COMPARISON_REQUEST_V1 = "onex.cmd.omnibase-infra.baseline-comparison-request.v1"  # onex.cmd.omnibase-infra.baseline-comparison-request.v1
     CMD_BASELINES_BATCH_COMPUTE_V1 = "onex.cmd.omnibase-infra.baselines-batch-compute.v1"  # onex.cmd.omnibase-infra.baselines-batch-compute.v1
     CMD_BUILD_LOOP_APPEND_V1 = "onex.cmd.omnibase-infra.build-loop-append.v1"  # onex.cmd.omnibase-infra.build-loop-append.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-inference-request.v1"  # onex.cmd.omnibase-infra.delegation-inference-request.v1
-    CMD_DELEGATION_QUALITY_GATE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"  # onex.cmd.omnibase-infra.delegation-quality-gate-request.v1
-    CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
-    CMD_DELEGATION_ROUTING_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-routing-request.v1"  # onex.cmd.omnibase-infra.delegation-routing-request.v1
-    CMD_INVOCATION_V1 = "onex.cmd.omnibase-infra.invocation.v1"  # onex.cmd.omnibase-infra.invocation.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
@@ -51,8 +46,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CHAIN_VERIFIED_V1 = "onex.evt.omnibase-infra.chain-verified.v1"  # onex.evt.omnibase-infra.chain-verified.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
-    EVT_DELEGATION_COMPLETED_V1 = "onex.evt.omnibase-infra.delegation-completed.v1"  # onex.evt.omnibase-infra.delegation-completed.v1
-    EVT_DELEGATION_FAILED_V1 = "onex.evt.omnibase-infra.delegation-failed.v1"  # onex.evt.omnibase-infra.delegation-failed.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_GATEWAY_HEARTBEAT_V1 = "onex.evt.omnibase-infra.gateway-heartbeat.v1"  # onex.evt.omnibase-infra.gateway-heartbeat.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
@@ -63,8 +56,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
-    EVT_QUALITY_GATE_RESULT_V1 = "onex.evt.omnibase-infra.quality-gate-result.v1"  # onex.evt.omnibase-infra.quality-gate-result.v1
-    EVT_ROUTING_DECISION_V1 = "onex.evt.omnibase-infra.routing-decision.v1"  # onex.evt.omnibase-infra.routing-decision.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_BOOTED_V1 = "onex.evt.omnibase-infra.runtime-booted.v1"  # onex.evt.omnibase-infra.runtime-booted.v1

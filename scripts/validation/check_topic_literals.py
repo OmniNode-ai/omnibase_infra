@@ -14,9 +14,11 @@
 # Exclusions:
 #   - tests/, fixtures/, docs/            (not production code)
 #   - generated/                          (auto-generated enum files)
-#   - topics.py, topic_constants.py       (canonical topic definition files)
+#   - topics.py                           (canonical topic definition file)
 #   - platform_topic_suffixes.py          (canonical platform topic registry)
 #   - contract.yaml                       (contract definitions, not Python)
+#   NOTE: topic_constants.py is NO LONGER whole-file excluded (OMN-13195/A4); its
+#   3 remaining kept literals are suppressed per-line in the baseline instead.
 #
 # Pre-existing violations that were present before OMN-3343 are suppressed
 # via `scripts/validation/topic_literal_baseline.txt`. New violations added
@@ -48,11 +50,20 @@ from pathlib import Path
 # Only match strings that START with the ONEX prefix (no env prefix like dev./prod.)
 _TOPIC_PATTERN = re.compile(r"^onex\.(evt|cmd)\.[a-z][a-z0-9._-]*$")
 
-# Files that ARE canonical topic definitions — raw literals are legitimate here
+# Files that ARE canonical topic definitions — raw literals are legitimate here.
+#
+# OMN-13195 (phase A4) narrowed this list: ``topic_constants.py`` is no longer a
+# whole-file exemption. After the 13 orphaned ``TOPIC_DELEGATION_*`` constants
+# were deleted, only 3 unavoidable topic literals remain in that file
+# (TOPIC_SESSION_COORDINATION_SIGNAL + the two TOPIC_DELEGATE_SKILL_* codegen-AST
+# sources). Those 3 specific lines are suppressed per-line in
+# ``topic_literal_baseline.txt`` instead — a far narrower allowlist than the
+# whole file. Full un-allowlisting (removing even those 3 baseline lines) is the
+# A5-full follow-up once the codegen reads contracts instead of this AST source
+# (OMN-13202 → OMN-13199).
 _EXCLUDED_FILENAMES: frozenset[str] = frozenset(
     {
         "topics.py",
-        "topic_constants.py",
         "service_topic_registry.py",
         "platform_topic_suffixes.py",
         "contract.yaml",

@@ -451,65 +451,22 @@ TOPIC_SESSION_COORDINATION_SIGNAL: Final[str] = (
 # ---------------------------------------------------------------------------
 # Delegation Pipeline Topics (OMN-7040)
 # ---------------------------------------------------------------------------
-
-TOPIC_DELEGATION_REQUEST: Final[str] = "onex.cmd.omnibase-infra.delegation-request.v1"
-"""Command topic for delegation requests from /delegate skill."""
-
-TOPIC_DELEGATION_ROUTING_DECISION: Final[str] = (
-    "onex.evt.omnibase-infra.routing-decision.v1"
-)
-"""Event topic for routing decisions from the delegation routing reducer."""
-
-TOPIC_DELEGATION_COMPLETED: Final[str] = (
-    "onex.evt.omnibase-infra.delegation-completed.v1"
-)
-"""Event topic for successful delegation completions."""
-
-TOPIC_DELEGATION_FAILED: Final[str] = "onex.evt.omnibase-infra.delegation-failed.v1"
-"""Event topic for failed delegation attempts."""
-
-TOPIC_DELEGATION_QUALITY_GATE_RESULT: Final[str] = (
-    "onex.evt.omnibase-infra.quality-gate-result.v1"
-)
-"""Event topic for quality gate evaluation results."""
-
-TOPIC_DELEGATION_ROUTING_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
-)
-"""Command topic for routing reducer invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INVOCATION_COMMAND: Final[str] = (
-    "onex.cmd.omnibase-infra.invocation.v1"
-)
-"""Command topic for typed invocation commands from the delegation orchestrator."""
-
-TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE: Final[str] = (
-    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
-)
-"""Event topic for remote agent task lifecycle updates."""
-
-TOPIC_DELEGATION_QUALITY_GATE_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
-)
-"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INFERENCE_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-inference-request.v1"
-)
-"""Command topic for LLM inference invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INFERENCE_RESPONSE: Final[str] = (
-    "onex.evt.omnibase-infra.inference-response.v1"
-)
-"""Event topic for LLM inference responses in the delegation pipeline."""
-
-TOPIC_DELEGATION_TASK_DELEGATED: Final[str] = "onex.evt.omniclaude.task-delegated.v1"
-"""Backward-compatible event topic for omnidash delegation projection."""
-
-TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
-    "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
-)
-"""Command topic for baseline comparison compute from the delegation orchestrator."""
+#
+# The 13 ``TOPIC_DELEGATION_*`` pipeline constants formerly defined here were
+# removed in OMN-13195 (plan: platform-debt contract-sourced-topics, phase A4).
+# Their production consumers were migrated to contract-sourced resolution in
+# OMN-13191 (infra applier → ``ServiceTopicRegistry``) and OMN-13193 (omnimarket
+# ``node_delegation_orchestrator`` → its own ``contract.yaml``). After those
+# merges every constant had ZERO production (``src/``) importers — verified by
+# per-constant grep across all repos under ``$OMNI_HOME`` on 2026-06-17 — so the
+# Python literals were deleted. The topic strings themselves still live in their
+# owning ``contract.yaml`` files; resolve them via ``ServiceTopicRegistry`` /
+# ``topic_keys`` (infra) or ``contract_publish_topics`` / ``contract_subscribe_topics``
+# (omnimarket), never by re-adding a literal here.
+#
+# Two ``TOPIC_DELEGATE_SKILL_*`` constants below are intentionally KEPT: they are
+# the AST source for ``generate_topic_enums.py`` and have no contract-resolution
+# replacement yet (follow-up tracked in OMN-13202 / unblocks A5-full OMN-13199).
 
 TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
     "onex.evt.omnimarket.delegate-skill-completed.v1"
@@ -531,16 +488,6 @@ consumed in ``runtime/service_kernel.py`` (OMN-11996). Keep this constant.
 __all__ = [
     "TOPIC_DELEGATE_SKILL_COMPLETED",
     "TOPIC_DELEGATE_SKILL_FAILED",
-    "TOPIC_DELEGATION_COMPLETED",
-    "TOPIC_DELEGATION_FAILED",
-    "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
-    "TOPIC_DELEGATION_INFERENCE_REQUEST",
-    "TOPIC_DELEGATION_INFERENCE_RESPONSE",
-    "TOPIC_DELEGATION_INVOCATION_COMMAND",
-    "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
-    "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
-    "TOPIC_DELEGATION_REQUEST",
-    "TOPIC_DELEGATION_ROUTING_DECISION",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",
