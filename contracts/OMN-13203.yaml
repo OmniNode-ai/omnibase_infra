@@ -16,8 +16,8 @@ evidence_requirements:
     command: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/test_handler_wiring_resolver_integration.py tests/integration/runtime/test_auto_wiring_resolver_end_to_end.py -q"
   - kind: ci
     description: >-
-      ruff format/check clean, mypy --strict clean on the three changed production modules, pre-commit passes on all changed files (no bypass).
-    command: "uv run mypy src/omnibase_infra/runtime/auto_wiring/handler_wiring.py src/omnibase_infra/runtime/auto_wiring/report.py src/omnibase_infra/runtime/auto_wiring/enum_quarantine_reason.py --strict"
+      ruff format/check clean, repo-wide mypy --strict gate (the Type Safety Validation CI job) passes on src/omnibase_infra/ including the changed production modules (handler_wiring.py, report.py, enum_quarantine_reason.py), pre-commit passes on all changed files (no bypass).
+    command: "uv run mypy src/omnibase_infra/ --strict"
 emergency_bypass:
   enabled: false
   justification: ""

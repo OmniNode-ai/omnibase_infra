@@ -46,6 +46,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.protocols import ProtocolEventBusLike
@@ -394,7 +395,7 @@ async def test_fatal_infra_error_raises_in_strict_mode(
             "omnibase_infra.runtime.auto_wiring.handler_wiring.ServiceHandlerResolver",
             return_value=_ResolverInfraDown(),
         ),
-        pytest.raises(Exception),
+        pytest.raises(ModelOnexError) as exc_info,
     ):
         await wire_from_manifest(
             manifest=manifest,
@@ -402,6 +403,11 @@ async def test_fatal_infra_error_raises_in_strict_mode(
             event_bus=_make_event_bus(),
             container=None,
         )
+    # The fatal infra failure surfaces as the auto-wiring aggregate ModelOnexError
+    # carrying the underlying InfraConnectionError message — proves the broker
+    # outage propagated (boot fails) rather than being quarantined.
+    assert "InfraConnectionError" in str(exc_info.value)
+    assert "broker unreachable" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
