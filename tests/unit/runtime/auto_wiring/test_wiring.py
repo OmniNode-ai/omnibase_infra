@@ -736,9 +736,22 @@ class TestWireFromManifest:
         assert report.total_wired == 0
 
     @pytest.mark.asyncio
-    async def test_unsatisfiable_di_raises_on_startup(self) -> None:
-        """OMN-8735 negative test: handler with unsatisfiable DI deps must raise."""
-        from omnibase_core.models.errors import ModelOnexError
+    async def test_unsatisfiable_di_quarantined_in_default_mode(self) -> None:
+        """OMN-13203: handler with unsatisfiable DI deps is quarantined, not boot-fatal.
+
+        Before OMN-13203 the resolver's unsatisfiable-ctor TypeError re-raised
+        and crashed runtime-effects boot (taking every healthy handler with it).
+        It is now contained so wire_from_manifest COMPLETES and the bad handler
+        is REPORTED: failed >= 1 + quarantined + a loud WARNING. The OMN-8735
+        fail-fast invariant is preserved under ONEX_WIRING_STRICT_MODE=1 (see
+        test_unsatisfiable_di_raises_on_startup_in_strict_mode below).
+        """
+        import os
+        from unittest.mock import patch as _patch
+
+        from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+            EnumQuarantineReason,
+        )
         from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
@@ -758,11 +771,57 @@ class TestWireFromManifest:
             async def handle(self, envelope: object) -> None:
                 pass
 
-        with patch(
-            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=HandlerWithDeps,
+        with (
+            _patch.dict(os.environ, {}, clear=False),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+                return_value=HandlerWithDeps,
+            ),
         ):
-            with pytest.raises((ModelOnexError, TypeError)):
+            os.environ.pop("ONEX_WIRING_STRICT_MODE", None)
+            # COMPLETES — no exception (the boot-crash regression is fixed).
+            report = await wire_from_manifest(manifest, engine)
+
+        assert report.total_failed >= 1
+        assert report.total_quarantined == 1
+        assert (
+            report.quarantined_handlers[0].reason
+            is EnumQuarantineReason.UNRESOLVABLE_HANDLER
+        )
+
+    @pytest.mark.asyncio
+    async def test_unsatisfiable_di_raises_on_startup_in_strict_mode(self) -> None:
+        """OMN-8735 invariant preserved: strict mode re-raises unsatisfiable DI."""
+        import os
+        from unittest.mock import patch as _patch
+
+        from omnibase_infra.runtime.message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        handler_routing = _make_handler_routing(
+            handler_name="HandlerWithDeps",
+            handler_module="fake.module",
+        )
+        contract = _make_contract(handler_routing=handler_routing)
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        class HandlerWithDeps:
+            def __init__(self, required_service: object) -> None:
+                self.required_service = required_service
+
+            async def handle(self, envelope: object) -> None:
+                pass
+
+        with (
+            _patch.dict(os.environ, {"ONEX_WIRING_STRICT_MODE": "1"}),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+                return_value=HandlerWithDeps,
+            ),
+        ):
+            with pytest.raises(TypeError):
                 await wire_from_manifest(manifest, engine)
 
     @pytest.mark.asyncio
