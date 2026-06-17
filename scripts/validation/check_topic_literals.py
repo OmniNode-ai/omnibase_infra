@@ -17,8 +17,9 @@
 #   - topics.py                           (canonical topic definition file)
 #   - platform_topic_suffixes.py          (canonical platform topic registry)
 #   - contract.yaml                       (contract definitions, not Python)
-#   NOTE: topic_constants.py is NO LONGER whole-file excluded (OMN-13195/A4); its
-#   3 remaining kept literals are suppressed per-line in the baseline instead.
+#   NOTE: topic_constants.py is fully scanned (OMN-13195/A4 narrowed the exemption;
+#   OMN-13202 deleted its last literals; OMN-13199/A5 finished the un-allowlisting).
+#   It holds DLQ builders only; the gate fails closed on any reintroduced literal.
 #
 # Pre-existing violations that were present before OMN-3343 are suppressed
 # via `scripts/validation/topic_literal_baseline.txt`. New violations added
@@ -57,10 +58,12 @@ _TOPIC_PATTERN = re.compile(r"^onex\.(evt|cmd)\.[a-z][a-z0-9._-]*$")
 # file (TOPIC_SESSION_COORDINATION_SIGNAL + the two TOPIC_DELEGATE_SKILL_*
 # codegen-AST sources) after migrating the enum codegen to read the
 # contract-declarative ``runtime/topics.yaml`` manifest, and removed their per-line
-# entries from ``topic_literal_baseline.txt``. ``topic_constants.py`` now contains
-# zero raw topic literals and needs no exemption here. Removing it from the
-# ``.pre-commit-config.yaml`` allowlist (if any redundancy remains) is the A5-full
-# follow-up (OMN-13199).
+# entries from ``topic_literal_baseline.txt``. OMN-13199 (phase A5) completed the
+# un-allowlisting: ``topic_constants.py`` is fully scanned by this gate (it is not
+# in ``_EXCLUDED_FILENAMES`` below), holds zero raw topic literals (DLQ builders
+# only), and the gate fails closed on any reintroduced literal — proven by
+# ``tests/unit/scripts/validation/test_check_topic_literals_fail_closed.py``.
+# No ``.pre-commit-config.yaml`` exemption for this file remains.
 _EXCLUDED_FILENAMES: frozenset[str] = frozenset(
     {
         "topics.py",
