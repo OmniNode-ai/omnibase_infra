@@ -92,22 +92,6 @@ DLQ_COMMAND_TOPIC_SUFFIX: Final[str] = (
 """DLQ topic suffix for permanently failed commands: 'dlq.omnibase-infra.commands.v1'"""
 
 # ==============================================================================
-# DLQ Quarantine Topic (OMN-12619)
-# ==============================================================================
-# Quarantine is the terminal landing topic for DLQ messages that the replay node
-# determined are NOT replayable (max-retry-exceeded, non-retryable error type,
-# or out-of-filter). It exists to END SILENT MESSAGE LOSS: the previous
-# skip-and-drop path discarded these messages (and, with tracking off, did not
-# even record them). Quarantine durably retains them for human/automated
-# reclassification. Ownership and re-entry semantics are authored in the DLQ
-# replay node contract and docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
-
-TOPIC_DLQ_QUARANTINE: Final[str] = (
-    f"{_DLQ_PREFIX}.{DLQ_DOMAIN}.{DLQ_PRODUCER}.quarantine.{DLQ_TOPIC_VERSION}"
-)
-"""Fully-qualified DLQ quarantine topic: 'onex.dlq.omnibase-infra.quarantine.v1'."""
-
-# ==============================================================================
 # Category-to-Suffix Mapping
 # ==============================================================================
 
@@ -463,26 +447,6 @@ TOPIC_SESSION_COORDINATION_SIGNAL: Final[str] = (
 )
 """Topic for session coordination signals between concurrent sessions."""
 
-TOPIC_SESSION_STATUS_CHANGED: Final[str] = (
-    "onex.evt.omniclaude.session-status-changed.v1"
-)
-"""Topic for session status change notifications."""
-
-# ---------------------------------------------------------------------------
-# Eval Pipeline Topics (OMN-6798)
-# ---------------------------------------------------------------------------
-
-TOPIC_EVAL_COMPLETED: Final[str] = "onex.evt.omnibase-infra.eval-completed.v1"
-"""Evaluation pipeline completed event.
-
-Published by ServiceAutoEvalRunner after each eval task completes.
-Carries eval_id, model_id, pass/fail counts, and overall verdict.
-
-Producer: ServiceAutoEvalRunner (OMN-6796)
-Consumer: omnidash eval dashboard, observability
-Ticket: OMN-6798
-"""
-
 
 # ---------------------------------------------------------------------------
 # Delegation Pipeline Topics (OMN-7040)
@@ -550,10 +514,19 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
     "onex.evt.omnimarket.delegate-skill-completed.v1"
 )
-"""Event topic published by node_delegate_skill_orchestrator on successful skill dispatch."""
+"""Event topic published by node_delegate_skill_orchestrator on successful skill dispatch.
+
+Generator source for ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1``, which is
+consumed in ``runtime/service_kernel.py`` to wire the delegate-skill terminal result
+applier (OMN-11996). Keep this constant: deleting it drops the generated enum member.
+"""
 
 TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
-"""Event topic published by node_delegate_skill_orchestrator on skill dispatch failure."""
+"""Event topic published by node_delegate_skill_orchestrator on skill dispatch failure.
+
+Generator source for ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_FAILED_V1``, which is
+consumed in ``runtime/service_kernel.py`` (OMN-11996). Keep this constant.
+"""
 
 __all__ = [
     "TOPIC_DELEGATE_SKILL_COMPLETED",
@@ -568,9 +541,6 @@ __all__ = [
     "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
     "TOPIC_DELEGATION_REQUEST",
     "TOPIC_DELEGATION_ROUTING_DECISION",
-    "TOPIC_DELEGATE_SKILL_COMPLETED",
-    "TOPIC_DELEGATE_SKILL_FAILED",
-    "TOPIC_EVAL_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",

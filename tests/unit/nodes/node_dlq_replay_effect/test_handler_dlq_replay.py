@@ -15,7 +15,8 @@ the consumer / replay producer / quarantine producer / tracking service:
     5. dlq_replay_history records every terminal outcome.
     6. Eligibility is decided by the reused should_replay() (max-retry,
        non-retryable error type) — not a reimplementation.
-    7. The QUARANTINED enum member and onex.dlq.omnibase-infra.quarantine.v1 constant exist.
+    7. The QUARANTINED enum member exists and build_dlq_topic("quarantine")
+       resolves to onex.dlq.omnibase-infra.quarantine.v1.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import pytest
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
 from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayRecord
-from omnibase_infra.event_bus.topic_constants import TOPIC_DLQ_QUARANTINE
+from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQ_REPLAY_CONSUMER_GROUP,
     DLQQuarantineProducer,
@@ -201,7 +202,7 @@ def _handler(
 
 
 def test_quarantine_constants_exist() -> None:
-    assert TOPIC_DLQ_QUARANTINE == "onex.dlq.omnibase-infra.quarantine.v1"
+    assert build_dlq_topic("quarantine") == "onex.dlq.omnibase-infra.quarantine.v1"
     assert EnumReplayStatus.QUARANTINED.value == "quarantined"
     assert DLQ_REPLAY_CONSUMER_GROUP == "onex-dlq-replay"
 

@@ -1,0 +1,67 @@
+# OMN-13190 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13190"
+title: "chore(OMN-13190): remove 3 zero-consumer TOPIC_* constants from topic_constants.py"
+summary: >-
+  Platform-debt cleanup (epic OMN-13188). The plan listed 6 candidate dead TOPIC_*
+  constants; verification refuted one (TOPIC_SESSION_COORDINATION_SIGNAL has a live
+  omnimarket emit_daemon consumer). During the build a second pair was also found NOT
+  dead: TOPIC_DELEGATE_SKILL_COMPLETED / TOPIC_DELEGATE_SKILL_FAILED are the
+  TopicEnumGenerator (OMN-2964) source for EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1,
+  which runtime/service_kernel.py:2045-2048 consumes to wire the delegate-skill terminal
+  result applier (OMN-11996). Deleting them dropped the generated enum members and broke
+  bootstrap() (caught by tests/unit/runtime/test_kernel.py). They were restored. Only the
+  3 genuinely-dead constants are removed: TOPIC_DLQ_QUARANTINE (constant-only; the
+  quarantine topic itself stays live via build_dlq_topic("quarantine")),
+  TOPIC_EVAL_COMPLETED, and TOPIC_SESSION_STATUS_CHANGED. The 16 DLQ builder/format
+  helpers are untouched. Generated topic enums were regenerated from source so the
+  Topic Enum Drift Check passes (only EVT_EVAL_COMPLETED_V1 and EVT_SESSION_STATUS_CHANGED_V1
+  drop, both with zero consumers).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Topic-constant, DLQ-replay, session-registry projector, delegation-topic, and
+      topic-registry-integration unit suites pass; full unit suite green (20436 passed,
+      kernel suite 56/56 serially) with the deleted constants gone and no new failures.
+    command: "uv run pytest tests/unit/event_bus/ tests/unit/topics/ tests/unit/nodes/node_dlq_replay_effect/test_handler_dlq_replay.py tests/unit/services/session_registry/test_session_registry_projector.py tests/unit/runtime/test_kernel.py -q"
+  - kind: ci
+    description: >-
+      Both topic gates green: no-hardcoded-topics pre-commit hook + check_topic_literals.py
+      arch-invariant, plus the Topic Enum Drift Check (generate_topic_enums.py --check).
+    command: "uv run python scripts/validation/check_topic_literals.py && uv run python scripts/generate_topic_enums.py --check"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-zero-consumer-grep
+    description: >-
+      Grep proves zero production AND zero test references to the 3 removed constants
+      (TOPIC_DLQ_QUARANTINE, TOPIC_EVAL_COMPLETED, TOPIC_SESSION_STATUS_CHANGED) and to the
+      2 dropped generated enum members (EVT_EVAL_COMPLETED_V1, EVT_SESSION_STATUS_CHANGED_V1)
+      across omnibase_infra, omnibase_core, and omnimarket.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "! grep -rn -e 'TOPIC_DLQ_QUARANTINE' -e 'TOPIC_EVAL_COMPLETED' -e 'TOPIC_SESSION_STATUS_CHANGED' -e 'EVT_EVAL_COMPLETED_V1' -e 'EVT_SESSION_STATUS_CHANGED_V1' --include='*.py' src/ tests/"
+  - id: dod-topic-gates
+    description: >-
+      Topic literal arch-invariant and Topic Enum Drift Check both pass after deletion +
+      enum regeneration.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run python scripts/validation/check_topic_literals.py && uv run python scripts/generate_topic_enums.py --check"
+  - id: dod-focused-tests
+    description: >-
+      Topic + DLQ + session-registry + kernel unit suites pass, proving the removed
+      constants had no live consumer and the kept delegate-skill enum members remain wired.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/event_bus/ tests/unit/topics/ tests/unit/nodes/node_dlq_replay_effect/test_handler_dlq_replay.py tests/unit/services/session_registry/test_session_registry_projector.py tests/unit/runtime/test_kernel.py -q"
