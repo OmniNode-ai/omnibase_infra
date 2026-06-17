@@ -1185,6 +1185,139 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   # ============================================================================
+  # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
+  #
+  # After the test matrix finishes, download all JUnit XML shards, merge them,
+  # and compare against the dev-branch baseline.  Any failure cluster NOT in the
+  # baseline causes this job to fail, blocking the PR.
+  #
+  # The baseline is updated nightly by the dev-baseline-publisher workflow.
+  # Expired entries (> 7 days old) also fail the gate to force renewal.
+  # Required status check name: "test-failure-ratchet / Test-Failure Ratchet Gate"
+  # ============================================================================
+  test-failure-ratchet:
+    name: Test-Failure Ratchet Gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    needs: [test-parallel, detect-changes]
+    # Run on PRs and merge_group events whenever there were actual test runs.
+    # Also run when docs-only so we detect ratchet-baseline staleness.
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code (dev branch baseline)
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          sparse-checkout: |
+            config/validation/test-failure-baseline.yaml
+            scripts/check_test_failure_ratchet.py
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout PR HEAD (for scripts)
+        uses: actions/checkout@v6
+        with:
+          clean: false
+          path: pr-head
+          sparse-checkout: |
+            scripts/check_test_failure_ratchet.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install PyYAML (minimal dep for ratchet script)
+        run: uv pip install --system pyyaml
+
+      - name: Download all JUnit XML shards
+        if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Merge JUnit shards into single XML
+        if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          shards_dir = Path("junit-shards")
+          if not shards_dir.exists():
+              print("No JUnit shard directory found — writing empty XML")
+              root = ET.Element("testsuite", tests="0")
+              ET.ElementTree(root).write("merged-junit.xml")
+              exit(0)
+
+          merged_root = ET.Element("testsuite", name="merged", tests="0")
+          total = 0
+          for shard_dir in sorted(shards_dir.iterdir()):
+              xml_files = list(shard_dir.glob("*.xml"))
+              for xml_file in xml_files:
+                  try:
+                      tree = ET.parse(xml_file)
+                      shard_root = tree.getroot()
+                      suites = shard_root.findall(".//testsuite") or [shard_root]
+                      for suite in suites:
+                          for tc in suite.findall("testcase"):
+                              merged_root.append(tc)
+                              if tc.find("failure") is not None or tc.find("error") is not None:
+                                  total += 1
+                  except ET.ParseError as e:
+                      print(f"Warning: could not parse {xml_file}: {e}")
+
+          merged_root.set("tests", str(total))
+          ET.ElementTree(merged_root).write("merged-junit.xml")
+          print(f"Merged {total} failed test cases into merged-junit.xml")
+          PYEOF
+
+      - name: Write empty JUnit if test-parallel was skipped
+        if: needs.test-parallel.result == 'skipped'
+        run: |
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          root = ET.Element('testsuite', tests='0')
+          ET.ElementTree(root).write('merged-junit.xml')
+          print('Test matrix was skipped (docs-only diff) — empty JUnit written.')
+          "
+
+      - name: Run test-failure ratchet check
+        run: |
+          python3 scripts/check_test_failure_ratchet.py \
+            --junit-xml merged-junit.xml \
+            --baseline config/validation/test-failure-baseline.yaml
+
+      - name: Post ratchet summary
+        if: always()
+        run: |
+          echo "## Test-Failure Ratchet Gate (OMN-13027)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Baseline: \`config/validation/test-failure-baseline.yaml\` (from dev branch)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f config/validation/test-failure-baseline.yaml ]; then
+            CLUSTER_COUNT=$(python3 -c "
+          import yaml
+          with open('config/validation/test-failure-baseline.yaml') as f:
+              d = yaml.safe_load(f) or {}
+          print(len(d.get('clusters', {})))
+          " 2>/dev/null || echo "?")
+            echo "Baseline clusters: **${CLUSTER_COUNT}**" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  # ============================================================================
   # Runtime Boot Smoke Test (OMN-9120)
   # Calls the reusable reusable-runtime-boot.yml workflow in compose mode.
   # Runs after the full test suite passes so a boot regression doesn't compete
@@ -1214,13 +1347,14 @@ jobs:
     # failure does not block CI Summary. A follow-up ticket promotes it to a hard
     # gate once compose-mode boot is consistently green on main. See CLAUDE.md
     # "Strict-mode invariants land AFTER all downstream consumers are compliant".
-    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
+    needs: [zone-filter, tests-gate, test-failure-ratchet, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
       - name: Check test results
         run: |
           gate="${{ needs.tests-gate.result }}"
+          ratchet="${{ needs.test-failure-ratchet.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
           infrahnd="${{ needs.infra-node-handler-ownership.result }}"
@@ -1238,6 +1372,7 @@ jobs:
           contractsync="${{ needs.contract-sync-gate.result }}"
 
           if [[ "$gate" == "success" ]] && \
+             [[ "$ratchet" == "success" || "$ratchet" == "skipped" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$infrahnd" == "success" ]] && \
@@ -1255,6 +1390,7 @@ jobs:
              [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
+            echo "Test-Failure Ratchet Gate: $ratchet"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Infra Node Handler Ownership: Passed"
@@ -1275,6 +1411,7 @@ jobs:
           else
             echo "Checks failed"
             echo "CI Tests Gate: $gate"
+            echo "Test-Failure Ratchet Gate: $ratchet"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
             echo "Infra Node Handler Ownership: $infrahnd"
