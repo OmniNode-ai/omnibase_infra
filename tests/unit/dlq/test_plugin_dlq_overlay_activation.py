@@ -116,10 +116,11 @@ class TestModelDomainPluginConfigOverlayField:
     def test_overlay_config_defaults_to_none(self) -> None:
         from uuid import uuid4
 
+        from omnibase_infra.event_bus import EventBusInmemory
         from omnibase_infra.runtime.models import ModelDomainPluginConfig
 
         mock_container = MagicMock()
-        mock_bus = MagicMock()
+        mock_bus = MagicMock(spec=EventBusInmemory)
         config = ModelDomainPluginConfig(
             container=mock_container,
             event_bus=mock_bus,
@@ -133,10 +134,11 @@ class TestModelDomainPluginConfigOverlayField:
     def test_overlay_config_can_be_set(self) -> None:
         from uuid import uuid4
 
+        from omnibase_infra.event_bus import EventBusInmemory
         from omnibase_infra.runtime.models import ModelDomainPluginConfig
 
         mock_container = MagicMock()
-        mock_bus = MagicMock()
+        mock_bus = MagicMock(spec=EventBusInmemory)
         overlay = {"DLQ_ENABLED": "true", "DLQ_DB_URL": "postgresql://localhost/dlq"}
         config = ModelDomainPluginConfig(
             container=mock_container,
