@@ -32,7 +32,7 @@ For capitalization rules in prose vs. code contexts, see the quick-reference tab
 | Value wrapper | `ModelContainer[T]` | "value wrapper" | — | "DI container" (wrong type) |
 | Side-effect request | `ModelIntent` | "intent" | `ModelPayload*` (payload) | "action", "command", "thunk" |
 | State snapshot | `ModelProjection` / projection | "projection" | `Model*Projection` | "snapshot" (use only for point-in-time reads) |
-| Message envelope | `ModelOnexEnvelope` | "envelope" | — | "message", "event" alone |
+| Message envelope | `ModelEventEnvelope[T]` | "envelope" | — | "message", "event" alone |
 | Event payload | varies | "event" or "payload" | `Model*Event` | "message" (too generic) |
 | FSM transition fn | `delta(state, event) -> (state, intents[])` | "delta function" | — | "reducer function" alone |
 
@@ -121,7 +121,7 @@ For capitalization rules in prose vs. code contexts, see the quick-reference tab
 **Architectural meaning**: A handler is a unit of business logic invoked by a node to process a single event or request. Handlers encapsulate the "what" — they compute results, call services, and return output. They do not emit events directly.
 
 **Two protocols**:
-- `ProtocolHandler` — envelope-based; used by the runtime layer. Input and output are both `ModelOnexEnvelope`.
+- `ProtocolHandler` — request/response I/O; used for HTTP, DB, and Kafka handlers. Input is `ModelProtocolRequest`, output is `ModelProtocolResponse`.
 - `ProtocolMessageHandler` — category-based; used by the dispatch engine. Input is `ModelEventEnvelope`, output is `ModelHandlerOutput`.
 
 **Handler No-Publish Rule**: Handlers must not hold a reference to the event bus or call any publish method. Only orchestrators publish events. This constraint is enforced by the architecture validator.
@@ -170,8 +170,7 @@ Projections are distinct from the FSM state held in the reducer: the FSM state d
 
 **Architectural meaning**: An envelope is the transport wrapper for all events on the ONEX event bus. It carries metadata (correlation ID, causation ID, timestamps, node identity) alongside the event payload.
 
-- `ModelOnexEnvelope` — the primary runtime envelope used by `ProtocolHandler`.
-- `ModelEventEnvelope` — used by the dispatch engine and `ProtocolMessageHandler`.
+- `ModelEventEnvelope[T]` — the canonical runtime envelope used by the dispatch engine and `ProtocolMessageHandler`.
 
 Envelopes are always frozen (`frozen=True`). They cross node boundaries and must be immutable.
 
