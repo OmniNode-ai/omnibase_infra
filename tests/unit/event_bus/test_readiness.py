@@ -15,6 +15,7 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventBusReadiness
+from omnibase_infra.protocols import ProtocolEventBusLike
 from tests.conftest import make_test_node_identity
 
 pytestmark = pytest.mark.unit
@@ -335,7 +336,7 @@ class TestRuntimeHostProcessReadiness:
             RuntimeHostProcess,
         )
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.get_readiness_status = AsyncMock(
             return_value=ModelEventBusReadiness(
                 is_ready=True,
@@ -362,7 +363,7 @@ class TestRuntimeHostProcessReadiness:
             RuntimeHostProcess,
         )
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.get_readiness_status = AsyncMock(
             return_value=ModelEventBusReadiness(
                 is_ready=True,
@@ -387,7 +388,7 @@ class TestRuntimeHostProcessReadiness:
             RuntimeHostProcess,
         )
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.get_readiness_status = AsyncMock(
             return_value=ModelEventBusReadiness(
                 is_ready=False,
@@ -412,7 +413,7 @@ class TestRuntimeHostProcessReadiness:
             RuntimeHostProcess,
         )
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         # No get_readiness_status method
         del mock_event_bus.get_readiness_status
         mock_event_bus.health_check = AsyncMock(return_value={"healthy": True})

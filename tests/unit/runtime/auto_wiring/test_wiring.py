@@ -398,6 +398,9 @@ class TestTerminalEventResultApplier:
             ) -> None:
                 return None
 
+            def get_consumer_groups(self) -> dict[tuple[str, str], str]:
+                return {}
+
         event_bus = FakeEventBus()
 
         class Handler:

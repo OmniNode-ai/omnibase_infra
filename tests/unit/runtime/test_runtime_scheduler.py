@@ -41,6 +41,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
 from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerConfig,
@@ -62,7 +63,7 @@ def mock_event_bus() -> AsyncMock:
     Returns:
         AsyncMock configured to simulate EventBusKafka behavior.
     """
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock(return_value=None)
     bus.start = AsyncMock(return_value=None)
     bus.stop = AsyncMock(return_value=None)

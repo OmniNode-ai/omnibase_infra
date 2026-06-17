@@ -37,6 +37,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
@@ -141,7 +142,7 @@ def _make_minimal_config() -> ModelDomainPluginConfig:
     """
     return ModelDomainPluginConfig(
         container=MagicMock(),
-        event_bus=MagicMock(),
+        event_bus=MagicMock(spec=ProtocolEventBusLike),
         correlation_id=uuid4(),
         input_topic="test.input.v1",
         output_topic="test.output.v1",

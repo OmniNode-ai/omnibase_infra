@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -77,7 +78,7 @@ async def test_wire_from_manifest_raises_in_strict_mode(
     manifest = ModelAutoWiringManifest(contracts=[contract])
 
     dispatch_engine = MagicMock()
-    event_bus = AsyncMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
     with pytest.raises(ModelOnexError, match="Auto-wiring failed"):
         await wire_from_manifest(
@@ -110,7 +111,7 @@ async def test_wire_from_manifest_collects_all_failures_in_strict_mode(
     manifest = ModelAutoWiringManifest(contracts=contracts)
 
     dispatch_engine = MagicMock()
-    event_bus = AsyncMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
     with pytest.raises(ModelOnexError) as exc_info:
         await wire_from_manifest(
@@ -147,7 +148,7 @@ async def test_wire_from_manifest_non_strict_does_not_raise(
     manifest = ModelAutoWiringManifest(contracts=[contract])
 
     dispatch_engine = MagicMock()
-    event_bus = AsyncMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
     report = await wire_from_manifest(
         manifest=manifest,

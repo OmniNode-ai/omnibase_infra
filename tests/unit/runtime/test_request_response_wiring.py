@@ -49,6 +49,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ProtocolConfigurationError,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
@@ -62,7 +63,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def mock_event_bus() -> MagicMock:
     """Mock event bus with publish/subscribe capabilities."""
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock()
     bus._bootstrap_servers = "localhost:9092"
     return bus

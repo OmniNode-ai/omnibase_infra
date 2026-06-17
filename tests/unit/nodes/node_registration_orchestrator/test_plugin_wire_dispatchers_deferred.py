@@ -31,6 +31,7 @@ import omnibase_infra.nodes.node_registration_orchestrator.plugin as plugin_modu
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     ServiceRegistration,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models.model_domain_plugin_config import (
     ModelDomainPluginConfig,
 )
@@ -57,7 +58,7 @@ def _make_plugin_config() -> ModelDomainPluginConfig:
     """
     container = MagicMock()
     container.service_registry = MagicMock()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     dispatch_engine = MagicMock()
     dispatch_engine.register_dispatcher = MagicMock()
     dispatch_engine.register_route = MagicMock()

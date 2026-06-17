@@ -45,6 +45,7 @@ import pytest
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
@@ -67,7 +68,7 @@ class TestContractDrivenSubscription:
         Returns an AsyncMock that tracks subscribe calls and returns mock
         unsubscribe callables.
         """
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         bus.subscribe = AsyncMock(return_value=AsyncMock())
         bus.publish = AsyncMock()
         return bus
@@ -219,7 +220,7 @@ class TestMessageDispatchFlow:
         Returns an AsyncMock that stores on_message callbacks for each topic,
         allowing tests to simulate message delivery.
         """
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         bus.callbacks: dict[str, object] = {}
 
         async def capture_subscribe(
@@ -357,7 +358,7 @@ class TestPublisherContractValidation:
     @pytest.fixture
     def mock_event_bus(self) -> AsyncMock:
         """Create mock event bus."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         bus.publish = AsyncMock()
         return bus
 
@@ -485,7 +486,7 @@ class TestHandlerNoBusAccess:
         from uuid import uuid4
 
         mock_dispatch_engine = AsyncMock()
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus,
@@ -528,7 +529,7 @@ class TestHandlerNoBusAccess:
         from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
         mock_dispatch_engine = AsyncMock()
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus,
@@ -687,7 +688,7 @@ class TestSubscriptionCleanup:
             unsubscribe_callback_3,
         ]
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.subscribe = AsyncMock(side_effect=unsubscribe_callbacks)
 
         wiring = EventBusSubcontractWiring(
@@ -729,7 +730,7 @@ class TestSubscriptionCleanup:
         """
         unsubscribe_callback = AsyncMock()
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.subscribe = AsyncMock(return_value=unsubscribe_callback)
 
         wiring = EventBusSubcontractWiring(
@@ -771,7 +772,7 @@ class TestSubscriptionCleanup:
         failing_unsubscribe = AsyncMock(side_effect=RuntimeError("unsubscribe failed"))
         successful_unsubscribe = AsyncMock()
 
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.subscribe = AsyncMock(
             side_effect=[failing_unsubscribe, successful_unsubscribe]
         )
@@ -817,7 +818,7 @@ class TestTopicResolution:
         Verifies the ONEX topic naming convention is realm-agnostic:
         {topic_suffix} (no environment prefix)
         """
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_dispatch_engine = AsyncMock()
 
         wiring = EventBusSubcontractWiring(
@@ -840,7 +841,7 @@ class TestTopicResolution:
         1. Topic resolution is realm-agnostic
         2. Same topic suffix regardless of environment
         """
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_dispatch_engine = AsyncMock()
         topic_suffix = "onex.evt.test.test-event.v1"
 
@@ -871,7 +872,7 @@ class TestPublisherTopicScopedProperties:
         1. Return type is frozenset
         2. Contains all allowed topics
         """
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
@@ -888,7 +889,7 @@ class TestPublisherTopicScopedProperties:
 
     def test_environment_property(self) -> None:
         """Test that environment property returns configured value."""
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
@@ -942,7 +943,7 @@ class TestIdempotencyIntegration:
         idempotency_store = StoreIdempotencyInmemory()
         mock_dispatch_engine = AsyncMock()
         mock_dispatch_engine.dispatch = AsyncMock()
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         # Track callbacks for message simulation
         callbacks: dict[str, object] = {}
@@ -1039,7 +1040,7 @@ class TestIdempotencyIntegration:
         idempotency_store = StoreIdempotencyInmemory()
         mock_dispatch_engine = AsyncMock()
         mock_dispatch_engine.dispatch = AsyncMock()
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         callbacks: dict[str, object] = {}
 
@@ -1131,7 +1132,7 @@ class TestIdempotencyIntegration:
         idempotency_store = StoreIdempotencyInmemory()
         mock_dispatch_engine = AsyncMock()
         mock_dispatch_engine.dispatch = AsyncMock()
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
 
         callbacks: dict[str, object] = {}
 
@@ -1233,7 +1234,7 @@ class TestOffsetCommitOnFailure:
         )
 
         # Setup: event bus with commit_offset tracking
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.commit_offset = AsyncMock()
 
         # Capture the callback registered with subscribe
@@ -1312,7 +1313,7 @@ class TestOffsetCommitOnFailure:
         mock_dispatch_engine.dispatch = AsyncMock(return_value=None)
 
         # Setup: event bus with commit_offset tracking
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.commit_offset = AsyncMock()
 
         # Capture the callback registered with subscribe
@@ -1390,7 +1391,7 @@ class TestOffsetCommitOnFailure:
         mock_dispatch_engine = AsyncMock()
 
         # Setup: event bus with commit_offset tracking
-        mock_event_bus = AsyncMock()
+        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
         mock_event_bus.commit_offset = AsyncMock()
 
         # Capture the callback registered with subscribe

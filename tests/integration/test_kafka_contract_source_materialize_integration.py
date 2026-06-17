@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.models.handlers import ModelHandlerDescriptor
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.enums.enum_materialization_rejection import (
     EnumMaterializationRejection,
 )
@@ -82,7 +83,7 @@ def test_materialize_cached_contract_full_flow() -> None:
             source.materialize_cached_contract(
                 node_name="int_test",
                 dispatch_engine=MagicMock(),
-                event_bus=AsyncMock(),
+                event_bus=AsyncMock(spec=ProtocolEventBusLike),
             )
         )
 
@@ -112,14 +113,14 @@ def test_materialize_cached_contract_idempotency_gate() -> None:
             source.materialize_cached_contract(
                 node_name="int_test",
                 dispatch_engine=MagicMock(),
-                event_bus=AsyncMock(),
+                event_bus=AsyncMock(spec=ProtocolEventBusLike),
             )
         )
         result2 = asyncio.run(
             source.materialize_cached_contract(
                 node_name="int_test",
                 dispatch_engine=MagicMock(),
-                event_bus=AsyncMock(),
+                event_bus=AsyncMock(spec=ProtocolEventBusLike),
             )
         )
 
@@ -142,7 +143,7 @@ def test_materialize_cached_contract_version_conflict() -> None:
         source.materialize_cached_contract(
             node_name="int_test",
             dispatch_engine=MagicMock(),
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
     )
 
@@ -162,7 +163,7 @@ def test_materialize_cached_contract_tracking_set_populated() -> None:
             source.materialize_cached_contract(
                 node_name="int_test",
                 dispatch_engine=MagicMock(),
-                event_bus=AsyncMock(),
+                event_bus=AsyncMock(spec=ProtocolEventBusLike),
             )
         )
 
@@ -187,7 +188,7 @@ def test_materialize_cached_contract_wiring_failure_does_not_persist() -> None:
             source.materialize_cached_contract(
                 node_name="int_test",
                 dispatch_engine=MagicMock(),
-                event_bus=AsyncMock(),
+                event_bus=AsyncMock(spec=ProtocolEventBusLike),
             )
         )
 

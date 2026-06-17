@@ -782,6 +782,14 @@ class EventBusInmemory:
         async with self._lock:
             return [topic for topic, subs in self._subscribers.items() if subs]
 
+    def get_consumer_groups(self) -> dict[tuple[str, str], str]:
+        """Return active topic/group keys mapped to effective consumer group IDs."""
+        return {
+            (topic, group_id): group_id
+            for topic, subscribers in self._subscribers.items()
+            for group_id, _callback in subscribers
+        }
+
     async def get_topic_offset(self, topic: str) -> int:
         """Get current offset for a topic.
 

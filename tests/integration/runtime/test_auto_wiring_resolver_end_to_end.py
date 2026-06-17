@@ -163,6 +163,26 @@ class _FakeEventBus:
     ) -> None:
         return None
 
+    async def publish_envelope(
+        self,
+        envelope: object,
+        topic: str,
+        *,
+        key: bytes | None = None,
+    ) -> None:
+        return None
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+    ) -> None:
+        return None
+
+    def get_consumer_groups(self) -> dict[tuple[str, str], str]:
+        return {}
+
 
 # ---------------------------------------------------------------------------
 # Manifest fixture — one contract per resolver branch

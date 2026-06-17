@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
 )
@@ -124,7 +125,7 @@ class TestResolveOutputTopic:
 
     def test_returns_fallback_when_map_empty(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
         )
         event = ModelNodeBecameActive()
@@ -132,7 +133,7 @@ class TestResolveOutputTopic:
 
     def test_resolves_via_short_name(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "NodeBecameActive": "onex.evt.platform.node-became-active.v1",
@@ -146,7 +147,7 @@ class TestResolveOutputTopic:
 
     def test_resolves_via_full_class_name(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "ModelNodeBecameActive": "onex.evt.platform.node-became-active.v1",
@@ -160,7 +161,7 @@ class TestResolveOutputTopic:
 
     def test_short_name_takes_precedence_over_full(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "NodeBecameActive": "short-topic",
@@ -172,7 +173,7 @@ class TestResolveOutputTopic:
 
     def test_falls_back_to_output_topic_when_not_in_map(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "SomeOtherEvent": "other-topic",
@@ -184,7 +185,7 @@ class TestResolveOutputTopic:
     def test_non_model_prefixed_class_uses_full_name(self) -> None:
         """Classes without Model prefix: short_name == class_name."""
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "UnmappedEvent": "mapped-topic",
@@ -195,7 +196,7 @@ class TestResolveOutputTopic:
 
     def test_embedded_topic_takes_precedence(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "mapped-topic",
@@ -207,7 +208,7 @@ class TestResolveOutputTopic:
 
     def test_embedded_topic_can_use_publish_topic_allowlist(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "onex.evt.example.completed.v1",
@@ -222,7 +223,7 @@ class TestResolveOutputTopic:
 
     def test_undeclared_embedded_topic_falls_back_to_contract_topic(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "mapped-topic",
@@ -242,7 +243,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_publish_uses_output_topic_map(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -261,7 +262,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_publish_falls_back_to_output_topic(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -281,7 +282,7 @@ class TestPublishPathTopicRouting:
     @pytest.mark.asyncio
     async def test_topic_router_takes_precedence_over_output_topic_map(self) -> None:
         """topic_router (OMN-4881) takes priority over output_topic_map (OMN-5132)."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -303,7 +304,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_embedded_topic_takes_precedence_over_topic_router(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -329,7 +330,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_multiple_events_route_independently(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -358,7 +359,7 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_intermediate_intents_do_not_fall_back_to_completed_topic(
         self,
     ) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -388,7 +389,7 @@ class TestDelegationIntentTopicRouting:
 
     @pytest.mark.asyncio
     async def test_delegation_terminal_topic_keeps_terminal_payload_only(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -407,7 +408,7 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_topic_envelope_publishes_inner_terminal_payload(
         self,
     ) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -504,7 +505,7 @@ class TestRealContractIntegration:
         )
         topic_map = load_published_events_map(contract_path)
 
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",

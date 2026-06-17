@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.contract_publisher import (
     ContractPublishingInfraError,
     ModelContractPublisherConfig,
@@ -71,7 +72,7 @@ name: Missing required fields
 @pytest.fixture
 def mock_publisher() -> AsyncMock:
     """Return mock event bus publisher."""
-    publisher = AsyncMock()
+    publisher = AsyncMock(spec=ProtocolEventBusLike)
     publisher.publish = AsyncMock(return_value=None)
     return publisher
 
@@ -269,7 +270,7 @@ class TestServiceContractPublisherPublishAll:
         )
 
         # Publisher that fails
-        mock_publisher = AsyncMock()
+        mock_publisher = AsyncMock(spec=ProtocolEventBusLike)
         mock_publisher.publish = AsyncMock(
             side_effect=Exception("Kafka connection failed")
         )
@@ -309,7 +310,7 @@ class TestServiceContractPublisherPublishAll:
         )
 
         # Publisher that fails only on first call
-        mock_publisher = AsyncMock()
+        mock_publisher = AsyncMock(spec=ProtocolEventBusLike)
         call_count = 0
 
         async def fail_first(*args, **kwargs):

@@ -47,6 +47,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
     ServiceLlmMetricsPublisher,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -393,7 +394,9 @@ class TestPublisherResilience:
         """When publisher raises, handle() still returns the response."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
-        publisher = AsyncMock(side_effect=RuntimeError("Kafka unavailable"))
+        publisher = AsyncMock(
+            spec=ProtocolEventBusLike, side_effect=RuntimeError("Kafka unavailable")
+        )
         service, _, _ = _make_service(transport=transport, publisher=publisher)
 
         response = await service.handle(
@@ -407,7 +410,7 @@ class TestPublisherResilience:
         """When publisher returns False (transient failure), handle() still succeeds."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
-        publisher = AsyncMock(return_value=False)
+        publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=False)
         service, _, _ = _make_service(transport=transport, publisher=publisher)
 
         response = await service.handle(

@@ -25,6 +25,7 @@ from omnibase_infra.adapters.overseer.adapter_ticket_service_linear_scoped impor
     AdapterTicketLinearScoped,
 )
 from omnibase_infra.errors import InvariantViolation
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +51,7 @@ def mock_ticket_adapter() -> MagicMock:
 
 @pytest.fixture
 def mock_event_bus() -> MagicMock:
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock(return_value=None)
     bus.publish_envelope = AsyncMock(return_value=None)
     bus.subscribe = AsyncMock(return_value=AsyncMock())

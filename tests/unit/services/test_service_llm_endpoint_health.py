@@ -35,6 +35,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.service_llm_endpoint_health import (
     EndpointCircuitBreaker,
     ModelLlmEndpointHealthConfig,
@@ -74,7 +75,7 @@ def config(sample_endpoints: dict[str, str]) -> ModelLlmEndpointHealthConfig:
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Return a mock ProtocolEventBusLike."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish_envelope = AsyncMock()
     return bus
 
