@@ -863,9 +863,19 @@ def _normalize_handler_result(
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+# Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
+# URL Contract" — each OmniNode service owns its own PostgreSQL database and a
+# dedicated *_DB_URL env var. This map MUST stay in parity with that table; a
+# missing row makes the DB-injection auto-wiring reject a contract whose
+# db_io.database names a real per-service DB (e.g. F3/OMN-13158:
+# node_dispatch_outcome_bridge_effect -> database omniintelligence).
 _DB_URL_ENV_MAP: dict[str, str] = {
-    "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
     "omnibase_infra": "OMNIBASE_INFRA_DB_URL",
+    "omniintelligence": "OMNIINTELLIGENCE_DB_URL",
+    "omniclaude": "OMNICLAUDE_DB_URL",
+    "omnimemory": "OMNIMEMORY_DB_URL",
+    "omninode_cloud": "OMNINODE_CLOUD_DB_URL",
+    "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
 }
 
 _OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
