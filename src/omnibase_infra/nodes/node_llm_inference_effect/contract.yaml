@@ -7,6 +7,12 @@
 #   without overriding declared fields (2026-06-07)
 # OMN-13158: HandlerLlmCliSubprocess resolves OAuth/subscription CLI backends
 #   from request.model (codex-cli, claude-cli, gemini-cli, opencode-cli).
+# OMN-13204: HandlerLlmOpenaiCompatible Protocol Conformance Note corrected to
+#   the real protocol I/O types — ProtocolHandler.execute(ModelProtocolRequest)
+#   -> ModelProtocolResponse and ProtocolMessageHandler.handle(ModelEventEnvelope)
+#   -> ModelHandlerOutput — replacing the deleted ModelOnexEnvelope reference
+#   (B5 residual of OMN-13196; deploy-gate runtime-path docstring edit, behavior
+#   unchanged). (2026-06-17)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
