@@ -237,8 +237,57 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         assert prepared.route_ids == []
 
     @pytest.mark.unit
-    def test_raises_typeerror_when_unresolvable(self) -> None:
-        """Plan Task 5 acceptance: OMN-8735 fail-fast invariant preserved."""
+    def test_unresolvable_handler_quarantined_in_default_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-13203: an unresolvable handler is quarantined (not boot-fatal).
+
+        Default mode contains the resolver's unsatisfiable-ctor TypeError so
+        runtime boot completes; the bad handler is reported as
+        UNRESOLVABLE_HANDLER.
+        """
+        from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+            EnumQuarantineReason,
+        )
+
+        monkeypatch.delenv("ONEX_WIRING_STRICT_MODE", raising=False)
+        contract = _make_contract()
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class HandlerWithDeps:
+            def __init__(self, required_service: object) -> None:
+                self.required_service = required_service
+
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithDeps,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+        assert prepared.is_quarantined is True
+        assert prepared.quarantine_reason is EnumQuarantineReason.UNRESOLVABLE_HANDLER
+        assert "required_service" in prepared.quarantine_detail
+
+    @pytest.mark.unit
+    def test_raises_typeerror_when_unresolvable_in_strict_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-8735 fail-fast invariant preserved under strict mode."""
+        monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
         contract = _make_contract()
         entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
 
@@ -578,15 +627,24 @@ class TestWireFromManifestResolverOutcomes:
         assert result.routes_registered == ()
 
     @pytest.mark.asyncio
-    async def test_typeerror_propagates_unchanged(self) -> None:
-        """Plan Task 5 acceptance: unresolvable-path invariant test (OMN-8735)."""
+    async def test_unresolvable_quarantined_default_raises_strict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-13203: unresolvable handler is quarantined in default mode, raised in strict.
+
+        Default mode: wire_from_manifest COMPLETES (no exception) and the
+        handler is reported failed + quarantined. Strict mode preserves the
+        OMN-8735 fail-fast invariant — the resolver TypeError propagates.
+        """
+        from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+            EnumQuarantineReason,
+        )
         from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
         )
 
         contract = _make_contract(handler_name="HandlerNeedsDep")
         manifest = _make_manifest(contract)
-        engine = MessageDispatchEngine()
 
         class HandlerNeedsDep:
             def __init__(self, required_service: object) -> None:
@@ -595,12 +653,28 @@ class TestWireFromManifestResolverOutcomes:
             async def handle(self, envelope: object) -> None:
                 return None
 
+        # Default (non-strict) mode: quarantine + complete.
+        monkeypatch.delenv("ONEX_WIRING_STRICT_MODE", raising=False)
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerNeedsDep,
+        ):
+            report = await wire_from_manifest(manifest, MessageDispatchEngine())
+        assert report.total_failed >= 1
+        assert report.total_quarantined == 1
+        assert (
+            report.quarantined_handlers[0].reason
+            is EnumQuarantineReason.UNRESOLVABLE_HANDLER
+        )
+
+        # Strict mode: the resolver TypeError still propagates unchanged.
+        monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
         with patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=HandlerNeedsDep,
         ):
             with pytest.raises(TypeError) as exc_info:
-                await wire_from_manifest(manifest, engine)
+                await wire_from_manifest(manifest, MessageDispatchEngine())
         assert "required_service" in str(exc_info.value)
 
     @pytest.mark.asyncio
