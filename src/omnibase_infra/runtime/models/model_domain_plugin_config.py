@@ -114,5 +114,11 @@ class ModelDomainPluginConfig:
     # Optional: Per-event-type topic routing from contract published_events.
     output_topic_map: dict[str, str] | None = None
 
+    # Optional: Resolved overlay config key-value pairs for feature gating (OMN-12634).
+    # Plugins read their activation flags from this dict instead of environment variables.
+    # Keys are defined per-feature (e.g. DLQ_ENABLED, DLQ_DB_URL for the DLQ plugin).
+    # None when the kernel has not loaded an overlay (legacy env-var mode).
+    overlay_config: dict[str, str] | None = None
+
 
 __all__ = ["ModelDomainPluginConfig"]
