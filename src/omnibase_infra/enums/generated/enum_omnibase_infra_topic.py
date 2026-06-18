@@ -21,6 +21,9 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_BASELINES_BATCH_COMPUTE_V1 = "onex.cmd.omnibase-infra.baselines-batch-compute.v1"  # onex.cmd.omnibase-infra.baselines-batch-compute.v1
     CMD_BUILD_LOOP_APPEND_V1 = "onex.cmd.omnibase-infra.build-loop-append.v1"  # onex.cmd.omnibase-infra.build-loop-append.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
+    CMD_CODING_AGENT_EFFECT_INVOKE_V1 = "onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1"  # onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1
+    CMD_CODING_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex.cmd.omnibase-infra.coding-agent-invoke.v1
+    CMD_CODING_AGENT_WORKSPACE_VALIDATE_V1 = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"  # onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-inference-request.v1"  # onex.cmd.omnibase-infra.delegation-inference-request.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
@@ -44,6 +47,13 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CHAIN_RETRIEVAL_RESULT_V1 = "onex.evt.omnibase-infra.chain-retrieval-result.v1"  # onex.evt.omnibase-infra.chain-retrieval-result.v1
     EVT_CHAIN_STORED_V1 = "onex.evt.omnibase-infra.chain-stored.v1"  # onex.evt.omnibase-infra.chain-stored.v1
     EVT_CHAIN_VERIFIED_V1 = "onex.evt.omnibase-infra.chain-verified.v1"  # onex.evt.omnibase-infra.chain-verified.v1
+    EVT_CODING_AGENT_COMPLETED_V1 = "onex.evt.omnibase-infra.coding-agent-completed.v1"  # onex.evt.omnibase-infra.coding-agent-completed.v1
+    EVT_CODING_AGENT_FAILED_V1 = "onex.evt.omnibase-infra.coding-agent-failed.v1"  # onex.evt.omnibase-infra.coding-agent-failed.v1
+    EVT_CODING_AGENT_FSM_ADVANCE_V1 = "onex.evt.omnibase-infra.coding-agent-fsm-advance.v1"  # onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
+    EVT_CODING_AGENT_FSM_STATE_UPDATED_V1 = "onex.evt.omnibase-infra.coding-agent-fsm-state-updated.v1"  # onex.evt.omnibase-infra.coding-agent-fsm-state-updated.v1
+    EVT_CODING_AGENT_INVOKE_COMPLETED_V1 = "onex.evt.omnibase-infra.coding-agent-invoke-completed.v1"  # onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
+    EVT_CODING_AGENT_INVOKE_FAILED_V1 = "onex.evt.omnibase-infra.coding-agent-invoke-failed.v1"  # onex.evt.omnibase-infra.coding-agent-invoke-failed.v1
+    EVT_CODING_AGENT_WORKSPACE_VALIDATED_V1 = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1

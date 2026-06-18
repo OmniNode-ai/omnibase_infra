@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Coding-Agent FSM REDUCER (OMN-13247 / Phase A)
+#
+# The deterministic-execution core of the coding-agent workflow. Pure fold:
+# delta(state, event) -> (state, intents[]). No I/O. Owns the FSM
+# (IDLE -> VALIDATING -> INVOKING -> CAPTURING -> COMPLETED|FAILED|REJECTED),
+# the retry policy (WORKSPACE_WRITE never auto-retried; duplicate correlation_id
+# never re-runs; READ_ONLY bounded retry), the N-failure circuit breaker, replay
+# safety (replay issues no live intent), and the correlation-trace projection.
+name: node_coding_agent_fsm_reducer
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: REDUCER_GENERIC
+node_version: {major: 1, minor: 0, patch: 0}
+description: >
+  Pure coding-agent FSM reducer. Folds one workflow event (prior FSM state + event) into the next ModelCodingAgentFsmState and materializes the coding-agent correlation-trace projection. Owns the IDLE -> VALIDATING -> INVOKING -> CAPTURING -> terminal sequence, the retry policy (workspace-write invocations are never auto-retried, a duplicate correlation_id never re-runs, read-only invocations retry up to a bounded count), and the N-failure circuit breaker that trips to FAILED. Pure fold — no events, no intents over the bus, no I/O; the orchestrator publishes transition commands. Replay recomputes state + projection but the reducer issues no live intent, so replay can never cause a subprocess.
+
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: "coding_agent.fsm.advance"
+      handler:
+        name: HandlerCodingAgentFsm
+        module: omnibase_infra.nodes.node_coding_agent_fsm_reducer.handlers.handler_coding_agent_fsm
+      description: "Fold one workflow event into the FSM state + trace projection."
+      input_model:
+        name: ModelCodingAgentFsmAdvance
+        module: omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance
+        description: "Prior FSM state + event to fold."
+input_model:
+  name: ModelCodingAgentFsmAdvance
+  module: omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance
+  description: "Prior FSM state + the event to fold."
+output_model:
+  name: ModelCodingAgentFsmState
+  module: omnibase_infra.models.coding_agent
+  description: "Advanced FSM state projection."
+descriptor:
+  node_archetype: reducer
+  purity: pure
+  idempotent: true
+  timeout_ms: 2000
+  # agent_invocation is FALSE: this reducer performs no I/O and shells no CLI.
+  agent_invocation: false
+runtime_profiles:
+  - effects
+event_bus:
+  subscribe_topics:
+    - onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
+  publish_topics:
+    - onex.evt.omnibase-infra.coding-agent-fsm-state-updated.v1
+    - onex.snapshot.projection.coding-agent.correlation-trace.v1
+dependencies:
+  - name: "omnibase_core"
+    type: "library"
+    library: "omnibase_core"
+    version: ">=0.39.0"
+metadata:
+  transport_type: kafka
+  description: "Pure coding-agent FSM reducer"
+  author: "OmniNode Platform Team"
+  related_tickets:
+    - "OMN-13247"
+    - "OMN-13245"
