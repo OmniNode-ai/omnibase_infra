@@ -197,8 +197,8 @@ skills:
       - {name: no-automerge, payload_field: no_automerge, arg_type: boolean, default: false}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: pr_review
-    node_name: node_pr_review_bot
-    result_model: omnimarket.nodes.node_pr_review_bot.models.models.ReviewVerdict
+    node_name: node_pr_review_orchestrator
+    result_model: omnimarket.review.pr_review_io.ReviewVerdict
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
@@ -208,8 +208,8 @@ skills:
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: pr_review_bot
-    node_name: node_pr_review_bot
-    result_model: omnimarket.nodes.node_pr_review_bot.models.models.ReviewVerdict
+    node_name: node_pr_review_orchestrator
+    result_model: omnimarket.review.pr_review_io.ReviewVerdict
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
