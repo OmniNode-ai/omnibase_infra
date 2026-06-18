@@ -134,8 +134,8 @@ skills:
       - {name: omni-home, payload_field: omni_home, arg_type: string}
       - {name: checks, payload_field: checks, arg_type: string_list}
   - skill_name: hostile_reviewer
-    node_name: node_hostile_reviewer
-    result_model: omnimarket.nodes.node_hostile_reviewer.models.model_hostile_reviewer_completed_event.ModelHostileReviewerCompletedEvent
+    node_name: node_hostile_reviewer_orchestrator
+    result_model: omnimarket.nodes.node_hostile_reviewer_orchestrator.models.model_hostile_reviewer_completed_event.ModelHostileReviewerCompletedEvent
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer}
       - {name: repo, payload_field: repo, arg_type: string}
