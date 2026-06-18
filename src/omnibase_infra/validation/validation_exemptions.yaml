@@ -3660,6 +3660,20 @@ pattern_exemptions:
       metric_name is a metric label string (e.g. "latency_ms"), not an entity display name. Converted from @dataclass in OMN-12184.
 
     ticket: OMN-12184
+  # ==========================================================================
+  # ModelContractAttachResult contract_name Exemption (OMN-13237)
+  # ==========================================================================
+  # contract_name is the wired contract's onex.nodes node name (routing
+  # identifier), mirroring ModelContractWiringResult.contract_name in the same
+  # auto-wiring boot path — not a foreign key to a contract entity.
+  - file_pattern: 'model_contract_attach_result\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is the wired contract's node name (the onex.nodes entry-point identifier used for per-contract boot interleave logging and consumer-group derivation), mirroring the established ModelContractWiringResult.contract_name field in the same auto-wiring path. It is a routing identifier, not a foreign key to a contract entity with ID + display_name.
+
+    documentation:
+      - CLAUDE.md (Node Identity Model)
+    ticket: OMN-13237
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

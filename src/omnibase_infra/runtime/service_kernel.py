@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import re
 import signal
@@ -63,10 +64,15 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import yaml
+
+if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_topic_readiness_config import (
+        ModelTopicReadinessConfig,
+    )
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
@@ -347,6 +353,65 @@ def _get_contracts_dir() -> Path:
         return Path(onex_value)
 
     return Path(DEFAULT_CONTRACTS_DIR)
+
+
+def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
+    """Resolve the per-contract boot-interleave readiness knobs (OMN-13237).
+
+    The kernel is the approved overlay-resolution boundary, so operator
+    overrides for the bounded readiness poll (§3.7) and bounded contract-attach
+    parallelism (§3.9) are read here and validated into a pure config model.
+    Invalid values fall back to the conservative defaults so a malformed
+    override never wedges boot.
+    """
+    from omnibase_infra.event_bus.model_topic_readiness_config import (
+        DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+        DEFAULT_READINESS_MAX_ATTEMPTS,
+        DEFAULT_READINESS_POLL_INTERVAL_MS,
+        DEFAULT_READINESS_TIMEOUT_SECONDS,
+        ModelTopicReadinessConfig,
+    )
+
+    def _float_env(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            value = float(raw)
+        except ValueError:
+            return default
+        if value <= 0.0 or math.isnan(value) or math.isinf(value):
+            return default
+        return value
+
+    def _int_env(name: str, default: int) -> int:
+        raw = os.environ.get(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return value if value >= 1 else default
+
+    return ModelTopicReadinessConfig(
+        readiness_timeout_seconds=_float_env(
+            "ONEX_TOPIC_READINESS_TIMEOUT_SECONDS",
+            DEFAULT_READINESS_TIMEOUT_SECONDS,
+        ),
+        readiness_poll_interval_ms=_int_env(
+            "ONEX_TOPIC_READINESS_POLL_INTERVAL_MS",
+            DEFAULT_READINESS_POLL_INTERVAL_MS,
+        ),
+        max_attempts=_int_env(
+            "ONEX_TOPIC_READINESS_MAX_ATTEMPTS",
+            DEFAULT_READINESS_MAX_ATTEMPTS,
+        ),
+        max_concurrent_contract_attach=_int_env(
+            "ONEX_MAX_CONCURRENT_CONTRACT_ATTACH",
+            DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+        ),
+    )
 
 
 def _build_runtime_handler_dependencies(
@@ -1157,7 +1222,15 @@ async def bootstrap() -> int:
             },
         )
 
-        # 3.5. Provision platform topics (best-effort, never blocks startup)
+        # 3.5. Provision platform topics.
+        # OMN-13237: the universe pass below is DEMOTED to a best-effort warm of
+        # cross-producer topics — it is no longer load-bearing for THIS runtime's
+        # consumers. The per-contract confirm in Phase B (provision -> ready ->
+        # attach) is the authority that gates consumer attach. The universe warm
+        # can be disabled (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the
+        # per-contract confirm carries all owned consumers (W2 evidence). The
+        # provisioner instance is reused by the Phase B interleave.
+        topic_provisioner: object | None = None
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -1200,27 +1273,41 @@ async def bootstrap() -> int:
                     skill_manifests_root=_skill_manifests_root,
                     skill_manifests_roots=_extra_manifest_roots,
                 )
-                provisioning_result = (
-                    await topic_provisioner.ensure_provisioned_topics_exist(
-                        correlation_id=correlation_id,
+                # OMN-13237: universe warm is best-effort and demoted; the
+                # per-contract confirm (Phase B) gates consumer attach.
+                _universe_warm_enabled = (
+                    os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
+                )
+                if not _universe_warm_enabled:
+                    logger.info(
+                        "Topic provisioning: universe warm DISABLED "
+                        "(ONEX_BOOT_UNIVERSE_PROVISION=0); per-contract confirm "
+                        "is the sole authority (OMN-13237) (correlation_id=%s)",
+                        correlation_id,
                     )
-                )
-                log_level = (
-                    logging.WARNING
-                    if provisioning_result["status"] != "success"
-                    else logging.INFO
-                )
-                logger.log(
-                    log_level,
-                    "Topic provisioning: status=%s created=%d existing=%d failed=%d "
-                    "failed_topics=%s (correlation_id=%s)",
-                    provisioning_result["status"],
-                    len(provisioning_result["created"]),
-                    len(provisioning_result["existing"]),
-                    len(provisioning_result["failed"]),
-                    provisioning_result["failed"] or "none",
-                    correlation_id,
-                )
+                else:
+                    provisioning_result = (
+                        await topic_provisioner.ensure_provisioned_topics_exist(
+                            correlation_id=correlation_id,
+                        )
+                    )
+                    log_level = (
+                        logging.WARNING
+                        if provisioning_result["status"] != "success"
+                        else logging.INFO
+                    )
+                    logger.log(
+                        log_level,
+                        "Topic provisioning (best-effort warm): status=%s "
+                        "created=%d existing=%d failed=%d failed_topics=%s "
+                        "(correlation_id=%s)",
+                        provisioning_result["status"],
+                        len(provisioning_result["created"]),
+                        len(provisioning_result["existing"]),
+                        len(provisioning_result["failed"]),
+                        provisioning_result["failed"] or "none",
+                        correlation_id,
+                    )
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic provisioning failed (best-effort, non-blocking) "
@@ -2639,6 +2726,23 @@ async def bootstrap() -> int:
             auto_wiring_report is not None
             and auto_wiring_manifest_for_subscriptions is not None
         ):
+            # OMN-13237: interleave provision -> confirm-ready -> attach per
+            # wired contract by passing the runtime provisioner. A not-ready
+            # contract is recorded and SKIPPED for attach; it never recycles the
+            # process. The aggregate tri-state is logged for operator visibility.
+            from typing import cast as _cast
+
+            from omnibase_infra.event_bus.model_contract_attach_result import (
+                ModelContractAttachResult,
+            )
+            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+                ModelRuntimeAttachReadiness,
+            )
+            from omnibase_infra.protocols.protocol_topic_provisioner import (
+                ProtocolTopicProvisioner,
+            )
+
+            _attach_results: list[ModelContractAttachResult] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -2646,6 +2750,20 @@ async def bootstrap() -> int:
                 event_bus=event_bus,
                 environment=environment,
                 result_appliers_by_contract=auto_wiring_result_appliers,
+                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
+                readiness_config=resolve_topic_readiness_config(),
+                attach_results_out=_attach_results,
+            )
+            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
+                tuple(_attach_results)
+            )
+            logger.info(
+                "Per-contract boot interleave: state=%s attached=%d/%d "
+                "(OMN-13237) (correlation_id=%s)",
+                _attach_readiness.state.value,
+                _attach_readiness.attached_contracts,
+                _attach_readiness.required_contracts,
+                correlation_id,
             )
             for contract_name, topics in auto_wired_subscriptions.items():
                 for topic in topics:
