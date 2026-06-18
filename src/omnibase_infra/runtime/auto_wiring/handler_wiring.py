@@ -60,10 +60,28 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.event_bus.enum_contract_attach_status import (
+    EnumContractAttachStatus,
+)
+from omnibase_infra.event_bus.enum_topic_readiness_status import (
+    EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_result import (
+    ModelContractAttachResult,
+)
+from omnibase_infra.event_bus.model_topic_readiness_config import (
+    ModelTopicReadinessConfig,
+)
+from omnibase_infra.event_bus.model_topic_set_readiness import (
+    ModelTopicSetReadiness,
+)
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.protocols.protocol_topic_provisioner import (
+    ProtocolTopicProvisioner,
+)
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -2283,6 +2301,21 @@ async def wire_from_manifest(
     return report
 
 
+def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, ...]:
+    """Return the topic set this contract owns at boot (OMN-13237, §3.6).
+
+    Subscribe topics (the consumers that attach) UNION the contract's owned
+    publish topics it must guarantee exist. Names come from the contract's
+    ``event_bus`` declarations only — never a Python literal. DLQ topics are
+    handled by the best-effort universe warm (covered across runtimes per §3.6).
+    """
+    if contract.event_bus is None:
+        return ()
+    ordered = list(contract.event_bus.subscribe_topics)
+    ordered.extend(contract.event_bus.publish_topics)
+    return tuple(dict.fromkeys(ordered))
+
+
 async def subscribe_wired_contract_topics(
     manifest: ModelAutoWiringManifest,
     report: ModelAutoWiringReport,
@@ -2291,12 +2324,31 @@ async def subscribe_wired_contract_topics(
     environment: str = "dev",
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    attach_results_out: list[ModelContractAttachResult] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
     This is the post-freeze companion to ``wire_from_manifest(...,
     subscribe_immediately=False)``. It preserves the kernel invariant that
     consumers only start after the dispatch engine becomes read-only.
+
+    OMN-13237 — when *provisioner* is supplied, the boot interleaves
+    provision -> confirm-ready -> attach PER WIRED CONTRACT (replacing the
+    global create-all-then-subscribe-all big-bang that caused the cold-broker
+    crash-loop). Each contract keeps the provision->ready->attach ORDER
+    invariant (§3.9); bounded parallelism across contracts is allowed via
+    ``readiness_config.max_concurrent_contract_attach``. A contract whose
+    provision/readiness fails is recorded NOT-READY and SKIPPED for attach — it
+    never aborts the kernel or recycles the process (§3.5, §3.8). Per-contract
+    attach outcomes are appended to *attach_results_out* when provided so the
+    caller can build the runtime readiness tri-state.
+
+    Returns the map of attached contract -> attached topics (the contracts that
+    actually subscribed). Backward-compatible: with no *provisioner* the
+    behavior is the original concurrent subscribe (no readiness gate).
     """
     if event_bus is None:
         return {}
@@ -2329,25 +2381,134 @@ async def subscribe_wired_contract_topics(
             continue
         eligible.append((result.contract_name, contract))
 
-    # Subscribe all contracts concurrently.  Within each contract,
-    # _subscribe_contract_topics already parallelises its own topics.
-    # Together this reduces cold-start from O(contracts * topics * t) to O(t).
-    async def _subscribe_contract(
+    knobs = readiness_config or ModelTopicReadinessConfig()
+    # Bounded parallelism across contracts; each contract keeps its own
+    # provision->ready->attach order (§3.9).
+    semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
+
+    async def _provision_ready_attach(
         name: str, contract: ModelDiscoveredContract
-    ) -> tuple[str, tuple[str, ...]]:
+    ) -> ModelContractAttachResult:
+        async with semaphore:
+            return await _interleave_contract(
+                name=name,
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_applier=(result_appliers_by_contract or {}).get(name),
+                provisioner=provisioner,
+                readiness_config=knobs,
+            )
+
+    attach_results = await asyncio.gather(
+        *(_provision_ready_attach(name, contract) for name, contract in eligible)
+    )
+
+    if attach_results_out is not None:
+        attach_results_out.extend(attach_results)
+
+    subscribed: dict[str, tuple[str, ...]] = {}
+    for ar in attach_results:
+        if ar.status is EnumContractAttachStatus.ATTACHED:
+            subscribed[ar.contract_name] = ar.topics_subscribed
+    return subscribed
+
+
+async def _interleave_contract(
+    *,
+    name: str,
+    contract: ModelDiscoveredContract,
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object,
+    environment: str,
+    result_applier: ProtocolDispatchResultApplier | None,
+    provisioner: ProtocolTopicProvisioner | None,
+    readiness_config: ModelTopicReadinessConfig,
+) -> ModelContractAttachResult:
+    """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
+
+    The order invariant is enforced here: every ``ensure_topic_exists`` for the
+    contract precedes its readiness confirm, which precedes consumer attach.
+    """
+    provision_topics = _contract_provision_topics(contract)
+
+    readiness: ModelTopicSetReadiness | None = None
+    if provisioner is not None and provision_topics:
+        # (1) Provision the contract's topics (idempotent), in declared order.
+        for topic in provision_topics:
+            try:
+                await provisioner.ensure_topic_exists(topic_name=topic)
+            except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
+                logger.warning(
+                    "Topic provisioning failed for contract '%s' topic '%s' "
+                    "(non-fatal, contract will be NOT-READY)",
+                    name,
+                    topic,
+                    exc_info=True,
+                )
+        # (2) Confirm broker metadata converged before attaching the consumer.
+        try:
+            readiness = await provisioner.confirm_topics_ready(
+                provision_topics,
+                config=readiness_config,
+            )
+        except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
+            logger.warning(
+                "Topic readiness confirm raised for contract '%s' "
+                "(non-fatal, contract will be NOT-READY)",
+                name,
+                exc_info=True,
+            )
+            readiness = ModelTopicSetReadiness(
+                topics=provision_topics,
+                status=EnumTopicReadinessStatus.UNAVAILABLE,
+            )
+        if not readiness.is_ready:
+            logger.warning(
+                "Contract '%s' NOT-READY: topic metadata did not converge "
+                "(status=%s failures=%s) — skipping consumer attach, runtime "
+                "stays live (OMN-13237)",
+                name,
+                readiness.status.value,
+                [f.topic for f in readiness.failures],
+            )
+            return ModelContractAttachResult(
+                contract_name=name,
+                status=EnumContractAttachStatus.NOT_READY,
+                readiness=readiness,
+                detail=f"readiness {readiness.status.value}",
+            )
+
+    # (3) Attach the consumer (readiness passed or no provisioner supplied).
+    try:
         topics_subscribed = await _subscribe_contract_topics(
             contract=contract,
             dispatch_engine=dispatch_engine,
             event_bus=event_bus,
             environment=environment,
-            result_applier=(result_appliers_by_contract or {}).get(name),
+            result_applier=result_applier,
         )
-        return name, tuple(topics_subscribed)
+    except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
+        logger.warning(
+            "Contract '%s' consumer attach FAILED after readiness (non-fatal): %s",
+            name,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        return ModelContractAttachResult(
+            contract_name=name,
+            status=EnumContractAttachStatus.FAILED,
+            readiness=readiness,
+            detail=type(exc).__name__,
+        )
 
-    results = await asyncio.gather(
-        *(_subscribe_contract(name, contract) for name, contract in eligible)
+    return ModelContractAttachResult(
+        contract_name=name,
+        status=EnumContractAttachStatus.ATTACHED,
+        topics_subscribed=tuple(topics_subscribed),
+        readiness=readiness,
     )
-    return dict(results)
 
 
 def _prioritize_subscription_results(
