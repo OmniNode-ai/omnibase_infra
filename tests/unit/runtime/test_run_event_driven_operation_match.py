@@ -270,3 +270,175 @@ async def test_payload_type_match_still_imports_event_model(tmp_path: Path) -> N
         assert result == EnumWorkflowResult.FAILED
     finally:
         sys.modules.pop("_test_ptmatch_handler", None)
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — OMN-13277: event_model-only contract (no top-level input_model)
+#          seeds the FULL payload from the routing entry's event_model.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_model_only_contract_seeds_full_payload(tmp_path: Path) -> None:
+    """A contract WITHOUT a top-level ``input_model`` seeds the full payload.
+
+    OMN-13277 root cause: ``_run_event_driven`` resolved the initial-payload
+    model ONLY from the top-level ``input_model``. When absent it published a
+    degenerate ``{correlation_id}``-only payload, silently dropping every other
+    caller-supplied field (the OMN-13253 failure mode). After the hardening the
+    payload model is resolved from the routing entry's ``event_model`` block, so
+    the ``--input`` file's required field (``ticket_id``) reaches the handler.
+    """
+
+    class _StartCommand(BaseModel):
+        correlation_id: str = ""
+        ticket_id: str
+
+    class _Terminal(BaseModel):
+        correlation_id: str = ""
+        ticket_id: str
+        status: str = "success"
+
+    captured: dict[str, str] = {}
+
+    class _EchoHandler:
+        async def handle(self, payload: _StartCommand) -> _Terminal:
+            # Capture exactly what the runtime seeded so the test can prove the
+            # caller's ticket_id survived (not dropped to {correlation_id}).
+            captured["ticket_id"] = payload.ticket_id
+            return _Terminal(
+                correlation_id=payload.correlation_id,
+                ticket_id=payload.ticket_id,
+            )
+
+    mod_model = types.ModuleType("_test_em_only_model")
+    mod_model._StartCommand = _StartCommand  # type: ignore[attr-defined]
+    mod_handler = types.ModuleType("_test_em_only_handler")
+    mod_handler._EchoHandler = _EchoHandler  # type: ignore[attr-defined]
+    sys.modules["_test_em_only_model"] = mod_model
+    sys.modules["_test_em_only_handler"] = mod_handler
+
+    try:
+        # NOTE: deliberately NO top-level input_model. The only place the payload
+        # model can be resolved from is the handler routing entry's event_model.
+        contract_yaml = (
+            "name: test_event_model_only_seed\n"
+            "contract_version: {major: 1, minor: 0, patch: 0}\n"
+            "node_type: orchestrator\n"
+            "description: event_model-only payload seeding test\n"
+            "terminal_event: evt.em.done.v1\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - cmd.em.start.v1\n"
+            "  publish_topics:\n"
+            "    - evt.em.done.v1\n"
+            "handler_routing:\n"
+            "  routing_strategy: payload_type_match\n"
+            "  handlers:\n"
+            "    - event_model:\n"
+            "        name: _StartCommand\n"
+            "        module: _test_em_only_model\n"
+            "      handler:\n"
+            "        name: _EchoHandler\n"
+            "        module: _test_em_only_handler\n"
+        )
+        workflow = tmp_path / "event_model_only.yaml"
+        workflow.write_text(contract_yaml)
+
+        input_file = tmp_path / "input.json"
+        input_file.write_text('{"ticket_id": "OMN-99999"}')
+
+        runtime = RuntimeLocal(
+            workflow_path=workflow,
+            state_root=tmp_path / "state",
+            timeout=10,
+            input_path=input_file,
+        )
+        result = await runtime.run_async()
+
+        assert result == EnumWorkflowResult.COMPLETED
+        # The caller's ticket_id must reach the handler — proving the full
+        # payload was seeded, not a degenerate {correlation_id} dict.
+        assert captured.get("ticket_id") == "OMN-99999", (
+            "event_model-only contract dropped caller input — payload was not "
+            "seeded from the routing entry's event_model (OMN-13277 regression)"
+        )
+    finally:
+        sys.modules.pop("_test_em_only_model", None)
+        sys.modules.pop("_test_em_only_handler", None)
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — OMN-13277: a contract resolving NO payload model fails loud.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_resolvable_payload_model_fails_loud(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A contract with NO resolvable payload model fails loud, naming the contract.
+
+    OMN-13277: when NEITHER a top-level ``input_model`` NOR an ``event_model`` /
+    ``handler.input_model`` block can be resolved, the runtime must refuse to
+    publish a degenerate ``{correlation_id}``-only payload. It raises a typed
+    ``ModelOnexError`` (recorded as FAILED at the run_async boundary) whose
+    message names the contract and the missing declarations.
+    """
+    import logging
+
+    class _OpHandler:
+        async def handle(self, correlation_id: str) -> None:
+            return None
+
+    mod_handler = types.ModuleType("_test_no_model_handler")
+    mod_handler._OpHandler = _OpHandler  # type: ignore[attr-defined]
+    sys.modules["_test_no_model_handler"] = mod_handler
+
+    try:
+        # operation_match entry: no event_model, no handler.input_model, and no
+        # top-level input_model => nothing to resolve a payload model from.
+        contract_yaml = (
+            "name: test_no_resolvable_model\n"
+            "contract_version: {major: 1, minor: 0, patch: 0}\n"
+            "node_type: orchestrator\n"
+            "description: no resolvable payload model test\n"
+            "terminal_event: evt.nm.done.v1\n"
+            "event_bus:\n"
+            "  subscribe_topics:\n"
+            "    - cmd.nm.start.v1\n"
+            "  publish_topics:\n"
+            "    - evt.nm.done.v1\n"
+            "handler_routing:\n"
+            "  routing_strategy: operation_match\n"
+            "  handlers:\n"
+            "    - operation: do_op\n"
+            "      handler:\n"
+            "        name: _OpHandler\n"
+            "        module: _test_no_model_handler\n"
+        )
+        workflow = tmp_path / "no_resolvable_model.yaml"
+        workflow.write_text(contract_yaml)
+
+        runtime = RuntimeLocal(
+            workflow_path=workflow,
+            state_root=tmp_path / "state",
+            timeout=10,
+        )
+        with caplog.at_level(logging.ERROR):
+            result = await runtime.run_async()
+
+        # Fail loud: FAILED result, never a degenerate publish + downstream
+        # validation error.
+        assert result == EnumWorkflowResult.FAILED
+
+        messages = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "could not resolve an initial-payload model" in messages
+        assert "test_no_resolvable_model" in messages, (
+            "fail-loud message must name the offending contract (OMN-13277)"
+        )
+    finally:
+        sys.modules.pop("_test_no_model_handler", None)

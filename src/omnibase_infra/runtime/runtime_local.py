@@ -745,6 +745,122 @@ class RuntimeLocal:
 
         return resolved
 
+    @staticmethod
+    def _coerce_model_spec(raw: object) -> RawWorkflowMap | None:
+        """Coerce a contract model reference to a ``{module, class}`` spec.
+
+        Accepts either a dotted string ``"some.module.ClassName"`` or a mapping.
+        Mappings may use ``class`` or ``name`` for the class key (the routing
+        ``event_model`` block uses ``name``; the top-level ``input_model`` block
+        uses ``class``). Returns ``None`` when no module/class can be resolved.
+        """
+        if isinstance(raw, str) and "." in raw:
+            module_name, class_name = raw.rsplit(".", 1)
+            if module_name and class_name:
+                return {"module": module_name, "class": class_name}
+            return None
+        if isinstance(raw, dict):
+            module = raw.get("module", "")
+            cls = raw.get("class", "") or raw.get("name", "")
+            if isinstance(module, str) and isinstance(cls, str) and module and cls:
+                return {"module": module, "class": cls}
+        return None
+
+    def _resolve_event_driven_payload_spec(
+        self, routing: RawWorkflowMap
+    ) -> tuple[RawWorkflowMap, str] | None:
+        """Resolve the initial-payload model spec for the event-driven path.
+
+        Resolution order (mirrors ``_run_single_handler``, but for the routed
+        path): top-level ``input_model`` → first handler routing entry's
+        ``event_model`` → that entry's ``handler.input_model``. Returns the
+        ``{module, class}`` spec and a human-readable source label describing
+        where it was resolved from, or ``None`` when no model can be resolved.
+        """
+        top_spec = self._coerce_model_spec(self._contract.get("input_model", {}))
+        if top_spec is not None:
+            return top_spec, "contract.input_model"
+
+        handlers = self._as_workflow_maps(routing.get("handlers", []))
+        for entry in handlers:
+            event_model = self._as_workflow_map(entry.get("event_model", {}))
+            em_spec = self._coerce_model_spec(event_model)
+            if em_spec is not None:
+                em_name = event_model.get("name", "")
+                return em_spec, f"handler_routing event_model '{em_name}'"
+
+            handler_block = self._as_workflow_map(entry.get("handler", {}))
+            hi_spec = self._coerce_model_spec(handler_block.get("input_model", {}))
+            if hi_spec is not None:
+                handler_name = handler_block.get("name", "unknown")
+                return hi_spec, f"handler_routing handler '{handler_name}'.input_model"
+
+        # Final fallback: an operation_match handler declares no event_model and
+        # no handler.input_model, but its ``handle`` method takes a single
+        # positional parameter annotated with a concrete BaseModel subclass (the
+        # OMN-8724 typed-parameter shape, e.g.
+        # ``handle(self, request: GoldenChainSweepRequest)``). The adapter would
+        # coerce the seeded dict into that model at the call boundary, so the
+        # model IS handler-derivable — seed the full payload from the annotation
+        # rather than failing loud or degrading to {correlation_id}.
+        for entry in handlers:
+            handler_block = self._as_workflow_map(entry.get("handler", {}))
+            module = handler_block.get("module", "")
+            cls = handler_block.get("name", "")
+            if not (
+                isinstance(module, str) and isinstance(cls, str) and module and cls
+            ):
+                continue
+            param_spec = self._handler_param_model_spec(module, cls)
+            if param_spec is not None:
+                return param_spec, f"handler '{cls}'.handle parameter annotation"
+
+        return None
+
+    @staticmethod
+    def _handler_param_model_spec(
+        handler_module: str, handler_class: str
+    ) -> RawWorkflowMap | None:
+        """Resolve a handler's sole typed-model ``handle`` parameter to a spec.
+
+        Imports ``handler_module.handler_class`` and inspects its ``handle``
+        method. When that method has exactly one positional parameter annotated
+        with a concrete ``BaseModel`` subclass, returns the ``{module, class}``
+        of that annotation. Returns ``None`` on any failure (import error, no
+        ``handle``, untyped/multi-parameter signature) — the caller then fails
+        loud. ``eval_str=True`` resolves PEP 563 string annotations (every node
+        handler uses ``from __future__ import annotations``).
+        """
+        try:
+            mod = importlib.import_module(handler_module)
+            handler_cls = getattr(mod, handler_class)
+            handle_method = handler_cls.handle
+        except (ImportError, AttributeError):
+            return None
+
+        try:
+            signature = inspect.signature(handle_method, eval_str=True)
+        except (TypeError, ValueError, NameError):
+            return None
+
+        positional = [
+            param
+            for name, param in signature.parameters.items()
+            if name != "self"
+            and param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+            and param.default is inspect.Parameter.empty
+        ]
+        if len(positional) != 1:
+            return None
+        annotation = positional[0].annotation
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return {"module": annotation.__module__, "class": annotation.__name__}
+        return None
+
     async def _run_event_driven(self, bus: ProtocolLocalRuntimeBus) -> None:
         """Execute the workflow using event-driven handler routing.
 
@@ -882,45 +998,78 @@ class RuntimeLocal:
 
         # --- 6. Build and publish initial payload ---
         correlation_id = uuid.uuid4()
-        raw_input_spec: object = self._contract.get("input_model", {})
 
-        # input_model can be a string "module.Class" or a dict with module/class
-        initial_payload = None
-        if isinstance(raw_input_spec, str) and "." in raw_input_spec:
-            # Format: "some.module.ClassName"
-            parts = raw_input_spec.rsplit(".", 1)
-            initial_payload = self._build_initial_payload(
-                {"module": parts[0], "class": parts[1]}
+        # Resolve the initial-payload model from, in order: top-level
+        # ``input_model`` → first routing entry's ``event_model`` → that entry's
+        # ``handler.input_model`` (OMN-13277). Previously this path consulted
+        # only the top-level ``input_model`` and, when absent, published a
+        # degenerate ``{correlation_id}``-only payload — silently dropping caller
+        # input and masking the real validation error downstream (root cause of
+        # OMN-13253). If NEITHER a top-level input_model NOR an event_model /
+        # handler-derivable model can be resolved, fail loud here naming the
+        # contract rather than publishing a degenerate payload.
+        resolved_spec = self._resolve_event_driven_payload_spec(routing)
+        if resolved_spec is None:
+            contract_name = self._contract.get("name", "<unknown>")
+            handler_names = [e.handler_name for e in resolved_entries] or ["<none>"]
+            msg = (
+                "RuntimeLocal: event-driven workflow could not resolve an "
+                "initial-payload model for contract "
+                f"'{contract_name}'. Declare a top-level 'input_model' (dotted "
+                "path or {module, class}) or an 'event_model' / "
+                "'handler.input_model' block on a handler_routing entry. "
+                f"Handlers wired: {handler_names}. Refusing to publish a "
+                "degenerate {correlation_id}-only payload that would silently "
+                "drop caller input."
             )
-        elif isinstance(raw_input_spec, dict):
-            initial_payload = self._build_initial_payload(raw_input_spec)
+            logger.error(msg)
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                message=msg,
+            )
 
-        if initial_payload is not None:
-            # Inject correlation_id if the model supports it
-            if hasattr(initial_payload, "correlation_id"):
-                try:
-                    payload_with_correlation: ProtocolLocalRuntimePayloadModel = cast(
-                        "ProtocolLocalRuntimePayloadModel", initial_payload
-                    )
-                    payload_with_correlation.correlation_id = correlation_id
-                except (AttributeError, ValueError):
-                    pass  # frozen model or incompatible type
+        payload_spec, payload_source = resolved_spec
+        logger.info(
+            "RuntimeLocal: resolved initial-payload model %s.%s from %s",
+            payload_spec["module"],
+            payload_spec["class"],
+            payload_source,
+        )
+        initial_payload = self._build_initial_payload(payload_spec)
+        if initial_payload is None:
+            contract_name = self._contract.get("name", "<unknown>")
+            msg = (
+                "RuntimeLocal: event-driven workflow resolved payload model "
+                f"{payload_spec['module']}.{payload_spec['class']} (from "
+                f"{payload_source}) for contract '{contract_name}' but failed to "
+                "import/instantiate it. Refusing to publish a degenerate "
+                "{correlation_id}-only payload that would silently drop caller "
+                "input."
+            )
+            logger.error(msg)
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                message=msg,
+            )
 
-            if hasattr(initial_payload, "model_dump_json"):
-                model_payload: ProtocolLocalRuntimePayloadModel = cast(
+        # Inject correlation_id if the model supports it
+        if hasattr(initial_payload, "correlation_id"):
+            try:
+                payload_with_correlation: ProtocolLocalRuntimePayloadModel = cast(
                     "ProtocolLocalRuntimePayloadModel", initial_payload
                 )
-                await bus.publish(
-                    subscribe_topics[0],
-                    None,
-                    model_payload.model_dump_json().encode("utf-8"),
-                )
-        else:
-            # Publish a minimal payload with just the correlation_id
-            minimal = json.dumps({"correlation_id": str(correlation_id)}).encode(
-                "utf-8"
-            )
-            await bus.publish(subscribe_topics[0], None, minimal)
+                payload_with_correlation.correlation_id = correlation_id
+            except (AttributeError, ValueError):
+                pass  # frozen model or incompatible type
+
+        model_payload: ProtocolLocalRuntimePayloadModel = cast(
+            "ProtocolLocalRuntimePayloadModel", initial_payload
+        )
+        await bus.publish(
+            subscribe_topics[0],
+            None,
+            model_payload.model_dump_json().encode("utf-8"),
+        )
 
         logger.info(
             "RuntimeLocal: published initial command to '%s' (correlation_id=%s)",
