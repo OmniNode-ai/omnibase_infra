@@ -1,0 +1,104 @@
+# OMN-13238 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13238"
+title: "feat(OMN-13238): contract-declared per-topic config + migrate ALL_PROVISIONED_TOPIC_SPECS"
+summary: >-
+  Ticket 2 of 2 of epic OMN-12651 (W3/W4). W3 makes per-topic provisioning config
+  (partitions / replication_factor / kafka_config) contract-declared: contracts may
+  carry an optional topic_config block on a structured topic item
+  (published_events[].topic_config, or an event_bus dict-form item the extractor reads).
+  The EXISTING ModelContractTopicEntry (omnibase_infra tools/contract_topic_extractor.py)
+  is extended with partitions|replication_factor|kafka_config (PEP 604, frozen, no new
+  parallel model); _extract_raw_topics_from_contract threads the parsed config onto each
+  entry; service_topic_manager._build_topic_specs maps it onto ModelTopicSpec (which
+  already supports all four fields), falling back to ModelTopicSpec defaults when absent.
+  No topic machinery added to omnibase_core. W4 migrates the config-bearing topics whose
+  OWNING omnibase_infra contract already declares a published_events entry (9 topics across
+  5 contracts) into those contracts' published_events[].topic_config — attaching config to
+  pre-existing entries only, so no new published events are synthesized and orchestrator/
+  effect event-purity invariants stay green. ALL_PROVISIONED_TOPIC_SPECS is NOT deleted:
+  118 of the 141 config-bearing source entries are owned by contracts in other repos
+  (omnimemory/omniintelligence/omnimarket build-loop+delegation/omninode routing), emitted
+  directly by the runtime kernel (no owning node contract), or are cmd/intent topics that
+  must not appear in published_events. Forcing those would require cross-repo PRs + an
+  omnibase_core event_bus schema extension and would compound the active omnimarket<->core
+  pin-drift (OMN-13224). Per AC-8/§3.5, ALL_PROVISIONED_TOPIC_SPECS is therefore explicitly
+  annotated TRANSITIONAL (a warm source pending per-repo migration, NOT a standing
+  provisioning authority; the misleading "single source of truth for topic creation"
+  docstring is corrected) with the per-repo follow-up tickets documented in-source and the
+  deletion tracked under OMN-12651. registry_outcome = transitional. Scope = W3/W4.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      New W3 unit suite (contract topic_config carried onto ModelContractTopicEntry,
+      mapped onto ModelTopicSpec/NewTopic, defaults when absent, merge keeps declared
+      config) and W4 parity suite (every migrated topic resolves the SAME
+      partitions/replication/kafka_config from its owning contract as the legacy registry;
+      registry marked transitional) pass with NO live broker. Existing extractor + topic
+      parity + orchestrator purity + registration/validation orchestrator suites remain
+      green (no regressions; the per-contract-config change is lossless).
+    command: "uv run pytest tests/unit/tools/test_contract_topic_config.py tests/ci/test_topic_config_contract_parity.py tests/unit/tools/test_contract_topic_extractor.py tests/ci/test_topic_parity.py tests/unit/topics/ tests/unit/event_bus/test_service_topic_manager.py tests/unit/nodes/test_orchestrator_purity.py tests/unit/nodes/test_orchestrator_decision_paths.py -q"
+  - kind: ci
+    description: >-
+      mypy --strict clean on src/ (2452 files); ruff format + check clean; no new onex
+      topic literals in Python (topic_literal_baseline.txt unchanged — new topic config
+      lives in contract YAML only); Topic Contract Parity Gate passes; no new model/enum in
+      omnibase_core; ModelContractTopicEntry extended in omnibase_infra; no backwards-compat
+      re-export of ALL_PROVISIONED_TOPIC_SPECS added.
+    command: "uv run mypy src/ --strict"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-w3-config-carry
+    description: >-
+      AC-2 topic-spec fidelity: a contract declaring topic_config (e.g. partitions=1,
+      retention.ms=604800000) produces a ModelContractTopicEntry and a
+      ModelTopicSpec/NewTopic with those values; a contract with no topic_config falls back
+      to ModelTopicSpec defaults (partitions=6, replication_factor=1, kafka_config=None).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/tools/test_contract_topic_config.py -q"
+  - id: dod-w4-parity
+    description: >-
+      Every migrated topic (9 infra-owned, pre-existing published_events entry) resolves the
+      same partitions/replication/kafka_config from its owning contract as the legacy
+      ALL_PROVISIONED_TOPIC_SPECS registry — proving the migration is lossless and free of
+      contract drift.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/ci/test_topic_config_contract_parity.py -q"
+  - id: dod-w4-no-shadow-registry
+    description: >-
+      AC-8 no shadow registry: ALL_PROVISIONED_TOPIC_SPECS is explicitly annotated
+      TRANSITIONAL with a deletion ticket (OMN-12651) and per-repo follow-ups, never left as
+      a second standing provisioning authority. The transitional banner + corrected
+      docstring are asserted by test, and no backwards-compat re-export was added.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -q 'TRANSITIONAL' src/omnibase_infra/topics/platform_topic_suffixes.py && ! grep -q 'single source of truth for topic creation' src/omnibase_infra/topics/platform_topic_suffixes.py"
+  - id: dod-no-new-topic-literals
+    description: >-
+      AC-7 no topic literals: no new onex.*.v* string literals added to Python source; the
+      topic_literal_baseline.txt is unchanged. New per-topic config lives in contract YAML.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "git diff origin/dev -- scripts/validation/topic_literal_baseline.txt | grep -q . && exit 1 || exit 0"
+  - id: dod-mypy-strict
+    description: >-
+      mypy --strict is clean across src/ with the extended ModelContractTopicEntry and the
+      service_topic_manager config mapping.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run mypy src/ --strict"

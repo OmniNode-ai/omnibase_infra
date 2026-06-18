@@ -193,10 +193,29 @@ class TopicProvisioner:
 
         result_specs: list[ModelTopicSpec] = []
         for entry in contract_entries:
+            # Per-topic config (OMN-13238): when a contract declares a
+            # ``topic_config`` block the extractor carries partitions /
+            # replication_factor / kafka_config; otherwise these stay None and
+            # ModelTopicSpec applies its canonical defaults.
             result_specs.append(
                 ModelTopicSpec(
                     suffix=entry.topic,
                     provisioning_priority=entry.provisioning_priority,
+                    partitions=(
+                        entry.partitions
+                        if entry.partitions is not None
+                        else DEFAULT_EVENT_TOPIC_PARTITIONS
+                    ),
+                    replication_factor=(
+                        entry.replication_factor
+                        if entry.replication_factor is not None
+                        else DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
+                    ),
+                    kafka_config=(
+                        dict(entry.kafka_config)
+                        if entry.kafka_config is not None
+                        else None
+                    ),
                 )
             )
 

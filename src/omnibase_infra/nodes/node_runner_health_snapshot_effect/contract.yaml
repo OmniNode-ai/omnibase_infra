@@ -49,10 +49,22 @@ published_events:
     event_type: "RunnerHealthSnapshotEvent"
     message_category: "EVENT"
     description: "Periodic health snapshot from GitHub Actions runners"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
   - topic: "onex.evt.omnibase-infra.network-pool-status.v1"
     event_type: "NetworkPoolStatusEvent"
     message_category: "EVENT"
     description: "Periodic Docker subnet-pool occupancy snapshot from runner hosts"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
 metadata:
   description: "Captures point-in-time health metrics from GitHub Actions runners and publishes snapshots for trend analysis"
   author: "OmniNode Team"
