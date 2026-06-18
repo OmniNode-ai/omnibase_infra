@@ -1,0 +1,39 @@
+# OMN-13203 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13203"
+title: "fix(OMN-13203): quarantine per-handler resolution failures instead of crashing runtime-effects boot"
+summary: >-
+  P0 crash-loop repair for the DEV effects worker. OMN-12982 (commit ee79972c) flipped non-canonical nodes' runtime_profiles onto [effects], which exposed handlers the resolver cannot construct. A single handler_routing entry whose constructor the ServiceHandlerResolver cannot satisfy (e.g. omnimarket node_pr_review_bot HandlerJudgeVerifier requiring ctor params ['judge_base_url', 'judge_model_id']) raised a bare resolver TypeError (Step 2 ctor-arg-mismatch / Step 6 unsatisfiable-ctor) or a per-handler ValueError. In _prepare_handler_wiring the non-Protocol TypeError re-raised, propagated through the OMN-8735 except-TypeError guards in _prepare_contract_wiring and wire_from_manifest, then out through the kernel's except-Exception, exiting the process BEFORE the :8086 health server bound. Docker crash-looped runtime-effects (verified live on .201 DEV: RestartCount=446, signature "TypeError: Handler ...HandlerJudgeVerifier requires constructor parameters ['judge_base_url', 'judge_model_id']"). One bad handler took down every healthy handler in the manifest. This change quarantines the two per-handler resolution-failure classes (non-Protocol resolver TypeError; per-handler ValueError) to EnumQuarantineReason.UNRESOLVABLE_HANDLER so wire_from_manifest COMPLETES, the kernel reaches freeze() + the :8086 bind, and the bad handler is REPORTED (loud WARNING + counted in total_failed) rather than crashing boot or silently dropped. ONEX_WIRING_STRICT_MODE=1 re-raises every resolution failure, preserving the pre-fix fail-closed gate. Infra outages (broker/DB/secret/manifest) surface as ModelOnexError / InfraConnectionError / ConnectionError / OSError, never a bare resolver TypeError/ValueError, so they are NOT caught by the new arms and STILL crash boot.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      New tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py plus updated negative tests in test_wiring.py, test_handler_wiring_resolver_integration.py, and test_auto_wiring_resolver_end_to_end.py prove: unsatisfiable/ctor-mismatch handler is quarantined+failed (not crash), per-handler ValueError contained identically, mixed good+bad wires the good handler, fatal InfraConnectionError still crashes boot, strict mode re-raises every resolution failure. Changed-area suite: 71 passed.
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/test_handler_wiring_resolver_integration.py tests/integration/runtime/test_auto_wiring_resolver_end_to_end.py -q"
+  - kind: ci
+    description: >-
+      ruff format/check clean, repo-wide mypy --strict gate (the Type Safety Validation CI job) passes on src/omnibase_infra/ including the changed production modules (handler_wiring.py, report.py, enum_quarantine_reason.py), pre-commit passes on all changed files (no bypass).
+    command: "uv run mypy src/omnibase_infra/ --strict"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-unresolvable-handler-quarantined-not-crash
+    description: >-
+      An unsatisfiable-constructor handler is quarantined as UNRESOLVABLE_HANDLER and counted in total_failed while wire_from_manifest COMPLETES (the boot-crash invariant is removed in default mode), proven by test_unsatisfiable_handler_quarantined_completes_and_counts_failed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py::test_unsatisfiable_handler_quarantined_completes_and_counts_failed -q"
+  - id: dod-fatal-infra-still-crashes-and-strict-reraises
+    description: >-
+      Infra outages still crash boot (InfraConnectionError is NOT quarantined) and strict mode re-raises every resolution failure, preserving the fail-closed gate.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py::test_fatal_infra_error_still_crashes_boot tests/unit/runtime/auto_wiring/test_handler_wiring_unresolvable_quarantine.py::test_strict_mode_reraises_unresolvable_handler -q"

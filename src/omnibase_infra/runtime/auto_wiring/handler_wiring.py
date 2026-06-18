@@ -1909,6 +1909,17 @@ def _strict_dispatcher_coverage_enabled() -> bool:
     )
 
 
+def _wiring_strict_mode_enabled() -> bool:
+    """Return True when ONEX_WIRING_STRICT_MODE is active (OMN-9126).
+
+    In strict mode no failure is demoted: per-handler resolution failures
+    re-raise (preserving the pre-OMN-13203 boot-crash invariant) instead of
+    being quarantined. Mirrors the env check at ``wire_from_manifest`` so a
+    single source defines strict semantics.
+    """
+    return os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true")
+
+
 def _is_orchestrator_contract(contract: ModelDiscoveredContract) -> bool:
     """Return True when a discovered contract is an orchestrator variant."""
     return "orchestrator" in contract.node_type.lower()
@@ -2962,7 +2973,40 @@ def _prepare_handler_wiring(
                     reason=EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION,
                     detail=_sanitize_exc(exc),
                 )
-            raise
+            # OMN-13203: a bare resolver TypeError that is NOT a Protocol target
+            # is exactly the unsatisfiable-ctor (ServiceHandlerResolver Step 6)
+            # or ctor-arg-mismatch (Step 2) per-handler wiring bug. These are
+            # the ONLY `raise TypeError` sites in the resolver (Steps 1a/2/6),
+            # are deterministic, never recoverable runtime state, and never an
+            # infra outage — broker/DB/secret failures surface as ModelOnexError
+            # / InfraConnectionError / ConnectionError / OSError, never a bare
+            # resolver TypeError. Before this change the bare re-raise here
+            # propagated through the OMN-8735 TypeError guards and crashed the
+            # whole runtime-effects boot (every healthy handler with it). Quarantine
+            # the single bad handler and continue so the runtime binds its health
+            # server and reports failed=N. Strict mode re-raises (preserves the
+            # boot-crash invariant) so the gate can still fail closed.
+            if _wiring_strict_mode_enabled():
+                raise
+            return _quarantine_prepared(
+                reason=EnumQuarantineReason.UNRESOLVABLE_HANDLER,
+                detail=_sanitize_exc(exc),
+            )
+        except ValueError as exc:
+            # OMN-13203: a per-handler ValueError from resolver/context construction
+            # (not-handle-shaped handler, blank-required field) is the same class
+            # of deterministic per-handler wiring bug as the unsatisfiable-ctor
+            # TypeError above — contain it identically. ValueError is NOT raised by
+            # broker/DB/secret transports (those raise ModelOnexError /
+            # InfraConnectionError / ConnectionError / OSError, caught by the
+            # `except Exception` arms upstream which still propagate), so this does
+            # not over-broaden the catch into infra outages. Strict mode re-raises.
+            if _wiring_strict_mode_enabled():
+                raise
+            return _quarantine_prepared(
+                reason=EnumQuarantineReason.UNRESOLVABLE_HANDLER,
+                detail=_sanitize_exc(exc),
+            )
         except RuntimeError as exc:
             # OMN-9457: deterministic containment for handlers whose
             # construction path calls asyncio.run() inside runtime-managed

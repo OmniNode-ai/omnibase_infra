@@ -527,15 +527,22 @@ class TestFullAutoWiringExercisesResolver:
         assert report_a.total_failed == report_b.total_failed
 
     @pytest.mark.asyncio
-    async def test_unresolvable_handler_raises_typeerror_no_report(self) -> None:
-        """Plan Task 8 negative case: OMN-8735 fail-fast preserved.
+    async def test_unresolvable_handler_quarantined_default_raised_strict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-13203: unresolvable handler is quarantined (default) / raised (strict).
 
-        A single unresolvable handler in the manifest propagates ``TypeError``
-        unchanged from the resolver's Step 6; no ``ModelAutoWiringReport``
-        is produced. Proves the cutover in Task 5 did not weaken the
-        fail-fast invariant that protects the runtime from booting with
-        partially-wired handlers.
+        Default mode: the resolver's Step-6 unsatisfiable-ctor ``TypeError`` is
+        contained so ``wire_from_manifest`` COMPLETES and the runtime can bind
+        its health server; the bad handler is reported failed + quarantined as
+        ``UNRESOLVABLE_HANDLER`` and named in the detail. Strict mode preserves
+        the OMN-8735 fail-fast invariant — the TypeError propagates unchanged so
+        the boot log identifies exactly which wiring gap would crash startup.
         """
+        from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+            EnumQuarantineReason,
+        )
+
         unresolvable_contract = _make_single_handler_contract(
             name="node_unresolvable",
             handler_cls=HandlerUnresolvable,
@@ -545,8 +552,28 @@ class TestFullAutoWiringExercisesResolver:
             contracts=(unresolvable_contract,),
             errors=(),
         )
-        engine = MessageDispatchEngine()
 
+        # Default (non-strict) mode: quarantine + complete.
+        monkeypatch.delenv("ONEX_WIRING_STRICT_MODE", raising=False)
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            side_effect=_import_handler_stub,
+        ):
+            report = await wire_from_manifest(
+                manifest=manifest,
+                dispatch_engine=MessageDispatchEngine(),
+                event_bus=None,
+                environment="test",
+                container=None,
+            )
+        assert report.total_failed >= 1
+        assert report.total_quarantined == 1
+        q = report.quarantined_handlers[0]
+        assert q.reason is EnumQuarantineReason.UNRESOLVABLE_HANDLER
+        assert "some_undeclared_service" in q.detail
+
+        # Strict mode: the TypeError still propagates unchanged.
+        monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
         with patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             side_effect=_import_handler_stub,
@@ -554,12 +581,11 @@ class TestFullAutoWiringExercisesResolver:
             with pytest.raises(TypeError) as exc_info:
                 await wire_from_manifest(
                     manifest=manifest,
-                    dispatch_engine=engine,
+                    dispatch_engine=MessageDispatchEngine(),
                     event_bus=None,
                     environment="test",
                     container=None,
                 )
-
         assert "some_undeclared_service" in str(exc_info.value), (
             "TypeError must name the missing constructor parameter so the "
             "runtime boot log identifies exactly which wiring gap crashed startup."

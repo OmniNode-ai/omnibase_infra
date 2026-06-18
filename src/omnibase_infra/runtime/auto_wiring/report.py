@@ -34,6 +34,16 @@ class EnumWiringOutcome(str, Enum):
     FAILED = "failed"
 
 
+# OMN-13203: quarantine reasons that represent a genuine per-handler WIRING
+# FAILURE (a deterministic, never-recoverable contract/handler bug) rather than
+# a deferred migration. These count toward ``total_failed`` so they are reported
+# as failures, never silently dropped. PROTOCOL_HANDLER_DECLARATION and
+# ASYNC_INCOMPATIBLE remain migration-quarantine-only (``total_quarantined``).
+_RESOLUTION_FAILURE_REASONS: frozenset[EnumQuarantineReason] = frozenset(
+    {EnumQuarantineReason.UNRESOLVABLE_HANDLER}
+)
+
+
 class ModelWiringOutcome(BaseModel):
     """Per-handler resolver outcome row within a contract-level wiring result.
 
@@ -209,11 +219,35 @@ class ModelAutoWiringReport(BaseModel):
 
     @property
     def total_failed(self) -> int:
-        return sum(1 for r in self.results if r.outcome == EnumWiringOutcome.FAILED)
+        """Count of wiring failures.
+
+        Includes both contract-level FAILED rows and per-handler
+        resolution-failure quarantines (OMN-13203 — unsatisfiable-ctor /
+        ctor-arg-mismatch / not-handle-shaped handlers). The latter previously
+        crashed runtime boot; they are now contained but MUST still surface as
+        failures so the gate and ``ONEX_WIRING_STRICT_MODE`` assertion react to
+        them. Migration-quarantines (Protocol/async) are NOT counted here —
+        they are reported via ``total_quarantined``.
+        """
+        failed_rows = sum(
+            1 for r in self.results if r.outcome == EnumWiringOutcome.FAILED
+        )
+        resolution_failures = sum(
+            1
+            for q in self.quarantined_handlers
+            if q.reason in _RESOLUTION_FAILURE_REASONS
+        )
+        return failed_rows + resolution_failures
 
     @property
     def total_quarantined(self) -> int:
-        """Count of handlers quarantined during wiring (OMN-9457)."""
+        """Count of handlers quarantined during wiring (OMN-9457).
+
+        Counts every quarantined handler, including OMN-13203
+        resolution-failure quarantines, so the ``quarantined=N`` summary field
+        stays a faithful count of contained handlers. The resolution-failure
+        subset is *additionally* surfaced in ``total_failed``.
+        """
         return len(self.quarantined_handlers)
 
     def __bool__(self) -> bool:
