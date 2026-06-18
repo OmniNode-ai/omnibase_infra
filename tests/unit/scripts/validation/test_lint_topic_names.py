@@ -197,6 +197,18 @@ def test_known_producer_accepted() -> None:
 
 
 @pytest.mark.unit
+def test_ui_cross_renderer_producer_accepted() -> None:
+    """OMN-13131: 'ui' is a canonical cross-renderer producer domain.
+
+    The renderer effect nodes (ui.effect.*) thin-publish capability declarations
+    onto onex.cmd.ui.renderer-capability-declared.v1; the producer 'ui' must be
+    accepted (not rejected as 'unknown producer').
+    """
+    result = lint_topic("onex.cmd.ui.renderer-capability-declared.v1")
+    assert result.is_valid, f"Expected valid but got violations: {result.violations}"
+
+
+@pytest.mark.unit
 def test_all_known_producers_accepted() -> None:
     """All entries in _KNOWN_PRODUCERS must produce valid 5-segment topics."""
     for producer in _KNOWN_PRODUCERS:
@@ -219,6 +231,7 @@ def test_known_producers_allowlist_complete() -> None:
         "omnibase-compat",
         "github",
         "platform",
+        "ui",
     }
     assert expected.issubset(_KNOWN_PRODUCERS), (
         f"Missing producers: {expected - _KNOWN_PRODUCERS}"
