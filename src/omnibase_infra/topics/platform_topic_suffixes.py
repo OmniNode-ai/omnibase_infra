@@ -2292,6 +2292,45 @@ def _omnimemory_enabled() -> bool:
     }
 
 
+# =============================================================================
+# TRANSITIONAL REGISTRY (OMN-13238) — pending per-owning-contract migration
+# =============================================================================
+# ``ALL_PROVISIONED_TOPIC_SPECS`` is a TRANSITIONAL per-topic config source, not
+# a standing provisioning authority. As of OMN-13238 the runtime provisioner
+# (``service_topic_manager._build_topic_specs``) sources topic NAMES *and* the
+# per-topic config (partitions / replication_factor / kafka_config) from
+# contract YAML via ``ContractTopicExtractor.extract_all`` — see the new
+# ``published_events[].topic_config`` block. 9 config-bearing topics whose OWNING
+# omnibase_infra contract already declared a ``published_events`` entry have been
+# migrated into those contracts in this PR (parity asserted by
+# tests/ci/test_topic_config_contract_parity.py).
+#
+# The remaining entries below stay here for one of these reasons:
+#   1. Their owning contract lives in another repo (omnimemory / omniintelligence
+#      / omnimarket build-loop + delegation / omninode routing) — migrating needs
+#      a cross-repo PR + (for the event_bus declaration site) an omnibase_core
+#      schema extension; deliberately NOT done here to avoid compounding the
+#      active omnimarket<->core pin-drift (OMN-13224).
+#   2. The topic is emitted directly by the runtime kernel (no owning node
+#      contract, e.g. runtime-error) — needs a runtime-owned contract first.
+#   3. The topic is a cmd/intent topic, or an event the owning contract does not
+#      list under ``published_events`` — attaching config there would either
+#      violate orchestrator/effect event-purity (no commands in published_events)
+#      or require declaring a NEW published event, both out of scope for this
+#      lossless config migration.
+#
+# Follow-up migration tickets are tracked under epic OMN-12651:
+#   - omnibase_core: extend ModelEventBusSubcontract / ModelTopicMeta so
+#     event_bus topic_config is contract-loadable cross-repo (unblocks the
+#     event_bus.publish_topics declaration site for cmd/intent + non-event topics).
+#   - omnimemory: migrate omnimemory-owned topic config into omnimemory contracts.
+#   - omniintelligence: migrate omniintelligence-owned topic config.
+#   - omnimarket: migrate build-loop + delegation owned topic config.
+#   - omnibase_infra: declare runtime-emitted topics (runtime-error, etc.) in a
+#     runtime-owned contract so their config is contract-sourced too.
+#
+# DO NOT add new entries here. Declare per-topic config in the owning contract's
+# ``published_events[].topic_config`` block instead.
 ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ALL_PLATFORM_TOPIC_SPECS
     + (
@@ -2309,11 +2348,17 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     + ALL_OMNINODE_ROUTING_TOPIC_SPECS
     + (ALL_OMNICLAUDE_TOPIC_SPECS if is_runtime_package_active("omniclaude") else ())
 )
-"""All topic specs to be provisioned by TopicProvisioner at startup.
+"""TRANSITIONAL per-topic config registry (OMN-13238) — NOT the runtime authority.
 
-Combines platform-reserved, domain plugin, and OmniClaude skill topic specs
-into a single registry consumed by service_topic_manager.py. This is the single
-source of truth for topic creation.
+The live runtime topic-creation authority is contract YAML extracted by
+``ContractTopicExtractor.extract_all`` and consumed by
+``service_topic_manager._build_topic_specs`` (names AND per-topic config). This
+registry is retained as a transitional warm source for topics whose owning
+contract has not yet been migrated to ``published_events[].topic_config`` (see
+the banner above for the per-repo follow-up tickets). It is consumed today only
+by the ``omni-infra list-topics`` CLI and the topic-parity CI tests — NOT by any
+runtime provisioning path. It must be fully deleted once the follow-up
+migrations land; it must never become a second standing provisioning authority.
 
 OmniMemory topics (ALL_OMNIMEMORY_TOPIC_SPECS) are included only when
 OMNIMEMORY_ENABLED is set to a truthy value ("1", "true", "yes", "on").

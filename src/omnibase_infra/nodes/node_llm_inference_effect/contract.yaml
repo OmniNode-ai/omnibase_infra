@@ -161,12 +161,27 @@ published_events:
   - topic: "onex.evt.omnibase-infra.inference-response.v1"
     event_type: "LlmInferenceResponse"
     description: "Content-bearing successful LLM inference response emitted directly from the effect node"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
   - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
     event_type: "LlmCallCompletedEvent"
     description: "Per-call metrics emitted after each inference call; may include gpu_seconds, gpu_type, gpu_count, and EnumUsageSource-backed compute_usage_source when the request declares GPU configuration"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
   - topic: "onex.evt.omnibase-infra.llm-call-completed.v1"
     event_type: "LlmCallCompletedInfraEvent"
     description: "Lightweight per-call metrics for infra-owned consumers; mirrors optional GPU usage evidence fields for infra projections"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
 # Dependencies
 dependencies:
   - name: "protocol_llm_http_transport"

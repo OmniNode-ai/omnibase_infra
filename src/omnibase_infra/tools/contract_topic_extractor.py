@@ -23,11 +23,14 @@ import importlib.resources
 import logging
 import re
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, cast
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
@@ -77,7 +80,14 @@ _EVENT_BUS_SECTION_KEYS: tuple[str, ...] = (
 
 
 class ModelContractTopicEntry(BaseModel):
-    """A single validated topic extracted from one or more contract.yaml files."""
+    """A single validated topic extracted from one or more contract.yaml files.
+
+    Per-topic provisioning config (``partitions``, ``replication_factor``,
+    ``kafka_config``) is carried from a contract's optional ``topic_config``
+    block (OMN-13238). When a contract does not declare ``topic_config`` for a
+    topic, these fields stay ``None`` and the provisioner falls back to the
+    ``ModelTopicSpec`` defaults.
+    """
 
     topic: str
     kind: Literal["evt", "cmd", "intent", "dlq"]
@@ -86,11 +96,31 @@ class ModelContractTopicEntry(BaseModel):
     version: str  # e.g. "v1"
     source_contracts: tuple[Path, ...]
     provisioning_priority: int = 100
+    partitions: int | None = None
+    replication_factor: int | None = None
+    kafka_config: Mapping[str, str] | None = None
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+    @field_validator("kafka_config", mode="before")
+    @classmethod
+    def _freeze_kafka_config(
+        cls, v: Mapping[str, str] | None
+    ) -> Mapping[str, str] | None:
+        """Freeze a mutable dict supplied at construction time."""
+        if isinstance(v, dict):
+            return MappingProxyType(dict(v))
+        return v
 
     def merge_sources(self, other: ModelContractTopicEntry) -> ModelContractTopicEntry:
-        """Return a new entry with source_contracts merged (deduped, sorted)."""
+        """Return a new entry with source_contracts merged (deduped, sorted).
+
+        Per-topic config is merged by taking the first non-``None`` value for
+        each field, so a topic declared in two contracts (one carrying
+        ``topic_config``, one not) keeps the declared config. When BOTH carry
+        conflicting config, ``self`` wins (deterministic by topic-string sort
+        order in the caller).
+        """
         combined = tuple(
             sorted(set(self.source_contracts) | set(other.source_contracts))
         )
@@ -100,6 +130,19 @@ class ModelContractTopicEntry(BaseModel):
                 "provisioning_priority": min(
                     self.provisioning_priority,
                     other.provisioning_priority,
+                ),
+                "partitions": (
+                    self.partitions if self.partitions is not None else other.partitions
+                ),
+                "replication_factor": (
+                    self.replication_factor
+                    if self.replication_factor is not None
+                    else other.replication_factor
+                ),
+                "kafka_config": (
+                    self.kafka_config
+                    if self.kafka_config is not None
+                    else other.kafka_config
                 ),
             }
         )
@@ -216,16 +259,82 @@ def _topic_priority(item: dict[object, object]) -> int:
     return 100
 
 
+@dataclass(frozen=True)  # internal-dataclass-ok: topic-parse-intermediate
+class RawTopicDecl:
+    """Internal parse intermediate: a raw topic string plus its declared config.
+
+    Not a domain model — it carries the per-topic provisioning attributes pulled
+    from a contract's optional ``topic_config`` block (OMN-13238) before they are
+    validated onto :class:`ModelContractTopicEntry`.
+    """
+
+    topic: str
+    provisioning_priority: int = 100
+    partitions: int | None = None
+    replication_factor: int | None = None
+    kafka_config: Mapping[str, str] | None = None
+
+
+def _parse_topic_config(
+    item: dict[object, object], source: Path
+) -> tuple[int | None, int | None, Mapping[str, str] | None]:
+    """Parse an optional ``topic_config`` block from a structured topic item.
+
+    Returns ``(partitions, replication_factor, kafka_config)``. Any field that
+    is absent or malformed is returned as ``None`` (falls back to defaults at
+    spec-build time). ``kafka_config`` values are coerced to strings (Kafka
+    topic configs are always string-valued).
+    """
+    raw = item.get("topic_config")
+    if not isinstance(raw, dict):
+        return (None, None, None)
+
+    partitions: int | None = None
+    partitions_raw = raw.get("partitions")
+    if isinstance(partitions_raw, int) and not isinstance(partitions_raw, bool):
+        partitions = partitions_raw
+    elif partitions_raw is not None:
+        _warn(
+            f"Ignoring non-integer topic_config.partitions={partitions_raw!r} "
+            f"for topic {item.get('topic')!r} in {source}"
+        )
+
+    replication_factor: int | None = None
+    rf_raw = raw.get("replication_factor")
+    if isinstance(rf_raw, int) and not isinstance(rf_raw, bool):
+        replication_factor = rf_raw
+    elif rf_raw is not None:
+        _warn(
+            f"Ignoring non-integer topic_config.replication_factor={rf_raw!r} "
+            f"for topic {item.get('topic')!r} in {source}"
+        )
+
+    kafka_config: Mapping[str, str] | None = None
+    kc_raw = raw.get("kafka_config")
+    if isinstance(kc_raw, dict):
+        kafka_config = {str(k): str(v) for k, v in kc_raw.items()}
+    elif kc_raw is not None:
+        _warn(
+            f"Ignoring non-mapping topic_config.kafka_config={kc_raw!r} "
+            f"for topic {item.get('topic')!r} in {source}"
+        )
+
+    return (partitions, replication_factor, kafka_config)
+
+
 def _extract_raw_topics_from_contract(
     data: dict[str, object], source: Path
-) -> list[tuple[str, int]]:
+) -> list[RawTopicDecl]:
     """
-    Extract all raw topic strings from a parsed contract YAML dict.
+    Extract all raw topic declarations from a parsed contract YAML dict.
 
     Checks ALL applicable keys — no early break on first match.
     If a field has both 'topic' and 'name' values, extracts both.
+    Structured (dict) topic items may carry an optional ``topic_config`` block
+    (``partitions`` / ``replication_factor`` / ``kafka_config``) which is
+    threaded onto the resulting declaration (OMN-13238).
     """
-    raw_topics: list[tuple[str, int]] = []
+    raw_topics: list[RawTopicDecl] = []
 
     # --- event_bus.subscribe_topics / event_bus.publish_topics (new-style) ---
     event_bus = data.get("event_bus")
@@ -235,12 +344,21 @@ def _extract_raw_topics_from_contract(
             if isinstance(topics_list, list):
                 for item in topics_list:
                     if isinstance(item, str) and item:
-                        raw_topics.append((item, 100))
+                        raw_topics.append(RawTopicDecl(topic=item))
                     elif isinstance(item, dict):
-                        # topic: "..." format inside subscribe_topics list
+                        # topic: "..." format inside subscribe/publish list
                         topic_val = item.get("topic")
                         if isinstance(topic_val, str) and topic_val:
-                            raw_topics.append((topic_val, _topic_priority(item)))
+                            partitions, rf, kc = _parse_topic_config(item, source)
+                            raw_topics.append(
+                                RawTopicDecl(
+                                    topic=topic_val,
+                                    provisioning_priority=_topic_priority(item),
+                                    partitions=partitions,
+                                    replication_factor=rf,
+                                    kafka_config=kc,
+                                )
+                            )
 
     # --- consumed_events / published_events / produced_events ---
     for section_key in _EVENT_SECTION_KEYS:
@@ -250,14 +368,31 @@ def _extract_raw_topics_from_contract(
         for item in section:
             if not isinstance(item, dict):
                 continue
+            partitions, rf, kc = _parse_topic_config(item, source)
             # new-style: topic key
             topic_val = item.get("topic")
             if isinstance(topic_val, str) and topic_val:
-                raw_topics.append((topic_val, _topic_priority(item)))
+                raw_topics.append(
+                    RawTopicDecl(
+                        topic=topic_val,
+                        provisioning_priority=_topic_priority(item),
+                        partitions=partitions,
+                        replication_factor=rf,
+                        kafka_config=kc,
+                    )
+                )
             # old-style: name key — extract both if both present
             name_val = item.get("name")
             if isinstance(name_val, str) and name_val:
-                raw_topics.append((name_val, _topic_priority(item)))
+                raw_topics.append(
+                    RawTopicDecl(
+                        topic=name_val,
+                        provisioning_priority=_topic_priority(item),
+                        partitions=partitions,
+                        replication_factor=rf,
+                        kafka_config=kc,
+                    )
+                )
 
     return raw_topics
 
@@ -483,13 +618,19 @@ class ContractTopicExtractor:
 
             raw_topics = _extract_raw_topics_from_contract(raw_yaml, contract_path)
 
-            for raw, provisioning_priority in raw_topics:
+            for decl in raw_topics:
+                raw = decl.topic
                 entry = _parse_topic(raw, contract_path)
                 if entry is None:
                     # Warned inside _parse_topic; skip
                     continue
                 entry = entry.model_copy(
-                    update={"provisioning_priority": provisioning_priority}
+                    update={
+                        "provisioning_priority": decl.provisioning_priority,
+                        "partitions": decl.partitions,
+                        "replication_factor": decl.replication_factor,
+                        "kafka_config": decl.kafka_config,
+                    }
                 )
 
                 if raw in accumulated:
@@ -767,12 +908,18 @@ class ContractTopicExtractor:
 
                 raw_topics = _extract_raw_topics_from_contract(raw_yaml, contract_path)
 
-                for raw, provisioning_priority in raw_topics:
+                for decl in raw_topics:
+                    raw = decl.topic
                     entry = _parse_topic(raw, contract_path)
                     if entry is None:
                         continue
                     entry = entry.model_copy(
-                        update={"provisioning_priority": provisioning_priority}
+                        update={
+                            "provisioning_priority": decl.provisioning_priority,
+                            "partitions": decl.partitions,
+                            "replication_factor": decl.replication_factor,
+                            "kafka_config": decl.kafka_config,
+                        }
                     )
 
                     if raw in accumulated:

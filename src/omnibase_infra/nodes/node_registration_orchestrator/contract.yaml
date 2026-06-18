@@ -510,9 +510,21 @@ published_events:
   - topic: "onex.evt.platform.topic-catalog-response.v1"
     event_type: "TopicCatalogResponse"
     description: "Full catalog snapshot in response to a TopicCatalogQuery"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "3600000"
+        "cleanup.policy": "delete"
   - topic: "onex.evt.platform.topic-catalog-changed.v1"
     event_type: "TopicCatalogChanged"
     description: "Notification published when the topic catalog version changes"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
   - topic: "onex.evt.platform.node-registration-initiated.v1"
     event_type: "NodeRegistrationInitiated"
   - topic: "onex.evt.platform.node-registration-accepted.v1"

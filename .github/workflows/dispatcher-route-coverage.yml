@@ -99,7 +99,11 @@ jobs:
             if [[ -n "$CHANGED" ]]; then
               # Convert to absolute paths so the script can match them
               ABS_PATHS=$(echo "$CHANGED" | xargs -I{} realpath --relative-to=. {} 2>/dev/null || echo "$CHANGED")
-              echo "changed_contracts=$ABS_PATHS" >> "$GITHUB_OUTPUT"
+              {
+                echo "changed_contracts<<EOF"
+                echo "$ABS_PATHS"
+                echo "EOF"
+              } >> "$GITHUB_OUTPUT"
               echo "Found changed contracts:"
               echo "$CHANGED" | head -20
             else

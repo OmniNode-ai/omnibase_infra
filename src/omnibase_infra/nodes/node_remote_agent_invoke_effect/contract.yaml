@@ -60,6 +60,12 @@ published_events:
   - topic: "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
     event_type: "AgentTaskLifecycleEvent"
     description: "Remote-agent lifecycle event emitted by protocol handlers."
+    topic_config:
+      partitions: 3
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
 health_check:
   enabled: true
   endpoint: "/health"
