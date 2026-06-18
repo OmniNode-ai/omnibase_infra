@@ -1,0 +1,9 @@
+# shellcheck configuration (OMN-13220)
+#
+# SC1091: "Not following: <file> was not specified as input." Our deploy scripts
+# source host-resolved env files (docker/runtime-policy.env, ~/.omnibase/.env)
+# that exist only at runtime on the deploy host, never in the repo. shellcheck
+# cannot follow them and the warning is pure noise — it says nothing about the
+# correctness of the sourcing script. Disable it globally so the shellcheck gate
+# fails only on real defects.
+disable=SC1091
