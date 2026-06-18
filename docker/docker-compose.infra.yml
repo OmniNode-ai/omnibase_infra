@@ -141,6 +141,15 @@ x-runtime-env: &runtime-env
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
+  # OMN-13220: per-consumer Kafka consumer-start budget. On a fully-cold lane the
+  # kernel joins a consumer group per subscribed topic; with 1300+ topics on a
+  # freshly-provisioned broker the default 30s blew on the slow group-coordinator
+  # tail and the kernel recycled before reaching healthy. deploy-runtime.sh
+  # exports a raised COLD_START_KAFKA_TIMEOUT_SECONDS before the restart; the
+  # :-30 default preserves the prior steady-state value when the var is unset
+  # (e.g. a plain `docker compose up` outside the deploy script). Mapped to
+  # ModelKafkaEventBusConfig.timeout_seconds (le=300) via apply_environment_overrides.
+  KAFKA_TIMEOUT_SECONDS: ${KAFKA_TIMEOUT_SECONDS:-30}
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state

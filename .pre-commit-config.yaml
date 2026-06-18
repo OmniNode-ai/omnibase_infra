@@ -69,6 +69,27 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
+  # OMN-13220: shellcheck the deploy surface this repo owns. Scoped to
+  # deploy-runtime.sh + its runtime_build sibling scripts (the deploy crash-loop
+  # blast radius) rather than all 56 scripts/*.sh, so the gate enforces real
+  # defects without a 56-script pre-existing-cleanup detour. SC1091 (sourced
+  # host-env files shellcheck cannot follow) is silenced in .shellcheckrc.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck (deploy-runtime surface)
+        files: ^scripts/(deploy-runtime\.sh|runtime_build/.*\.sh)$
+        stages: [pre-commit]
+  # actionlint (GitHub Actions linting) is intentionally NOT wired as a
+  # repo-wide pre-commit hook in this PR: a baseline run flags pre-existing
+  # findings across ~20 unrelated workflows (embedded-shellcheck style nits +
+  # an actionlint secret-name case-normalization quirk in
+  # dependency-cascade.yml). This PR touches no workflow files, so adding the
+  # gate here would ship a hook that is red on day one over code this ticket
+  # did not author — detection without a clean baseline, which Rule 5 prohibits.
+  # actionlint is run ad-hoc in CI verification for OMN-13220; wiring it as a
+  # required gate is tracked as its own workflow-cleanup follow-up.
   # ONEX Python Development Hooks (from shared templates)
   # Order: ruff format → ruff check → mypy (formatting before linting before type checking)
   # Note: ruff replaces both black and isort (10-100x faster)

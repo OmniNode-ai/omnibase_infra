@@ -77,10 +77,45 @@ readonly RUNTIME_SERVICES=(
     intelligence-api
     omninode-contract-resolver
 )
+# Migration services refreshed (one-shot) before the --no-deps runtime restart.
+# Order matters: forward-migration applies the omnibase_infra schema, then
+# intelligence-migration applies the omniintelligence schema, then migration-gate
+# stamps db_metadata.migrations_complete and stays up as a healthcheck keepalive.
+#
+# OMN-13220: intelligence-migration was MISSING here. The compose file gates
+# omninode-runtime on `intelligence-migration: condition: service_completed_successfully`,
+# but restart_services() uses `up -d --no-deps`, which bypasses depends_on. On a
+# fresh-DB lane that left public.db_metadata for omniintelligence unstamped, so
+# the runtime crash-looped. The preflight must run it explicitly.
+#
+# One-shot services (run-to-completion, exit 0) are listed in
+# RUNTIME_MIGRATION_ONESHOTS so the preflight can `docker wait` on them; the
+# keepalive migration-gate is deliberately excluded from that wait set.
 readonly RUNTIME_MIGRATION_SERVICES=(
     forward-migration
+    intelligence-migration
     migration-gate
 )
+readonly RUNTIME_MIGRATION_ONESHOTS=(
+    forward-migration
+    intelligence-migration
+)
+# Broker readiness services brought up (and waited on) before the runtime
+# restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
+# 1300+-topic provisioning burst on first boot does not exhaust the default
+# single-shard partition ceiling (OMN-11886 / OMN-13220). Because the runtime
+# restart is `--no-deps`, the compose depends_on chain (which includes
+# redpanda-partition-cap as service_completed_successfully) is bypassed, so the
+# preflight must apply the cap explicitly before the kernel provisions topics.
+readonly BROKER_READINESS_SERVICE="redpanda"
+readonly BROKER_PARTITION_CAP_SERVICE="redpanda-partition-cap"
+# Cold-start consumer-group join budget (OMN-13220). On a fully-cold lane the
+# kernel joins a consumer group per subscribed topic; with 1300+ topics on a
+# freshly-provisioned broker the default 30s per-consumer KAFKA_TIMEOUT_SECONDS
+# blew on the slow group-coordinator tail and the kernel recycled before it
+# reached healthy. Raise the per-consumer start budget for the restart-driven
+# boot. Operator-overridable; clamped to the config field bound (le=300).
+readonly COLD_START_KAFKA_TIMEOUT_SECONDS="${COLD_START_KAFKA_TIMEOUT_SECONDS:-180}"
 readonly REQUIRED_PROJECTION_TABLES=(
     delegation_events
     node_service_registry
@@ -1598,6 +1633,58 @@ build_images() {
 # Restart -- bring up runtime services only
 # =============================================================================
 
+warm_broker_topic_provisioning() {
+    # Bring the broker + partition cap to readiness before the --no-deps runtime
+    # restart so the cold-start topic-provisioning burst does not crash-loop the
+    # kernel (OMN-13220). The runtime restart bypasses depends_on, so the
+    # compose-declared redpanda-partition-cap gate never fires on a restart-only
+    # deploy — apply it here, explicitly, before the kernel boots.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+
+    log_step "Broker Topic-Provisioning Warmup"
+
+    # 1. Ensure the broker itself is up and healthy. `up -d` is a no-op when it
+    # is already running; the --wait flag blocks until the healthcheck passes so
+    # the partition-cap rpk calls below do not race a still-starting broker.
+    local broker_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        -f "${compose_file}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --wait
+        "${BROKER_READINESS_SERVICE}"
+    )
+    log_info "Ensuring broker is healthy: ${BROKER_READINESS_SERVICE}"
+    log_cmd "${broker_up_cmd[*]}"
+    "${broker_up_cmd[@]}"
+
+    # 2. Apply the partition cap (run-to-completion). force-recreate re-runs the
+    # one-shot even if a prior run left an exited container behind.
+    local cap_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        -f "${compose_file}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --force-recreate
+        "${BROKER_PARTITION_CAP_SERVICE}"
+    )
+    log_info "Applying broker partition cap: ${BROKER_PARTITION_CAP_SERVICE}"
+    log_cmd "${cap_up_cmd[*]}"
+    "${cap_up_cmd[@]}"
+
+    local cap_container="${compose_project}-${BROKER_PARTITION_CAP_SERVICE}"
+    local cap_wait_cmd=(docker wait "${cap_container}")
+    log_cmd "${cap_wait_cmd[*]}"
+    if [[ "$("${cap_wait_cmd[@]}")" != "0" ]]; then
+        log_error "${BROKER_PARTITION_CAP_SERVICE} did not complete successfully."
+        log_error "Broker partition cap not applied; cold-start topic provisioning may crash-loop the runtime."
+        return 1
+    fi
+    log_info "Broker partition cap applied."
+}
+
 run_runtime_migration_preflight() {
     # Run bounded migration services before --no-deps runtime restarts.
     local deploy_target="$1"
@@ -1618,18 +1705,29 @@ run_runtime_migration_preflight() {
         log_info "Refreshing migration service: ${service}"
         log_cmd "${cmd[*]}"
         "${cmd[@]}"
-        if [[ "${service}" == "forward-migration" ]]; then
-            # Derive the container name from the compose project so the wait
-            # targets the lane being deployed, not a fixed name. The base
-            # compose names it <compose-project>-forward-migration and each
-            # lane overlay follows the same form (OMN-12987), so this resolves
-            # to omnibase-infra-forward-migration for dev and
-            # omnibase-infra-stability-test-forward-migration for stability.
-            local forward_migration_container="${compose_project}-forward-migration"
-            local wait_cmd=(docker wait "${forward_migration_container}")
+        # One-shot migrations (forward-migration, intelligence-migration) run to
+        # completion and must exit 0 before the dependent schema/runtime work
+        # proceeds. migration-gate is a long-running healthcheck keepalive, NOT a
+        # one-shot, so it is deliberately excluded from the wait set
+        # (OMN-13220). Deriving the container name from the compose project keeps
+        # the wait pointed at the lane being deployed (OMN-12987): the base
+        # compose names it <compose-project>-<service> and each lane overlay
+        # follows the same form (e.g. omnibase-infra-intelligence-migration for
+        # dev, omnibase-infra-stability-test-intelligence-migration for stability).
+        local is_oneshot=false
+        local oneshot
+        for oneshot in "${RUNTIME_MIGRATION_ONESHOTS[@]}"; do
+            if [[ "${service}" == "${oneshot}" ]]; then
+                is_oneshot=true
+                break
+            fi
+        done
+        if [[ "${is_oneshot}" == true ]]; then
+            local migration_container="${compose_project}-${service}"
+            local wait_cmd=(docker wait "${migration_container}")
             log_cmd "${wait_cmd[*]}"
             if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
-                log_error "forward-migration did not complete successfully."
+                log_error "${service} did not complete successfully."
                 return 1
             fi
         fi
@@ -2041,6 +2139,27 @@ main() {
 
     # Phase 11: Restart (optional)
     if [[ "${RESTART}" == true ]]; then
+        # Raise the per-consumer Kafka consumer-start budget for the restart-driven
+        # cold boot (OMN-13220). x-runtime-env reads KAFKA_TIMEOUT_SECONDS from the
+        # shell environment (default 30s when unset); exporting it here propagates
+        # the raised cold-start value to every runtime container compose recreates.
+        # Validate + clamp to ModelKafkaEventBusConfig.timeout_seconds bounds
+        # (ge=1, le=300) so an operator override cannot produce a config the
+        # kernel rejects at boot.
+        local cold_start_timeout="${COLD_START_KAFKA_TIMEOUT_SECONDS}"
+        if [[ ! "${cold_start_timeout}" =~ ^[0-9]+$ ]]; then
+            log_error "COLD_START_KAFKA_TIMEOUT_SECONDS must be a positive integer (got: '${cold_start_timeout}')."
+            return 1
+        fi
+        if (( cold_start_timeout < 1 )); then
+            cold_start_timeout=1
+        elif (( cold_start_timeout > 300 )); then
+            log_warn "COLD_START_KAFKA_TIMEOUT_SECONDS=${cold_start_timeout} exceeds the config max (300); clamping to 300."
+            cold_start_timeout=300
+        fi
+        export KAFKA_TIMEOUT_SECONDS="${cold_start_timeout}"
+        log_info "Cold-start Kafka consumer-start budget: KAFKA_TIMEOUT_SECONDS=${KAFKA_TIMEOUT_SECONDS}s"
+        warm_broker_topic_provisioning "${deploy_target}" "${compose_project}"
         run_runtime_migration_preflight "${deploy_target}" "${compose_project}"
         restart_services "${deploy_target}" "${compose_project}"
     fi
