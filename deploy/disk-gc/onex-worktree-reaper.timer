@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-worktree-reaper.timer — triggers the .201 event-sourced reaper pass
+# (OMN-13228, T4 of OMN-13008).
+#
+# Systemd USER timer. Where onex-disk-gc.timer is the hourly backstop, this fires
+# frequently (every 2 min) so a merged PR's worktree is reaped within ~one interval
+# of the projection materializing the event — "reap on merge", honest about its
+# polling latency. The reaper is event-sourced and idempotent (it advances a cursor
+# only on a fully-successful execute pass), so a tight interval is safe and cheap:
+# an empty ?since page is a single HTTP GET.
+#
+# Install on .201 (user scope, no sudo):
+#   bash deploy/disk-gc/install-worktree-reaper.sh
+#
+# Check:
+#   systemctl --user list-timers onex-worktree-reaper.timer
+#   systemctl --user status onex-worktree-reaper.timer
+
+[Unit]
+Description=ONEX .201 worktree reaper timer (reap-on-merge, event-sourced)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+# First run 2 min after the user manager starts (let docker + projection API settle).
+OnStartupSec=2min
+# Then every 2 min. Calendar recurrence re-arms reliably for a oneshot service.
+OnCalendar=*:0/2
+# Spread load a little so it never lines up exactly with other jobs.
+RandomizedDelaySec=20s
+# Fire a missed run on resume (host sleep, reboots).
+Persistent=true
+Unit=onex-worktree-reaper.service
+
+[Install]
+WantedBy=timers.target
