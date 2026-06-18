@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""CLI subprocess handler for LLM inference via Gemini CLI and Codex CLI.
+"""CLI subprocess handler for LLM inference via Gemini / Claude / opencode CLI.
 
 Generalizes the proven subprocess dispatch pattern from the hostile reviewer
 aggregator (aggregate_reviews.py) into an ONEX handler that accepts
@@ -18,6 +18,8 @@ CLI subprocess handlers distinguish these failure classes:
 Related:
     - OMN-7106: Add Gemini CLI and Codex CLI as subprocess LLM handlers
     - OMN-7103: Node-Based LLM Delegation Workflow
+    - OMN-13215: codex-cli REMOVED — the delegation ceiling executes over the
+      canonical HTTP inference path; no codex subprocess config remains here.
 """
 
 from __future__ import annotations
@@ -57,12 +59,10 @@ class EnumCliBackendStatus(str, Enum):
     EMPTY_RESPONSE = "empty_response"
 
 
+# OMN-13215: the ``codex-cli`` model config was REMOVED. The delegation ceiling
+# executes over the canonical HTTP inference path — no codex shell-out remains.
 _CLI_CONFIG_BY_MODEL: dict[str, tuple[str, list[str]]] = {
     "gemini-cli": ("gemini", ["-p"]),
-    "codex-cli": (
-        "codex",
-        ["--sandbox", "read-only", "--ask-for-approval", "never", "exec"],
-    ),
     "claude-cli": (
         "claude",
         [
