@@ -260,7 +260,7 @@ def _topic_priority(item: dict[object, object]) -> int:
 
 
 @dataclass(frozen=True)  # internal-dataclass-ok: topic-parse-intermediate
-class _RawTopicDecl:
+class RawTopicDecl:
     """Internal parse intermediate: a raw topic string plus its declared config.
 
     Not a domain model — it carries the per-topic provisioning attributes pulled
@@ -324,7 +324,7 @@ def _parse_topic_config(
 
 def _extract_raw_topics_from_contract(
     data: dict[str, object], source: Path
-) -> list[_RawTopicDecl]:
+) -> list[RawTopicDecl]:
     """
     Extract all raw topic declarations from a parsed contract YAML dict.
 
@@ -334,7 +334,7 @@ def _extract_raw_topics_from_contract(
     (``partitions`` / ``replication_factor`` / ``kafka_config``) which is
     threaded onto the resulting declaration (OMN-13238).
     """
-    raw_topics: list[_RawTopicDecl] = []
+    raw_topics: list[RawTopicDecl] = []
 
     # --- event_bus.subscribe_topics / event_bus.publish_topics (new-style) ---
     event_bus = data.get("event_bus")
@@ -344,14 +344,14 @@ def _extract_raw_topics_from_contract(
             if isinstance(topics_list, list):
                 for item in topics_list:
                     if isinstance(item, str) and item:
-                        raw_topics.append(_RawTopicDecl(topic=item))
+                        raw_topics.append(RawTopicDecl(topic=item))
                     elif isinstance(item, dict):
                         # topic: "..." format inside subscribe/publish list
                         topic_val = item.get("topic")
                         if isinstance(topic_val, str) and topic_val:
                             partitions, rf, kc = _parse_topic_config(item, source)
                             raw_topics.append(
-                                _RawTopicDecl(
+                                RawTopicDecl(
                                     topic=topic_val,
                                     provisioning_priority=_topic_priority(item),
                                     partitions=partitions,
@@ -373,7 +373,7 @@ def _extract_raw_topics_from_contract(
             topic_val = item.get("topic")
             if isinstance(topic_val, str) and topic_val:
                 raw_topics.append(
-                    _RawTopicDecl(
+                    RawTopicDecl(
                         topic=topic_val,
                         provisioning_priority=_topic_priority(item),
                         partitions=partitions,
@@ -385,7 +385,7 @@ def _extract_raw_topics_from_contract(
             name_val = item.get("name")
             if isinstance(name_val, str) and name_val:
                 raw_topics.append(
-                    _RawTopicDecl(
+                    RawTopicDecl(
                         topic=name_val,
                         provisioning_priority=_topic_priority(item),
                         partitions=partitions,
