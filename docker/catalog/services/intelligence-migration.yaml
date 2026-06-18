@@ -2,7 +2,7 @@ name: intelligence-migration
 description: One-shot migration runner for omniintelligence database
 image: postgres:16-alpine
 layer: infrastructure
-container_name: omnibase-intelligence-migration
+container_name: omnibase-infra-intelligence-migration
 required_env:
   - POSTGRES_PASSWORD
 hardcoded_env:

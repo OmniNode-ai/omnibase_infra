@@ -1,0 +1,35 @@
+# OMN-13201 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13201"
+title: "fix(OMN-13201): lane-namespace intelligence-migration container_name (DEV migration gap)"
+summary: >-
+  P0 DEV effects-lane crash-loop repair, part (c): the base (DEV-lane) intelligence-migration one-shot used the fixed, non-lane-prefixed container_name omnibase-intelligence-migration, unlike every sibling migration service (omnibase-infra-forward-migration, omnibase-infra-migration-gate) and every other lane (stability-test/judge/prod all carry their lane prefix). On a shared Docker host the fixed name collides across lanes, so the DEV one-shot never ran -- 015_create_db_metadata.sql was never applied to the DEV omniintelligence database and the runtime entrypoint logged "relation public.db_metadata does not exist" on every effects boot. Verified live on .201 DEV: omniintelligence DB has 9 tables, no schema_migrations table, no db_metadata relation. Fix renames the base container_name to omnibase-infra-intelligence-migration in both the canonical catalog manifest and the hand-maintained DEV compose, matching its forward-migration / migration-gate siblings.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      New regression test_intelligence_migration_uses_lane_namespaced_container_name asserts the generated runtime compose gives intelligence-migration the omnibase-infra- lane prefix matching forward-migration and migration-gate. Catalog generator + completeness + resolver + lane suites pass (54 passed).
+    command: "uv run pytest tests/unit/infra/test_catalog_generator.py tests/unit/infra/test_catalog_completeness.py tests/unit/infra/test_catalog_resolver.py tests/unit/infra/test_stability_test_runtime_lane.py tests/unit/infra/test_judge_compose_profile.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-intelligence-migration-lane-prefix
+    description: >-
+      The generated runtime compose assigns intelligence-migration the lane-prefixed container_name omnibase-infra-intelligence-migration, matching its sibling migration one-shots, proven by test_intelligence_migration_uses_lane_namespaced_container_name.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/infra/test_catalog_generator.py::test_intelligence_migration_uses_lane_namespaced_container_name -q"
+  - id: dod-catalog-compose-parity
+    description: >-
+      Both the canonical catalog manifest and the hand-maintained DEV compose carry the same lane-prefixed container_name (no drift).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -q 'container_name: omnibase-infra-intelligence-migration' docker/catalog/services/intelligence-migration.yaml && grep -q 'container_name: omnibase-infra-intelligence-migration' docker/docker-compose.infra.yml"
