@@ -60,6 +60,36 @@ volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
   - ../contracts:/app/contracts:ro
+  # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
+  # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
+  # AMBIENT OAuth from ~/.codex and ~/.claude — no ANTHROPIC_API_KEY / *_MODEL /
+  # endpoint env. The credential VALUES are NEVER baked into the image and NEVER
+  # committed; they are operator-supplied host directories bound read-only.
+  #
+  # DEV credential source (Phase 0, OMN-13246 / omni_home PR #182): a fresh
+  # Linux login inside the .201 container produced portable on-disk creds at
+  # /home/omniinfra/.codex (auth.json, ChatGPT OAuth + refresh token) and
+  # /home/omniinfra/.claude (.credentials.json, claude.ai OAuth + refresh token).
+  # Claude Code 2.x on macOS stores its credential in the Keychain, so there is
+  # NO ~/.claude/auth.json on the Mac to copy — the Linux container login is the
+  # source of truth. The operator copies those two dirs to a stable host path
+  # (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude} on .201) and points
+  # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR at them.
+  #
+  # Default /dev/null keeps lanes without configured creds startable (the CLIs
+  # simply have no ambient auth and fail closed on invocation, never at boot).
+  #
+  # codex: mount the credential FILE (auth.json) read-only, NOT the whole
+  # ~/.codex dir. codex 0.141.0 writes app-server / session state into CODEX_HOME
+  # (~/.codex) at runtime, so a fully read-only dir mount makes `codex exec` fail
+  # with "Read-only file system" even though the creds are valid (verified
+  # in-container 2026-06-18). Binding only auth.json :ro keeps the credential
+  # VALUE read-only while leaving the rest of ~/.codex on the writable layer.
+  - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+  # claude: the whole ~/.claude dir read-only works (claude reads
+  # .credentials.json for ambient OAuth; `claude -p` needs no write to that dir;
+  # verified in-container 2026-06-18).
+  - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
 depends_on:
   - service: omninode-runtime
     condition: service_healthy
