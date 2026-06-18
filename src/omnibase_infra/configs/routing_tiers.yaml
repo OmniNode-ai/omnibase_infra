@@ -83,19 +83,12 @@ tiers:
   # CLI agent delegation tier (OMN-10137)
   # Models dispatched via subprocess rather than HTTP API.
   # Availability confirmed at dispatch time via shutil.which inside HandlerLlmCliSubprocess.
+  #
+  # OMN-13215: the shelled ``codex-cli`` model was REMOVED from this tier. The
+  # delegation ceiling executes over the canonical HTTP path (claude tier ->
+  # cloud-sonnet) — there is no codex subprocess inference path anywhere.
   - name: cli_agents
     models:
-      - id: codex-cli
-        backend_id: cli-codex
-        max_context_tokens: 200000
-        use_for:
-          - agent_delegation
-          - code_generation
-          - complex_reasoning
-          - reasoning
-          - planning
-          - test
-          - research
       - id: claude-cli
         backend_id: cli-claude
         max_context_tokens: 200000

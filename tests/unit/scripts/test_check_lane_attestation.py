@@ -41,6 +41,19 @@ def _write_tmp(content: str, suffix: str = ".md") -> Path:
         return Path(f.name)
 
 
+def _write_tmp_named(content: str, filename: str) -> Path:
+    """Write content under a temp dir using a specific filename.
+
+    Used to exercise path-scoped patterns (lane-manifest detection): the
+    lane-key / compose_project patterns only apply when the path marks a
+    lane-census manifest (OMN-13215).
+    """
+    tmp_dir = Path(tempfile.mkdtemp())
+    path = tmp_dir / filename
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Files WITHOUT lane attestation language — always pass
 # ---------------------------------------------------------------------------
@@ -147,7 +160,7 @@ def test_markdown_lane_table_without_verified_fails() -> None:
     path.unlink(missing_ok=True)
 
 
-def test_compose_project_in_yaml_without_verified_fails() -> None:
+def test_compose_project_in_lane_manifest_without_verified_fails() -> None:
     """lane-manifest.yaml with compose_project but no verified: must fail."""
     content = (
         "schema_version: '1.0.0'\n"
@@ -156,11 +169,32 @@ def test_compose_project_in_yaml_without_verified_fails() -> None:
         "    compose_project: omnibase-infra-prod\n"
         "    network: omnibase-infra-prod-network\n"
     )
-    path = _write_tmp(content, suffix=".yaml")
+    path = _write_tmp_named(content, "lane-manifest.yaml")
     violations = MOD.check_file(path)
     assert len(violations) == 1
     assert "verified:" in violations[0]
-    path.unlink(missing_ok=True)
+
+
+def test_compose_project_outside_lane_manifest_does_not_fire() -> None:
+    """OMN-13215: compose_project / bare YAML keys in a NON-lane-manifest file
+    (e.g. an ordinary node contract with ``handlers:`` / ``tags:``) must NOT
+    trip the gate. The lane-key / compose_project patterns are scoped to the
+    lane-census manifest path so the gate stops mis-firing on every edited
+    node contract.
+    """
+    node_contract = (
+        "name: node_example_effect\n"
+        "node_type: EFFECT_GENERIC\n"
+        "handler_routing:\n"
+        "  routing_strategy: operation_match\n"
+        "  handlers:\n"
+        "    - operation: example.op\n"
+        "metadata:\n"
+        "  tags:\n"
+        "    - example\n"
+    )
+    path = _write_tmp_named(node_contract, "contract.yaml")
+    assert MOD.check_file(path) == []
 
 
 def test_generated_block_without_verified_fails() -> None:

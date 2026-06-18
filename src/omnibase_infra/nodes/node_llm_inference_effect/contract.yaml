@@ -6,7 +6,10 @@
 #   fields (e.g. chat_template_kwargs.enable_thinking) merged in _build_payload
 #   without overriding declared fields (2026-06-07)
 # OMN-13158: HandlerLlmCliSubprocess resolves OAuth/subscription CLI backends
-#   from request.model (codex-cli, claude-cli, gemini-cli, opencode-cli).
+#   from request.model (claude-cli, gemini-cli, opencode-cli).
+# OMN-13215: the codex-cli shell-execution path was REMOVED. The delegation
+#   ceiling executes over the canonical HTTP inference path; no codex subprocess
+#   operation or backend remains.
 # OMN-13204: HandlerLlmOpenaiCompatible Protocol Conformance Note corrected to
 #   the real protocol I/O types — ProtocolHandler.execute(ModelProtocolRequest)
 #   -> ModelProtocolResponse and ProtocolMessageHandler.handle(ModelEventEnvelope)
@@ -84,12 +87,9 @@ handler_routing:
         name: "HandlerLlmCliSubprocess"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
       description: "Execute LLM inference via Gemini CLI subprocess (gemini -p)"
-    # Codex CLI Subprocess Handler
-    - operation: "inference.codex_cli"
-      handler:
-        name: "HandlerLlmCliSubprocess"
-        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
-      description: "Execute LLM inference via Codex CLI subprocess (codex exec)"
+    # OMN-13215: the Codex CLI subprocess operation (inference.codex_cli) was
+    # REMOVED. The delegation ceiling executes over the canonical HTTP inference
+    # path (HandlerLlmOpenaiCompatible) — no codex shell-out remains.
     # Claude CLI Subprocess Handler (OMN-10137)
     - operation: "inference.claude_cli"
       handler:

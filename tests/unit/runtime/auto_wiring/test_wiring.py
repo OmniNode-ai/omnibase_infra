@@ -948,7 +948,7 @@ class TestWireFromManifest:
 
         Mirrors the real node_llm_inference_effect contract which lists
         HandlerLlmCliSubprocess for both ``inference.gemini_cli`` and
-        ``inference.codex_cli``.
+        ``inference.claude_cli``.
         """
         from omnibase_infra.runtime.message_dispatch_engine import (
             MessageDispatchEngine,
@@ -964,7 +964,7 @@ class TestWireFromManifest:
             ModelHandlerRoutingEntry(
                 handler=ModelHandlerRef(name="HandlerShared", module="fake.module"),
                 event_model=None,
-                operation="inference.codex_cli",
+                operation="inference.claude_cli",
             ),
         )
         handler_routing = ModelHandlerRouting(

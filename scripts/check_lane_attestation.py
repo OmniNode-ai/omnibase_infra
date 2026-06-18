@@ -41,18 +41,34 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Pattern that identifies lane-boundary attestation language in file content.
-# A "lane attestation" is any line that declares or documents a lane boundary.
+# Patterns that identify lane-boundary attestation language in ANY file.
+# A "lane attestation" is content that declares or documents a lane boundary.
+# These are path-independent because their shape is specific to lane attestation
+# language (a lane table row referencing the omnibase-infra compose family, or the
+# generated lane-table block marker) and cannot collide with ordinary content.
 _LANE_ATTESTATION_PATTERNS = [
     # Markdown lane table rows — e.g. "| dev | `omnibase-infra` |"
     re.compile(r"^\|[^|]+\|\s*`omnibase-infra[^`]*`", re.MULTILINE),
+    # Generated lane table block header (CLAUDE.md)
+    re.compile(r"<!-- GENERATED_LANE_TABLE", re.MULTILINE),
+]
+
+# Patterns that are ONLY meaningful inside a lane-census manifest file. A bare
+# 2-space-indented YAML key (``^  name:``) and a ``compose_project:`` line occur
+# in countless ordinary node contracts (``  handlers:``, ``  tags:``), so applying
+# them everywhere mis-fired the gate on every edited node contract (OMN-13215).
+# Scope them to the lane-manifest path so the gate guards real lane attestations
+# without flagging unrelated YAML.
+_LANE_MANIFEST_ONLY_PATTERNS = [
     # Lane manifest compose_project declarations
     re.compile(r"^\s+compose_project:\s+\S+", re.MULTILINE),
     # Lane manifest lane keys (top-level lane names)
     re.compile(r"^  [a-z][a-z0-9-]+:\s*$", re.MULTILINE),
-    # Generated lane table block header (CLAUDE.md)
-    re.compile(r"<!-- GENERATED_LANE_TABLE", re.MULTILINE),
 ]
+
+# Path marker identifying a lane-census manifest/snapshot file. The lane-key /
+# compose_project patterns only apply to these files.
+_LANE_MANIFEST_PATH_PATTERN = re.compile(r"lane-census/|lane-manifest")
 
 # Pattern for the required verified annotation. Accepts:
 #   verified: 2026-06-12 via <command>
@@ -77,8 +93,12 @@ def _is_exempt(path: str) -> bool:
     return any(p.search(path) for p in _EXEMPT_PATH_PATTERNS)
 
 
-def _has_lane_attestation(content: str) -> bool:
-    return any(p.search(content) for p in _LANE_ATTESTATION_PATTERNS)
+def _has_lane_attestation(content: str, path: str) -> bool:
+    if any(p.search(content) for p in _LANE_ATTESTATION_PATTERNS):
+        return True
+    if _LANE_MANIFEST_PATH_PATTERN.search(path):
+        return any(p.search(content) for p in _LANE_MANIFEST_ONLY_PATTERNS)
+    return False
 
 
 def _has_verified_annotation(content: str) -> bool:
@@ -98,7 +118,7 @@ def check_file(path: Path) -> list[str]:
     except OSError:
         return violations  # file disappeared between staging and check
 
-    if not _has_lane_attestation(content):
+    if not _has_lane_attestation(content, rel):
         return violations
 
     if not _has_verified_annotation(content):

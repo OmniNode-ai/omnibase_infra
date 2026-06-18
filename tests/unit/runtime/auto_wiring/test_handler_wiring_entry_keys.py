@@ -52,7 +52,7 @@ class TestHandlerEntryKeyDerivation:
 
     @pytest.mark.unit
     def test_dispatcher_id_uses_handler_entry_key(self) -> None:
-        handler_key = _derive_handler_entry_key(_entry("inference.codex-cli"))
+        handler_key = _derive_handler_entry_key(_entry("inference.opencode-cli"))
 
         assert (
             _derive_dispatcher_id("node_model_router", handler_key)
@@ -64,10 +64,10 @@ class TestHandlerEntryKeyDerivation:
         self,
     ) -> None:
         gemini_key = _derive_handler_entry_key(_entry("inference.gemini-cli"))
-        codex_key = _derive_handler_entry_key(_entry("inference.codex-cli"))
+        opencode_key = _derive_handler_entry_key(_entry("inference.opencode-cli"))
 
         assert _derive_dispatcher_id("node_model_router", gemini_key) != (
-            _derive_dispatcher_id("node_model_router", codex_key)
+            _derive_dispatcher_id("node_model_router", opencode_key)
         )
 
     @pytest.mark.unit
@@ -76,10 +76,10 @@ class TestHandlerEntryKeyDerivation:
     ) -> None:
         topic = "onex.cmd.omnimarket.model-route.v1"
         gemini_key = _derive_handler_entry_key(_entry("inference.gemini-cli"))
-        codex_key = _derive_handler_entry_key(_entry("inference.codex-cli"))
+        opencode_key = _derive_handler_entry_key(_entry("inference.opencode-cli"))
 
         assert _derive_route_id("node_model_router", gemini_key, topic) != (
-            _derive_route_id("node_model_router", codex_key, topic)
+            _derive_route_id("node_model_router", opencode_key, topic)
         )
 
 
