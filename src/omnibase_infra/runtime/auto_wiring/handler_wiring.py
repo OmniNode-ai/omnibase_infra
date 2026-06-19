@@ -458,14 +458,37 @@ def _make_dispatch_callback(
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
+        handler_takes_envelope = _handler_accepts_event_envelope(
+            cast("Callable[..., object]", handle_method)
+        )
         try:
             model_cls = _import_event_model_class(event_model)
-            typed_payload = (
+            typed_payload: object = (
                 payload
                 if isinstance(payload, model_cls)
                 else model_cls.model_validate(payload)
             )
         except Exception as exc:
+            # An envelope-accepting handler (a multi-step ORCHESTRATOR) declares
+            # its ``event_model`` as the workflow ENTRYPOINT, yet it also consumes
+            # the heterogeneous follow-up events on its other subscribe topics
+            # (validated / completed / failed) whose payloads do NOT validate as
+            # the entrypoint model. Such a handler coerces ``envelope.payload``
+            # itself, keyed on ``event_type``. Re-hydrate the typed envelope with
+            # the RAW domain payload (preserving ``event_type``) so the handler's
+            # own polymorphic coercion runs — the entrypoint event still gets the
+            # typed payload via the success path above (OMN-13247). Non-envelope
+            # (typed-payload) handlers keep the strict fail-fast behavior.
+            if handler_takes_envelope:
+                fallback_envelope = _materialize_raw_event_envelope(
+                    envelope, payload, event_model.name
+                )
+                fallback_result = handle_method(fallback_envelope)
+                if asyncio.iscoroutine(fallback_result):
+                    fallback_result = await cast("Awaitable[object]", fallback_result)
+                return _normalize_handler_result(
+                    fallback_result, envelope, event_model.name
+                )
             failure_result = _build_inference_intent_validation_failure_result(
                 event_model=event_model,
                 envelope=envelope,
@@ -475,12 +498,10 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
-        if _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handle_method)
-        ):
+        if handler_takes_envelope:
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
-                typed_payload,
+                cast("BaseModel", typed_payload),
                 event_model.name,
             )
             envelope_result = handle_method(handler_envelope)
@@ -700,6 +721,51 @@ def _extract_dispatch_event_type(envelope: object) -> object | None:
         if isinstance(debug_trace, Mapping):
             return debug_trace.get("event_type")
     return getattr(envelope, "event_type", None)
+
+
+def _materialize_raw_event_envelope(
+    envelope: object,
+    raw_payload: object,
+    fallback_event_type: str,
+) -> ModelEventEnvelope[object]:
+    """Re-hydrate a typed envelope carrying the RAW domain payload.
+
+    Used when an envelope-accepting ORCHESTRATOR consumes a follow-up event whose
+    payload does not validate as its declared entrypoint ``event_model`` (the
+    validated / completed / failed events of a multi-step workflow). The handler
+    coerces ``envelope.payload`` itself keyed on ``event_type``, so this preserves
+    the inbound ``event_type`` and hands the handler a typed
+    ``ModelEventEnvelope`` (never a bare dict, which would crash
+    ``envelope.event_type``) without forcing the payload into the entrypoint model
+    (OMN-13247).
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    if isinstance(envelope, ModelEventEnvelope):
+        updates: dict[str, object] = {"payload": raw_payload}
+        if envelope.event_type is None:
+            updates["event_type"] = fallback_event_type
+        return envelope.model_copy(update=updates)
+
+    correlation_id = _coerce_uuid_or_none(
+        _extract_dispatch_correlation_id(envelope, raw_payload)
+    )
+    envelope_timestamp = _coerce_datetime_or_none(
+        _extract_dispatch_envelope_timestamp(envelope)
+    )
+    event_type = _extract_dispatch_event_type(envelope)
+    return ModelEventEnvelope[object](
+        payload=raw_payload,
+        correlation_id=correlation_id if correlation_id is not None else uuid4(),
+        envelope_timestamp=(
+            envelope_timestamp if envelope_timestamp is not None else datetime.now(UTC)
+        ),
+        event_type=str(event_type or fallback_event_type),
+        source_tool="auto-wiring",
+    )
 
 
 def _materialize_typed_event_envelope(
