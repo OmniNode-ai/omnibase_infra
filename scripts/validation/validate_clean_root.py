@@ -135,6 +135,7 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "tests",
         "docs",
         "scripts",
+        "architecture-handshakes",
         # Common optional directories
         "config",
         "contracts",
