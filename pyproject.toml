@@ -174,7 +174,7 @@ override-dependencies = [
 # OMN-13094: pin core to the merged ArtifactStore (OMN-13093) +
 # ModelArtifactRef/ModelSkillResult (OMN-13091) so `onex node --output receipt`
 # consumes the canonical content-addressed capture surface.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "ae8793bdad96c12a0b47e2f4d1d0f179618553b8" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "d6e9c3d845a9560f9ba203c92963970c0e325c75" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
