@@ -34,6 +34,15 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-runtime-effects
   RUNTIME_PROFILE: effects
+  # OMN-13247 (Phase B dev-verify fix): credential HOME for the spawned
+  # claude/codex subprocess (node_coding_agent_invoke_effect). The dev runtime
+  # container runs as root (HOME=/root) while the OAuth creds are bind-mounted at
+  # /home/omniinfra/.codex and /home/omniinfra/.claude (volumes below). claude and
+  # codex read AMBIENT auth from $HOME, so the effect overrides the child env with
+  # HOME=$CODING_AGENT_CRED_HOME (and CODEX_HOME=$CODING_AGENT_CRED_HOME/.codex)
+  # rather than letting them look in /root and fail auth. Container-internal path
+  # that must match the credential bind-mount target -> hardcoded_env, not a secret.
+  CODING_AGENT_CRED_HOME: /home/omniinfra
   ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres

@@ -57,6 +57,7 @@ from omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agen
     ModelCodingAgentFsmAdvance,
 )
 from omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_coding_agent_invoke import (
+    ModelSubprocessInvocation,
     ModelSubprocessOutcome,
 )
 
@@ -134,26 +135,21 @@ def _fsm_state(
 
 
 class _SpySubprocess:
-    """Mock for the invoke effect's run_subprocess seam; records calls.
+    """Mock for the invoke effect's run_subprocess seam; records invocations.
 
-    The seam signature carries the optional stdin (claude WORKSPACE_WRITE pipes
-    the prompt via stdin — OMN-13246), so the spy records it too. No real
-    claude/codex subprocess ever runs under test.
+    The seam takes one ModelSubprocessInvocation bundling argv, cwd, timeout,
+    network posture, the optional stdin (claude WORKSPACE_WRITE pipes the prompt
+    via stdin — OMN-13246), and the explicit child env (HOME overridden to the
+    contract-resolved credential home — OMN-13247 Phase B). No real claude/codex
+    subprocess ever runs under test.
     """
 
     def __init__(self, outcome: ModelSubprocessOutcome) -> None:
         self._outcome = outcome
-        self.calls: list[tuple[list[str], str, int, bool, str | None]] = []
+        self.calls: list[ModelSubprocessInvocation] = []
 
-    def __call__(
-        self,
-        argv: list[str],
-        cwd: str,
-        timeout_s: int,
-        network: bool,
-        stdin: str | None,
-    ) -> ModelSubprocessOutcome:
-        self.calls.append((argv, cwd, timeout_s, network, stdin))
+    def __call__(self, invocation: ModelSubprocessInvocation) -> ModelSubprocessOutcome:
+        self.calls.append(invocation)
         return self._outcome
 
 
@@ -492,6 +488,12 @@ class TestFsmReducerDispatch:
 # ---------------------------------------------------------------------------
 
 
+# A pinned credential home for the effect tests so they never depend on the
+# CODING_AGENT_CRED_HOME env var being set (the contract resolves it via
+# ${env.CODING_AGENT_CRED_HOME}; an explicit override pins it deterministically).
+_CRED_HOME = "/home/omniinfra"
+
+
 @pytest.mark.unit
 class TestInvokeEffectDispatch:
     async def test_invoke_completed_with_git_diff(self, tmp_path: Path) -> None:
@@ -505,6 +507,7 @@ class TestInvokeEffectDispatch:
             probe_head_sha=lambda _cwd: "abc1234",
             capture_diff=lambda _cwd: (("foo.py",), "diff --git a/foo.py b/foo.py"),
             which=lambda _b: "/usr/bin/claude",
+            agent_credential_home=_CRED_HOME,
         )
         command = _invoke_command(workspace_path=str(tmp_path))
         envelope: ModelEventEnvelope[ModelCodingAgentInvokeCommand] = (
@@ -521,11 +524,100 @@ class TestInvokeEffectDispatch:
         assert result.starting_head_sha == "abc1234"
         assert len(spy.calls) == 1
 
+    async def test_subprocess_env_carries_resolved_cred_home(
+        self, tmp_path: Path
+    ) -> None:
+        """The spawned subprocess env sets HOME=<resolved cred home> (OMN-13247).
+
+        The root-HOME cred-resolution fix: claude/codex read ambient OAuth creds
+        from $HOME, and the dev runtime runs as root (HOME=/root) while the creds
+        are bind-mounted under the contract-resolved credential home. The handler
+        must hand the runner an explicit env with HOME overridden to that home —
+        asserted here against the mocked runner so no real CLI runs.
+        """
+        spy = _SpySubprocess(
+            ModelSubprocessOutcome(
+                returncode=0, stdout="done", stderr="", timed_out=False
+            )
+        )
+        handler = HandlerCodingAgentInvoke(
+            run_subprocess=spy,
+            probe_head_sha=lambda _cwd: "abc1234",
+            capture_diff=lambda _cwd: ((), ""),
+            which=lambda _b: "/usr/bin/claude",
+            agent_credential_home=_CRED_HOME,
+        )
+        result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
+        assert result.status == EnumAgentStatus.COMPLETED
+        assert len(spy.calls) == 1
+        env = spy.calls[0].env
+        assert env["HOME"] == _CRED_HOME
+
+    async def test_codex_subprocess_env_sets_codex_home(self, tmp_path: Path) -> None:
+        """For codex, the env also sets CODEX_HOME=<cred home>/.codex (OMN-13247).
+
+        codex derives its credential dir from CODEX_HOME; pinning it alongside HOME
+        keeps auth resolution independent of codex's own $HOME derivation.
+        """
+        spy = _SpySubprocess(
+            ModelSubprocessOutcome(
+                returncode=0, stdout="done", stderr="", timed_out=False
+            )
+        )
+        handler = HandlerCodingAgentInvoke(
+            run_subprocess=spy,
+            probe_head_sha=lambda _cwd: "abc1234",
+            capture_diff=lambda _cwd: ((), ""),
+            which=lambda _b: "/usr/bin/codex",
+            agent_credential_home=_CRED_HOME,
+        )
+        command = ModelCodingAgentInvokeCommand(
+            correlation_id=uuid4(),
+            agent=EnumCodingAgent.CODEX,
+            prompt="add a docstring to foo.py",
+            workspace_path=str(tmp_path),
+            sandbox=EnumAgentSandbox.READ_ONLY,
+            timeout_ms=60000,
+        )
+        result = handler.invoke(command)
+        assert result.status == EnumAgentStatus.COMPLETED
+        env = spy.calls[0].env
+        assert env["HOME"] == _CRED_HOME
+        assert env["CODEX_HOME"] == f"{_CRED_HOME}/.codex"
+
+    def test_unavailable_when_cred_home_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail-closed: no override + unset CODING_AGENT_CRED_HOME -> UNAVAILABLE.
+
+        The handler refuses to spawn (and never silently inherits the runtime
+        container's /root HOME) when the credential home is unresolvable.
+        """
+        monkeypatch.delenv("CODING_AGENT_CRED_HOME", raising=False)
+        spy = _SpySubprocess(
+            ModelSubprocessOutcome(returncode=0, stdout="x", stderr="", timed_out=False)
+        )
+        # No agent_credential_home override: resolution falls to the contract,
+        # whose ${env.CODING_AGENT_CRED_HOME} now resolves empty -> fail closed.
+        handler = HandlerCodingAgentInvoke(
+            run_subprocess=spy,
+            which=lambda _b: "/usr/bin/claude",
+        )
+        result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
+        assert result.status == EnumAgentStatus.FAILED
+        assert result.error_class == EnumCliBackendStatus.UNAVAILABLE
+        # No subprocess attempted when the credential home is unresolvable.
+        assert spy.calls == []
+
     def test_unavailable_when_binary_missing(self, tmp_path: Path) -> None:
         spy = _SpySubprocess(
             ModelSubprocessOutcome(returncode=0, stdout="x", stderr="", timed_out=False)
         )
-        handler = HandlerCodingAgentInvoke(run_subprocess=spy, which=lambda _b: None)
+        handler = HandlerCodingAgentInvoke(
+            run_subprocess=spy,
+            which=lambda _b: None,
+            agent_credential_home=_CRED_HOME,
+        )
         result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
         assert result.status == EnumAgentStatus.FAILED
         assert result.error_class == EnumCliBackendStatus.UNAVAILABLE
@@ -541,6 +633,7 @@ class TestInvokeEffectDispatch:
             probe_head_sha=lambda _cwd: None,
             capture_diff=lambda _cwd: ((), ""),
             which=lambda _b: "/usr/bin/claude",
+            agent_credential_home=_CRED_HOME,
         )
         result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
         assert result.error_class == EnumCliBackendStatus.TIMEOUT
@@ -557,6 +650,7 @@ class TestInvokeEffectDispatch:
             probe_head_sha=lambda _cwd: None,
             capture_diff=lambda _cwd: ((), ""),
             which=lambda _b: "/usr/bin/claude",
+            agent_credential_home=_CRED_HOME,
         )
         result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
         assert result.error_class == EnumCliBackendStatus.SUBPROCESS_ERROR
@@ -573,6 +667,7 @@ class TestInvokeEffectDispatch:
             probe_head_sha=lambda _cwd: None,
             capture_diff=lambda _cwd: ((), ""),
             which=lambda _b: "/usr/bin/claude",
+            agent_credential_home=_CRED_HOME,
         )
         result = handler.invoke(_invoke_command(workspace_path=str(tmp_path)))
         assert result.error_class == EnumCliBackendStatus.EMPTY_RESPONSE

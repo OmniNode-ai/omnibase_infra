@@ -54,6 +54,9 @@ from omnibase_infra.models.coding_agent.model_coding_agent_result import (
 from omnibase_infra.models.coding_agent.model_coding_agent_trace_projection import (
     ModelCodingAgentTraceProjection,
 )
+from omnibase_infra.models.coding_agent.model_subprocess_invocation import (
+    ModelSubprocessInvocation,
+)
 from omnibase_infra.models.coding_agent.model_subprocess_outcome import (
     ModelSubprocessOutcome,
 )
@@ -80,6 +83,7 @@ __all__: list[str] = [
     "ModelCodingAgentResult",
     "ModelCodingAgentTraceProjection",
     "ModelAgentInvocation",
+    "ModelSubprocessInvocation",
     "ModelSubprocessOutcome",
     "ModelWorkspaceValidateCommand",
     "ModelWorkspaceValidateResult",

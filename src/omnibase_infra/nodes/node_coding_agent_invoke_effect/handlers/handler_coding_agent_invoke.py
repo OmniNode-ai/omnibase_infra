@@ -31,6 +31,7 @@ import signal
 import subprocess
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TypeVar
 from uuid import uuid4
 
@@ -52,13 +53,24 @@ from omnibase_infra.models.coding_agent.model_coding_agent_invoke_command import
 from omnibase_infra.models.coding_agent.model_coding_agent_result import (
     ModelCodingAgentResult,
 )
+from omnibase_infra.models.coding_agent.model_subprocess_invocation import (
+    ModelSubprocessInvocation,
+)
 from omnibase_infra.models.coding_agent.model_subprocess_outcome import (
     ModelSubprocessOutcome,
+)
+from omnibase_infra.nodes.node_coding_agent_invoke_effect.contract_descriptor import (
+    contract_agent_credential_home,
 )
 
 logger = logging.getLogger(__name__)
 
 HANDLER_ID = "coding-agent-invoke-effect"
+
+# The contract that declares descriptor.agent_credential_home (the ${env.…}
+# overlay value the spawned subprocess uses as HOME). The descriptor is the single
+# source of truth; the handler never hardcodes a credential-home path.
+_CONTRACT = Path(__file__).resolve().parent.parent / "contract.yaml"
 
 # Dispatch payloads are coerced at runtime; the protocol entry is generic over the
 # envelope payload type (ProtocolMessageHandler.handle(ModelEventEnvelope[T])).
@@ -72,12 +84,12 @@ _CLI_BINARY_BY_AGENT: dict[EnumCodingAgent, str] = {
 }
 
 
-# Seam types: the EFFECT's I/O is injected so tests mock it. The signature carries
-# the optional stdin so the live runner pipes the prompt to claude --add-dir
-# correctly (OMN-13246) while remaining trivial to mock.
-SubprocessRunner = Callable[
-    [list[str], str, int, bool, str | None], ModelSubprocessOutcome
-]
+# Seam types: the EFFECT's I/O is injected so tests mock it. The runner takes a
+# single ModelSubprocessInvocation bundling argv, cwd, timeout, network posture,
+# the optional piped stdin (claude --add-dir pipes the prompt via stdin —
+# OMN-13246), and the explicit child ``env`` whose HOME is the contract-resolved
+# credential home (OMN-13247 Phase B dev-verify fix) — trivial to mock.
+SubprocessRunner = Callable[[ModelSubprocessInvocation], ModelSubprocessOutcome]
 GitProbe = Callable[[str], str | None]
 GitDiffCapture = Callable[[str], tuple[tuple[str, ...], str]]
 
@@ -178,6 +190,7 @@ class HandlerCodingAgentInvoke:
         probe_head_sha: GitProbe | None = None,
         capture_diff: GitDiffCapture | None = None,
         which: Callable[[str], str | None] | None = None,
+        agent_credential_home: str | None = None,
     ) -> None:
         # Live process-group runner + git probes are the defaults (the argv
         # mapping is finalized from Phase 0 / OMN-13246). Tests inject mocks for
@@ -192,6 +205,12 @@ class HandlerCodingAgentInvoke:
             capture_diff if capture_diff is not None else _git_capture_diff
         )
         self._which = which if which is not None else _default_which
+        # The credential HOME for the spawned subprocess. Resolved from the
+        # contract descriptor (${env.CODING_AGENT_CRED_HOME}) by default; an
+        # explicit override lets tests pin it without touching the environment.
+        # Resolution is deferred to invoke-time (fail-closed there) so constructing
+        # the handler never requires CODING_AGENT_CRED_HOME to be set.
+        self._agent_credential_home = agent_credential_home
 
     def invoke(self, command: ModelCodingAgentInvokeCommand) -> ModelCodingAgentResult:
         """Run one coding-agent invocation; return the system-derived result."""
@@ -210,6 +229,19 @@ class HandlerCodingAgentInvoke:
                 f"{binary} not found on PATH",
             )
 
+        # Resolve the credential HOME and build the explicit child env BEFORE
+        # spawning. Fail-closed: an unset CODING_AGENT_CRED_HOME raises (surfaced
+        # as UNAVAILABLE) rather than letting the child inherit the runtime
+        # container's HOME (/root under the dev runtime — no creds there).
+        try:
+            child_env = self._build_subprocess_env(command.agent)
+        except ValueError as exc:
+            return self._failed(
+                command,
+                EnumCliBackendStatus.UNAVAILABLE,
+                str(exc),
+            )
+
         starting_head_sha = self._probe_head_sha(command.workspace_path)
 
         invocation = build_agent_invocation(command)
@@ -219,12 +251,17 @@ class HandlerCodingAgentInvoke:
         # The runner spawns in its own process group; on timeout it kills the
         # whole group and returns timed_out=True (no orphaned subprocess). The
         # prompt is piped via stdin for claude write mode (--add-dir is greedy).
+        # The explicit child env carries HOME=<contract cred home> so claude/codex
+        # find their ambient OAuth creds even when the runtime runs as root.
         outcome = self._run_subprocess(
-            invocation.argv,
-            command.workspace_path,
-            timeout_s,
-            command.network,
-            invocation.stdin,
+            ModelSubprocessInvocation(
+                argv=invocation.argv,
+                cwd=command.workspace_path,
+                timeout_s=timeout_s,
+                network=command.network,
+                stdin=invocation.stdin,
+                env=child_env,
+            )
         )
         duration_ms = (time.monotonic() - start) * 1000
 
@@ -279,6 +316,35 @@ class HandlerCodingAgentInvoke:
             output=content,
         )
 
+    def _resolve_credential_home(self) -> str:
+        """Resolve the credential HOME (override > contract descriptor).
+
+        Fails closed via ``contract_agent_credential_home`` when the descriptor
+        resolves empty (``CODING_AGENT_CRED_HOME`` unset), so the subprocess never
+        silently inherits ``/root``.
+        """
+        if self._agent_credential_home is not None:
+            return self._agent_credential_home
+        return contract_agent_credential_home(_CONTRACT)
+
+    def _build_subprocess_env(self, agent: EnumCodingAgent) -> dict[str, str]:
+        """Build the explicit child env for the spawned claude/codex subprocess.
+
+        Copies the parent ``os.environ`` and overrides ``HOME`` with the
+        contract-resolved credential home so the CLI reads its ambient OAuth creds
+        from ``<cred_home>/.claude`` / ``<cred_home>/.codex`` instead of the
+        runtime container's ``HOME`` (``/root`` under the dev runtime, where no
+        creds are bind-mounted). For codex, ``CODEX_HOME`` is set to
+        ``<cred_home>/.codex`` so it does not depend on codex's own ``$HOME``
+        derivation. No API-key / endpoint env is added — auth stays ambient.
+        """
+        cred_home = self._resolve_credential_home()
+        env = dict(os.environ)
+        env["HOME"] = cred_home
+        if agent is EnumCodingAgent.CODEX:
+            env["CODEX_HOME"] = str(Path(cred_home) / ".codex")
+        return env
+
     def _failed(
         self,
         command: ModelCodingAgentInvokeCommand,
@@ -332,13 +398,9 @@ def _default_which(binary: str) -> str | None:
 
 
 def _run_subprocess_pgroup(
-    argv: list[str],
-    cwd: str,
-    timeout_s: int,
-    network: bool,
-    stdin: str | None,
+    invocation: ModelSubprocessInvocation,
 ) -> ModelSubprocessOutcome:
-    """Run ``argv`` in ``cwd`` in its OWN process group; timeout kills the group.
+    """Run ``invocation`` in its OWN process group; timeout kills the group.
 
     ``start_new_session=True`` puts the child in a fresh session + process group,
     so a runaway agent that forks children is reaped as a unit: on timeout (or
@@ -346,22 +408,30 @@ def _run_subprocess_pgroup(
     subprocess survives (plan §5.5). The prompt is piped via stdin when provided
     (claude WORKSPACE_WRITE; ``--add-dir`` is greedy on positionals — OMN-13246).
 
-    ``network`` is threaded for parity with the seam contract; network isolation
-    is enforced by the container/namespace boundary (Phase B), not by this
-    in-process runner, so it does not branch on the flag here.
+    ``invocation.env`` is the EXPLICIT child environment (a copy of the parent env
+    with ``HOME`` — and ``CODEX_HOME`` for codex — overridden to the
+    contract-resolved credential home) so claude/codex find their ambient OAuth
+    creds even when the runtime runs as root (OMN-13247 Phase B dev-verify fix).
+    It is passed verbatim to ``Popen(env=...)``; the child never inherits the
+    parent env implicitly.
+
+    ``invocation.network`` is carried for parity with the seam contract; network
+    isolation is enforced by the container/namespace boundary (Phase B), not by
+    this in-process runner, so it does not branch on the flag here.
     """
-    del network  # isolation is a container-boundary concern (Phase B), not here.
+    stdin = invocation.stdin
     process = subprocess.Popen(
-        argv,
-        cwd=cwd,
+        invocation.argv,
+        cwd=invocation.cwd,
         stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
+        env=dict(invocation.env),
     )
     try:
-        stdout, stderr = process.communicate(input=stdin, timeout=timeout_s)
+        stdout, stderr = process.communicate(input=stdin, timeout=invocation.timeout_s)
         return ModelSubprocessOutcome(
             returncode=process.returncode,
             stdout=stdout or "",
@@ -466,6 +536,7 @@ __all__: list[str] = [
     "GitProbe",
     "HandlerCodingAgentInvoke",
     "ModelAgentInvocation",
+    "ModelSubprocessInvocation",
     "ModelSubprocessOutcome",
     "SubprocessRunner",
     "build_agent_invocation",

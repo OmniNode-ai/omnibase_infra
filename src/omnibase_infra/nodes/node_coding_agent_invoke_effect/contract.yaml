@@ -63,6 +63,16 @@ descriptor:
   timeout_ms: 1800000
   # The contract distinction the OMN-13219 gate reads. ONLY this node declares it.
   agent_invocation: true
+  # Credential HOME for the spawned claude/codex subprocess (OMN-13247 Phase B
+  # dev-verify fix). The dev runtime container runs as root (HOME=/root) while the
+  # OAuth creds are bind-mounted at /home/omniinfra/.codex and
+  # /home/omniinfra/.claude (runtime-effects.yaml, OMN-13248). claude/codex read
+  # AMBIENT auth from $HOME, so without overriding HOME for the child process the
+  # CLIs look in /root and fail auth. This descriptor is resolved from the
+  # ${env.VAR} overlay convention (no hardcoded /home/omniinfra in source) and the
+  # handler exports it as HOME (and CODEX_HOME) on the subprocess env. Fails closed:
+  # the handler raises if this resolves empty rather than silently inherit /root.
+  agent_credential_home: "${env.CODING_AGENT_CRED_HOME}"
 runtime_profiles:
   - effects
 terminal_event: onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
