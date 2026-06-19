@@ -15,9 +15,9 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    # OMN-13094: pin advanced to the merged ArtifactStore slice (OMN-13093) —
-    # receipt mode consumes omnibase_core.artifacts + ModelSkillResult.
-    expected_core = "ae8793bdad96c12a0b47e2f4d1d0f179618553b8"
+    # OMN-13131: pin advanced to the renderer-capability runtime core release
+    # consumed by the W5 runtime image.
+    expected_core = "dc69b726248fd0212a3abc0a5a587bd974278739"
 
     assert expected_core in pyproject
     assert expected_core in uv_lock
@@ -30,7 +30,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13187: identity regenerated after the dependency refresh changed the
+    # OMN-13131: identity regenerated after the core pin refresh changed the
     # runner image lock binding inputs.
-    assert lock["identity_digest"] == "a9b134c16ae5a2b6a322fba4a6e219e4"
-    assert lock["shared_env_digest"] == "bcc8bacedd620800c62b693c"
+    assert lock["identity_digest"] == "99e2542d6724e0c67e67de865c700972"
+    assert lock["shared_env_digest"] == "b20344134388330365ca735a"
