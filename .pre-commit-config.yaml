@@ -43,6 +43,20 @@ repos:
     hooks:
       - id: no-plugin-daemon-classes
         files: ^src/omnibase_infra/.*\.py$
+  # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
+  # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
+  # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
+  # carve-out: a model-CLI shell-out is permitted iff the enclosing node
+  # contract.yaml declares descriptor.agent_invocation: true (a contract fact,
+  # never a free-text comment). Ratchet: existing violations grandfathered in the
+  # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
+  # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 940d2f2ab44d2f455a607926674b90ecbc9b74ba # pragma: allowlist secret
+    hooks:
+      - id: check-canonical-inference
+        args: [--repo, omnibase_infra, --repo-root, .]
+        exclude: ^(tests/|archived/|archive/).*\.py$
   # URL Authority Gate (OMN-13298, child of OMN-12803).
   # Ratchet: NEW fingerprints fail; existing violations grandfathered in the
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
@@ -635,6 +649,24 @@ repos:
         files: ^contracts/llm_endpoints\.yaml$
         pass_filenames: false
         stages: [pre-commit]
+  # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
+  # required gates for omnibase_infra against omnibase_core's
+  # architecture-handshakes/validator-requirements.yaml, ratcheted by this
+  # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
+  # Re-pin rev to the merged-dev SHA once the omnibase_core export PR lands.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: d163312724489f10f58ffdf8115ba1fa9d5783e8 # pragma: allowlist secret
+    hooks:
+      - id: validate-validator-requirements
+        args:
+          - --repo
+          - omnibase_infra
+          - --repo-root
+          - .
+          - --spec
+          - architecture-handshakes/validator-requirements.yaml
+          - --baseline
+          - architecture-handshakes/validator-requirements-baseline.yaml
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
