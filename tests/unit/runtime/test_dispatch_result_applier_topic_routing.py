@@ -20,6 +20,7 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.protocols import ProtocolEventBusLike
@@ -351,6 +352,101 @@ class TestPublishPathTopicRouting:
         assert mock_bus.publish_envelope.call_count == 2
         topics = [c.kwargs["topic"] for c in mock_bus.publish_envelope.call_args_list]
         assert topics == ["active-topic", "accepted-topic"]
+
+
+class TestOrchestratorEmittedEnvelopeRouting:
+    """OMN-13247: a multi-step ORCHESTRATOR sequences a workflow by emitting one
+    ``ModelEventEnvelope`` per next-command whose ``event_type`` is the FULL
+    destination topic of that emit. The emitted envelope carries no ``topic``
+    field and its class is always ``ModelEventEnvelope``, so the legacy routing
+    fell through to the single ``output_topic`` fallback (the terminal_event) and
+    EVERY emit was misrouted to the terminal topic. The applier must route by the
+    envelope's ``event_type`` when it is a declared (allowed) topic, and publish
+    the INNER payload (not a double-nested envelope)."""
+
+    _VALIDATE = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    _INVOKE = "onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1"
+    _TERMINAL = "onex.evt.omnibase-infra.coding-agent-completed.v1"
+
+    def _emitted(self, event_type: str | None) -> ModelEventEnvelope[BaseModel]:
+        return ModelEventEnvelope(
+            payload=UnmappedEvent(value="cmd"),
+            correlation_id=uuid4(),
+            event_type=event_type,
+        )
+
+    @pytest.mark.asyncio
+    async def test_emit_routes_to_event_type_topic_not_terminal(self) -> None:
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,  # production fallback IS the terminal topic
+            allowed_output_topics={self._VALIDATE, self._INVOKE, self._TERMINAL},
+        )
+        result = _make_result(output_events=[self._emitted(self._VALIDATE)])
+        await applier.apply(result)
+
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == self._VALIDATE, (
+            "the orchestrator-emitted envelope must route by its event_type, not "
+            "fall back to the terminal topic (the OMN-13247 misroute)"
+        )
+        # The inner payload is published, not a double-nested ModelEventEnvelope.
+        assert isinstance(call_kwargs["envelope"].payload, UnmappedEvent)
+
+    @pytest.mark.asyncio
+    async def test_sequential_emits_route_to_distinct_topics(self) -> None:
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._VALIDATE, self._INVOKE, self._TERMINAL},
+        )
+        result = _make_result(
+            output_events=[
+                self._emitted(self._VALIDATE),
+                self._emitted(self._INVOKE),
+            ],
+        )
+        await applier.apply(result)
+
+        topics = [c.kwargs["topic"] for c in mock_bus.publish_envelope.call_args_list]
+        assert topics == [self._VALIDATE, self._INVOKE]
+        assert self._TERMINAL not in topics
+
+    @pytest.mark.asyncio
+    async def test_undeclared_event_type_falls_back_to_output_topic(self) -> None:
+        """An ``event_type`` that is not a contract-declared publish topic is not
+        a routing destination — fall back rather than publish to an undeclared
+        topic."""
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._VALIDATE, self._TERMINAL},
+        )
+        result = _make_result(
+            output_events=[self._emitted("onex.cmd.example.not-declared.v1")],
+        )
+        await applier.apply(result)
+        assert mock_bus.publish_envelope.call_args.kwargs["topic"] == self._TERMINAL
+
+    @pytest.mark.asyncio
+    async def test_envelope_without_event_type_unwraps_to_inner_payload(self) -> None:
+        """An EFFECT emits a ``ModelEventEnvelope`` with no event_type, relying on
+        the fallback topic; the inner payload must still be published (no
+        double-nesting)."""
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._TERMINAL},
+        )
+        result = _make_result(output_events=[self._emitted(None)])
+        await applier.apply(result)
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == self._TERMINAL
+        assert isinstance(call_kwargs["envelope"].payload, UnmappedEvent)
 
 
 class TestDelegationIntentTopicRouting:
