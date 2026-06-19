@@ -1146,14 +1146,20 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
+            # JSONB adaptation: a Python dict or list bound to a JSONB column must
+            # be wrapped in psycopg2.extras.Json or psycopg2 sends a Postgres ARRAY
+            # literal (for lists) / fails (for dicts). Wrap BOTH unconditionally —
+            # the projection tables that take a list (quality_gates_*_jsonb,
+            # corpus_errors) are all JSONB, and this adapter writes no Postgres
+            # ARRAY columns. The earlier `_json`/`_jsonb` suffix gate was a
+            # works-by-convention coupling: a JSONB list column whose name did not
+            # end in that suffix (e.g. corpus_errors, OMN-13350) was sent as a
+            # Postgres ARRAY and the INSERT failed — and the projection consumer
+            # then silently committed the offset and dropped the event.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
-                    if isinstance(value, dict)
-                    or (
-                        isinstance(value, list)
-                        and str(key).endswith(("_json", "_jsonb"))
-                    )
+                    if isinstance(value, dict | list)
                     else value
                 )
                 for key, value in row.items()
