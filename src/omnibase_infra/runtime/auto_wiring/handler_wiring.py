@@ -947,6 +947,17 @@ def _normalize_handler_result(
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+# OMN-13350: JSONB list columns whose name does NOT end in the _json/_jsonb
+# convention and so must be explicitly JSON-adapted. A Python list bound to a
+# JSONB column must be wrapped in psycopg2.extras.Json or psycopg2 sends a
+# Postgres ARRAY literal, which fails against a JSONB column — and the projection
+# consumer then silently commits the offset and drops the event. This set is the
+# narrow allowlist for JSONB list columns that the suffix rule does not cover; it
+# must NOT include genuine Postgres text[] ARRAY columns (e.g.
+# swarm_runs.models_used / machines_used), which are correctly passed as raw
+# lists.
+_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors"})
+
 # Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
 # dedicated *_DB_URL env var. This map MUST stay in parity with that table; a
@@ -1146,13 +1157,24 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
+            # JSONB adaptation: a dict is always JSON-adapted. A list is
+            # JSON-adapted for a JSONB column (suffix _json/_jsonb, or the
+            # _JSONB_LIST_COLUMNS allowlist for unsuffixed JSONB list columns such
+            # as corpus_errors, OMN-13350) and otherwise passed raw so genuine
+            # Postgres text[] ARRAY columns (e.g. swarm_runs.models_used /
+            # machines_used) keep their array semantics. A JSONB list sent as a
+            # Postgres ARRAY literal fails the INSERT — which is what
+            # silently dropped node-generation-completed events before this fix.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
                     if isinstance(value, dict)
                     or (
                         isinstance(value, list)
-                        and str(key).endswith(("_json", "_jsonb"))
+                        and (
+                            str(key).endswith(("_json", "_jsonb"))
+                            or str(key) in _JSONB_LIST_COLUMNS
+                        )
                     )
                     else value
                 )

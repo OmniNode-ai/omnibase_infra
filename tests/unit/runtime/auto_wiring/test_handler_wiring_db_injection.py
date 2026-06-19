@@ -429,6 +429,48 @@ def test_sync_db_adapter_json_adapts_list_values() -> None:
     assert isinstance(params["quality_gates_checked_jsonb"], psycopg2.extras.Json)
 
 
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
+    """A JSONB list column in the allowlist is JSON-adapted even without the suffix.
+
+    OMN-13350: generation_events.corpus_errors is a JSONB column named without the
+    _json/_jsonb suffix. The adapter only wrapped lists for suffixed keys, so
+    corpus_errors was sent to Postgres as a text ARRAY literal, the INSERT failed,
+    and the projection consumer committed the offset anyway (silent drop).
+    corpus_errors is now in the _JSONB_LIST_COLUMNS allowlist and is JSON-adapted.
+    A genuine Postgres text[] ARRAY column (e.g. swarm_runs.models_used) must NOT
+    be wrapped — that is guarded by test_sync_psycopg2_adapter_preserves_text_array_lists.
+    """
+    import psycopg2.extras
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "generation_events",
+            "correlation_id",
+            {
+                "correlation_id": "gen-1",
+                "corpus_checked": True,
+                "corpus_passed": False,
+                "corpus_errors": ["missed violation_fixture v3"],
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    assert isinstance(params["corpus_errors"], psycopg2.extras.Json)
+    # Scalar columns pass through unchanged (not JSON-wrapped).
+    assert params["corpus_checked"] is True
+    assert params["corpus_passed"] is False
+
+
 # ---------------------------------------------------------------------------
 # Tests: terminal event emission (OMN-11187)
 # ---------------------------------------------------------------------------
