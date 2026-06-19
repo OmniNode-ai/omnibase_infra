@@ -94,6 +94,9 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # fmt: off
 _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
+    # Coding-agent workflow external entrypoint — published by workflow clients
+    # (the coding-agent CLI thin-publisher), not a contract-declared node (OMN-13247).
+    "onex.cmd.omnibase-infra.coding-agent-invoke.v1": "Published by coding-agent workflow clients as the external entrypoint | owner: jonah | expiry: 2026-12-01",
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",

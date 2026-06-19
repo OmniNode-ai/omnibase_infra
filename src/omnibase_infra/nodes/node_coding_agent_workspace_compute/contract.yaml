@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Coding-Agent Workspace COMPUTE (OMN-13247 / Phase A)
+#
+# Pure pre-flight workspace safety for the canonical coding-agent workflow.
+# Allowed-root resolution, symlink-escape rejection, sandbox/write-mode
+# coherence, command-shape validation (plan §5.5). Deterministic, no I/O —
+# git clean-tree / HEAD-sha reads are I/O and live in the EFFECT, not here.
+name: node_coding_agent_workspace_compute
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: COMPUTE_GENERIC
+node_version: {major: 1, minor: 0, patch: 0}
+description: >
+  Pure pre-flight workspace-safety compute for the coding-agent workflow. Folds a ModelWorkspaceValidateCommand into a deterministic ModelWorkspaceValidateResult: resolves the workspace path, rejects any path that escapes every allowed root (symlink/traversal escape), checks sandbox/write-mode coherence, and validates command shape (non-empty prompt + workspace_path). No I/O — the EFFECT owns git reads. The verdict gates whether any subprocess ever runs.
+
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: "coding_agent.workspace.validate"
+      handler:
+        name: HandlerWorkspaceValidate
+        module: omnibase_infra.nodes.node_coding_agent_workspace_compute.handlers.handler_workspace_validate
+      description: "Pure workspace pre-flight validation."
+      input_model:
+        name: ModelWorkspaceValidateCommand
+        module: omnibase_infra.models.coding_agent
+        description: "Workspace policy inputs to validate."
+input_model:
+  name: ModelWorkspaceValidateCommand
+  module: omnibase_infra.models.coding_agent
+  description: "Workspace policy inputs (path, allowed roots, sandbox, prompt)."
+output_model:
+  name: ModelWorkspaceValidateResult
+  module: omnibase_infra.models.coding_agent
+  description: "Deterministic validation verdict (valid + rejection reason)."
+descriptor:
+  node_archetype: compute
+  purity: pure
+  idempotent: true
+  timeout_ms: 2000
+  # NOTE (OMN-13247 / OMN-13219): agent_invocation is FALSE here. Only the
+  # invoke EFFECT shells the coding-agent CLI, so only that contract declares
+  # agent_invocation: true. The OMN-13219 gate reads that flag.
+  agent_invocation: false
+runtime_profiles:
+  - effects
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
+  publish_topics:
+    - onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
+dependencies:
+  - name: "omnibase_core"
+    type: "library"
+    library: "omnibase_core"
+    version: ">=0.39.0"
+metadata:
+  transport_type: kafka
+  description: "Pure coding-agent workspace pre-flight compute"
+  author: "OmniNode Platform Team"
+  related_tickets:
+    - "OMN-13247"
+    - "OMN-13245"

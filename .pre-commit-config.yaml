@@ -285,7 +285,17 @@ repos:
       # (discovered by repo-root walk; drain tracked by OMN-12982).
       - id: onex-validate-runtime-profiles
         name: Validate runtime_profiles on node contracts (OMN-12957)
-        entry: uv run --frozen python -m omnibase_core.validation.validator_runtime_profiles src/
+        # Reads the canonical baseline allowlist at config/validation/ — the same
+        # path the required CI gate (.github/workflows/validator-runtime-profiles.yml)
+        # passes explicitly. The bare module CLI auto-discovers a different
+        # repo-root path (validation/) that does not exist here, so the hook is
+        # pinned to the canonical config/validation path to match CI (OMN-13247).
+        entry: >-
+          uv run --frozen python -c "import sys; from pathlib import Path;
+          from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles;
+          r = ValidatorRuntimeProfiles(allowlist_path=Path('config/validation/runtime_profiles_allowlist.yaml')).validate(Path('src'));
+          [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues];
+          sys.exit(0 if r.is_valid else 1)"
         language: system
         files: 'contract\.yaml$'
         pass_filenames: false
