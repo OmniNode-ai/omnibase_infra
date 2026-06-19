@@ -30,7 +30,8 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13187: identity regenerated after the dependency refresh changed the
-    # runner image lock binding inputs.
-    assert lock["identity_digest"] == "a9b134c16ae5a2b6a322fba4a6e219e4"
-    assert lock["shared_env_digest"] == "bcc8bacedd620800c62b693c"
+    # OMN-13247: identity regenerated because adding the 4 coding-agent onex.nodes
+    # entry-points to pyproject.toml changed the runner image binding inputs
+    # (pyproject.toml feeds both the manifest_digest and the shared_env_digest).
+    assert lock["identity_digest"] == "538af71b74ce7382c6c688c693d1f3df"
+    assert lock["shared_env_digest"] == "7db3ae16f0562d1fca8c8502"
