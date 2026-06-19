@@ -155,6 +155,18 @@ fi
 # moved here as a backup. On success the backup is removed; on failure
 # cleanup_on_exit() restores it.
 FORCE_BACKUP_DIR=""
+# OMN-13364: path (relative to the deploy target) of the vendored forward-migration
+# tree. The backup-restore path in cleanup_on_exit() reverts the WHOLE deployment
+# tree, including freshly-built migrations, which silently regressed the deployed
+# migrations to the pre-build snapshot (dropped node_projection_delegation/
+# 0015_generation_corpus_acceptance.sql in the 2026-06-19 stability redeploy).
+# After a restore, the freshly-synced migration tree is re-applied from this
+# snapshot so the deployed migrations always match the build source (origin/dev).
+readonly MIGRATION_TREE_REL_PATH="docker/migrations/forward"
+# Absolute path to a preserved copy of the freshly-synced vendored migration
+# tree, captured after sync_files() (so the restore can re-apply it). Empty until
+# the snapshot is taken; the snapshot dir is removed on exit.
+MIGRATION_TREE_SNAPSHOT_DIR=""
 # Set to true only when ALL deployment phases complete successfully.
 # Used by cleanup_on_exit to determine if the --force backup can be safely removed.
 DEPLOYMENT_COMPLETE=false
@@ -991,6 +1003,13 @@ cleanup_on_exit() {
                 log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
                 log_error "================================================================="
             else
+                # OMN-13364: the restored tree carries the PRE-BUILD vendored
+                # migration tree. Re-apply the freshly-synced migration tree
+                # (snapshot taken after sync_files) so the deployed migrations
+                # match the build source instead of silently regressing to the
+                # backup's stale snapshot (which dropped a forward migration in
+                # the 2026-06-19 stability redeploy).
+                restore_migration_tree_after_revert "${original_dir}"
                 log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
                 log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
             fi
@@ -1002,8 +1021,66 @@ cleanup_on_exit() {
         FORCE_BACKUP_DIR=""
     fi
 
+    # OMN-13364: remove the migration-tree snapshot taken after sync_files.
+    if [[ -n "${MIGRATION_TREE_SNAPSHOT_DIR}" && -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
+        rm -rf "${MIGRATION_TREE_SNAPSHOT_DIR}" 2>/dev/null || true
+    fi
+    MIGRATION_TREE_SNAPSHOT_DIR=""
+
     # Release concurrency lock
     rm -rf "${LOCK_DIR}" 2>/dev/null || true
+}
+
+snapshot_migration_tree() {
+    # Preserve a copy of the freshly-synced vendored forward-migration tree so a
+    # later backup-restore (cleanup_on_exit) can re-apply it instead of leaving
+    # the restored tree on the backup's stale, pre-build migrations (OMN-13364).
+    local deploy_target="$1"
+    local src_tree="${deploy_target}/${MIGRATION_TREE_REL_PATH}"
+
+    if [[ ! -d "${src_tree}" ]]; then
+        # No vendored migration tree to protect (e.g. a deployment layout that
+        # does not bind-mount forward migrations). Nothing to snapshot.
+        log_warn "No vendored migration tree at ${src_tree}; skipping snapshot."
+        return 0
+    fi
+
+    local snapshot_dir="${deploy_target}.migrations.snapshot"
+    rm -rf "${snapshot_dir}" 2>/dev/null || true
+    mkdir -p "${snapshot_dir}"
+    # Mirror the tree exactly so re-apply is a faithful copy of the build source.
+    rsync -a --delete "${src_tree}/" "${snapshot_dir}/"
+    MIGRATION_TREE_SNAPSHOT_DIR="${snapshot_dir}"
+    log_info "Snapshotted vendored migration tree for restore safety: ${snapshot_dir}"
+}
+
+restore_migration_tree_after_revert() {
+    # Re-apply the freshly-synced vendored migration tree onto a restored
+    # deployment tree so a backup-restore never silently regresses migrations to
+    # the backup's pre-build snapshot (OMN-13364).
+    local restored_dir="$1"
+
+    if [[ -z "${MIGRATION_TREE_SNAPSHOT_DIR}" || ! -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
+        # The failure happened before sync_files snapshotted the tree (e.g. an
+        # rsync/sanity failure). In that case nothing newer than the backup was
+        # produced, so the backup's migration tree is already the correct one.
+        log_warn "No migration-tree snapshot to re-apply; restored tree keeps the backup migrations."
+        return 0
+    fi
+
+    local dst_tree="${restored_dir}/${MIGRATION_TREE_REL_PATH}"
+    log_warn "Re-applying freshly-built vendored migration tree onto restored deployment:"
+    log_warn "  ${MIGRATION_TREE_SNAPSHOT_DIR}/ -> ${dst_tree}/"
+    mkdir -p "${dst_tree}"
+    if rsync -a --delete "${MIGRATION_TREE_SNAPSHOT_DIR}/" "${dst_tree}/"; then
+        log_warn "Migration tree re-applied: deployed migrations match the build source, not the backup."
+    else
+        log_error "================================================================="
+        log_error "CRITICAL: Failed to re-apply the vendored migration tree after restore!"
+        log_error "The restored deployment may carry STALE migrations (silent loss risk)."
+        log_error "Manual recovery: rsync -a --delete '${MIGRATION_TREE_SNAPSHOT_DIR}/' '${dst_tree}/'"
+        log_error "================================================================="
+    fi
 }
 
 # =============================================================================
@@ -1633,6 +1710,63 @@ build_images() {
 # Restart -- bring up runtime services only
 # =============================================================================
 
+resolve_broker_container() {
+    # Resolve the running broker container id/name for the given compose project.
+    #
+    # OMN-13364: the broker's fixed container_name (e.g. omnibase-infra-redpanda)
+    # is NOT a reliable handle — when it collides with another project's broker,
+    # Docker prefixes it with a random hash (3ed1fdb8d50b_omnibase-infra-redpanda).
+    # The compose service label (com.docker.compose.service=redpanda) survives
+    # the prefix, so resolve by compose project + service label instead of by an
+    # exact container-name string match.
+    local compose_project="$1"
+    docker ps -q \
+        --filter "label=com.docker.compose.project=${compose_project}" \
+        --filter "label=com.docker.compose.service=${BROKER_READINESS_SERVICE}" \
+        2>/dev/null \
+        | head -1
+}
+
+assert_broker_reachable() {
+    # Return 0 when the broker is actually reachable on the lane network.
+    #
+    # Keys readiness off `rpk cluster health` executed INSIDE the broker
+    # container (talking to the broker on TCP/9092 over the lane network), not
+    # off an exact container-name match or the compose-wait exit status. This is
+    # what lets the warmup tolerate a Docker-prefixed broker name and an
+    # already-present healthy broker without false-failing (OMN-13364).
+    local compose_project="$1"
+    local attempts="${BROKER_REACHABLE_RETRIES:-15}"
+    local interval="${BROKER_REACHABLE_INTERVAL:-4}"
+
+    local broker_container
+    broker_container="$(resolve_broker_container "${compose_project}")"
+    if [[ -z "${broker_container}" ]]; then
+        log_error "No running broker container found for project '${compose_project}'"
+        log_error "  (label com.docker.compose.service=${BROKER_READINESS_SERVICE})."
+        return 1
+    fi
+    log_info "Resolved broker container: ${broker_container} (probing reachability)"
+
+    local attempt=0
+    while (( attempt < attempts )); do
+        attempt=$((attempt + 1))
+        # rpk talks to the broker on the internal listener (redpanda:9092 / TCP).
+        # `cluster health` succeeding means the broker is reachable AND serving;
+        # that is the readiness signal the partition-cap rpk calls below need.
+        if docker exec "${broker_container}" \
+            rpk cluster health -X brokers=redpanda:9092 >/dev/null 2>&1; then
+            log_info "Broker reachable: rpk cluster health OK (attempt ${attempt})."
+            return 0
+        fi
+        log_info "  Broker not ready yet (attempt ${attempt}/${attempts}) -- waiting ${interval}s..."
+        sleep "${interval}"
+    done
+
+    log_error "Broker ${broker_container} did not become reachable after ${attempts} attempts."
+    return 1
+}
+
 warm_broker_topic_provisioning() {
     # Bring the broker + partition cap to readiness before the --no-deps runtime
     # restart so the cold-start topic-provisioning burst does not crash-loop the
@@ -1648,6 +1782,17 @@ warm_broker_topic_provisioning() {
     # 1. Ensure the broker itself is up and healthy. `up -d` is a no-op when it
     # is already running; the --wait flag blocks until the healthcheck passes so
     # the partition-cap rpk calls below do not race a still-starting broker.
+    #
+    # OMN-13364: the compose `up --wait` is best-effort, not the source of truth
+    # for broker readiness. When the broker container_name collides with another
+    # project's broker, Docker assigns a random prefix (e.g.
+    # 3ed1fdb8d50b_omnibase-infra-redpanda) and/or leaves the recreate in
+    # 'Created'; `up -d --wait` then errors or never reaches healthy even though
+    # a healthy broker is already reachable on the lane network. Do NOT treat
+    # that as a deploy failure (it would trigger the backup-restore path, which
+    # reverts the freshly-built vendored migration tree). Key broker readiness
+    # off ACTUAL reachability (`rpk cluster health` on TCP/9092 inside the lane)
+    # via assert_broker_reachable below, not off the compose-wait exit status.
     local broker_up_cmd=(
         docker compose
         -p "${compose_project}"
@@ -1658,7 +1803,19 @@ warm_broker_topic_provisioning() {
     )
     log_info "Ensuring broker is healthy: ${BROKER_READINESS_SERVICE}"
     log_cmd "${broker_up_cmd[*]}"
-    "${broker_up_cmd[@]}"
+    if ! "${broker_up_cmd[@]}"; then
+        log_warn "Broker compose up --wait did not report healthy (possible"
+        log_warn "name-prefix collision or already-present broker). Falling back"
+        log_warn "to a direct broker-reachability probe before deciding."
+    fi
+
+    # Source of truth: probe the broker directly. Tolerates a Docker-prefixed
+    # container name and an already-present healthy broker (OMN-13364).
+    if ! assert_broker_reachable "${compose_project}"; then
+        log_error "Broker is not reachable on the lane network after warmup."
+        log_error "Cold-start topic provisioning cannot proceed; aborting."
+        return 1
+    fi
 
     # 2. Apply the partition cap (run-to-completion). force-recreate re-runs the
     # one-shot even if a prior run left an exited container behind.
@@ -2116,6 +2273,11 @@ main() {
 
     # Phase 6: Sync
     sync_files "${repo_root}" "${deploy_target}"
+
+    # OMN-13364: snapshot the freshly-synced vendored migration tree so a later
+    # backup-restore (cleanup_on_exit) re-applies it instead of reverting the
+    # deployed migrations to the backup's stale, pre-build snapshot.
+    snapshot_migration_tree "${deploy_target}"
 
     # Mark deployment directory for cleanup on failure. If registry write or
     # build fails after rsync, cleanup_on_exit() will remove this orphaned
