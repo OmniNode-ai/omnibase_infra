@@ -133,6 +133,33 @@ skills:
     args:
       - {name: omni-home, payload_field: omni_home, arg_type: string}
       - {name: checks, payload_field: checks, arg_type: string_list}
+  - skill_name: gap
+    node_name: node_gap_compute
+    result_model: omnimarket.nodes.node_gap_compute.models.model_gap_compute_result.ModelGapComputeResult
+    args:
+      - {name: subcommand, payload_field: subcommand, arg_type: string, positional: true}
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: epic, payload_field: epic, arg_type: string}
+      - {name: report, payload_field: report, arg_type: string}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: repo-roots, payload_field: repo_roots, arg_type: string_list}
+      - {name: since-days, payload_field: since_days, arg_type: integer}
+      - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
+      - {name: max-findings, payload_field: max_findings, arg_type: integer}
+      - {name: max-best-effort, payload_field: max_best_effort, arg_type: integer}
+      - {name: max-iterations, payload_field: max_iterations, arg_type: integer}
+      - {name: output, payload_field: output, arg_type: string}
+      - {name: ticket, payload_field: ticket, arg_type: string}
+      - {name: resume, payload_field: resume, arg_type: string}
+      - {name: lag-threshold, payload_field: lag_threshold, arg_type: integer}
+      - {name: latest, payload_field: latest, arg_type: boolean, default: false}
+      - {name: audit, payload_field: audit, arg_type: boolean, default: false}
+      - {name: no-fix, payload_field: no_fix, arg_type: boolean, default: false}
+      - {name: verify, payload_field: verify, arg_type: boolean, default: false}
+      - {name: auto-only, payload_field: auto_only, arg_type: boolean, default: false}
+      - {name: skip-infra-probes, payload_field: skip_infra_probes, arg_type: boolean, default: false}
+      - {name: include-auth-probes, payload_field: include_auth_probes, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: hostile_reviewer
     node_name: node_hostile_reviewer_orchestrator
     result_model: omnimarket.nodes.node_hostile_reviewer_orchestrator.models.model_hostile_reviewer_completed_event.ModelHostileReviewerCompletedEvent
