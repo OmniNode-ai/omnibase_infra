@@ -12,12 +12,17 @@ edits + untracked files), never parsed from stdout.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from omnibase_infra.models.coding_agent.model_subprocess_invocation import (
+    ModelSubprocessInvocation,
+)
 from omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_coding_agent_invoke import (
     _git_capture_diff,
     _git_head_sha,
@@ -28,6 +33,28 @@ pytestmark = pytest.mark.unit
 
 _HAS_GIT = shutil.which("git") is not None
 _HAS_SH = shutil.which("sh") is not None
+
+# The explicit child env the runner now requires (a copy of the parent env). The
+# real handler overrides HOME with the contract-resolved credential home; these
+# runner-level tests pass the inherited env unchanged (no agent binary is run).
+_ENV = dict(os.environ)
+
+
+def _invocation(
+    argv: list[str],
+    cwd: str,
+    timeout_s: int,
+    stdin: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> ModelSubprocessInvocation:
+    return ModelSubprocessInvocation(
+        argv=argv,
+        cwd=cwd,
+        timeout_s=timeout_s,
+        network=False,
+        stdin=stdin,
+        env=env if env is not None else _ENV,
+    )
 
 
 def _git_init(repo: Path) -> None:
@@ -40,7 +67,7 @@ def _git_init(repo: Path) -> None:
 class TestProcessGroupRunner:
     def test_runner_captures_stdout_and_exit(self, tmp_path: Path) -> None:
         outcome = _run_subprocess_pgroup(
-            ["sh", "-c", "printf done"], str(tmp_path), 10, False, None
+            _invocation(["sh", "-c", "printf done"], str(tmp_path), 10)
         )
         assert outcome.returncode == 0
         assert outcome.stdout == "done"
@@ -49,14 +76,14 @@ class TestProcessGroupRunner:
     def test_runner_pipes_stdin(self, tmp_path: Path) -> None:
         # Proves the prompt-via-stdin path the claude write mode relies on.
         outcome = _run_subprocess_pgroup(
-            ["cat"], str(tmp_path), 10, False, "piped-prompt"
+            _invocation(["cat"], str(tmp_path), 10, stdin="piped-prompt")
         )
         assert outcome.returncode == 0
         assert outcome.stdout == "piped-prompt"
 
     def test_runner_nonzero_exit(self, tmp_path: Path) -> None:
         outcome = _run_subprocess_pgroup(
-            ["sh", "-c", "exit 3"], str(tmp_path), 10, False, None
+            _invocation(["sh", "-c", "exit 3"], str(tmp_path), 10)
         )
         assert outcome.returncode == 3
         assert outcome.timed_out is False
@@ -66,9 +93,24 @@ class TestProcessGroupRunner:
         # whole process group is killed (SIGTERM->SIGKILL). The call returns
         # promptly with timed_out=True rather than hanging the full sleep.
         outcome = _run_subprocess_pgroup(
-            ["sh", "-c", "sleep 30 & sleep 30"], str(tmp_path), 1, False, None
+            _invocation(["sh", "-c", "sleep 30 & sleep 30"], str(tmp_path), 1)
         )
         assert outcome.timed_out is True
+
+    def test_runner_uses_explicit_env_home(self, tmp_path: Path) -> None:
+        # The runner passes the explicit env verbatim to the child: the subprocess
+        # sees HOME=<cred home>, NOT the parent process's HOME. This is the
+        # root-HOME cred-resolution fix (OMN-13247 Phase B): the child reads its
+        # ambient OAuth creds from <cred home> even when the runtime runs as root.
+        cred_home = str(tmp_path / "creds")
+        child_env = {**os.environ, "HOME": cred_home}
+        outcome = _run_subprocess_pgroup(
+            _invocation(
+                ["sh", "-c", 'printf %s "$HOME"'], str(tmp_path), 10, env=child_env
+            )
+        )
+        assert outcome.returncode == 0
+        assert outcome.stdout == cred_home
 
 
 @pytest.mark.skipif(not _HAS_GIT, reason="requires git")
