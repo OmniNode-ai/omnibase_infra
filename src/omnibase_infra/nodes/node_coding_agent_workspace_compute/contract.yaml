@@ -21,7 +21,7 @@ handler_routing:
         name: HandlerWorkspaceValidate
         module: omnibase_infra.nodes.node_coding_agent_workspace_compute.handlers.handler_workspace_validate
       description: "Pure workspace pre-flight validation."
-      input_model:
+      event_model:
         name: ModelWorkspaceValidateCommand
         module: omnibase_infra.models.coding_agent
         description: "Workspace policy inputs to validate."

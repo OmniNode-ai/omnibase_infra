@@ -21,7 +21,7 @@ handler_routing:
         name: HandlerCodingAgentOrchestrator
         module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
       description: "Route a coding-agent lifecycle event to the next bus command."
-      input_model:
+      event_model:
         name: ModelCodingAgentInvokeCommand
         module: omnibase_infra.models.coding_agent
         description: "The invoke-requested command (workflow entrypoint)."

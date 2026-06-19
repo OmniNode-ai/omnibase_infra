@@ -43,6 +43,15 @@ hardcoded_env:
   # rather than letting them look in /root and fail auth. Container-internal path
   # that must match the credential bind-mount target -> hardcoded_env, not a secret.
   CODING_AGENT_CRED_HOME: /home/omniinfra
+  # OMN-13247 (epic OMN-13245): the coding-agent ORCHESTRATOR resolves its
+  # contract descriptor.allowed_workspace_roots from
+  # ${env.ONEX_CODING_AGENT_WORKSPACE_ROOT} and FAILS CLOSED if it resolves empty
+  # (no unscoped workspace is ever permitted). The agent EFFECT confines every
+  # workspace_path under this root. Container-internal path that must match the
+  # agent-workspaces dir the runtime writes into -> hardcoded_env, not a secret.
+  # Patched live on dev for the e2e proof; committed here so the lane is
+  # reproducible from the catalog.
+  ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
   ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres
