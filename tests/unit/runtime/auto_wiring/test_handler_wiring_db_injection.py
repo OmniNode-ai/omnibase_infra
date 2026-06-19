@@ -431,14 +431,15 @@ def test_sync_db_adapter_json_adapts_list_values() -> None:
 
 @pytest.mark.unit
 def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
-    """A JSONB list column whose name does NOT end in _json/_jsonb is JSON-adapted.
+    """A JSONB list column in the allowlist is JSON-adapted even without the suffix.
 
-    OMN-13350: generation_events.corpus_errors is a JSONB column named without
-    that suffix. The previous adapter only wrapped lists for _json/_jsonb-suffixed
-    keys, so corpus_errors was sent to Postgres as a text ARRAY literal, the
-    INSERT failed with UndefinedColumn/array-type errors, and the projection
-    consumer committed the offset anyway (silent drop). The adapter now wraps any
-    list/dict, so a JSONB list column persists regardless of its name.
+    OMN-13350: generation_events.corpus_errors is a JSONB column named without the
+    _json/_jsonb suffix. The adapter only wrapped lists for suffixed keys, so
+    corpus_errors was sent to Postgres as a text ARRAY literal, the INSERT failed,
+    and the projection consumer committed the offset anyway (silent drop).
+    corpus_errors is now in the _JSONB_LIST_COLUMNS allowlist and is JSON-adapted.
+    A genuine Postgres text[] ARRAY column (e.g. swarm_runs.models_used) must NOT
+    be wrapped — that is guarded by test_sync_psycopg2_adapter_preserves_text_array_lists.
     """
     import psycopg2.extras
 
