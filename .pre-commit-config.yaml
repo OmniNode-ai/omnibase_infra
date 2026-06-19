@@ -33,6 +33,16 @@ repos:
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
+  # OMN-13284: Plugin* lifecycle guard relocated to omnibase_core. Consume the
+  # canonical remote hook instead of the deleted infra-local module
+  # (omnibase_infra.validators.no_plugin_daemon_classes, OMN-10123). Rev pins the
+  # core commit carrying the no-plugin-daemon-classes export; it bumps to the
+  # squash-merge SHA once omnibase_core PR for OMN-13284 lands.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: a509d3fb2777693242fdcd979e5d67bed2bbefeb # pragma: allowlist secret
+    hooks:
+      - id: no-plugin-daemon-classes
+        files: ^src/omnibase_infra/.*\.py$
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
   # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
@@ -285,7 +295,17 @@ repos:
       # (discovered by repo-root walk; drain tracked by OMN-12982).
       - id: onex-validate-runtime-profiles
         name: Validate runtime_profiles on node contracts (OMN-12957)
-        entry: uv run --frozen python -m omnibase_core.validation.validator_runtime_profiles src/
+        # Reads the canonical baseline allowlist at config/validation/ — the same
+        # path the required CI gate (.github/workflows/validator-runtime-profiles.yml)
+        # passes explicitly. The bare module CLI auto-discovers a different
+        # repo-root path (validation/) that does not exist here, so the hook is
+        # pinned to the canonical config/validation path to match CI (OMN-13247).
+        entry: >-
+          uv run --frozen python -c "import sys; from pathlib import Path;
+          from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles;
+          r = ValidatorRuntimeProfiles(allowlist_path=Path('config/validation/runtime_profiles_allowlist.yaml')).validate(Path('src'));
+          [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues];
+          sys.exit(0 if r.is_valid else 1)"
         language: system
         files: 'contract\.yaml$'
         pass_filenames: false
@@ -323,16 +343,9 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-      # OMN-10123: Plugin* classes are deterministic compute plugins only.
-      # Daemon/service/worker lifecycles belong behind ONEX nodes and handlers.
-      - id: no-plugin-daemon-classes
-        name: Block Plugin* daemon/service/worker classes
-        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra
-        language: system
-        types: [python]
-        files: ^src/omnibase_infra/.*\.py$
-        pass_filenames: false
-        stages: [pre-commit]
+      # OMN-13284: the local no-plugin-daemon-classes hook was relocated to the
+      # canonical omnibase_core remote hook (see the omnibase_core repo block
+      # above). The infra-local module was deleted; one canonical implementation.
       # OMN-10820: Block Any in handler handle()/~__init__() signatures.
       # Budget starts at 0 (current codebase is clean). Decrement target: stay at 0.
       # Suppress a justified exception with: # substrate-allow: <reason>
@@ -661,7 +674,6 @@ repos:
         files: ^contracts/llm_endpoints\.yaml$
         pass_filenames: false
         stages: [pre-commit]
-
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
@@ -680,7 +692,6 @@ repos:
           - architecture-handshakes/validator-requirements.yaml
           - --baseline
           - architecture-handshakes/validator-requirements-baseline.yaml
-
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]

@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Coding-Agent ORCHESTRATOR (OMN-13247 / Phase A)
+#
+# Sequences the coding-agent workflow validate -> invoke -> capture but dispatches
+# commands OVER THE BUS — it never constructs sibling handlers in-process, never
+# runs an in-process FSM loop, and never does I/O. The FSM (retries, circuit
+# breaker, replay safety) lives in the reducer; the I/O lives in the effect.
+name: node_coding_agent_orchestrator
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: ORCHESTRATOR_GENERIC
+node_version: {major: 1, minor: 0, patch: 0}
+description: >
+  Coding-agent workflow orchestrator. On invoke-requested it emits the workspace-validate command (the COMPUTE pre-flight runs BEFORE any subprocess, so an unsafe workspace is rejected before the agent is invoked). On workspace-validated it emits the invoke command (valid) to the agent effect, or the FSM workspace-rejected advance (invalid → terminal REJECTED, no subprocess). On invoke-completed / invoke-failed it emits the corresponding FSM advance so the reducer owns retry / circuit-breaker / replay decisions. Emits, never returns; no in-process handler construction, no FSM loop, no I/O.
+
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: "coding_agent.orchestrate"
+      handler:
+        name: HandlerCodingAgentOrchestrator
+        module: omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator
+      description: "Route a coding-agent lifecycle event to the next bus command."
+      input_model:
+        name: ModelCodingAgentInvokeCommand
+        module: omnibase_infra.models.coding_agent
+        description: "The invoke-requested command (workflow entrypoint)."
+input_model:
+  name: ModelCodingAgentInvokeCommand
+  module: omnibase_infra.models.coding_agent
+  description: "The invoke-requested command (workflow entrypoint)."
+output_model:
+  name: ModelCodingAgentResult
+  module: omnibase_infra.models.coding_agent
+  description: "Terminal coding-agent result threaded through the workflow."
+descriptor:
+  node_archetype: orchestrator
+  purity: orchestration
+  idempotent: false
+  timeout_ms: 1800000
+  # agent_invocation is FALSE: the orchestrator only emits bus commands; the
+  # agent CLI shell-out lives solely in node_coding_agent_invoke_effect.
+  agent_invocation: false
+  # Contract-declared allowed workspace roots (the single source of truth, the
+  # COMPUTE pre-flight resolves every workspace_path under one of these). Uses
+  # the ${env.VAR} overlay convention (no hardcoded /Users or /Volumes path) so
+  # an operator overlay sets the real root per lane; the orchestrator fails
+  # closed if this resolves empty (no unscoped workspace is ever permitted).
+  allowed_workspace_roots:
+    - "${env.ONEX_CODING_AGENT_WORKSPACE_ROOT}"
+runtime_profiles:
+  - effects
+terminal_event: onex.evt.omnibase-infra.coding-agent-completed.v1
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.coding-agent-invoke.v1
+    - onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
+    - onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
+    - onex.evt.omnibase-infra.coding-agent-invoke-failed.v1
+  publish_topics:
+    - onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
+    - onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1
+    - onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
+    - onex.evt.omnibase-infra.coding-agent-completed.v1
+    - onex.evt.omnibase-infra.coding-agent-failed.v1
+dependencies:
+  - name: "omnibase_core"
+    type: "library"
+    library: "omnibase_core"
+    version: ">=0.39.0"
+metadata:
+  transport_type: kafka
+  description: "Coding-agent workflow orchestrator"
+  author: "OmniNode Platform Team"
+  related_tickets:
+    - "OMN-13247"
+    - "OMN-13245"

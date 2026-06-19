@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Coding-Agent Invoke EFFECT (OMN-13247 / Phase A)
+#
+# The ONLY I/O node in the coding-agent workflow: runs the claude/codex
+# subprocess in the workspace and captures the git-derived diff after exit.
+#
+# This is the ONLY contract in the workflow that declares
+# descriptor.agent_invocation: true. That flag is the contract fact the
+# OMN-13219 ValidatorCanonicalInference gate reads (Phase C) to permit a
+# model-CLI subprocess in THIS node while still banning it as an inference tier
+# everywhere else. The permission is a reviewable contract declaration, NOT a
+# `# canonical-inference-ok:` free-text comment.
+#
+# FINALIZED RUNNER (OMN-13247): The handler executes a REAL claude/codex
+# subprocess via a live process-group runner (spawned in its own process group;
+# a timeout kills the whole group, leaving no orphan). The sandbox ->
+# permission-mode CLI argv mapping is finalized from the Phase 0 (OMN-13246) auth
+# proof (evidence: omni_home PR #182, merged) — taken verbatim, never re-derived:
+#   Codex:  READ_ONLY       -> `codex exec -s read-only --json <prompt>`
+#           WORKSPACE_WRITE -> `codex exec -C <ws> -s danger-full-access --json <prompt>`
+#           (`-s workspace-write` fails in-container — bwrap cannot create a user
+#            namespace — so the CONTAINER is the sandbox boundary and
+#            `danger-full-access` is the proven write mode.)
+#   Claude: READ_ONLY       -> `claude -p --output-format json --permission-mode plan <prompt>`
+#           WORKSPACE_WRITE -> `claude -p --output-format json --permission-mode
+#                              acceptEdits --add-dir <ws>` with the prompt piped via
+#                              STDIN (`--add-dir` is greedy on positionals).
+# Auth is ambient (the CLI reads ~/.codex / ~/.claude); no API-key/endpoint argv
+# is built. The subprocess + git I/O remain behind injected seams so tests run no
+# real CLI. The only DoD gap remaining is the live e2e on dev (post-Phase-B).
+name: node_coding_agent_invoke_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+node_version: {major: 1, minor: 0, patch: 0}
+description: >
+  Coding-agent invoke effect. Runs the claude/codex CLI subprocess in the target workspace and returns a system-derived ModelCodingAgentResult: status, exit code, git-derived files_changed + diff (captured AFTER the subprocess exits, never trusted from agent stdout), diff_hash, starting_head_sha, structured error_class (UNAVAILABLE/TIMEOUT/SUBPROCESS_ERROR/EMPTY_RESPONSE), timed_out, and duration. shutil.which gates availability; the subprocess spawns in its own process group and a timeout kills the whole group. The subprocess + git I/O are injected seams so this node is the single sanctioned model-CLI shell-out surface. agent-reported output/usage are advisory only.
+
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: "coding_agent.invoke"
+      handler:
+        name: HandlerCodingAgentInvoke
+        module: omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_coding_agent_invoke
+      description: "Run the coding-agent CLI subprocess + capture git diff."
+      input_model:
+        name: ModelCodingAgentInvokeCommand
+        module: omnibase_infra.models.coding_agent
+        description: "One coding-agent invocation request."
+input_model:
+  name: ModelCodingAgentInvokeCommand
+  module: omnibase_infra.models.coding_agent
+  description: "One coding-agent invocation request (agent, prompt, workspace, sandbox, timeout)."
+output_model:
+  name: ModelCodingAgentResult
+  module: omnibase_infra.models.coding_agent
+  description: "System-derived invocation result + advisory agent-reported fields."
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+  timeout_ms: 1800000
+  # The contract distinction the OMN-13219 gate reads. ONLY this node declares it.
+  agent_invocation: true
+runtime_profiles:
+  - effects
+terminal_event: onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1
+  publish_topics:
+    - onex.evt.omnibase-infra.coding-agent-invoke-completed.v1
+    - onex.evt.omnibase-infra.coding-agent-invoke-failed.v1
+dependencies:
+  - name: "omnibase_core"
+    type: "library"
+    library: "omnibase_core"
+    version: ">=0.39.0"
+metadata:
+  transport_type: kafka
+  description: "Coding-agent invoke effect (the only model-CLI shell-out surface)"
+  author: "OmniNode Platform Team"
+  related_tickets:
+    - "OMN-13247"
+    - "OMN-13245"
+    - "OMN-13219"
