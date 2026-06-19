@@ -33,6 +33,16 @@ repos:
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
+  # OMN-13284: Plugin* lifecycle guard relocated to omnibase_core. Consume the
+  # canonical remote hook instead of the deleted infra-local module
+  # (omnibase_infra.validators.no_plugin_daemon_classes, OMN-10123). Rev pins the
+  # core commit carrying the no-plugin-daemon-classes export; it bumps to the
+  # squash-merge SHA once omnibase_core PR for OMN-13284 lands.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: a509d3fb2777693242fdcd979e5d67bed2bbefeb # pragma: allowlist secret
+    hooks:
+      - id: no-plugin-daemon-classes
+        files: ^src/omnibase_infra/.*\.py$
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
@@ -284,16 +294,9 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-      # OMN-10123: Plugin* classes are deterministic compute plugins only.
-      # Daemon/service/worker lifecycles belong behind ONEX nodes and handlers.
-      - id: no-plugin-daemon-classes
-        name: Block Plugin* daemon/service/worker classes
-        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra
-        language: system
-        types: [python]
-        files: ^src/omnibase_infra/.*\.py$
-        pass_filenames: false
-        stages: [pre-commit]
+      # OMN-13284: the local no-plugin-daemon-classes hook was relocated to the
+      # canonical omnibase_core remote hook (see the omnibase_core repo block
+      # above). The infra-local module was deleted; one canonical implementation.
       # OMN-10820: Block Any in handler handle()/~__init__() signatures.
       # Budget starts at 0 (current codebase is clean). Decrement target: stay at 0.
       # Suppress a justified exception with: # substrate-allow: <reason>
