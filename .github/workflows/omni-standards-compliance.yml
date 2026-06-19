@@ -158,7 +158,18 @@ jobs:
           attempt=1
           max_attempts=3
           delay=10
-          until uv pip install "${install_args[@]}"; do
+          until uv pip install "pydantic>=2.11.7" "pyyaml>=6.0.2"; do
+            status=$?
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "::error::uv pip install pydantic/pyyaml failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+            echo "::warning::uv pip install pydantic/pyyaml attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
+          attempt=1
+          until uv pip install --no-deps "${install_args[@]}"; do
             status=$?
             if [[ "$attempt" -ge "$max_attempts" ]]; then
               echo "::error::uv pip install onex_change_control failed after ${attempt} attempt(s)"

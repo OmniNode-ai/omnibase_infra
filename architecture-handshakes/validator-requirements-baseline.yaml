@@ -129,9 +129,6 @@ gaps:
     kind: MISSING_CI_WORKFLOW
   - repo: omnibase_infra
     validator: pydantic-patterns
-    kind: MISSING_CI_WORKFLOW
-  - repo: omnibase_infra
-    validator: pydantic-patterns
     kind: MISSING_PRE_COMMIT
   - repo: omnibase_infra
     validator: self-gating-workflows

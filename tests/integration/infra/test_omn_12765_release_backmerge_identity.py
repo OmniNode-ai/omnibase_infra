@@ -15,9 +15,9 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    # OMN-13131: pin advanced to the renderer-capability runtime core release
-    # consumed by the W5 runtime image.
-    expected_core = "dc69b726248fd0212a3abc0a5a587bd974278739"
+    # OMN-13290: pin advanced to the backend secret-discipline core validator
+    # consumed by the infra gate.
+    expected_core = "d6e9c3d845a9560f9ba203c92963970c0e325c75"
 
     assert expected_core in pyproject
     assert expected_core in uv_lock
@@ -30,8 +30,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13247: identity regenerated because adding the 4 coding-agent onex.nodes
-    # entry-points to pyproject.toml changed the runner image binding inputs
-    # (pyproject.toml feeds both the manifest_digest and the shared_env_digest).
-    assert lock["identity_digest"] == "e9825ff53fdc27ad57ad61cc133ea830"
-    assert lock["shared_env_digest"] == "8cf7e1e1a85a1d2433a9a355"
+    # OMN-13290: identity regenerated after merging the backend-secret gate with
+    # the coding-agent nodes and validator-requirements baseline changes.
+    assert lock["identity_digest"] == "88303b6571205b4c2602f93a4912324d"
+    assert lock["shared_env_digest"] == "c028f4f1d619fb0101204054"
