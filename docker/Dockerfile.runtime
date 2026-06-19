@@ -533,6 +533,67 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# ============================================================================
+# Coding-agent CLIs: Node.js LTS + pinned codex/claude (OMN-13248, epic OMN-13245)
+# ============================================================================
+# The canonical coding-agent EFFECT node (node_coding_agent_invoke_effect,
+# descriptor.agent_invocation: true) shells out to `codex` / `claude` to run a
+# coding agent inside the workspace. These CLIs are distributed only as npm
+# global packages, so the runtime image needs Node.js. The base image ships no
+# Node (plan §1 #8), so install Node LTS from NodeSource, then the two CLIs at
+# the EXACT versions proven headless-authenticatable in a Linux .201 container
+# in Phase 0 (OMN-13246, omni_home PR #182): codex-cli 0.141.0, claude 2.1.181.
+#
+# Pin discipline: npm global CLI installs are pinned to an exact `@version`
+# (opposite to the PyPI --no-deps range pins) so the runtime image is fully
+# reproducible. scripts/check_dockerfile_pins.py enforces that both packages
+# carry an explicit `@version` pin.
+#
+# These CLIs read AMBIENT OAuth credentials from ~/.codex and ~/.claude (no
+# ANTHROPIC_API_KEY / *_MODEL / endpoint env). The credentials themselves are
+# NOT baked into the image — they are a read-only host bind-mount declared on
+# the effects service (see docker/catalog/services/runtime-effects.yaml and the
+# runtime-effects service in docker-compose.infra.yml).
+#
+# codex write mode note (Phase 0 caveat, decided for Phase B): codex's internal
+# `-s workspace-write` bwrap sandbox cannot create a user namespace inside the
+# cap-dropped effects container. The coding-agent effect runs codex with
+# `-s danger-full-access` (the container itself is the sandbox boundary); we do
+# NOT grant CAP_SYS_ADMIN / userns to the effects container (least-privilege).
+# The argv itself lives in Phase A; this is the supporting image decision.
+ARG NODE_MAJOR=20
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eu; \
+    apt-get update && apt-get install -y --no-install-recommends gnupg; \
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list; \
+    apt-get update && apt-get install -y --no-install-recommends nodejs; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean
+
+# Install the coding-agent CLIs at the exact Phase 0-proven versions.
+# Exact `@version` pins (NOT ranges) — required for a reproducible runtime image
+# and enforced by scripts/check_dockerfile_pins.py.
+RUN set -eu; \
+    npm install -g \
+        @openai/codex@0.141.0 \
+        @anthropic-ai/claude-code@2.1.181; \
+    npm cache clean --force
+
+# Build-time assert that both coding-agent CLIs resolved on PATH (mirrors the
+# torch/import asserts in the builder stage L388-403). A missing binary must
+# fail the build, not degrade silently at runtime.
+RUN set -eu; \
+    which codex; \
+    which claude; \
+    codex --version; \
+    claude --version; \
+    echo "coding-agent CLIs verified: codex + claude present on PATH"
+
 # Runtime session health probes invoke uv-owned commands such as golden-chain
 # checks. Keep uv in the final image as an explicit runtime tool.
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
@@ -549,6 +610,15 @@ COPY --from=builder /app/.venv/lib/python3.12/site-packages/setuptools-*.dist-in
 # UID 1000 is typically the first non-system user, good for volume permissions
 RUN groupadd --gid 1000 omniinfra && \
     useradd --uid 1000 --gid omniinfra --shell /bin/bash --create-home omniinfra
+
+# OMN-13248: pre-create the coding-agent credential dirs owned by omniinfra so a
+# read-only credential FILE bind-mount (e.g. ~/.codex/auth.json) lands inside an
+# omniinfra-owned WRITABLE directory. codex 0.141.0 writes app-server/session
+# state into CODEX_HOME (~/.codex) at runtime; if Docker auto-creates ~/.codex
+# for the file mount it is root-owned and codex fails with "Permission denied".
+# Creating these dirs in the image (omniinfra:omniinfra) fixes that while keeping
+# the mounted auth.json itself read-only. (~/.claude mounts as a whole RO dir.)
+RUN install -d -o omniinfra -g omniinfra /home/omniinfra/.codex /home/omniinfra/.claude
 
 WORKDIR /app
 

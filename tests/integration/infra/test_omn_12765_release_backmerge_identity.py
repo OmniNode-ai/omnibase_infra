@@ -31,5 +31,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-13290: identity regenerated after the core pin update changed the
     # runner image lock binding inputs.
-    assert lock["identity_digest"] == "e09fd3dfe311f78f5e34ce03b57cb239"
-    assert lock["shared_env_digest"] == "8d35b55f3e6734d29e6ccbe5"
+    assert lock["identity_digest"] == "a6f27d8430192cf28a7aa0cf1ac86a99"
+    assert lock["shared_env_digest"] == "db55588e632c2dbbae010ace"
