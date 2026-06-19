@@ -44,7 +44,7 @@ handler_routing:
         name: HandlerCodingAgentInvoke
         module: omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_coding_agent_invoke
       description: "Run the coding-agent CLI subprocess + capture git diff."
-      input_model:
+      event_model:
         name: ModelCodingAgentInvokeCommand
         module: omnibase_infra.models.coding_agent
         description: "One coding-agent invocation request."

@@ -826,6 +826,21 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       KAFKA_INSTANCE_ID: runtime-effects
+      # OMN-13247 (epic OMN-13245): coding-agent runtime env. These are
+      # effects-only (the four coding-agent nodes run in runtime_profiles:
+      # [effects]) so they live on this service, not the shared x-runtime-env
+      # anchor. Both are container-internal paths (never secrets); they were
+      # patched live on dev for the e2e proof and are committed here so the lane
+      # is reproducible.
+      #   - CODING_AGENT_CRED_HOME: claude/codex read AMBIENT OAuth from $HOME, but
+      #     the runtime container runs as root (HOME=/root) while the creds are
+      #     bind-mounted under /home/omniinfra; the invoke EFFECT overrides the
+      #     child env with HOME=$CODING_AGENT_CRED_HOME (CODEX_HOME=$.../.codex).
+      #   - ONEX_CODING_AGENT_WORKSPACE_ROOT: the orchestrator resolves its
+      #     contract descriptor.allowed_workspace_roots from ${env.…} and FAILS
+      #     CLOSED if unset (no unscoped workspace is ever permitted).
+      CODING_AGENT_CRED_HOME: /home/omniinfra
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
