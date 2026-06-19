@@ -847,6 +847,37 @@ services:
       # runtime that makes the outbound provider call). Operator-supplied host
       # token file bound read-only; token VALUE never in committed config.
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
+      # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
+      # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
+      # AMBIENT OAuth from ~/.codex and ~/.claude — no ANTHROPIC_API_KEY / *_MODEL /
+      # endpoint env. Credential VALUES are NEVER baked into the image and NEVER
+      # committed; operator-supplied host directories bound read-only.
+      #
+      # DEV credential source (Phase 0, OMN-13246 / omni_home PR #182): a fresh
+      # Linux login INSIDE the .201 container produced portable on-disk creds —
+      # /home/omniinfra/.codex (auth.json, ChatGPT OAuth + refresh token) and
+      # /home/omniinfra/.claude (.credentials.json, claude.ai OAuth + refresh
+      # token). Claude Code 2.x on macOS stores its credential in the Keychain,
+      # so there is NO ~/.claude/auth.json on the Mac to copy — the Linux login
+      # is the source. The operator copies both dirs to a stable host path on
+      # .201 (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude}) and sets
+      # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR.
+      #
+      # Default /dev/null keeps lanes without creds configured startable (the
+      # CLIs have no ambient auth and fail closed on invocation, never at boot).
+      #
+      # codex: mount the credential FILE (auth.json) read-only, NOT the whole
+      # ~/.codex dir. codex 0.141.0 writes app-server / session state into
+      # CODEX_HOME (~/.codex) at runtime, so a fully read-only dir mount makes
+      # `codex exec` fail with "Read-only file system" even though the creds are
+      # valid (verified in-container 2026-06-18). Binding only auth.json :ro keeps
+      # the credential VALUE read-only (cannot be overwritten/exfiltrated) while
+      # leaving the rest of ~/.codex on the container's writable layer.
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+      # claude: the whole ~/.claude dir read-only works (claude reads
+      # .credentials.json for ambient OAuth and does not require write access to
+      # that dir for `claude -p`; verified in-container 2026-06-18).
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

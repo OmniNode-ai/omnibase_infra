@@ -1,0 +1,6 @@
+Reading additional input from stdin...
+{"type":"thread.started","thread_id":"019edcc0-63a4-7462-8c4f-4febeb105b9c"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello"}}
+{"type":"turn.completed","usage":{"input_tokens":11432,"cached_input_tokens":9600,"output_tokens":5,"reasoning_output_tokens":0}}
+CODEX_RO_EXIT=0
