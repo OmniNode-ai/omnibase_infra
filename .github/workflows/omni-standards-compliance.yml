@@ -155,10 +155,11 @@ jobs:
           if [ -s /tmp/onex-change-control-overrides.txt ]; then
             install_args=(--overrides /tmp/onex-change-control-overrides.txt "${install_args[@]}")
           fi
+          uv pip install "pydantic>=2.11.7" "pyyaml>=6.0.2"
           attempt=1
           max_attempts=3
           delay=10
-          until uv pip install "${install_args[@]}"; do
+          until uv pip install --no-deps "${install_args[@]}"; do
             status=$?
             if [[ "$attempt" -ge "$max_attempts" ]]; then
               echo "::error::uv pip install onex_change_control failed after ${attempt} attempt(s)"
