@@ -35,7 +35,9 @@ from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingReg
 
 pytestmark = pytest.mark.unit
 
-# The 24 dispatch shims this ticket migrates (ticket deliverable 1).
+# The dispatch shims migrated to the declarative skill->node mapping.
+# OMN-13097 seeded the first 24; `gap` was added once node_gap_compute landed
+# in omnimarket but the CLI still rejected `onex skill gap` (this fix).
 _EXPECTED_SKILLS = frozenset(
     {
         "aislop_sweep",
@@ -51,6 +53,7 @@ _EXPECTED_SKILLS = frozenset(
         "doc_freshness_sweep",
         "dod_verify",
         "duplication_sweep",
+        "gap",
         "hostile_reviewer",
         "linear_housekeeping",
         "merge_sweep",
@@ -363,6 +366,76 @@ def test_command_dispatches_via_receipt_mode(
     assert payload["repos"] == ["omnibase_core", "omnibase_infra"]
     assert payload["dry_run"] is True
     assert captured["backend_overrides"] == {"event_bus": "inmemory"}
+
+
+def test_gap_mapping_routes_positional_subcommand_to_node(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`onex skill gap detect --scope local` dispatches node_gap_compute.
+
+    Guards the regression this fix addresses: the gap SKILL.md and the
+    omnimarket node_gap_compute both existed, but the CLI rejected
+    ``onex skill gap`` because it was absent from skill_mapping.yaml.
+    """
+    captured: dict[str, object] = {}
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        captured.update(kwargs)
+        input_path = kwargs["input_path"]
+        assert isinstance(input_path, Path)
+        captured["payload"] = json.loads(input_path.read_text(encoding="utf-8"))
+        return 0
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _fake_receipt_mode)
+    monkeypatch.setattr(
+        cli_skill,
+        "_resolve_packaged_contract",
+        lambda n: tmp_path / f"{n}-contract.yaml",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "gap",
+            "detect",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--scope",
+            "local",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["node_name"] == "node_gap_compute"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["subcommand"] == "detect"
+    assert payload["scope"] == "local"
+
+
+def test_gap_payload_validates_against_request_model() -> None:
+    """The gap mapping builds a payload the node's request model accepts.
+
+    omnimarket is the backing-node package and is not a hard test dependency
+    of omnibase_infra; skip when it is not installed (CI parity with the other
+    omnimarket-optional tests in this suite).
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_gap_compute.models.model_gap_compute_request"
+    )
+    ModelGapComputeRequest = request_module.ModelGapComputeRequest
+
+    registry = load_skill_registry()
+    gap = registry.get("gap")
+    assert gap is not None
+    assert gap.node_name == "node_gap_compute"
+    payload = _parse_skill_args(
+        gap, ("detect", "--scope", "local", "--severity-threshold", "CRITICAL")
+    )
+    request = ModelGapComputeRequest.model_validate(payload)
+    assert request.subcommand.value == "detect"
+    assert request.scope == "local"
+    assert request.severity_threshold.value == "CRITICAL"
 
 
 def test_command_writes_payload_under_state_root_not_tmp(
