@@ -113,6 +113,27 @@ class TestVendoredViewMigrations:
         assert "0012_generation_output_columns.sql" in files
         assert "0013_generation_proof_fields.sql" in files
 
+    def test_premium_counterfactual_migration_vendored(self) -> None:
+        """OMN-13355: the pinned premium-counterfactual column migration is vendored.
+
+        The auditable saving (counterfactual - actual) is persisted as a JSONB
+        column on delegation_events. The node-owned migration must be vendored so
+        a clean clone materializes the column under the forward-migration runner.
+        """
+        migration = (
+            NODES_DIR / "node_projection_delegation" / "0017_premium_counterfactual.sql"
+        )
+        assert migration.is_file(), (
+            "0017_premium_counterfactual.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert (
+            "ALTER TABLE delegation_events" in sql
+            and "ADD COLUMN IF NOT EXISTS premium_counterfactual JSONB" in sql
+        )
+
     def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
         """Base migration must be safe when delegation_events already exists."""
         migration = (
