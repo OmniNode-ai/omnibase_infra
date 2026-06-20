@@ -17,8 +17,17 @@ jobs:
   gate:
     if: >-
       github.event_name == 'merge_group' ||
-      ((github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&
-      github.actor != 'dependabot[bot]')
+      (github.event_name == 'pull_request' &&
+      github.actor != 'dependabot[bot]') ||
+      (((github.event_name == 'issue_comment' && github.event.issue.pull_request != null) ||
+      github.event_name == 'pull_request_review' ||
+      github.event_name == 'pull_request_review_comment') &&
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.actor, 'coderabbit'))
+    concurrency:
+      group: cr-thread-gate-${{ github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.run_id }}
+      cancel-in-progress: true
     uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@main
     with:
       pr-number: ${{ format('{0}', github.event.pull_request.number || github.event.issue.number || 0) }}
