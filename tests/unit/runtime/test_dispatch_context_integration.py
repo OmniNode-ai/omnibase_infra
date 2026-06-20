@@ -33,9 +33,9 @@ import pytest
 from pydantic import BaseModel
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
-from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 # =============================================================================

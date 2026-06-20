@@ -183,7 +183,7 @@ def _make_engine(
         message_types=message_types,
         payload_type_matcher=payload_type_matcher,
     )
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     engine.register_route(
         ModelDispatchRoute(

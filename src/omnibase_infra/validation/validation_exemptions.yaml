@@ -690,23 +690,6 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-983
-  - file_pattern: 'model_dispatch_route\.py'
-    violation_pattern: "Field 'route_id' should use UUID"
-    reason: >
-      route_id is a human-readable semantic identifier (e.g., "default-route"), not a UUID.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions)
-      - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-    ticket: OMN-983
-  - file_pattern: 'model_dispatch_route\.py'
-    violation_pattern: "Field 'dispatcher_id' should use UUID"
-    reason: >
-      dispatcher_id is a human-readable semantic identifier, consistent across dispatch models.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions)
-    ticket: OMN-983
   - file_pattern: 'model_dispatch_metrics\.py'
     method_pattern: "Function 'record_dispatch'"
     violation_pattern: 'has \d+ parameters'

@@ -264,8 +264,8 @@ async def wire_registration_dispatchers(
     # Deferred imports: These imports are placed inside the function to avoid circular
     # import issues and to delay loading dispatcher infrastructure until this function
     # is actually called.
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.enums import EnumMessageCategory
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
         DispatcherCatalogRequest,
         DispatcherNodeHeartbeat,
@@ -409,7 +409,7 @@ async def wire_registration_dispatchers(
             route_id=ROUTE_ID_NODE_INTROSPECTION,
             topic_pattern="*.evt.*.node-introspection.*",
             message_category=EnumMessageCategory.EVENT,
-            dispatcher_id=dispatcher_introspected.dispatcher_id,
+            handler_id=dispatcher_introspected.dispatcher_id,
             message_type="platform.node-introspection",
         )
         engine.register_route(route_introspection)
@@ -420,7 +420,7 @@ async def wire_registration_dispatchers(
             route_id=ROUTE_ID_RUNTIME_TICK,
             topic_pattern="*.intent.*.runtime-tick.*",
             message_category=EnumMessageCategory.INTENT,
-            dispatcher_id=dispatcher_runtime_tick.dispatcher_id,
+            handler_id=dispatcher_runtime_tick.dispatcher_id,
             message_type="platform.runtime-tick",
         )
         engine.register_route(route_runtime_tick)
@@ -431,7 +431,7 @@ async def wire_registration_dispatchers(
             route_id=ROUTE_ID_NODE_REGISTRATION_ACKED,
             topic_pattern="*.cmd.*.node-registration-acked.*",
             message_category=EnumMessageCategory.COMMAND,
-            dispatcher_id=dispatcher_acked.dispatcher_id,
+            handler_id=dispatcher_acked.dispatcher_id,
             message_type="platform.node-registration-acked",
         )
         engine.register_route(route_acked)
@@ -453,7 +453,7 @@ async def wire_registration_dispatchers(
                 route_id=ROUTE_ID_NODE_HEARTBEAT,
                 topic_pattern="*.evt.*.node-heartbeat.*",
                 message_category=EnumMessageCategory.EVENT,
-                dispatcher_id=dispatcher_heartbeat.dispatcher_id,
+                handler_id=dispatcher_heartbeat.dispatcher_id,
                 message_type="platform.node-heartbeat",
             )
             engine.register_route(route_heartbeat)
@@ -477,7 +477,7 @@ async def wire_registration_dispatchers(
                 route_id=ROUTE_ID_TOPIC_CATALOG_QUERY,
                 topic_pattern="*.cmd.*.topic-catalog-query.*",
                 message_category=EnumMessageCategory.COMMAND,
-                dispatcher_id=dispatcher_topic_catalog_query.dispatcher_id,
+                handler_id=dispatcher_topic_catalog_query.dispatcher_id,
                 message_type="platform.topic-catalog-query",
             )
             engine.register_route(route_topic_catalog_query)
@@ -501,7 +501,7 @@ async def wire_registration_dispatchers(
                 route_id=ROUTE_ID_CATALOG_REQUEST,
                 topic_pattern="*.cmd.*.request-introspection.*",
                 message_category=EnumMessageCategory.COMMAND,
-                dispatcher_id=dispatcher_catalog_request.dispatcher_id,
+                handler_id=dispatcher_catalog_request.dispatcher_id,
                 message_type="platform.request-introspection",
             )
             engine.register_route(route_catalog_request)
