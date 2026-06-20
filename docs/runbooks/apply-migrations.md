@@ -239,6 +239,26 @@ wrap in a transaction and check for idempotency before re-applying.
 Omnidash maintains its own `omnidash_analytics` read-model database with SQL migrations
 in `omnidash/migrations/`. These are wired into the bootstrap pipeline as **Step 1d**.
 
+### Canonical projection database (OMN-13362)
+
+The delegation projection (`node_projection_delegation`, omnimarket) writes to
+**`omnidash_analytics.delegation_events`** — the live, growing table. Node-owned
+migrations vendored under `docker/migrations/forward/nodes/<node>/` are applied by
+`run-forward-migrations.sh` against `NODE_POSTGRES_DB` (compose sets
+`omnidash_analytics`), NOT the flat infra `omnibase_infra` DB.
+
+> **Probe the live table in `omnidash_analytics`, never `omnibase_infra`.** A stale
+> `delegation_events` decoy used to exist in the `omnibase_infra` DB (a historical
+> artifact from before the node-migration runner was repointed to
+> `omnidash_analytics`; last write 2026-05-13, read by nothing). Querying that decoy
+> caused the 2026-06-19 Gate-Zero "writes stopped May 13" misdiagnosis. Forward
+> migration `087_drop_stale_delegation_events_decoy.sql` drops it. Future probes:
+>
+> ```bash
+> # Correct: live delegation projection
+> psql -d omnidash_analytics -c "SELECT count(*), max(timestamp) FROM delegation_events;"
+> ```
+
 ### Bootstrap (advisory -- warn and continue)
 
 During `bootstrap-infisical.sh`, Step 1d runs the omnidash migration runner if both

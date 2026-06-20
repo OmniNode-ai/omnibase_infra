@@ -1,0 +1,24 @@
+-- OMN-13362: drop the stale `delegation_events` decoy from the omnibase_infra DB.
+--
+-- The canonical delegation projection (node_projection_delegation, omnimarket)
+-- writes to `omnidash_analytics.delegation_events` — that is the live, growing
+-- table, applied through the node-owned migration tree under
+-- docker/migrations/forward/nodes/node_projection_delegation/ with
+-- NODE_POSTGRES_DB=omnidash_analytics (run-forward-migrations.sh).
+--
+-- A SECOND `delegation_events` exists in the `omnibase_infra` DB itself. It is a
+-- historical artifact from before the node-migration runner was repointed to
+-- omnidash_analytics: at that time NODE_POSTGRES_DB defaulted to POSTGRES_DB
+-- (=omnibase_infra), so the node migrations created the table there too. That
+-- copy stopped receiving writes (last write 2026-05-13, ~40 rows) and is read by
+-- nothing — but querying it is exactly what produced the 2026-06-19 Gate-Zero
+-- misdiagnosis ("writes stopped May 13"). Evidence:
+-- docs/evidence/2026-06-19-gate-zero/runtime-201.md.
+--
+-- This migration runs in the flat infra sequence against POSTGRES_DB
+-- (=omnibase_infra), so the DROP targets the decoy, never the live
+-- omnidash_analytics copy (a different database the flat runner never touches).
+-- No flat infra migration and no infra source reads delegation_events from the
+-- omnibase_infra DB, so the drop is safe. Idempotent for already-cleaned volumes.
+
+DROP TABLE IF EXISTS public.delegation_events;

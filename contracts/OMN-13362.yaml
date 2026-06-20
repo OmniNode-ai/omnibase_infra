@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13362"
+title: "Resolve dual delegation_events tables — drop the stale omnibase_infra decoy"
+summary: >
+  delegation_events existed in TWO databases on .201: omnidash_analytics (live, canonical writer — node_projection_delegation) and omnibase_infra (stale decoy, ~40 rows, last write 2026-05-13, read by nothing). Querying the decoy produced the 2026-06-19 Gate-Zero misdiagnosis. Forward migration 087 drops the decoy from the omnibase_infra DB so omnidash_analytics is the single canonical delegation_events. The migration runs in the flat infra sequence against POSTGRES_DB=omnibase_infra, so it can only hit the decoy, never the live copy in the separate omnidash_analytics DB. Also re-vendors the omnimarket node-migration tree to clear pre-existing capsule_store vendoring drift so the node-migration-sync gate is green.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Migration sequence validator passes with the new flat migration 087 (no duplicate sequence numbers)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python scripts/validation/validate_migration_sequence.py"
+  - id: "dod-002"
+    description: "Node-migration vendor tree is in sync with omnimarket dev (sync-node-migrations --check passes)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - id: "dod-003"
+    description: "Migration discovery + sentinel unit tests green."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/migrations/test_node_migration_discovery.py tests/unit/runtime/test_migration_sentinel.py -q"
+  - id: "dod-deploy"
+    description: "Deploy-gate evidence: 087 is an idempotent DROP TABLE IF EXISTS on the stale decoy in the omnibase_infra DB; applied by the canonical forward-migration runner on the next redeploy. REQUIRED_PROJECTION_TABLES checks target omnidash_analytics (the live table), so the drop does not break the migration gate."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-13362 drops a stale unread decoy table via idempotent DROP TABLE IF EXISTS in the flat infra migration sequence (omnibase_infra DB); live delegation_events in omnidash_analytics is untouched'"
