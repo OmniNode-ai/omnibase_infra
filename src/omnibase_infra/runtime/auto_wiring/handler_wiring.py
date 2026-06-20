@@ -1239,6 +1239,31 @@ def _is_projection_runner_handler(handler_instance: object) -> bool:
     )
 
 
+def _extract_rows_upserted(result: object) -> int:
+    """Extract the rows-written count from a projection handler's return value.
+
+    OMN-13360: the projection terminal event must be gated on a real write.
+    Projection handlers return either a ModelProjectionResult-shaped mapping
+    (``{"rows_upserted": N, ...}``) or a runner-shim mapping (``{"projected":
+    bool}``). This narrows both to an integer row count:
+
+    - ``rows_upserted`` present -> coerce to int (the authoritative count).
+    - only ``projected`` present (runner shim) -> 1 when truthy, else 0. The
+      standalone runner returns ``{"projected": bool}`` where True already means
+      a row was committed (its DB execute path raises on failure).
+    - anything else -> 0 (no provable write; terminal must NOT be emitted).
+    """
+    if isinstance(result, dict):
+        if "rows_upserted" in result:
+            try:
+                return int(result["rows_upserted"])
+            except (TypeError, ValueError):
+                return 0
+        if "projected" in result:
+            return 1 if bool(result["projected"]) else 0
+    return 0
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     db_tables: list[dict[str, str]],
@@ -1318,13 +1343,36 @@ def _make_projection_dispatch_callback(
             result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
-            projected = True
-            logger.debug(
-                "Projection handler completed: topic=%s event_type=%s result=%s",
-                topic,
-                event_type,
-                result,
-            )
+            # OMN-13360 (deterministic-truth gate): the terminal
+            # `projection-delegation-applied.v1` event asserts that a durable row
+            # landed, so it must be gated on the handler's actual write outcome —
+            # not merely on `handle()` not raising. The projection handler returns
+            # ModelProjectionResult.model_dump() carrying rows_upserted (0 or 1+);
+            # a zero-row / internally-swallowed path returns normally and would
+            # otherwise emit a false-positive `projected:true`. Gate on
+            # rows_upserted >= 1 and log loudly when a no-raise handler wrote zero
+            # rows so the failure surfaces instead of being masked.
+            rows_upserted = _extract_rows_upserted(result)
+            projected = rows_upserted >= 1
+            if projected:
+                logger.debug(
+                    "Projection handler completed: topic=%s event_type=%s "
+                    "rows_upserted=%s result=%s",
+                    topic,
+                    event_type,
+                    rows_upserted,
+                    result,
+                )
+            else:
+                logger.error(
+                    "Projection handler wrote zero rows (no terminal emitted): "
+                    "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
+                    type(handler_instance).__name__,
+                    topic or "unknown",
+                    event_type,
+                    rows_upserted,
+                    result,
+                )
         except TypeError as exc:
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "

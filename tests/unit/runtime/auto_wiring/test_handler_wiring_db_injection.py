@@ -527,6 +527,56 @@ def test_projection_callback_emits_terminal_event_on_success() -> None:
 
 
 @pytest.mark.unit
+def test_projection_callback_does_not_emit_terminal_event_on_zero_rows() -> None:
+    """OMN-13360: a handler that returns rows_upserted=0 must NOT emit a terminal.
+
+    The projection terminal asserts a durable row landed. A no-raise handler that
+    upserts zero rows (internal swallow / dedup no-op / failed-but-unraised write)
+    returns normally; the prior gate emitted `projected:true` regardless. Gating
+    on rows_upserted >= 1 makes that zero-row path produce NO terminal event.
+    """
+    import uuid
+
+    published: list[tuple] = []
+
+    class ZeroRowHandler:
+        def handle(self, input_data: dict) -> dict:
+            # No exception, but nothing was written.
+            return {"rows_upserted": 0, "table": "delegation_events"}
+
+    class FakeEventBus:
+        async def publish(self, topic: str, key: object, value: bytes) -> None:
+            published.append((topic, key, value))
+
+    db_tables = [{"name": "delegation_events", "database": "omnidash_analytics"}]
+    terminal_topic = "onex.evt.omnimarket.projection-delegation-applied.v1"
+    callback = _make_projection_dispatch_callback(
+        ZeroRowHandler(),
+        db_tables,
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        event_bus=FakeEventBus(),
+        terminal_event=terminal_topic,
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"task_type": "code-review"}
+    envelope.correlation_id = uuid.uuid4()
+    fake_adapter = MagicMock()
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+            asyncio.run(callback(envelope))
+
+    assert published == [], (
+        "Zero-row projection must not emit a projected:true terminal event"
+    )
+
+
+@pytest.mark.unit
 def test_projection_callback_emits_terminal_event_from_materialized_dict() -> None:
     """Terminal event correlation is extracted from materialized dispatch dicts."""
     import json
