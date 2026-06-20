@@ -45,6 +45,7 @@ import pytest
 import yaml
 
 from omnibase_core.enums import EnumMessageCategory
+from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -53,7 +54,6 @@ from omnibase_infra.models.coding_agent import (
     EnumCodingAgent,
     ModelCodingAgentInvokeCommand,
 )
-from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator import (
     HandlerCodingAgentOrchestrator,
 )

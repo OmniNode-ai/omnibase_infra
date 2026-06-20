@@ -10,10 +10,10 @@ from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
+from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     PreparedWiring,
     _commit_handler_wiring,

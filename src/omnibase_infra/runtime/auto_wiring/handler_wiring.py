@@ -105,12 +105,12 @@ from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
@@ -3109,11 +3109,11 @@ def _prepare_handler_wiring(
     from omnibase_core.enums.enum_handler_resolution_outcome import (
         EnumHandlerResolutionOutcome,
     )
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.resolver.model_handler_resolution import (
         ModelHandlerResolution,
     )
     from omnibase_infra.enums import EnumMessageCategory
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     handler_ref = entry.handler
     handler_key = _derive_handler_entry_key(entry)
@@ -3397,7 +3397,7 @@ def _prepare_handler_wiring(
                 route_id=route_id,
                 topic_pattern=topic_pattern,
                 message_category=category,
-                dispatcher_id=dispatcher_id,
+                handler_id=dispatcher_id,
             )
             route_ids.append(route_id)
             routes.append(route)
