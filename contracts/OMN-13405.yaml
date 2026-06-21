@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: '1.0.0'
+ticket_id: OMN-13405
+title: 'Workspace build vendors omnibase_core from the dev-HEAD clone'
+summary: >-
+  Make the workspace-mode runtime image install omnibase_core from the staged dev-HEAD clone instead of the lock-pinned released wheel, so runtime/effects/projection-api import dev-only core modules (e.g. enum_correction_failure_axis) that omnimarket dev requires. Proven by a cold dev-lane bring-up coming up HEALTHY (no projection-api crash-loop).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: build
+    description: >-
+      Workspace build installs omnibase_core from file:///workspace/sibling-repos/omnibase_core (NOT the git/lock wheel); build-provenance asserts the local-path install; the runtime image imports omnibase_core.enums.enum_correction_failure_axis and omnimarket.intelligence.events.
+    command: >-
+      docker run --rm --entrypoint /app/.venv/bin/python omnibase-infra-omninode-runtime:latest -c "import omnibase_core.enums.enum_correction_failure_axis; from omnimarket.intelligence.events import ModelUserCorrectionEvent; print('OK')"
+  - kind: runtime
+    description: >-
+      Cold dev-lane bring-up (project omnibase-infra, --profile runtime): omninode-runtime + runtime-effects + projection-api running/healthy, restarts=0, projection-api NOT crash-looping; broker Redpanda EventBusKafka; migration ledger 0017/0018/0019 applied.
+    command: >-
+      docker inspect -f '{{.State.Health.Status}} {{.RestartCount}}' omnimarket-projection-api
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks <PR> --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      Workspace build (BUILD_SOURCE=workspace) installs omnibase_core from the staged dev-HEAD tree (file:// direct_url), defeating omnibase_infra pyproject [tool.uv.sources] git pin; build-provenance reports 'All 4 workspace provenance proofs passed' with omnibase_core install=file://. Evidence: .onex_state/runtime-e2e-2026-06-21/02-dev-deploy/a6/build.log + CAPTURE.md.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_deploy_runtime_build_context.py tests/scripts/test_check_sibling_lock_pins.py -q'
+  - id: dod-002
+    description: >-
+      The new runtime image imports omnibase_core.enums.enum_correction_failure_axis (the exact v4 ModuleNotFoundError) and omnimarket.intelligence.events (the v4 crash site); cold dev bring-up came up HEALTHY with projection-api restarts=0 and /health 200. Evidence: .onex_state/runtime-e2e-2026-06-21/02-dev-deploy/a6/CAPTURE.md.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_deploy_runtime_build_context.py -q'

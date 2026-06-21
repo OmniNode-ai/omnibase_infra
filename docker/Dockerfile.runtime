@@ -277,8 +277,30 @@ COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspac
 # expected-vs-actual pin proof into build-provenance.json for deploy verifiers.
 COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.json
 
-# workspace mode installs omnibase_compat, onex_change_control, omnimarket from
-# the staged local trees.  release mode installs from pinned remote sources.
+# workspace mode installs omnibase_core, omnibase_compat, onex_change_control,
+# omnimarket from the staged local trees.  release mode installs from pinned
+# remote sources (core stays from omnibase_infra/uv.lock — correct for a release).
+#
+# OMN-13405: workspace mode reinstalls omnibase_core FIRST from the staged dev-HEAD
+# clone. `uv sync` above already installed omnibase-core from omnibase_infra/uv.lock,
+# but that lock pins a released 0.45.0 wheel at a commit PREDATING dev enum modules
+# (enum_correction_failure_axis, OMN-13234/12846) that omnimarket dev imports at
+# module-import time. Reinstalling core from the staged dev tree overrides the
+# enum-less lock wheel so the runtime kernel + projection-api import cleanly.
+# Forcing the local-path core install is non-trivial because omnibase_infra's
+# pyproject.toml [tool.uv.sources] pins omnibase-core to a git rev (the enum-less
+# 0.45.0). With WORKDIR=/app (the infra project) every `uv pip install` discovers
+# that project upward and re-resolves `omnibase-core` to the git source — even with
+# a `@ file://` reference — so the staged dev tree never wins. The install is
+# therefore run from `/` (a subshell `cd /`) so NO project pyproject/uv.lock is in
+# scope, with `--python /app/.venv/bin/python` (explicit target venv), `--no-sources`
+# (ignore [tool.uv.sources]), an explicit PEP 508 direct reference
+# (`omnibase-core @ file:///workspace/sibling-repos/omnibase_core`), `--no-cache`
+# (bypass the cached git wheel from the BuildKit uv cache mount), and
+# `--reinstall-package omnibase-core`. Together these pin the install source to the
+# staged dev tree, record a file:// direct_url, and the build-provenance
+# local-install proof (compute_workspace_provenance.py WORKSPACE_PACKAGES) asserts
+# it. release mode is unchanged: core comes from the lock via [tool.uv.sources].
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
@@ -306,12 +328,16 @@ ARG OMNIMARKET_REF=dev
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        for repo in omnibase_compat onex_change_control omnimarket; do \
+        for repo in omnibase_core omnibase_compat onex_change_control omnimarket; do \
             p="/workspace/sibling-repos/${repo}"; \
             if [ ! -d "${p}" ]; then \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
             fi; \
         done; \
+        uv-with-retry pip uninstall omnibase-core; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
+            "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/onex_change_control; \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/omnimarket; \
