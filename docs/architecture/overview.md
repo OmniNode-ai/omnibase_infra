@@ -4,6 +4,8 @@
 
 This document provides a high-level overview of the ONEX (OmniNode eXecution) architecture used in `omnibase_infra`.
 
+> _Node counts and the package-structure listing in this document were verified against code on this refresh (OMN-13465): 109 `node_<name>/` directories and 107 `contract.yaml` files under `src/omnibase_infra/nodes/`._
+
 ## Design Philosophy
 
 ONEX is built on three core principles:
@@ -720,7 +722,7 @@ flowchart TB
 
 ## Node Families
 
-The 29 nodes in `omnibase_infra` are organized into 8 functional families. Each family follows the EFFECT → COMPUTE → REDUCER → ORCHESTRATOR flow where applicable.
+`omnibase_infra` ships 109 node directories (107 `contract.yaml` files) under `src/omnibase_infra/nodes/`, verified against code on this refresh (OMN-13465). The table below summarizes the **primary documented families** — a curated subset of 29 nodes detailed in [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md). Additional node families not enumerated here include delegation/routing, merge-sweep, coding-agent, RSD scoring, scope extraction, and GitHub/Gmail effect integrations. Each family follows the EFFECT → COMPUTE → REDUCER → ORCHESTRATOR flow where applicable.
 
 | Family | Node Count | Purpose |
 |--------|-----------|---------|
@@ -733,7 +735,7 @@ The 29 nodes in `omnibase_infra` are organized into 8 functional families. Each 
 | **RRH** | 3 | Release readiness: environment collection, 13-rule validation, artifact persistence |
 | **Auxiliary** | 1 | Slack alerting for infrastructure events |
 
-See [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) for the full per-node inventory with input/output models.
+See [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) for the documented per-node inventory with input/output models and the live whole-repo node-type distribution.
 
 ## `src/omnibase_infra/` Package Structure
 
@@ -760,7 +762,7 @@ src/omnibase_infra/
 ├── migrations/         # Database schema migrations
 ├── mixins/             # MixinAsyncCircuitBreaker and other reusable mixins
 ├── models/             # Shared Pydantic models (not node-specific)
-├── nodes/              # All 29 ONEX nodes (see CURRENT_NODE_ARCHITECTURE.md)
+├── nodes/              # 109 ONEX node directories (see CURRENT_NODE_ARCHITECTURE.md)
 ├── observability/      # Metrics, tracing, structured logging
 ├── plugins/            # Plugin loader system (HandlerPluginLoader)
 ├── projectors/         # Projection reader/writer implementations
@@ -781,7 +783,7 @@ src/omnibase_infra/
 
 ### ASCII Version
 
-**Diagram Description**: This ASCII diagram shows the three-layer package dependency structure. At the top, omnibase_infra contains infrastructure implementations including handlers (Consul, DB, Infisical, HTTP, LLM, Slack), nodes (29 nodes across 8 families), and runtime (RuntimeHostProcess, Dispatchers, Loaders). It depends on omnibase_spi (middle layer), which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core (bottom layer), which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
+**Diagram Description**: This ASCII diagram shows the three-layer package dependency structure. At the top, omnibase_infra contains infrastructure implementations including handlers (Consul, DB, Infisical, HTTP, LLM, Slack), nodes (109 node directories; see CURRENT_NODE_ARCHITECTURE.md), and runtime (RuntimeHostProcess, Dispatchers, Loaders). It depends on omnibase_spi (middle layer), which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core (bottom layer), which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -789,7 +791,7 @@ src/omnibase_infra/
 │   Infrastructure implementations                 │
 │   - Handlers (Consul, DB, Infisical, HTTP,      │
 │               LLM, Slack, Filesystem)           │
-│   - Nodes (29 nodes across 8 families)          │
+│   - Nodes (109 node directories)                │
 │   - Runtime (RuntimeHostProcess, Dispatchers,   │
 │              Topic Provisioner, Config Discovery)│
 └─────────────────────────────────────────────────┘
@@ -821,12 +823,12 @@ src/omnibase_infra/
 ```mermaid
 flowchart TB
     accTitle: ONEX Package Layering
-    accDescr: Dependency diagram showing the three-layer package architecture. omnibase_infra at the top contains infrastructure implementations including handlers for Consul, DB, Infisical, HTTP, LLM, and Slack, plus 29 nodes across 8 functional families and the RuntimeHostProcess. It depends on omnibase_spi which provides Service Provider Interface protocols. Both depend on omnibase_core at the bottom which provides core models and base classes.
+    accDescr: Dependency diagram showing the three-layer package architecture. omnibase_infra at the top contains infrastructure implementations including handlers for Consul, DB, Infisical, HTTP, LLM, and Slack, plus 109 node directories and the RuntimeHostProcess. It depends on omnibase_spi which provides Service Provider Interface protocols. Both depend on omnibase_core at the bottom which provides core models and base classes.
 
     subgraph INFRA["omnibase_infra"]
         I1[Infrastructure implementations]
         I2["Handlers (Consul, DB, Infisical, HTTP, LLM, Slack, Filesystem)"]
-        I3["Nodes (29 nodes — Registration, Validation, LLM,\nSession Lifecycle, Checkpoint, Ledger, RRH, Slack)"]
+        I3["Nodes (109 node dirs — Registration, Validation, LLM,\nDelegation/Routing, Merge-Sweep, Coding-Agent, RSD, Ledger, RRH, ...)"]
         I4["Runtime (RuntimeHostProcess, Dispatchers, Loaders,\nTopic Provisioner, Config Discovery)"]
     end
 
@@ -854,7 +856,7 @@ flowchart TB
 | Topic | Document |
 |-------|----------|
 | **Coding standards** | [CLAUDE.md](../../CLAUDE.md) - **authoritative source** for all rules |
-| **Current node inventory** | [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) - all 29 nodes with types, models, and functional groups |
+| **Current node inventory** | [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) - documented node subset with types/models plus the live whole-repo node-type distribution |
 | Quick start | [Getting Started](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |
