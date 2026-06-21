@@ -30,7 +30,6 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13290: identity regenerated after merging the backend-secret gate with
-    # the coding-agent nodes and validator-requirements baseline changes.
-    assert lock["identity_digest"] == "88303b6571205b4c2602f93a4912324d"
-    assert lock["shared_env_digest"] == "c028f4f1d619fb0101204054"
+    # OMN-13452: identity regenerated after the security dependency bump refresh.
+    assert lock["identity_digest"] == "7a292eec0315d7a33f09d6ac5cd16d1e"
+    assert lock["shared_env_digest"] == "45fc7d4fd08d4ba9706a9933"
