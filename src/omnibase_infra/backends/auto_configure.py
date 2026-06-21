@@ -28,16 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 def _import_event_bus_inmemory() -> type:
-    """Import EventBusInmemory from core (preferred) or infra (fallback)."""
-    try:
-        from omnibase_core.event_bus.event_bus_inmemory import (
-            EventBusInmemory as _Cls,
-        )
-    except ImportError:
-        # Why: Runtime compatibility requires assigning through a broader static type.
-        from omnibase_infra.event_bus.event_bus_inmemory import (  # type: ignore[assignment]
-            EventBusInmemory as _Cls,
-        )
+    """Import the thin infra EventBusInmemory adapter over the core transport.
+
+    OMN-13419: the in-memory transport lives once in omnibase_core; the infra
+    adapter (omnibase_infra.event_bus.event_bus_inmemory) wraps it to provide
+    the infra-shaped health_check / consumer-group surface the runtime kernel
+    needs when Kafka is unavailable.
+    """
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory as _Cls
 
     return _Cls
 

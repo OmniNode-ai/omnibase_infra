@@ -1,143 +1,90 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""In-Memory Event Bus implementation for local development and testing.
+"""Thin infra adapter over the canonical core in-memory event bus.
 
-Implements ProtocolEventBus interface using deque-based event history with
-direct subscriber callback invocation. This implementation is designed for
-local development and testing scenarios where a full message broker (Kafka)
-is not needed.
+The single canonical ``EventBusInmemory`` transport lives in
+``omnibase_core.event_bus.event_bus_inmemory`` (OMN-7062/OMN-7077). The
+861-line infra duplicate that previously lived here has been deleted
+(OMN-13419) so there is exactly one in-memory transport implementation.
 
-Features:
-    - Topic-based message routing with FIFO ordering
-    - Async publish/subscribe with callback handlers
-    - Event history tracking for debugging and testing
-    - Async-safe operations using asyncio.Lock
-    - No external dependencies required
-    - Support for environment/group-based routing
+This module is a *thin* adapter, NOT a second implementation. It subclasses
+the core bus, inheriting all of its state management (deque history, async
+lock, topic offsets, subscriber registry, per-subscriber circuit-breaker
+accounting). It re-expresses only the surface that the infra runtime and
+``ProtocolEventBusLike`` genuinely require and that the pinned core release
+does not yet provide:
 
-Usage:
-    ```python
-    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-    from omnibase_infra.models import ModelNodeIdentity
+1. Infra-typed messages — the canonical core bus builds
+   ``omnibase_core`` ``ModelEventMessage``/``ModelEventHeaders`` whose
+   ``schema_version`` is a ``ModelSemVer``; the infra runtime, Kafka bus, node
+   handlers, and 50+ tests are typed against the infra
+   ``ModelEventMessage`` whose ``schema_version`` is a ``str``. The adapter
+   overrides ``publish`` to build and deliver the infra message types so every
+   downstream consumer receives exactly the model it always has (one boundary
+   instead of coercion scattered across every handler/projection).
+2. Infra error taxonomy — the infra kernel, dispatchers, and error-handling
+   tests are typed against ``InfraUnavailableError`` /
+   ``ProtocolConfigurationError`` (the core bus raises ``ModelOnexError``).
+3. Dict-shaped ``health_check()`` — ``RuntimeHostProcess.health_check()`` and
+   ``ServiceRuntimeHealthMonitor`` read ``health["started"]`` /
+   ``health["subscriber_count"]`` etc.; the core bus returns a
+   ``TypedDictEventBusHealth`` with only ``healthy``/``connected``/``status``.
+4. ``get_consumer_groups()`` — part of ``ProtocolEventBusLike`` (alongside
+   ``EventBusKafka``) and consumed by ``ServiceRuntimeHealthMonitor``; absent
+   on the pinned core bus.
 
-    bus = EventBusInmemory(environment="dev", group="test")
-    await bus.start()
-
-    # Create node identity for consumer group derivation
-    identity = ModelNodeIdentity(
-        env="dev",
-        service="my-service",
-        node_name="event-processor",
-        version="v1",
-    )
-
-    # Subscribe to a topic
-    async def handler(msg):
-        print(f"Received: {msg.value}")
-    unsubscribe = await bus.subscribe("events", identity, handler)
-
-    # Publish a message
-    await bus.publish("events", b"key", b"value")
-
-    # Cleanup
-    await unsubscribe()
-    await bus.close()
-    ```
+Everything else — ``subscribe``/``unsubscribe``, history, offsets, lifecycle,
+the circuit-breaker manager methods — is inherited unchanged from the core
+bus. When the core ``ModelEventHeaders``/``ModelEventMessage`` model shape,
+``health_check`` shape, and ``get_consumer_groups`` land in a released core
+version, this adapter collapses to a bare re-export and can be deleted.
 
 Protocol Compatibility:
-    ProtocolEventBus from omnibase_core using duck typing
-    (no explicit inheritance required per ONEX patterns).
+    ProtocolEventBus / ProtocolEventBusLike via duck typing.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
+from omnibase_core.enums.enum_consumer_group_purpose import (
+    EnumConsumerGroupPurpose as _CoreEnumConsumerGroupPurpose,
+)
+from omnibase_core.event_bus.event_bus_inmemory import (
+    EventBusInmemory as _CoreEventBusInmemory,
+)
+from omnibase_core.models.event_bus.model_event_message import (
+    ModelEventMessage as _CoreModelEventMessage,
+)
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.models import (
-    ModelEventBusReadiness,
-    ModelEventHeaders,
-    ModelEventMessage,
-)
+from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
-from omnibase_infra.utils import compute_consumer_group_id
+
+if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_node_identity import (
+        ProtocolNodeIdentity as _CoreProtocolNodeIdentity,
+    )
 
 logger = logging.getLogger(__name__)
 
 
-class EventBusInmemory:
-    """In-memory event bus for local development and testing.
+class EventBusInmemory(_CoreEventBusInmemory):
+    """Infra-facing adapter over the canonical core in-memory event bus.
 
-    Implements ProtocolEventBus interface using deque-based event history
-    with direct subscriber callback invocation. Async-safe operations are
-    ensured via asyncio.Lock. This implementation provides a lightweight
-    event bus for testing and local development without external dependencies.
-
-    Transport Type:
-        Uses EnumInfraTransportType.INMEMORY for error context and logging,
-        correctly identifying this as an in-memory transport (not KAFKA).
-
-    Default Configuration:
-        - environment: "local" - Appropriate for local development scenarios.
-          Tests typically override with "test" for clarity in logs.
-        - group: "default" - Generic consumer group identifier.
-          Tests typically override with test-specific group names.
-        - max_history: 1000 - Sufficient for most testing/debugging scenarios.
-        - circuit_breaker_threshold: 5 - Consecutive failures before circuit opens.
-
-    Features:
-        - Topic-based message routing with FIFO ordering
-        - Multiple subscribers per topic with group-based filtering
-        - Event history tracking with configurable retention
-        - Async-safe operations using asyncio.Lock
-        - Environment and group-based message routing
-        - Circuit breaker pattern for subscriber failure isolation
-        - Debugging utilities for inspecting event flow
-        - Readiness checking (always ready when started, no external deps)
-
-    Attributes:
-        environment: Environment identifier (e.g., "local", "dev", "test")
-        group: Consumer group identifier
-        adapter: Returns self (no separate adapter for in-memory)
-
-    Example:
-        ```python
-        from omnibase_infra.models import ModelNodeIdentity
-
-        bus = EventBusInmemory(environment="dev", group="test")
-        await bus.start()
-
-        # Create node identity for consumer group derivation
-        identity = ModelNodeIdentity(
-            env="dev",
-            service="my-service",
-            node_name="event-processor",
-            version="v1",
-        )
-
-        # Subscribe
-        async def handler(msg):
-            print(f"Received: {msg.value}")
-        unsubscribe = await bus.subscribe("events", identity, handler)
-
-        # Publish
-        await bus.publish("events", b"key", b"value")
-
-        # Cleanup
-        await unsubscribe()
-        await bus.close()
-        ```
+    Inherits all transport behavior from
+    ``omnibase_core.event_bus.event_bus_inmemory.EventBusInmemory`` and only
+    overrides the infra-contract boundary (error taxonomy, dict-shaped
+    ``health_check``, consumer-group introspection).
     """
 
     def __init__(
@@ -147,17 +94,7 @@ class EventBusInmemory:
         max_history: int = 1000,
         circuit_breaker_threshold: int = 5,
     ) -> None:
-        """Initialize the in-memory event bus.
-
-        Args:
-            environment: Environment identifier for message routing
-            group: Consumer group identifier for message routing
-            max_history: Maximum number of events to retain in history
-            circuit_breaker_threshold: Number of consecutive failures before circuit opens
-
-        Raises:
-            ProtocolConfigurationError: If circuit_breaker_threshold is not a positive integer
-        """
+        """Initialize the bus, raising the infra error type on bad config."""
         if circuit_breaker_threshold < 1:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.INMEMORY,
@@ -166,135 +103,69 @@ class EventBusInmemory:
                 correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
-                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}",
+                f"circuit_breaker_threshold must be a positive integer, "
+                f"got {circuit_breaker_threshold}",
                 context=context,
                 parameter="circuit_breaker_threshold",
                 value=circuit_breaker_threshold,
             )
-        self._environment = environment
-        self._group = group
-        self._max_history = max_history
-
-        # Topic -> list of (group_id, callback) tuples
-        self._subscribers: dict[
-            str, list[tuple[str, Callable[[ModelEventMessage], Awaitable[None]]]]
-        ] = defaultdict(list)
-
-        # Event history for debugging (circular buffer with O(1) operations)
-        self._event_history: deque[ModelEventMessage] = deque(maxlen=max_history)
-
-        # Topic -> offset counter for message ordering
-        self._topic_offsets: dict[str, int] = defaultdict(int)
-
-        # Lock for coroutine safety
-        self._lock = asyncio.Lock()
-
-        # Started flag
-        self._started = False
-
-        # Shutdown flag for consuming loop
-        self._shutdown = False
-
-        # Subscriber failure tracking for circuit breaker pattern
-        # Maps (topic, group_id) to consecutive failure count
-        self._subscriber_failures: dict[tuple[str, str], int] = {}
-        self._max_consecutive_failures: int = circuit_breaker_threshold
+        super().__init__(
+            environment=environment,
+            group=group,
+            max_history=max_history,
+            circuit_breaker_threshold=circuit_breaker_threshold,
+        )
 
     @property
     def adapter(self) -> EventBusInmemory:
-        """No adapter for in-memory - returns self.
-
-        Returns:
-            Self reference (in-memory bus is its own adapter)
-        """
+        """No separate adapter for in-memory -- returns self."""
         return self
 
-    @property
-    def environment(self) -> str:
-        """Get the environment identifier.
+    async def subscribe(  # type: ignore[override]
+        self,
+        topic: str,
+        node_identity: ModelNodeIdentity | None = None,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
+        *,
+        group_id: str | None = None,
+        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
+        required_for_readiness: bool = False,
+    ) -> Callable[[], Awaitable[None]]:
+        """Subscribe with infra-typed identity/enum/callback.
 
-        Returns:
-            Environment string (e.g., "local", "dev", "test")
+        Re-declares the inherited core ``subscribe`` with the infra
+        ``ModelNodeIdentity`` / ``EnumConsumerGroupPurpose`` / infra-message
+        callback so infra call sites type-check. The core implementation only
+        reads ``identity`` attributes and ``purpose.value`` and stores the
+        callback opaquely, so delegation is behavior-preserving (OMN-13419).
         """
-        return self._environment
-
-    @property
-    def group(self) -> str:
-        """Get the consumer group identifier.
-
-        Returns:
-            Consumer group string
-        """
-        return self._group
-
-    async def start(self) -> None:
-        """Start the event bus.
-
-        Initializes internal state and marks the bus as ready for operations.
-        This is a no-op for in-memory implementation but required for protocol.
-        """
-        async with self._lock:
-            self._started = True
-            self._shutdown = False
-        logger.info(
-            "EventBusInmemory started",
-            extra={"environment": self._environment, "group": self._group},
+        return await super().subscribe(
+            topic,
+            cast("_CoreProtocolNodeIdentity | None", node_identity),
+            cast(
+                "Callable[[_CoreModelEventMessage], Awaitable[None]] | None",
+                on_message,
+            ),
+            group_id=group_id,
+            purpose=cast("_CoreEnumConsumerGroupPurpose", purpose),
+            required_for_readiness=required_for_readiness,
         )
 
-    async def initialize(self, config: dict[str, object]) -> None:
-        """Initialize the event bus with configuration.
-
-        Protocol method for compatibility with ProtocolEventBus.
-        Extracts configuration and delegates to start().
-
-        Args:
-            config: Configuration dictionary with optional keys:
-                - environment: Override environment setting
-                - group: Override group setting
-                - max_history: Override max_history setting
-        """
-        # Protect configuration updates with lock to prevent race conditions
-        async with self._lock:
-            if "environment" in config:
-                self._environment = str(config["environment"])
-            if "group" in config:
-                self._group = str(config["group"])
-            if "max_history" in config:
-                self._max_history = int(str(config["max_history"]))
-                # Recreate deque with new maxlen, preserving existing history
-                self._event_history = deque(
-                    self._event_history, maxlen=self._max_history
-                )
-        # start() acquires its own lock, so call it outside the lock to avoid deadlock
-        await self.start()
-
-    async def shutdown(self) -> None:
-        """Gracefully shutdown the event bus.
-
-        Protocol method that stops consuming and clears resources.
-        """
-        await self.close()
-
-    async def publish(
+    async def publish(  # type: ignore[override]
         self,
         topic: str,
         key: bytes | None,
         value: bytes,
         headers: ModelEventHeaders | None = None,
     ) -> None:
-        """Publish message to topic.
+        """Publish a message, delivering infra-typed ``ModelEventMessage``.
 
-        Delivers the message to all subscribers registered for the topic.
-        Messages are delivered asynchronously but in FIFO order per subscriber.
-
-        Args:
-            topic: Target topic name
-            key: Optional message key (for future partitioning support)
-            value: Message payload as bytes
-            headers: Optional event headers with metadata
-
-        Raises:
-            InfraUnavailableError: If the bus has not been started
+        Overrides the core publish so the bus emits the infra
+        ``ModelEventMessage``/``ModelEventHeaders`` (``schema_version: str``)
+        that the infra runtime, node handlers, and tests expect, instead of the
+        core models (``schema_version: ModelSemVer``). State (offsets, history,
+        per-subscriber circuit breaker) is the inherited core state; only the
+        message construction and the not-started error type differ.
         """
         if not self._started:
             context = ModelInfraErrorContext(
@@ -311,7 +182,6 @@ class EventBusInmemory:
                 topic=topic,
             )
 
-        # Create headers if not provided
         if headers is None:
             headers = ModelEventHeaders(
                 source=f"{self._environment}.{self._group}",
@@ -320,7 +190,6 @@ class EventBusInmemory:
             )
 
         async with self._lock:
-            # Get next offset for topic
             offset = self._topic_offsets[topic]
             self._topic_offsets[topic] = offset + 1
 
@@ -329,21 +198,20 @@ class EventBusInmemory:
                 key=key,
                 value=value,
                 headers=headers,
-                offset=str(offset),  # Convert int to string for Pydantic model
+                offset=str(offset),
                 partition=0,
             )
-
-            # Add to history (deque handles maxlen automatically with O(1) performance)
-            self._event_history.append(message)
-
-            # Get subscribers snapshot
+            # OMN-13419: the inherited core deque is typed for the core
+            # ModelEventMessage; the adapter intentionally stores the infra-typed
+            # message (same structural shape, str schema_version) so consumers
+            # receive the infra model. Drops to a re-export once core aligns.
+            self._event_history.append(message)  # type: ignore[arg-type]
             subscribers = list(self._subscribers.get(topic, []))
 
-        # Call subscribers outside lock to avoid deadlocks
+        # Deliver outside the lock; mirror the inherited circuit-breaker policy.
         for group_id, callback in subscribers:
             failure_key = (topic, group_id)
 
-            # Check if circuit is open (too many consecutive failures) - read under lock
             async with self._lock:
                 failure_count = self._subscriber_failures.get(failure_key, 0)
 
@@ -360,19 +228,18 @@ class EventBusInmemory:
                 continue
 
             try:
-                await callback(message)
-                # Reset failure count on success - under lock
+                # Callback typed for core ModelEventMessage; infra-typed
+                # message is structurally identical (OMN-13419).
+                await callback(message)  # type: ignore[arg-type]
                 async with self._lock:
                     if failure_key in self._subscriber_failures:
                         del self._subscriber_failures[failure_key]
             except Exception as e:
-                # Increment failure count - under lock
                 async with self._lock:
                     self._subscriber_failures[failure_key] = (
                         self._subscriber_failures.get(failure_key, 0) + 1
                     )
                     current_failure_count = self._subscriber_failures[failure_key]
-                # Log but don't fail other subscribers
                 logger.exception(
                     "Subscriber callback failed",
                     extra={
@@ -391,58 +258,23 @@ class EventBusInmemory:
         *,
         key: bytes | None = None,
     ) -> None:
-        """Publish an event envelope to a topic.
+        """Serialize an envelope to JSON bytes and publish via infra ``publish``.
 
-        Protocol method for ProtocolEventBus compatibility.
-        Serializes the envelope to JSON bytes and publishes.
-
-        Envelope Structure:
-            The envelope is expected to be a Pydantic model (typically
-            ModelEventEnvelope from omnibase_core) with the following structure:
-
-            - correlation_id: UUID for tracing the event across services
-            - event_type: String identifying the event type
-            - payload: The event data (dict or Pydantic model)
-            - metadata: Optional metadata dict
-            - timestamp: When the event was created
-
-            Serialization:
-                - Pydantic models: Uses model_dump(mode="json")
-                - Legacy Pydantic v1: Uses dict()
-                - Dict objects: Passed through directly
-                - Other types: Serialized via json.dumps (may raise TypeError)
-
-        Args:
-            envelope: Envelope object to publish. Typically ModelEventEnvelope
-                from omnibase_core, but any object with model_dump(), dict(),
-                or dict-like structure is supported.
-            topic: Target topic name for publishing.
-
-        Raises:
-            InfraUnavailableError: If the bus has not been started.
-            ProtocolConfigurationError: If envelope cannot be JSON-serialized (explicit
-                handling provides clearer error messages than raw TypeError).
+        Mirrors the core serialization contract but builds infra-typed headers
+        and routes through this class's ``publish`` so an infra
+        ``ModelEventMessage`` is delivered, and re-expresses serialization
+        failures as the infra ``ProtocolConfigurationError``.
         """
-        # Serialize envelope to JSON bytes
-        # Note: envelope is expected to have a model_dump() method (Pydantic)
         envelope_dict: object
         if hasattr(envelope, "model_dump"):
-            # Use getattr for type-safe method access after hasattr check
-            model_dump_method = envelope.model_dump
-            envelope_dict = model_dump_method(mode="json")
+            envelope_dict = envelope.model_dump(mode="json")
         elif hasattr(envelope, "dict"):
-            # Use getattr for type-safe method access after hasattr check
-            dict_method = envelope.dict
-            envelope_dict = dict_method()
+            envelope_dict = envelope.dict()
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
-            # Fallback for non-Pydantic, non-dict types (e.g., primitive JSON-serializable
-            # types like str, int, list). Explicit handling below catches TypeError.
             envelope_dict = envelope
 
-        # Explicit error handling for non-serializable envelopes
-        # This provides clearer error messages than letting json.dumps raise raw TypeError
         try:
             value = json.dumps(envelope_dict).encode("utf-8")
         except TypeError as e:
@@ -454,8 +286,9 @@ class EventBusInmemory:
             )
             raise ProtocolConfigurationError(
                 f"Envelope is not JSON-serializable: {e}. "
-                f"Ensure envelope is a Pydantic model (with model_dump), dict, or "
-                f"JSON-compatible primitive. Got type: {type(envelope).__name__}",
+                f"Ensure envelope is a Pydantic model (with model_dump), dict, "
+                f"or JSON-compatible primitive. Got type: "
+                f"{type(envelope).__name__}",
                 context=context,
                 parameter="envelope",
                 value=str(type(envelope)),
@@ -467,132 +300,7 @@ class EventBusInmemory:
             content_type="application/json",
             timestamp=datetime.now(UTC),
         )
-
         await self.publish(topic, key, value, headers)
-
-    async def subscribe(
-        self,
-        topic: str,
-        node_identity: ModelNodeIdentity | None = None,
-        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
-        *,
-        group_id: str | None = None,
-        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
-        required_for_readiness: bool = False,
-    ) -> Callable[[], Awaitable[None]]:
-        """Subscribe to topic with callback handler.
-
-        Registers a callback to be invoked for each message published to the topic.
-        Returns an unsubscribe function to remove the subscription.
-
-        The consumer group ID is either provided directly via ``group_id`` or
-        derived from ``node_identity`` using the canonical format:
-        ``{env}.{service}.{node_name}.{purpose}.{version}``.
-
-        Note: For the in-memory implementation, the consumer group ID is used for
-        internal tracking and circuit breaker isolation, but does not affect actual
-        message delivery semantics (all subscribers receive all messages).
-
-        Args:
-            topic: Topic to subscribe to
-            node_identity: Node identity used to derive the consumer group ID.
-                Contains env, service, node_name, and version components.
-                Required if ``group_id`` is not provided.
-            on_message: Async callback invoked for each message
-            group_id: Explicit consumer group ID. When provided, takes precedence
-                over derivation from ``node_identity``. Useful for domain plugins
-                that manage their own group naming.
-            purpose: Consumer group purpose classification. Defaults to CONSUME.
-                Used in the consumer group ID derivation for disambiguation.
-                Ignored when ``group_id`` is provided explicitly.
-            required_for_readiness: Whether this subscription must be active for
-                the runtime to report as ready. Ignored by the in-memory
-                implementation (always ready). Defaults to False.
-
-        Returns:
-            Async unsubscribe function to remove this subscription
-
-        Raises:
-            ValueError: If neither ``node_identity`` nor ``group_id`` is provided,
-                or if ``on_message`` is not provided.
-
-        Example:
-            ```python
-            from omnibase_infra.models import ModelNodeIdentity
-            from omnibase_infra.enums import EnumConsumerGroupPurpose
-
-            identity = ModelNodeIdentity(
-                env="dev",
-                service="my-service",
-                node_name="event-processor",
-                version="v1",
-            )
-
-            async def handler(msg):
-                print(f"Received: {msg.value}")
-
-            # Standard subscription (group_id: dev.my-service.event-processor.consume.v1)
-            unsubscribe = await bus.subscribe("events", identity, handler)
-
-            # With explicit group_id (domain plugins)
-            unsubscribe = await bus.subscribe(
-                topic="events", group_id="my-group", on_message=handler,
-            )
-
-            # ... later ...
-            await unsubscribe()
-            ```
-        """
-        if on_message is None:
-            raise ValueError("on_message callback is required")
-
-        # Resolve consumer group ID: explicit group_id takes precedence
-        if group_id is not None:
-            effective_group_id = group_id
-        elif node_identity is not None:
-            effective_group_id = compute_consumer_group_id(node_identity, purpose)
-        else:
-            raise ValueError("subscribe() requires either node_identity or group_id")
-
-        async with self._lock:
-            self._subscribers[topic].append((effective_group_id, on_message))
-            logger.debug(
-                "Subscriber added",
-                extra={"topic": topic, "group_id": effective_group_id},
-            )
-
-        async def unsubscribe() -> None:
-            """Remove this subscription from the topic."""
-            async with self._lock:
-                try:
-                    self._subscribers[topic].remove((effective_group_id, on_message))
-                    logger.debug(
-                        "Subscriber removed",
-                        extra={"topic": topic, "group_id": effective_group_id},
-                    )
-                except ValueError:
-                    # Already unsubscribed
-                    pass
-
-        return unsubscribe
-
-    async def start_consuming(self) -> None:
-        """Start the consumer loop.
-
-        Protocol method for ProtocolEventBus compatibility.
-        For in-memory implementation, this is a no-op as messages are
-        delivered synchronously in publish().
-
-        This method blocks until shutdown() is called (for protocol compatibility).
-        """
-        if not self._started:
-            await self.start()
-
-        # For in-memory, we don't need a consuming loop since publish
-        # delivers messages synchronously. But we provide an async wait
-        # for protocol compatibility.
-        while not self._shutdown:
-            await asyncio.sleep(0.1)
 
     async def broadcast_to_environment(
         self,
@@ -600,30 +308,16 @@ class EventBusInmemory:
         payload: dict[str, object],
         target_environment: str | None = None,
     ) -> None:
-        """Broadcast command to environment.
-
-        Sends a command message to all subscribers in the target environment.
-
-        Args:
-            command: Command identifier
-            payload: Command payload data
-            target_environment: Target environment (defaults to current)
-        """
+        """Broadcast a command to an environment using infra-typed headers."""
         env = target_environment or self._environment
-        # INTENTIONAL ENV PREFIX: broadcast topics are infrastructure-scoped, not event routing.
-        # The {env}.broadcast pattern is used for environment-wide coordination commands,
-        # not for domain event routing which uses realm-agnostic onex.* suffixes.
         topic = f"{env}.broadcast"
-        value_dict = {"command": command, "payload": payload}
-        value = json.dumps(value_dict).encode("utf-8")
-
+        value = json.dumps({"command": command, "payload": payload}).encode("utf-8")
         headers = ModelEventHeaders(
             source=f"{self._environment}.{self._group}",
             event_type="broadcast",
             content_type="application/json",
             timestamp=datetime.now(UTC),
         )
-
         await self.publish(topic, None, value, headers)
 
     async def send_to_group(
@@ -632,59 +326,24 @@ class EventBusInmemory:
         payload: dict[str, object],
         target_group: str,
     ) -> None:
-        """Send command to specific group.
-
-        Sends a command message to all subscribers in a specific group.
-
-        Args:
-            command: Command identifier
-            payload: Command payload data
-            target_group: Target group identifier
-        """
-        # INTENTIONAL ENV PREFIX: group-targeted topics are infrastructure-scoped,
-        # not event routing. Same rationale as broadcast topics above.
+        """Send a command to a specific group using infra-typed headers."""
         topic = f"{self._environment}.{target_group}"
-        value_dict = {"command": command, "payload": payload}
-        value = json.dumps(value_dict).encode("utf-8")
-
+        value = json.dumps({"command": command, "payload": payload}).encode("utf-8")
         headers = ModelEventHeaders(
             source=f"{self._environment}.{self._group}",
             event_type="group_command",
             content_type="application/json",
             timestamp=datetime.now(UTC),
         )
-
         await self.publish(topic, None, value, headers)
 
-    async def close(self) -> None:
-        """Close the event bus and release resources.
+    async def health_check(self) -> dict[str, object]:  # type: ignore[override]
+        """Return infra dict-shaped health (consumed by the runtime kernel).
 
-        Clears all subscribers, failure tracking, and marks the bus as stopped.
-        """
-        async with self._lock:
-            self._subscribers.clear()
-            self._subscriber_failures.clear()
-            self._started = False
-            self._shutdown = True
-        logger.info(
-            "EventBusInmemory closed",
-            extra={"environment": self._environment, "group": self._group},
-        )
-
-    async def health_check(self) -> dict[str, object]:
-        """Check event bus health.
-
-        Protocol method for ProtocolEventBus compatibility.
-
-        Returns:
-            Dictionary with health status information:
-                - healthy: Whether the bus is operational
-                - started: Whether start() has been called
-                - environment: Current environment
-                - group: Current consumer group
-                - subscriber_count: Total number of active subscriptions
-                - topic_count: Number of topics with subscribers
-                - history_size: Current event history size
+        ``RuntimeHostProcess.health_check()`` and
+        ``ServiceRuntimeHealthMonitor`` read ``started`` / ``subscriber_count``
+        etc., so the adapter preserves the historical infra dict shape rather
+        than the core ``TypedDictEventBusHealth``.
         """
         async with self._lock:
             subscriber_count = sum(len(subs) for subs in self._subscribers.values())
@@ -701,161 +360,18 @@ class EventBusInmemory:
             "history_size": history_size,
         }
 
-    async def get_readiness_status(self) -> ModelEventBusReadiness:
-        """Check event bus readiness for serving traffic.
-
-        The in-memory event bus is always ready once started, since there are
-        no external dependencies (no Kafka broker, no partition assignments).
-
-        Returns:
-            Structured readiness status. Always ready when started.
-        """
-        started = self._started
-        return ModelEventBusReadiness(
-            is_ready=started,
-            consumers_started=started,
-            required_topics=(),
-            required_topics_ready=started,
-        )
-
-    # =========================================================================
-    # Debugging/Observability Methods
-    # =========================================================================
-
-    async def get_event_history(
-        self,
-        limit: int = 100,
-        topic: str | None = None,
-    ) -> list[ModelEventMessage]:
-        """Get recent events for debugging.
-
-        Args:
-            limit: Maximum number of events to return
-            topic: Optional topic filter
-
-        Returns:
-            List of recent events (most recent last)
-        """
-        async with self._lock:
-            # Convert deque to list for filtering operations
-            history_list = list(self._event_history)
-
-            # Apply topic filter FIRST (if specified)
-            if topic:
-                history_list = [msg for msg in history_list if msg.topic == topic]
-
-            # Then apply limit (take the most recent N messages)
-            history = (
-                history_list[-limit:] if limit < len(history_list) else history_list
-            )
-            return list(history)
-
-    async def clear_event_history(self) -> None:
-        """Clear event history.
-
-        Useful for test isolation between test cases.
-        """
-        async with self._lock:
-            self._event_history.clear()
-        logger.debug("Event history cleared")
-
-    async def get_subscriber_count(self, topic: str | None = None) -> int:
-        """Get subscriber count, optionally filtered by topic.
-
-        Args:
-            topic: Optional topic to filter by
-
-        Returns:
-            Number of active subscriptions
-        """
-        async with self._lock:
-            if topic:
-                return len(self._subscribers.get(topic, []))
-            return sum(len(subs) for subs in self._subscribers.values())
-
-    async def get_topics(self) -> list[str]:
-        """Get list of topics with active subscribers.
-
-        Returns:
-            List of topic names with at least one subscriber
-        """
-        async with self._lock:
-            return [topic for topic, subs in self._subscribers.items() if subs]
-
     def get_consumer_groups(self) -> dict[tuple[str, str], str]:
-        """Return active topic/group keys mapped to effective consumer group IDs."""
+        """Return active topic/group keys mapped to effective consumer group IDs.
+
+        Part of ``ProtocolEventBusLike`` (shared with ``EventBusKafka``) and
+        consumed by ``ServiceRuntimeHealthMonitor``; absent on the pinned core
+        bus so it is re-expressed here over the inherited subscriber state.
+        """
         return {
             (topic, group_id): group_id
             for topic, subscribers in self._subscribers.items()
             for group_id, _callback in subscribers
         }
 
-    async def get_topic_offset(self, topic: str) -> int:
-        """Get current offset for a topic.
-
-        Args:
-            topic: Topic name
-
-        Returns:
-            Current offset (number of messages published to topic)
-        """
-        async with self._lock:
-            return self._topic_offsets.get(topic, 0)
-
-    # =========================================================================
-    # Circuit Breaker Methods
-    # =========================================================================
-
-    async def reset_subscriber_circuit(self, topic: str, group_id: str) -> bool:
-        """Reset the circuit breaker for a specific subscriber.
-
-        Clears the failure count for the specified topic/group_id combination,
-        allowing the subscriber to receive messages again.
-
-        Args:
-            topic: Topic name
-            group_id: Consumer group identifier
-
-        Returns:
-            True if the circuit was reset, False if there was no circuit to reset
-        """
-        failure_key = (topic, group_id)
-        async with self._lock:
-            if failure_key in self._subscriber_failures:
-                del self._subscriber_failures[failure_key]
-                logger.info(
-                    "Subscriber circuit breaker reset",
-                    extra={"topic": topic, "group_id": group_id},
-                )
-                return True
-            return False
-
-    async def get_circuit_breaker_status(self) -> dict[str, object]:
-        """Get circuit breaker status for all subscribers.
-
-        Returns:
-            Dictionary with circuit breaker status information:
-                - open_circuits: List of dicts with topic/group_id for open circuits
-                - failure_counts: Dict mapping "topic:group_id" to failure count
-        """
-        async with self._lock:
-            open_circuits = [
-                {"topic": topic, "group_id": group_id}
-                for (topic, group_id), count in self._subscriber_failures.items()
-                if count >= self._max_consecutive_failures
-            ]
-            return {
-                "open_circuits": open_circuits,
-                "failure_counts": {
-                    f"{topic}:{group_id}": count
-                    for (topic, group_id), count in self._subscriber_failures.items()
-                },
-            }
-
-
-# OMN-7062: The omnibase_core canonical EventBusInmemory exists but has a
-# different health_check() return structure (TypedDictEventBusHealth vs dict
-# with 'started'/'subscriber_count' keys).  Re-export is deferred until the
-# APIs are aligned and infra tests are updated to the core contract.
 
 __all__: list[str] = ["EventBusInmemory", "ModelEventHeaders", "ModelEventMessage"]
