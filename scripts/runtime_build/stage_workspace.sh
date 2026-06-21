@@ -38,7 +38,15 @@
 #   3  sibling pin drift from the consuming lock (preflight abort)
 set -euo pipefail
 
+# OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
+# install the dev-HEAD core (which carries enum modules not yet in the released
+# 0.45.0 wheel pinned by omnibase_infra/uv.lock, e.g. enum_correction_failure_axis
+# added by OMN-13234/OMN-12846). Without this, `uv sync` installs the lock-pinned
+# enum-LESS core wheel and omnimarket (installed --no-deps) imports a missing enum,
+# crash-looping projection-api + the runtime kernel. Order matters: core must be
+# staged/installed before compat/occ/omnimarket so it is the resolved core for all.
 SIBLING_REPOS=(
+    "omnibase_core"
     "omnibase_compat"
     "onex_change_control"
     "omnimarket"

@@ -58,7 +58,13 @@ PIN_COMPARISON_PATH = Path("/workspace/sibling-pin-comparison.json")
 # Canonical set of sibling repos that workspace mode must provision.
 # Keys are the directory names under sibling-repos/; values are installed
 # package distribution names (as returned by importlib.metadata).
+#
+# OMN-13405: omnibase_core is provisioned from the staged dev-HEAD clone (the
+# Dockerfile reinstalls it with --no-deps over the lock-pinned wheel). Verifying
+# its install is local makes a regression (core silently reverting to the
+# enum-less released wheel) fail the build instead of crash-looping at runtime.
 WORKSPACE_PACKAGES: dict[str, str] = {
+    "omnibase_core": "omnibase-core",
     "omnibase_compat": "omnibase-compat",
     "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
