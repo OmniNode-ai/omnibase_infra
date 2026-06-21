@@ -321,7 +321,9 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 | `node_validation_ledger_projection_compute` | COMPUTE | `ModelEventMessage` | `ModelValidationLedgerEntry` |
 | `node_validation_orchestrator` | ORCHESTRATOR | `ModelPatternCandidate` | `ModelValidationPlan` |
 
-**Total: 29 documented nodes** across 4 archetypes. The live repository contains 103 `contract.yaml` files across 106 node directories; the additional nodes are in functional sub-packages (e.g., `services/`, `projections/`) not covered in the inventory sections above. Section 3 covers the primary canonical nodes; the full census is maintained by `scripts/validate.py contracts`.
+**Total: 29 documented nodes** across 4 archetypes (a curated subset). The live repository contains 109 `node_<name>/` directories under `src/omnibase_infra/nodes/` with 107 `contract.yaml` files; the additional nodes (delegation, merge-sweep, coding-agent, RSD, scope, GitHub/Gmail effects, etc.) are not enumerated in the inventory sections above. Section 3 covers the primary canonical nodes; the full census is maintained by `scripts/validate.py contracts`.
+
+> _Verified against code on this refresh (OMN-13465): `ls -d src/omnibase_infra/nodes/node_* | wc -l` → 109; `find src/omnibase_infra/nodes -name contract.yaml | wc -l` → 107._
 
 ---
 
@@ -336,7 +338,7 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 
 > *`node_validation_orchestrator` is classified `ORCHESTRATOR_GENERIC` in its contract; the COMPUTE count above corrects for that. The table in section 4 is authoritative.
 
-**Corrected distribution**:
+**Corrected distribution (documented subset)**:
 
 | Type | Count |
 |------|-------|
@@ -345,6 +347,18 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 | **REDUCER** | 4 |
 | **ORCHESTRATOR** | 2 |
 | **Total** | 29 |
+
+**Live whole-repo distribution** (all `contract.yaml` under `src/omnibase_infra/nodes/`, verified on this refresh via `grep -rh '^node_type:' src/omnibase_infra/nodes/*/contract.yaml | sort | uniq -c`):
+
+| Type | Count |
+|------|-------|
+| **EFFECT** | 58 |
+| **COMPUTE** | 22 |
+| **REDUCER** | 13 |
+| **ORCHESTRATOR** | 12 |
+| **Total** | 105 |
+
+> The whole-repo total counts contracts that declare `node_type`. Two of the 107 `contract.yaml` files are handler/aux contracts without a `node_type` field.
 
 ---
 
