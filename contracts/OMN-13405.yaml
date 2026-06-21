@@ -9,12 +9,12 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 evidence_requirements:
-  - kind: build
+  - kind: tests
     description: >-
       Workspace build installs omnibase_core from file:///workspace/sibling-repos/omnibase_core (NOT the git/lock wheel); build-provenance asserts the local-path install; the runtime image imports omnibase_core.enums.enum_correction_failure_axis and omnimarket.intelligence.events.
     command: >-
       docker run --rm --entrypoint /app/.venv/bin/python omnibase-infra-omninode-runtime:latest -c "import omnibase_core.enums.enum_correction_failure_axis; from omnimarket.intelligence.events import ModelUserCorrectionEvent; print('OK')"
-  - kind: runtime
+  - kind: manual
     description: >-
       Cold dev-lane bring-up (project omnibase-infra, --profile runtime): omninode-runtime + runtime-effects + projection-api running/healthy, restarts=0, projection-api NOT crash-looping; broker Redpanda EventBusKafka; migration ledger 0017/0018/0019 applied.
     command: >-
