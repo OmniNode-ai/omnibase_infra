@@ -61,7 +61,7 @@ _is_allowlisted() {
 # imports) of the infra in-memory adapter. Docstring/example lines (e.g. a
 # ">>> from ..." doctest) are excluded by anchoring on leading whitespace +
 # the import keyword only.
-PATTERN='^[[:space:]]*from omnibase_infra\.event_bus\.event_bus_inmemory import|^[[:space:]]*from omnibase_infra\.event_bus import[^#]*EventBusInmemory'
+PATTERN='^[[:space:]]*from omnibase_infra\.event_bus\.event_bus_inmemory import|^[[:space:]]*import[[:space:]]+omnibase_infra\.event_bus\.event_bus_inmemory([[:space:]]+as[[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?([[:space:]]*#.*)?$|^[[:space:]]*from omnibase_infra\.event_bus import[^#]*EventBusInmemory'
 
 while IFS= read -r line; do
     file="${line%%:*}"
