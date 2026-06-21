@@ -134,6 +134,61 @@ class TestVendoredViewMigrations:
             and "ADD COLUMN IF NOT EXISTS premium_counterfactual JSONB" in sql
         )
 
+    def test_cost_measurements_migration_vendored(self) -> None:
+        """OMN-13401/OMN-13234: the per-tier actual-cost measurement migration is vendored.
+
+        0018 records HOW cost_usd was measured (cost_tier_type, cost_tier_name,
+        cost_measurement_source, budget_headroom_consumed_usd) so honest savings
+        (counterfactual - actual) is auditable from the projection. The node-owned
+        migration must be vendored so a clean clone materializes the columns under
+        the forward-migration runner.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0018_delegation_cost_measurements.sql"
+        )
+        assert migration.is_file(), (
+            "0018_delegation_cost_measurements.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert "ALTER TABLE delegation_events" in sql
+        for column in (
+            "cost_tier_type",
+            "cost_tier_name",
+            "cost_measurement_source",
+            "budget_headroom_consumed_usd",
+        ):
+            assert f"ADD COLUMN IF NOT EXISTS {column}" in sql
+
+    def test_budget_state_migration_vendored(self) -> None:
+        """OMN-13401/OMN-13235: the per-tenant ceiling budget-state table is vendored.
+
+        0019 creates the durable, event-sourced delegation_budget_state surface
+        (cap + consumption + headroom) so the dashboard/API can show how much of a
+        tenant's monthly ceiling budget is consumed. The node-owned migration must
+        be vendored so a clean clone materializes the table under the
+        forward-migration runner.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0019_delegation_budget_state.sql"
+        )
+        assert migration.is_file(), (
+            "0019_delegation_budget_state.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS delegation_budget_state" in sql
+        assert (
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_delegation_budget_state_identity"
+            in sql
+        )
+
     def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
         """Base migration must be safe when delegation_events already exists."""
         migration = (
