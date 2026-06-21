@@ -13,14 +13,20 @@
 #   workspace/sibling-repos/<repo-name>/  (rsync'd working tree copy)
 #   workspace/sibling-pin-comparison.json (expected-vs-actual pin proof)
 #
-# Sibling-pin preflight (OMN-12977):
+# Sibling-pin preflight (OMN-12977, OMN-13403):
 #   Before staging, the consuming repo's uv.lock is the pin authority. The
 #   build vendors the canonical OMNI_HOME clones of omnibase_infra / omnibase_core
-#   / siblings; if any clone's version or git SHA drifts from the lock, the build
-#   ABORTS rather than silently vendoring a stale sibling. This is the recurrence
-#   guard for the 2026-06-11 stability crash where a 13-day-stale infra 0.37.0-dev
-#   (pre-OMN-12501 guard) was vendored against an omnimarket dev lock pinning
-#   infra 0.38.1. Set CONSUMER_LOCK to the consuming repo's uv.lock (default:
+#   / siblings; if any clone's version mismatches the lock, or the clone is BEHIND
+#   the locked SHA (stale), the build ABORTS rather than silently vendoring a
+#   stale sibling. This is the recurrence guard for the 2026-06-11 stability crash
+#   where a 13-day-stale infra 0.37.0-dev (pre-OMN-12501 guard) was vendored
+#   against an omnimarket dev lock pinning infra 0.38.1.
+#   OMN-13403 exception: a clone whose version EXACTLY matches the lock and whose
+#   HEAD is a strict git DESCENDANT of the locked SHA (clone strictly AHEAD) is
+#   recorded as a non-fatal clone-ahead note and does NOT abort -- this is the
+#   unavoidable steady state for a real runtime sibling like onex_change_control
+#   whose dev branch advances on every receipt PR, so an exact lock pin can never
+#   durably converge. Set CONSUMER_LOCK to the consuming repo's uv.lock (default:
 #   ${OMNI_HOME}/omnimarket/uv.lock). Set ALLOW_SIBLING_PIN_DRIFT=1 ONLY with an
 #   explicit operator decision (e.g. an intentional forward rebuild ahead of a
 #   lock bump); the override is recorded in the provenance artifact, never silent.
