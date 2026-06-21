@@ -291,30 +291,10 @@ pattern_exemptions:
       - docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
     ticket: OMN-756
   # ==========================================================================
-  # RuntimeLocal Exemptions (OMN-11570)
-  # ==========================================================================
-  # Local CLI runtime moved from core to infra. It keeps the existing cohesive
-  # single-class runtime surface while the concrete implementation ownership
-  # moves layers; splitting it during the move would turn a relocation ticket
-  # into a behavior-changing runtime refactor.
-  - file_pattern: 'runtime_local\.py'
-    class_pattern: "Class 'RuntimeLocal'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      RuntimeLocal is the cohesive local CLI runtime migrated from core to infra by OMN-11570. Its methods share workflow contract state, bus lifecycle state, terminal state, and state-root persistence. Splitting is deferred to a dedicated runtime refactor ticket so this migration preserves behavior.
-
-    documentation:
-      - OMN-11546 concrete-node audit
-    ticket: OMN-11570
-  - file_pattern: 'runtime_local\.py'
-    method_pattern: "Function name 'run'"
-    violation_pattern: "Function name 'run' is too generic"
-    reason: >
-      RuntimeLocal.run is the established synchronous convenience entry point paired with run_async. Renaming would break existing local-runtime consumers during the layer migration.
-
-    documentation:
-      - OMN-11546 concrete-node audit
-    ticket: OMN-11570
+  # RuntimeLocal Exemptions (OMN-11570) removed in OMN-13445: RuntimeLocal +
+  # runtime_local.py relocated back to omnibase_core.runtime (Phase 1b,
+  # OMN-13444 / core #1296) and the infra copy was deleted. The exemptions now
+  # live with the implementation in omnibase_core.
   - file_pattern: 'cli_node\.py'
     method_pattern: "Function 'run_node_by_name'"
     violation_pattern: 'has \d+ parameters'

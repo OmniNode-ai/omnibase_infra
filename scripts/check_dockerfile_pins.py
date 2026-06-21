@@ -83,6 +83,7 @@ _NPM_PACKAGE_SPEC_RE = re.compile(
     r"(?P<package>@?[A-Za-z0-9_][A-Za-z0-9_.\-]*(?:/[A-Za-z0-9_][A-Za-z0-9_.\-]*)?)"
     r"(?:@(?P<version>[0-9][A-Za-z0-9_.\-]*))?"
 )
+_NPM_ALIAS_MARKER = "@npm:"
 
 
 def _iter_logical_lines(text: str) -> list[tuple[int, str]]:
@@ -153,6 +154,19 @@ def _parse_npm_global_installs(path: Path) -> list[NpmPinEntry]:
         for token in args.split():
             # Skip flags (-g already consumed; --foo, etc.) and shell glue.
             if token.startswith("-") or (not token[0].isalnum() and token[0] != "@"):
+                continue
+            if _NPM_ALIAS_MARKER in token:
+                alias_name, target_spec = token.split(_NPM_ALIAS_MARKER, maxsplit=1)
+                _target_package, sep, target_version = target_spec.rpartition("@")
+                if not alias_name or not sep or not target_version:
+                    continue
+                entries.append(
+                    NpmPinEntry(
+                        package=alias_name,
+                        version=target_version,
+                        line_number=line_no,
+                    )
+                )
                 continue
             spec_m = _NPM_PACKAGE_SPEC_RE.fullmatch(token)
             if not spec_m:
