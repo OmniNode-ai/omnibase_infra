@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13406"
+title: "Harden flat migration 087_drop_stale_delegation_events_decoy with CASCADE (warm-DB apply fails)"
+summary: >
+  Flat forward migration 087 used a bare `DROP TABLE IF EXISTS delegation_events` (no CASCADE). On a WARM omnibase_infra DB carrying the stale decoy delegation_events (40 rows on stability) plus its dead dependent views, Postgres refuses the drop (other objects depend on it) → forward-migration exits 3 → blocks node migrations 0017/0018/0019. Cold dev had no decoy so it passed there; stability hit it and remediated by a manual CASCADE drop (infra DB only; live omnidash_analytics.delegation_events untouched), and PROD would hit the identical blocker on first forward-migration. The fix changes the drop to `DROP TABLE IF EXISTS public.delegation_events CASCADE;`. The five dependent views the CASCADE removes (projection_delegation_summary, projection_delegation_model_routing, projection_delegation_quality_gate, projection_delegation_token_usage from node 0010; projection_delegation_savings from node_projection_savings 076) are DEAD copies that exist only in the omnibase_infra DB — created there historically when NODE_POSTGRES_DB defaulted to POSTGRES_DB(=omnibase_infra) before the node runner was repointed to omnidash_analytics. The LIVE views of the same names live in omnidash_analytics, are rebuilt there by the same node migrations under NODE_POSTGRES_DB=omnidash_analytics, and are NEVER touched by this flat infra migration (it runs only against POSTGRES_DB=omnibase_infra). The id-based runner (schema_migrations PRIMARY KEY, no checksum) skips 087 on lanes that already applied it, so editing it re-runs nowhere already-migrated and is a harmless no-op on cold DBs.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: >
+      Scratch acceptance proof on a throwaway Postgres 16 (--rm): (a) WARM DB with a decoy delegation_events + dependent view → hardened 087 succeeds and drops BOTH; (b) DB with NO decoy → 087 is a clean no-op success; (neg) WARM DB + the OLD bare DROP (no CASCADE) → Postgres refuses (reproduces the original blocker).
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -q 'OVERALL: PASS' docs/evidence/OMN-13406/087-cascade-scratch-proof.md"
+  - id: "dod-002"
+    description: >
+      Migration sequence validator passes with the CASCADE-hardened 087 (no duplicate sequence numbers; still a single flat file).
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python scripts/validation/validate_migration_sequence.py"
+  - id: "dod-deploy"
+    description: >
+      Deploy-gate evidence: 087 remains an idempotent DROP TABLE IF EXISTS targeting the stale decoy in the omnibase_infra DB, applied by the canonical forward-migration runner on the next redeploy. CASCADE only adds removal of the decoy's dead dependent views (same DB). REQUIRED_PROJECTION_TABLES checks target omnidash_analytics (the live table/views), so the drop does not break the migration gate; after merge, the prod promotion forward-migration clears the decoy automatically with no manual prod DB mutation.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-13406 hardens flat 087 to DROP TABLE IF EXISTS ... CASCADE on the stale unread decoy in the omnibase_infra DB; live delegation_events + projection views in omnidash_analytics are untouched'"
+  - id: "dod-occ-pr"
+    description: >
+      OCC evidence PR carries the central contracts/OMN-13406.yaml and the PASS dod_receipts consumed by the omnibase_infra PR Receipt Gate.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -c '^ticket_id: \"OMN-13406\"$' contracts/OMN-13406.yaml"
