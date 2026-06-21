@@ -113,6 +113,9 @@ jobs:
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
+      - name: Single-canonical in-memory event bus (OMN-13419)
+        run: bash scripts/validation/check_no_infra_inmemory_import.sh
+
       - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
         run: uv run pre-commit run no-plugin-daemon-classes --all-files
 
