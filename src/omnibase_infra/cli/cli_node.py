@@ -25,11 +25,11 @@ import click
 
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
-from omnibase_infra.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 

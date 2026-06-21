@@ -48,8 +48,8 @@ from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
+from omnibase_core.runtime.runtime_local import RuntimeLocal
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
-from omnibase_infra.runtime.runtime_local import RuntimeLocal
 
 __all__ = [
     "CAPTURE_DIR_NAME",

@@ -124,11 +124,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
     "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     "ProtocolDelegationDispatchPort": "runtime/protocols/protocol_delegation_dispatch_port.py",  # [RUNTIME] OMN-E0 delegation dispatch port interface — infra-internal, narrows dispatch surface for handler injection
-    "ProtocolLocalRuntimeBus": "protocols/protocol_local_runtime_bus.py",  # [RUNTIME] OMN-11570 local runtime bus adapter boundary
-    "ProtocolLocalRuntimeCallableTarget": "protocols/protocol_local_runtime_callable_target.py",  # [RUNTIME] OMN-11570 local handler invocation boundary
-    "ProtocolLocalRuntimeDumpModel": "protocols/protocol_local_runtime_dump_model.py",  # [RUNTIME] OMN-11570 local result serialization boundary
-    "ProtocolLocalRuntimeMessage": "protocols/protocol_local_runtime_message.py",  # [RUNTIME] OMN-11570 local bus message shape
-    "ProtocolLocalRuntimePayloadModel": "protocols/protocol_local_runtime_payload_model.py",  # [RUNTIME] OMN-11570 local payload serialization boundary
+    # OMN-13445: the 5 ProtocolLocalRuntime* protocols relocated to
+    # omnibase_core.protocols.runtime (Phase 1b, OMN-13444 / core #1296). Infra's
+    # copies were deleted, so they are no longer infra-owned protocols.
     # === [OBS] Observability protocols ===
     "ProtocolEmissionCountSource": "observability/wiring_health/protocol_emission_count_source.py",
     "ProtocolConsumptionCountSource": "observability/wiring_health/protocol_consumption_count_source.py",

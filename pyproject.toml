@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.44.0,<0.46.0",
+    "omnibase-core>=0.44.0,<0.47.0",
     "omnibase-spi>=0.22.0,<0.23.0",
     # ============================================================================
     # External Dependency Security Guidance
@@ -166,15 +166,16 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.44.0,<0.46.0",
+    "omnibase-core>=0.44.0,<0.47.0",
     "omnibase-spi>=0.22.0,<0.23.0",
 ]
 
 [tool.uv.sources]
-# OMN-13094: pin core to the merged ArtifactStore (OMN-13093) +
-# ModelArtifactRef/ModelSkillResult (OMN-13091) so `onex node --output receipt`
-# consumes the canonical content-addressed capture surface.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "d6e9c3d845a9560f9ba203c92963970c0e325c75" }
+# OMN-13445: pin core to the merged Phase-1b SHA (OMN-13444, #1296) that
+# relocated RuntimeLocal + adapter + the 5 local-runtime protocols into
+# omnibase_core.runtime / omnibase_core.protocols.runtime, so infra re-points
+# onto the core-resident runtime end-to-end without waiting on a PyPI mint.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "db7f341353e598df84629b1c32514c78d554ef57" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
