@@ -123,7 +123,7 @@ class ServiceAutoEvalRunner:
                 score=0.0,
                 latency_ms=0.0,
                 tokens_used=0,
-                cost_usd=0.0,
+                cost_usd=0.0,  # cost-zero-ok: budget-rejection path, no LLM call made
                 error_message=budget_error,
                 completed_at=datetime.now(UTC),
                 model_id=task.model_id,
@@ -159,7 +159,7 @@ class ServiceAutoEvalRunner:
                 score=0.0,
                 latency_ms=latency_ms,
                 tokens_used=0,
-                cost_usd=0.0,
+                cost_usd=0.0,  # cost-zero-ok: exception path, no tokens consumed
                 error_message=str(exc),
                 completed_at=datetime.now(UTC),
                 model_id=task.model_id,
