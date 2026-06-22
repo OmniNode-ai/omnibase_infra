@@ -103,6 +103,18 @@ fi
 STAGING_DIR="workspace/sibling-repos"
 mkdir -p "${STAGING_DIR}"
 
+# ---------------------------------------------------------------------------
+# Per-repo VCS provenance (OMN-13030): record {vcs_ref, vcs_dirty, vcs_branch}
+# for every sibling at staging time. rsync drops .git, so the staged tree has
+# no recoverable VCS identity inside the image — this is the only point in the
+# build where the source clone's git history is reachable. The manifest is
+# folded into /app/build-provenance.json by compute_workspace_provenance.py so a
+# deploy verifier can prove EXACTLY which commit (and clean/dirty state) of each
+# sibling was vendored. A sibling whose git history cannot be read is an
+# unverifiable build and ABORTS (no silent "unknown" stamp).
+# ---------------------------------------------------------------------------
+VCS_PROVENANCE_OUT="workspace/sibling-vcs-provenance.json"
+
 missing=()
 for repo in "${SIBLING_REPOS[@]}"; do
     src="${OMNI_HOME}/${repo}"
@@ -119,6 +131,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     exit 2
 fi
 
+vcs_entries=()
 for repo in "${SIBLING_REPOS[@]}"; do
     src="${OMNI_HOME}/${repo}"
     dst="${STAGING_DIR}/${repo}"
@@ -133,12 +146,45 @@ for repo in "${SIBLING_REPOS[@]}"; do
     # Record the source HEAD SHA so the lock-pin preflight and provenance can
     # identify exactly which commit was vendored. rsync drops .git, so without
     # this marker the staged tree has no recoverable SHA (OMN-12987).
-    if git -C "${src}" rev-parse HEAD >/dev/null 2>&1; then
-        git -C "${src}" rev-parse HEAD > "${dst}/.build-sha"
-    else
+    if ! vcs_ref="$(git -C "${src}" rev-parse HEAD 2>/dev/null)"; then
         echo "ERROR: cannot resolve HEAD SHA for ${src}; refusing to stage an unverifiable tree" >&2
         exit 3
     fi
+    echo "${vcs_ref}" > "${dst}/.build-sha"
+
+    # OMN-13030: capture full per-repo VCS provenance at staging time. A repo
+    # whose git history is unreadable for the branch/status probes is just as
+    # unverifiable as one missing a HEAD SHA — abort rather than stamp "unknown".
+    if ! vcs_branch="$(git -C "${src}" rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
+        echo "ERROR: cannot resolve branch for ${src}; refusing to stage an unverifiable tree (OMN-13030)" >&2
+        exit 3
+    fi
+    if ! status_out="$(git -C "${src}" status --porcelain 2>/dev/null)"; then
+        echo "ERROR: cannot resolve working-tree status for ${src}; refusing to stage an unverifiable tree (OMN-13030)" >&2
+        exit 3
+    fi
+    if [[ -n "${status_out}" ]]; then
+        vcs_dirty="true"
+    else
+        vcs_dirty="false"
+    fi
+    vcs_entries+=("$(printf '    "%s": {"vcs_ref": "%s", "vcs_dirty": %s, "vcs_branch": "%s"}' \
+        "${repo}" "${vcs_ref}" "${vcs_dirty}" "${vcs_branch}")")
 done
 
+# Emit the per-repo VCS provenance manifest. compute_workspace_provenance.py
+# folds this into /app/build-provenance.json under "per_repo_vcs_provenance".
+{
+    printf '{\n  "siblings": {\n'
+    for i in "${!vcs_entries[@]}"; do
+        if [[ "${i}" -lt $((${#vcs_entries[@]} - 1)) ]]; then
+            printf '%s,\n' "${vcs_entries[$i]}"
+        else
+            printf '%s\n' "${vcs_entries[$i]}"
+        fi
+    done
+    printf '  }\n}\n'
+} > "${VCS_PROVENANCE_OUT}"
+
 echo "workspace staging complete: ${#SIBLING_REPOS[@]} repos staged to ${STAGING_DIR}"
+echo "per-repo VCS provenance written to ${VCS_PROVENANCE_OUT}"

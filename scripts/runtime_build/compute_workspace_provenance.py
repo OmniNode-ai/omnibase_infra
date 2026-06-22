@@ -54,6 +54,13 @@ CONSUMING_REPO = "omnimarket"
 # so deploy verifiers can assert the build honored the consuming repo's lock
 # (OMN-12977). Absent only for builds staged before the preflight existed.
 PIN_COMPARISON_PATH = Path("/workspace/sibling-pin-comparison.json")
+# Per-repo VCS provenance emitted by stage_workspace.sh (OMN-13030): records
+# {vcs_ref, vcs_dirty, vcs_branch} for every staged sibling at staging time,
+# where the source clone's git history is still reachable (rsync strips .git
+# from the staged tree, so this is the ONLY recoverable VCS identity). Folded
+# into the manifest so a deploy verifier can prove which commit (and clean/dirty
+# state) of each sibling was vendored.
+VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 
 # Canonical set of sibling repos that workspace mode must provision.
 # Keys are the directory names under sibling-repos/; values are installed
@@ -147,6 +154,34 @@ def _load_pin_comparison(errors: list[str]) -> dict[str, object] | None:
             "drift(s) -- the build vendored stale siblings (OMN-12977)."
         )
     return comparison
+
+
+def _load_vcs_provenance(errors: list[str]) -> dict[str, object]:
+    """Load stage_workspace.sh's per-repo VCS provenance (OMN-13030).
+
+    Returns the parsed {"siblings": {...}} dict. A workspace build whose VCS
+    provenance is absent or carries no sibling entries means stage_workspace.sh
+    did not stamp the per-repo git identity — the staged tree is unverifiable,
+    so this is recorded as an error and fails the build (consistent with the
+    fail-closed stance the staging step already takes on an unreadable HEAD).
+    """
+    if not VCS_PROVENANCE_PATH.exists():
+        errors.append(
+            f"Missing per-repo VCS provenance: {VCS_PROVENANCE_PATH}. "
+            "stage_workspace.sh must stamp per-repo {vcs_ref, vcs_dirty, "
+            "vcs_branch} before the workspace build (OMN-13030)."
+        )
+        return {"siblings": {}}
+    parsed: dict[str, object] = json.loads(
+        VCS_PROVENANCE_PATH.read_text(encoding="utf-8")
+    )
+    siblings = parsed.get("siblings", {})
+    if not isinstance(siblings, dict) or not siblings:
+        errors.append(
+            "Per-repo VCS provenance has no sibling entries; the staged tree "
+            "is unverifiable (OMN-13030)."
+        )
+    return {"siblings": siblings if isinstance(siblings, dict) else {}}
 
 
 def main() -> int:
@@ -261,11 +296,18 @@ def main() -> int:
     # operator override was used, this records expected-vs-actual durably.
     sibling_pin_comparison = _load_pin_comparison(errors)
 
+    # OMN-13030: per-repo VCS provenance stamped by stage_workspace.sh.
+    per_repo_vcs_provenance = _load_vcs_provenance(errors)
+
     manifest = {
         "build_source": "workspace",
         "build_time": os.environ.get("BUILD_DATE", "unknown"),
-        "vcs_ref": os.environ.get("VCS_REF", "unknown"),
+        # Renamed from the ambiguous top-level "vcs_ref" (OMN-13030): this is the
+        # building omnibase_infra repo's OWN ref, distinct from the per-sibling
+        # refs now recorded under "per_repo_vcs_provenance".
+        "infra_vcs_ref": os.environ.get("VCS_REF", "unknown"),
         "proofs": proofs,
+        "per_repo_vcs_provenance": per_repo_vcs_provenance,
         "pin_comparison": pin_comparison,
         "sibling_pin_comparison": sibling_pin_comparison,
     }

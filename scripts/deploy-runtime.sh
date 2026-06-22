@@ -1410,6 +1410,18 @@ if spec and spec.origin:
         "${repo_root}/workspace/sibling-pin-comparison.json" \
         "${deploy_target}/workspace/sibling-pin-comparison.json"
 
+    # Carry the per-repo VCS provenance file Dockerfile.runtime COPYs
+    # (workspace/sibling-vcs-provenance.json, OMN-13030). Same rationale as the
+    # pin-comparison file above: the sibling-repos/ rsync only covers the
+    # subdirectory, so without this the deployed build context lacks the file and
+    # `docker build` fails on the COPY. Release mode ships the committed
+    # placeholder; workspace mode ships the real per-repo {vcs_ref, vcs_dirty,
+    # vcs_branch} stage_workspace.sh wrote into the repo root.
+    log_cmd "rsync -a workspace/sibling-vcs-provenance.json -> deployed"
+    rsync -a \
+        "${repo_root}/workspace/sibling-vcs-provenance.json" \
+        "${deploy_target}/workspace/sibling-vcs-provenance.json"
+
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
