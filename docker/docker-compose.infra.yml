@@ -368,6 +368,11 @@ services:
       # OMN-7302: raise partition cap from default 1000 to 7000 to prevent
       # "Not enough resources" failures when topic count × partitions exceeds
       # the per-shard limit.
+      # NOTE: --set is a node-startup flag that may not persist to cluster config
+      # on a fresh volume. The primary reset-proof mechanism is .bootstrap.yaml
+      # (mounted below). The redpanda-partition-cap init service also applies the
+      # value via rpk cluster config set post-startup. All three layers agree on
+      # 7000. (OMN-13469)
       - --set topic_partitions_per_shard=7000
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
@@ -379,6 +384,12 @@ services:
       - "${REDPANDA_ADMIN_PORT:-9644}:9644"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
+      # OMN-13469: .bootstrap.yaml is the volume-reset-proof primary mechanism.
+      # Redpanda reads this file on first cluster formation (fresh volume) and
+      # applies the config before any topics are created. This is belt #1;
+      # the --set flag above is belt #2; the redpanda-partition-cap init service
+      # is belt #3. Do NOT apply to prod/stability/judge (follow-up: OMN-13469).
+      - ./redpanda/.bootstrap.yaml:/etc/redpanda/.bootstrap.yaml:ro
     networks:
       - omnibase-infra-network
     healthcheck:
