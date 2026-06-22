@@ -34,5 +34,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-13472: identity regenerated after refreshing the shared CI env binding
     # for the current dev/runtime proof inputs.
-    assert lock["identity_digest"] == "0f337da65f9dbcd3018bccd77bdd1420"
-    assert lock["shared_env_digest"] == "efb9011b0136952b9f7d9886"
+    assert lock["identity_digest"] == "a5397671d0c377acef2862ca5ff5d7c4"
+    assert lock["shared_env_digest"] == "a4615f062775d0b9e025d38f"

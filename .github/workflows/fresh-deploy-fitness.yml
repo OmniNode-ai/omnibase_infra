@@ -1,0 +1,175 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# fresh-deploy-fitness.yml (OMN-13412)
+#
+# WHY THIS EXISTS
+#   Wave E hardens fresh-deploy fitness + build provenance as REQUIRED CI gates
+#   (enforcement, not detection). Each job below is a blocking status check so a
+#   broken input — a version-skewed wheel, a hardcoded zero terminal cost, a
+#   context-ROI claim with no pinning hash, or code merged onto an already-
+#   published version — fails CI with a non-zero exit BEFORE merge, never at
+#   deploy time.
+#
+# Gates in this workflow (4 of the 7 fresh-deploy fitness gates):
+#   * release-identity            — no src/** change merges without a version bump
+#   * terminal-cost-completeness  — no hardcoded cost_usd=0.0 on terminal paths
+#   * context-field-presence      — context-ROI claims carry context_pack_hash
+#   * sibling-lock-pins           — workspace-build sibling-pin recurrence ratchet
+#   * pinned-wheel-skew           — build-provenance version-skew guard
+#
+# (The scratch-Postgres cold-apply migration job lives in ci.yml as
+#  `migration-integration`; the vendored-tree byte-equality check lives in
+#  node-migration-sync.yml — both already required.)
+
+name: fresh-deploy-fitness
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  release-identity:
+    name: release-identity
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install packaging
+        run: pip install --quiet "packaging>=23"
+      - name: No code merged onto a published version without a bump
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.ref || 'dev' }}"
+          git fetch --quiet origin "${BASE}" || true
+          python scripts/check_release_identity.py --base "origin/${BASE}"
+
+  terminal-cost-completeness:
+    name: terminal-cost-completeness
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Forbid hardcoded cost_usd=0.0 on terminal cost paths
+        run: python scripts/check_terminal_cost_completeness.py
+
+  context-field-presence:
+    name: context-field-presence
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install PyYAML
+        run: pip install --quiet "PyYAML>=6"
+      - name: Context-ROI claims must carry context_pack_hash
+        run: python scripts/check_context_field_presence.py
+
+  sibling-lock-pins:
+    name: sibling-lock-pins
+    # The workspace-build sibling-pin recurrence ratchet (OMN-12977) is a
+    # build-time guard whose blocking direction is "a STALE clone that is BEHIND
+    # the lock with a mismatched version" — the 2026-06-11 crash it prevents.
+    # On the infra repo the checked-out HEAD legitimately runs AHEAD of
+    # omnimarket's lock between releases, so running the live compare as a
+    # per-PR blocking gate would red-flag every forward-version PR. The
+    # enforcement this required gate provides is the ratchet LOGIC itself: if the
+    # fatal-on-behind / clone-ahead-exception logic regresses, its test suite
+    # fails and blocks merge. The live build-time compare still runs inside the
+    # docker build (Dockerfile.runtime provenance step) where the directionality
+    # is correct.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 8
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v6
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Sibling-pin recurrence ratchet — logic regression gate
+        run: |
+          uv run --frozen pytest tests/scripts/test_check_sibling_lock_pins.py -q -p no:cacheprovider
+
+  pinned-wheel-skew:
+    name: pinned-wheel-skew
+    # ADVISORY (continue-on-error) — NOT yet a blocking required gate. A baseline
+    # run on origin/dev flags PRE-EXISTING build-provenance drift this PR did not
+    # author: OMNIBASE_COMPAT_REF is pinned to a commit while a newer compat
+    # release exists, and ONEX_CHANGE_CONTROL_REF is a floating `main` ref. Wiring
+    # this as blocking would ship a gate that is red on day one over pins owned by
+    # separate platform-debt tickets — Rule 5 prohibits detection without a clean
+    # baseline (same discipline as the actionlint carve-out in
+    # .pre-commit-config.yaml). The build-time provenance assertion already FAILS
+    # the docker build on version-skew (compute_workspace_provenance.py /
+    # assert_pins_satisfied), so the deploy-time gap is already closed. This job
+    # surfaces the drift in CI; it flips to blocking in a follow-up once the
+    # pre-existing pins are refreshed.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 8
+    continue-on-error: true
+    env:
+      GH_TOKEN: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build-provenance version-skew guard (advisory)
+        shell: bash
+        run: |
+          python scripts/check-pinned-wheels.py --dockerfile docker/Dockerfile.runtime

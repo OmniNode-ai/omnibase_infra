@@ -304,10 +304,10 @@ COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.jso
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="4d887307aae34d9d40d389ba91070cb411ce3df5"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/4d887307aae34d9d40d389ba91070cb411ce3df5.tar.gz"
-# onex_change_control tracks the moving `main` branch.
-ARG ONEX_CHANGE_CONTROL_REF=main
+ARG OMNIBASE_COMPAT_REF="v0.5.4"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.4.tar.gz"
+# Pin to the onex_change_control v0.5.3 release tag.
+ARG ONEX_CHANGE_CONTROL_REF=v0.5.3
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
