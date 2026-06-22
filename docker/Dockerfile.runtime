@@ -428,6 +428,19 @@ import importlib; \
 [importlib.import_module(m) for m in ('cachetools', 'omnimemory')]; \
 print('generation-path transitive deps verified: cachetools, omnimemory')"
 
+# OMN-12658: build-time import smoke guard for the delegation runtime path.
+# After ALL wheels are installed, import the foundation packages plus the
+# canonical delegation node handler. A skewed omnibase_compat / omnibase_core
+# wheel (or a delegation-node import break) fails the docker build non-zero
+# here — at build time — instead of degrading silently as a runtime
+# entry-point load failure. The docker-build CI job loads this image, so a
+# failing import fails the required status check on the PR.
+RUN /app/.venv/bin/python -c "\
+import omnibase_compat; \
+import omnibase_core; \
+from omnimarket.nodes.node_llm_delegation_call_effect import HandlerLlmDelegationCall; \
+print(f'delegation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}, {HandlerLlmDelegationCall.__name__}')"
+
 # Cleanup: remove __pycache__ and .pyc files from venv
 # Note: does NOT touch /root/.cache/uv (that's a cache mount, not persisted in layer)
 RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
