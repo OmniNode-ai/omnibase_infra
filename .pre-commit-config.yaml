@@ -297,6 +297,25 @@ repos:
         files: '(contract\.yaml|handlers/handler_.*\.py)$'
         pass_filenames: true
         stages: [pre-commit]
+      # ARCH-004 Signal B orchestration-monolith ratchet (OMN-13486).
+      #
+      # Changed-node ratchet (BLOCKING): for any node directory touched by this
+      # commit, fail if it introduces a NEW / worsened / untracked Class-B
+      # orchestration monolith (oversized + complex + not executor-bound),
+      # INDEPENDENT of FSM decorativeness — a DISTINCT signal from Signal A
+      # above. Accepted debt is frozen in
+      # architecture-handshakes/orchestration-monolith-baseline.yaml (its OWN
+      # baseline dimension; it can only shrink).
+      #
+      # Same OMN-12550 / OMN-13325 wiring as Signal A — NOT a parallel hook.
+      # Owner epic for the baselined nodes: OMN-13485.
+      - id: onex-orchestration-monolith-ratchet
+        name: ONEX Orchestration-Monolith Ratchet (ARCH-004 Signal B)
+        entry: uv run --frozen python scripts/validate.py orchestration_monoliths
+        language: system
+        files: '(contract\.yaml|handlers/handler_.*\.py)$'
+        pass_filenames: true
+        stages: [pre-commit]
       # Architecture layer validation - core/infra separation
       # Verifies omnibase_core has no infrastructure dependencies (kafka, httpx, etc.)
       #
@@ -759,4 +778,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
-  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
+  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]

@@ -321,6 +321,7 @@ ignore = [
 "src/omnibase_infra/observability/sinks/sink_logging_structured.py" = ["T201"]
 # ARCH-004 imperative-orchestrator ratchet CLI (OMN-13472): intentional CLI/report stdout.
 "src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py" = ["T201"]
+"src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_orchestration_monolith_ratchet.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
