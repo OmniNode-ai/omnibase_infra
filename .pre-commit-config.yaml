@@ -685,6 +685,19 @@ repos:
         pass_filenames: false
         types_or: [markdown, yaml]
         stages: [pre-commit]
+      # OMN-13030: Evidence provenance-probe gate.
+      # Rejects any staged markdown handoff/OCC/evidence doc that asserts a
+      # "deployed sha / running digest / promoted revision" claim WITHOUT an
+      # adjacent `docker exec <container> cat /app/build-provenance.json` probe
+      # citation. A deployed-SHA claim must be proven against the image's baked
+      # provenance manifest, not copied from a build log or memory.
+      - id: check-evidence-provenance-probe
+        name: Deployed-SHA claims require adjacent provenance-probe (OMN-13030)
+        entry: uv run --frozen python scripts/check_evidence_provenance_probe.py --staged
+        language: system
+        pass_filenames: false
+        types_or: [markdown]
+        stages: [pre-commit]
       # Skip-token rejection gate (OMN-11412 / OMN-10414)
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
       # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.

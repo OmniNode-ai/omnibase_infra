@@ -119,6 +119,20 @@ jobs:
       - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
         run: uv run pre-commit run no-plugin-daemon-classes --all-files
 
+      # OMN-13030: Deployed-SHA claims in handoff/OCC/evidence docs must carry an
+      # adjacent `docker exec <container> cat /app/build-provenance.json` probe.
+      # Enforcement, not detection: this runs the same gate as the pre-commit hook
+      # over the docs tree so a bypassed local hook fails the PR.
+      - name: Evidence provenance-probe gate (OMN-13030)
+        run: |
+          shopt -s globstar nullglob
+          docs_files=(docs/**/*.md)
+          if [ ${#docs_files[@]} -gt 0 ]; then
+            for f in "${docs_files[@]}"; do
+              uv run python scripts/check_evidence_provenance_probe.py --file "$f"
+            done
+          fi
+
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 

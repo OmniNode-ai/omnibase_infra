@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omninode.ai/schemas/build-provenance.json",
+  "title": "RuntimeBuildProvenance",
+  "description": "Schema for /app/build-provenance.json baked into the omninode-runtime image. Records the build source, the building infra repo's own VCS ref (infra_vcs_ref), per-sibling-repo VCS provenance (vcs_ref/vcs_dirty/vcs_branch), workspace install proofs, and sibling lock-pin comparisons. Written by scripts/runtime_build/compute_workspace_provenance.py (workspace mode) or the Dockerfile release-mode printf (OMN-13030).",
+  "type": "object",
+  "required": ["build_source", "build_time", "infra_vcs_ref"],
+  "additionalProperties": true,
+  "properties": {
+    "build_source": {
+      "type": "string",
+      "enum": ["workspace", "release"],
+      "description": "Whether the image was built from staged local sibling trees (workspace) or pinned remote sources (release)."
+    },
+    "build_time": {
+      "type": "string",
+      "description": "BUILD_DATE build-arg, or 'unknown'."
+    },
+    "infra_vcs_ref": {
+      "type": "string",
+      "description": "The building omnibase_infra repo's own git ref (VCS_REF build-arg). Renamed from the ambiguous top-level 'vcs_ref' in OMN-13030 to disambiguate the host infra ref from per-sibling refs."
+    },
+    "per_repo_vcs_provenance": {
+      "type": "object",
+      "description": "Per-sibling-repo VCS provenance captured by stage_workspace.sh at staging time. Empty in release mode (siblings come from pinned remote sources, not staged clones).",
+      "properties": {
+        "siblings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["vcs_ref", "vcs_dirty", "vcs_branch"],
+            "additionalProperties": false,
+            "properties": {
+              "vcs_ref": {
+                "type": "string",
+                "description": "The sibling clone's HEAD commit SHA at staging time."
+              },
+              "vcs_dirty": {
+                "type": "boolean",
+                "description": "True if the sibling clone had uncommitted changes (git status --porcelain non-empty) at staging time."
+              },
+              "vcs_branch": {
+                "type": "string",
+                "description": "The sibling clone's checked-out branch (git rev-parse --abbrev-ref HEAD); 'HEAD' for a detached checkout."
+              }
+            }
+          }
+        }
+      }
+    },
+    "proofs": {
+      "type": "array",
+      "description": "Per-sibling workspace install proofs (digest + local-install assertion)."
+    },
+    "pin_comparison": {
+      "type": "array",
+      "description": "Expected-vs-actual sibling lock-pin comparison computed during the provenance pass."
+    },
+    "sibling_pin_comparison": {
+      "type": ["object", "null"],
+      "description": "The preflight's expected-vs-actual sibling-pin comparison artifact, folded in for deploy verifiers."
+    }
+  }
+}

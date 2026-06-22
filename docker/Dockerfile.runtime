@@ -277,6 +277,13 @@ COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspac
 # expected-vs-actual pin proof into build-provenance.json for deploy verifiers.
 COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.json
 
+# Copy the per-repo VCS provenance emitted by stage_workspace.sh (OMN-13030). A
+# committed placeholder makes this COPY always valid; workspace mode overwrites
+# it with the real per-repo {vcs_ref, vcs_dirty, vcs_branch} so
+# compute_workspace_provenance.py can fold it into build-provenance.json for
+# deploy verifiers. Release mode ignores it.
+COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.json
+
 # workspace mode installs omnibase_core, omnibase_compat, onex_change_control,
 # omnimarket from the staged local trees.  release mode installs from pinned
 # remote sources (core stays from omnibase_infra/uv.lock — correct for a release).
@@ -356,7 +363,7 @@ RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
     else \
-        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": [],\n  "lock_pin_comparison": []\n}\n' \
+        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "infra_vcs_ref": "%s",\n  "proofs": [],\n  "per_repo_vcs_provenance": {"siblings": {}},\n  "lock_pin_comparison": []\n}\n' \
             "${BUILD_DATE:-unknown}" "${VCS_REF:-unknown}" > /app/build-provenance.json; \
     fi
 
