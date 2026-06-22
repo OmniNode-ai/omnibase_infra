@@ -574,6 +574,10 @@ def run_imperative_orchestrators(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
+    # Derive the repo key from the working tree (worktrees nest the repo name in
+    # a ticket dir, so the immediate dir name is authoritative) instead of
+    # hardcoding it; baseline entries are keyed by repo::node.
+    repo_name = repo_root.name
     baseline = load_baseline(
         repo_root / "architecture-handshakes" / "imperative-orchestrator-baseline.yaml"
     )
@@ -584,7 +588,7 @@ def run_imperative_orchestrators(
             if verbose:
                 print("Imperative Orchestrators: SKIP (no node dirs in changeset)")
             return True
-        result = scan_node_dirs("omnibase_infra", node_dirs, repo_root=repo_root)
+        result = scan_node_dirs(repo_name, node_dirs, repo_root=repo_root)
         failures = ratchet_violations(result.hard_fails, baseline)
         passed = not failures
         if verbose or not passed:
@@ -603,7 +607,7 @@ def run_imperative_orchestrators(
     )
 
     node_dirs = discover_node_dirs(repo_root)
-    result = scan_node_dirs("omnibase_infra", node_dirs, repo_root=repo_root)
+    result = scan_node_dirs(repo_name, node_dirs, repo_root=repo_root)
     print(
         f"Imperative Orchestrators (full report): "
         f"{len(result.hard_fails)} hard-fail node(s) across {len(node_dirs)} dirs."

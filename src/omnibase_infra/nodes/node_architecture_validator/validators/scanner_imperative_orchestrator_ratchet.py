@@ -437,6 +437,16 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
 
     if args.write_baseline:
+        # A baseline must capture the FULL current debt; writing one from a
+        # --check-changed scan would silently drop every hard-fail not in the
+        # changeset, shrinking the ratchet baseline below true state.
+        if not args.check_all:
+            print(
+                "--write-baseline requires --check-all (a baseline must record "
+                "the full current debt, not just the changed nodes).",
+                file=sys.stderr,
+            )
+            return 1
         write_baseline(baseline_path, args.repo_name, result.hard_fails)
         print(f"Wrote baseline: {baseline_path}")
         return 0

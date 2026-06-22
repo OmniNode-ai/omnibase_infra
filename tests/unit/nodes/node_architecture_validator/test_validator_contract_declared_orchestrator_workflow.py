@@ -27,6 +27,7 @@ from omnibase_infra.nodes.node_architecture_validator.validators.scanner_imperat
     BaselineEntry,
     discover_node_dirs,
     load_baseline,
+    main,
     ratchet_violations,
     render_baseline_yaml,
     scan_node_dirs,
@@ -632,3 +633,12 @@ def test_baseline_roundtrip(tmp_path: Path) -> None:
     assert key in loaded
     assert loaded[key].finding_codes == entry.finding_codes
     assert loaded[key].owner_ticket == "OMN-13471"
+
+
+def test_write_baseline_requires_check_all() -> None:
+    """--write-baseline must reject --check-changed (would shrink the baseline)."""
+    rc = main(["--check-changed", "--write-baseline"])
+    assert rc == 1, (
+        "--write-baseline from a --check-changed scan must fail: a baseline must "
+        "record the full current debt, not just the changed nodes."
+    )
