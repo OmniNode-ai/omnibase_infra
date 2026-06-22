@@ -171,11 +171,15 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-13445: pin core to the merged Phase-1b SHA (OMN-13444, #1296) that
-# relocated RuntimeLocal + adapter + the 5 local-runtime protocols into
-# omnibase_core.runtime / omnibase_core.protocols.runtime, so infra re-points
-# onto the core-resident runtime end-to-end without waiting on a PyPI mint.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "db7f341353e598df84629b1c32514c78d554ef57" }
+# OMN-13507: re-point core pin from db7f341353 (OMN-13444, #1296) to core dev
+# HEAD 1b22fd18b (a strict descendant of db7f341 on omnibase_core dev). The old
+# pin PREDATED the ModelTaskDelegatedEvent token fields (tokens_input/
+# tokens_output @ #1300/81c865f6, context_pack_hash @ #1299/1c412207b), so a
+# release-mode runtime build vendored a core whose frozen+extra=forbid wire
+# event rejected terminal-emit -> delegation terminal rows never persisted.
+# New pin carries all three fields; version stays 0.46.0 (override bound
+# >=0.44.0,<0.47.0 unchanged). Mirrors the OMN-13504 omnimarket relock.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "1b22fd18bc0c3aebe9501da63dc57e33a47a3d70" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 [tool.ruff]
