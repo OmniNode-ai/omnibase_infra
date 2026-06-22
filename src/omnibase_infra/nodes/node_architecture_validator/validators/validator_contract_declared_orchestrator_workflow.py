@@ -169,7 +169,7 @@ ENUM_STATE_MATCH_RATIO = 0.6
 # --------------------------------------------------------------------------- #
 # Node-directory analysis result (internal, not a public model)
 # --------------------------------------------------------------------------- #
-class _NodeAnalysis:
+class OrchestratorNodeAnalysis:
     """Mutable accumulator for one node directory's cross-file analysis.
 
     This is an internal scratch object; the public surface is the list of
@@ -414,7 +414,7 @@ def _handler_selects_state_and_emits(source: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Core node-directory analysis
 # --------------------------------------------------------------------------- #
-def analyze_node_directory(node_dir: Path) -> _NodeAnalysis | None:
+def analyze_node_directory(node_dir: Path) -> OrchestratorNodeAnalysis | None:
     """Run the ARCH-004 cross-file join over a single node directory.
 
     Args:
@@ -423,7 +423,7 @@ def analyze_node_directory(node_dir: Path) -> _NodeAnalysis | None:
             to :class:`~pathlib.Path` before calling.
 
     Returns:
-        A populated :class:`_NodeAnalysis` (with any violations), or ``None`` if
+        A populated :class:`OrchestratorNodeAnalysis` (with any violations), or ``None`` if
         the directory is not an analyzable node (no contract) or is exempt
         (reducer / not orchestrator-like).
     """
@@ -439,7 +439,7 @@ def analyze_node_directory(node_dir: Path) -> _NodeAnalysis | None:
     if not isinstance(raw, dict):
         return None
 
-    analysis = _NodeAnalysis(node_path, contract_path)
+    analysis = OrchestratorNodeAnalysis(node_path, contract_path)
     analysis.node_type = str(raw.get("node_type", ""))
     analysis.node_name = str(raw.get("name", node_path.name))
 
@@ -499,7 +499,7 @@ def analyze_node_directory(node_dir: Path) -> _NodeAnalysis | None:
     return analysis
 
 
-def _evaluate_signals(a: _NodeAnalysis) -> None:
+def _evaluate_signals(a: OrchestratorNodeAnalysis) -> None:
     """Apply the hard-fail and warning signals to a populated analysis."""
     handler_loc = a.max_handler_path or a.contract_path
 
