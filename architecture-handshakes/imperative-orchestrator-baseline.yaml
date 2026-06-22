@@ -23,7 +23,7 @@ entries:
       - H1
       - W3
       - W4
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13488
   - repo: omnibase_infra
     node: node_chain_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_replay_complete.py
@@ -31,7 +31,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13489
+    accepted_rationale: 'Thin (70L) decision handler; stateless confidence-threshold branch returning a next-step action, no decorative FSM and no handler-driven _transition. Accepted as baseline.'
   - repo: omnimarket
     node: node_delegation_orchestrator
     max_handler_path: src/omnimarket/nodes/node_delegation_orchestrator/handlers/handler_delegation_workflow.py
@@ -53,7 +54,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13490
+    accepted_rationale: 'Thin (90L) decision handler evaluating an auto-merge-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
   - repo: omnibase_infra
     node: node_registration_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_registration_orchestrator/handlers/handler_node_registration_acked.py
@@ -61,7 +63,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13491
+    accepted_rationale: 'Large (435L) but I/O-bound: owns projection read + snapshot publish and DELEGATES the ack state decision to the pure-function RegistrationReducerService (self._reducer.decide_ack); not a decorative FSM driven by handler-side _transition. Accepted as baseline (not Class A).'
   - repo: omnibase_infra
     node: node_routing_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_routing_orchestrator/handlers/handler_health_complete.py
@@ -69,7 +72,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13492
+    accepted_rationale: 'Thin (70L) decision handler evaluating a health-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
   - repo: omnibase_infra
     node: node_rsd_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_data_fetch_complete.py
@@ -77,7 +81,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13493
+    accepted_rationale: 'Thin (90L) decision handler evaluating an RSD data-fetch-complete result and emitting the next step. The node declares an execution_graph, so traversal is executor-bound rather than handler-driven; no decorative FSM and no handler-side _transition. Accepted as baseline.'
   - repo: omnibase_infra
     node: node_scope_workflow_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_scope_workflow_orchestrator/handlers/handler_scope_file_read_complete.py
@@ -85,7 +90,8 @@ entries:
     risk_score: 2
     finding_codes:
       - H2
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13494
+    accepted_rationale: 'Thin (73L) decision handler evaluating a scope file-read-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
   - repo: omnimarket
     node: pr_lifecycle_orchestrator
     max_handler_path: src/omnimarket/nodes/node_pr_lifecycle_orchestrator/handlers/handler_pr_lifecycle_orchestrator.py
@@ -96,4 +102,4 @@ entries:
       - W1
       - W2
       - W4
-    owner_ticket: OMN-13471
+    owner_ticket: OMN-13487
