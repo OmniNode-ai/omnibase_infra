@@ -32,8 +32,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13445: identity regenerated after advancing the omnibase-core pin to the
-    # Phase-1b core SHA (the pin lives in pyproject.toml + uv.lock, which are
-    # binding components of the runner image identity digest).
-    assert lock["identity_digest"] == "8c3208f1d0b18f6a94b6fe27a270e7cb"
-    assert lock["shared_env_digest"] == "a796970abe13b64c009206f2"
+    # OMN-13472: identity regenerated after refreshing the shared CI env binding
+    # for the current dev/runtime proof inputs.
+    assert lock["identity_digest"] == "0f337da65f9dbcd3018bccd77bdd1420"
+    assert lock["shared_env_digest"] == "efb9011b0136952b9f7d9886"

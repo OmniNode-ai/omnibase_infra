@@ -196,6 +196,22 @@ jobs:
           echo "================================================================"
           uv run pytest tests/audit/test_io_violations.py::TestCIGateIOPurity -v --tb=short
 
+      # ARCH-004 imperative-orchestrator ratchet (OMN-13472).
+      # Full report over the repo: surfaces every contract-declared-but-unbound
+      # orchestrator FSM driven imperatively by a handler (the delegation-shaped
+      # anti-pattern ARCH-003 misses). Non-blocking INITIALLY (continue-on-error)
+      # while the baseline is above threshold — the changed-node ratchet
+      # (pre-commit, blocking) stops regressions. Promote to a required gate once
+      # the baseline is below the agreed threshold; this rides OMN-12550
+      # (validator gating) / OMN-13325 (ratchet enforcement), not a fresh hook.
+      - name: Run imperative-orchestrator ratchet report (ARCH-004)
+        continue-on-error: true
+        run: |
+          echo "================================================================"
+          echo "Imperative-Orchestrator Ratchet Report (ARCH-004, OMN-13472)"
+          echo "================================================================"
+          uv run python scripts/validate.py imperative_orchestrators --verbose
+
       - name: Run markdown link validation
         run: |
           echo "================================================================"

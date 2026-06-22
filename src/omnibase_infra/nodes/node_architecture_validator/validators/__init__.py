@@ -26,6 +26,15 @@ Architecture Rules:
         Reducers own state machines; orchestrators are "reaction planners"
         that coordinate work based on reducer outputs.
 
+    - ARCH-004: Contract-Declared Orchestrator Workflow Must Be Bound To An Executor
+        Cross-file, node-directory rule (OMN-13472). An orchestrator-like node
+        that declares an fsm:/workflow-state set must bind it to a runtime
+        executor; it must not leave the contract table decorative while a
+        handler drives the transitions itself. Catches the delegation-shaped
+        anti-pattern (_transition(...) in a non-"*Orchestrator" handler) that
+        ARCH-003's single-file, class-name-gated AST approach structurally
+        misses. Reducers are exempt.
+
 Two Interfaces:
     **1. Function-based validators** - Direct file validation, returns detailed results.
 
@@ -79,6 +88,11 @@ Configuration:
 
 from __future__ import annotations
 
+from omnibase_infra.nodes.node_architecture_validator.validators.validator_contract_declared_orchestrator_workflow import (
+    RuleContractDeclaredOrchestratorWorkflow,
+    analyze_node_directory,
+    validate_contract_declared_orchestrator_workflow,
+)
 from omnibase_infra.nodes.node_architecture_validator.validators.validator_no_direct_dispatch import (
     RuleNoDirectDispatch,
     validate_no_direct_dispatch,
@@ -97,8 +111,12 @@ __all__: list[str] = [
     "validate_no_direct_dispatch",
     "validate_no_handler_publishing",
     "validate_no_orchestrator_fsm",
+    # Functions (node-directory cross-file validators)
+    "validate_contract_declared_orchestrator_workflow",
+    "analyze_node_directory",
     # Classes (protocol-compliant rules)
     "RuleNoDirectDispatch",
     "RuleNoHandlerPublishing",
     "RuleNoOrchestratorFSM",
+    "RuleContractDeclaredOrchestratorWorkflow",
 ]
