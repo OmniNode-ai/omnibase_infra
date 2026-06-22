@@ -67,9 +67,14 @@ class BaselineEntry:
     risk_score: int
     finding_codes: tuple[str, ...]
     owner_ticket: str
+    #: Optional one-line justification for keeping this hard-fail in the
+    #: baseline (e.g. a thin handler that delegates the state decision to a
+    #: pure-function reducer and is accepted as baseline rather than Class A).
+    #: Empty string when no rationale is recorded.
+    accepted_rationale: str = ""
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        out: dict[str, object] = {
             "repo": self.repo,
             "node": self.node,
             "max_handler_path": self.max_handler_path,
@@ -78,6 +83,9 @@ class BaselineEntry:
             "finding_codes": list(self.finding_codes),
             "owner_ticket": self.owner_ticket,
         }
+        if self.accepted_rationale:
+            out["accepted_rationale"] = self.accepted_rationale
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BaselineEntry:
@@ -100,6 +108,7 @@ class BaselineEntry:
             risk_score=_as_int(data.get("risk_score", 0)),
             finding_codes=codes,
             owner_ticket=str(data.get("owner_ticket", "")),
+            accepted_rationale=str(data.get("accepted_rationale", "")),
         )
 
 
