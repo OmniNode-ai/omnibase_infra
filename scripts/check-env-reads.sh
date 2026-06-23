@@ -24,6 +24,12 @@ APPROVED_INFIX_PATTERNS=(
     "/runtime/config_discovery/config_prefetcher.py"
     "/runtime/runtime_profile.py"
     "/services/registry_api/registry_discovery.py"
+    # OMN-13537: receipt-mode CLI is the config-resolution boundary between the
+    # --state-root flag and the ArtifactStore's sole env-var contract
+    # (ONEX_ARTIFACT_STORE_ROOT). The pinned omnibase_core store exposes no
+    # injection seam, so the boundary must publish the resolved default to the
+    # environment — same class of boundary as service_kernel/config_prefetcher.
+    "/cli/receipt_mode.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

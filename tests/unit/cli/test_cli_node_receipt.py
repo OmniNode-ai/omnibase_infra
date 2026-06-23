@@ -12,8 +12,10 @@ Acceptance is STRUCTURAL, not size-based (plan Open Question 3 resolution):
   artifact store and hash-verified on retrieval;
 - ``artifact.captured`` + ``tool.output.captured`` are emitted via the emit
   daemon socket, or spooled locally when the daemon is unreachable;
-- artifact-write failure prints the FULL output instead of a receipt
-  (no hidden loss);
+- ONEX_ARTIFACT_STORE_ROOT defaults to ``<state_root>/artifacts`` when unset
+  so durable capture succeeds without a pre-exported env var (OMN-13537);
+- a genuine (non-env) artifact-write failure prints the FULL output instead of
+  a receipt (no hidden loss);
 - node failure produces ``status=failed`` with the full error output inline.
 
 These tests run the REAL dispatch path: the actual click command through the
@@ -280,14 +282,73 @@ class TestReceiptModeSuccess:
         assert not spool_dir.exists() or not list(spool_dir.iterdir())
 
 
-class TestReceiptModeFailureAsymmetry:
-    def test_artifact_write_failure_prints_full_output_not_receipt(
+class TestArtifactStoreRootDefault:
+    """OMN-13537: ONEX_ARTIFACT_STORE_ROOT defaults to <state_root>/artifacts.
+
+    Before this fix the unset env var raised KeyError in the store constructor
+    and the receipt path failed OPEN — receipts were silently never captured.
+    """
+
+    def test_unset_env_captures_under_state_root_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Missing ONEX_ARTIFACT_STORE_ROOT ⇒ FULL output, no receipt."""
-        result, _ = _invoke_receipt(tmp_path, monkeypatch, store_root=None)
-        # The run itself succeeded; capture failed; nothing may be hidden.
+        """Unset ONEX_ARTIFACT_STORE_ROOT ⇒ default-resolve, receipt captured."""
+        result, state_root = _invoke_receipt(tmp_path, monkeypatch, store_root=None)
+        assert result.exit_code == 0, result.output
+        # No fail-open: the KeyError line must NOT appear.
+        assert "artifact capture failed" not in result.stderr
+        assert "no hidden loss" not in result.stderr
+        # Exactly one receipt JSON on stdout (capture succeeded).
+        payload = _parse_single_receipt(result.stdout)
+        receipt = ModelSkillResult.model_validate(payload)
+        assert receipt.status.is_success_like
+        assert receipt.artifact_refs, "capture must be artifact-backed via default"
+
+        # Artifacts physically landed under the defaulted <state_root>/artifacts.
+        default_store_root = state_root / "artifacts"
+        assert default_store_root.is_dir()
+        store = ArtifactStore()  # reads the env var the CLI just defaulted
+        assert store.root == default_store_root.resolve()
+        for raw_ref in payload["artifact_refs"]:  # type: ignore[union-attr]
+            assert isinstance(raw_ref, dict)
+            ref = ModelArtifactRef.model_validate(raw_ref)
+            store.read_blob(ref)  # re-hashes; raises on mismatch
+            assert store.read_meta(ref).source_system == "onex_cli"
+
+    def test_explicit_env_override_wins_over_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit ONEX_ARTIFACT_STORE_ROOT is honored, not the default."""
+        explicit_root = tmp_path / "operator-chosen-artifacts"
+        result, state_root = _invoke_receipt(
+            tmp_path, monkeypatch, store_root=explicit_root
+        )
+        assert result.exit_code == 0, result.output
+        _parse_single_receipt(result.stdout)
+        # Artifacts went to the operator path, NOT the state-root default.
+        assert explicit_root.is_dir()
+        assert list(explicit_root.iterdir()), "explicit store root must hold blobs"
+        default_store_root = state_root / "artifacts"
+        assert not default_store_root.exists(), "default must not be used on override"
+
+
+class TestReceiptModeFailureAsymmetry:
+    def test_genuine_write_failure_prints_full_output_not_receipt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A real (non-env) artifact write failure ⇒ FULL output, no receipt.
+
+        Fail-loud is preserved for genuine write errors: pointing the store
+        root at an existing regular FILE makes the store's shard ``mkdir`` raise
+        ``NotADirectoryError`` (an ``OSError``), which must surface the full
+        output (no hidden loss) rather than a receipt.
+        """
+        store_file = tmp_path / "store-is-a-file"
+        store_file.write_text("not a directory", encoding="utf-8")
+        result, _ = _invoke_receipt(tmp_path, monkeypatch, store_root=store_file)
+        # The run itself succeeded; capture failed for a real reason.
         assert result.exit_code == 0
+        assert "artifact capture failed" in result.stderr
         assert "no hidden loss" in result.stderr
         # Full capture stream passes through instead of a receipt.
         assert "RuntimeLocal" in result.stdout

@@ -16,9 +16,19 @@ Layer A of the skill-output-suppression slice
   :class:`~omnibase_core.models.dispatch.model_skill_result.ModelSkillResult`
   JSON object carrying the FULL result.
 
+Artifact store root resolution (OMN-13537):
+
+- The artifact store root defaults to ``<state_root>/artifacts`` when
+  ``ONEX_ARTIFACT_STORE_ROOT`` is unset, so durable capture succeeds for the
+  CLI surface (``onex node/skill/delegate --output receipt``) without the
+  operator pre-exporting the env var. An explicit override always wins.
+  Before this, the unset env var raised ``KeyError`` in the store constructor
+  and the path **failed open** — receipts were silently never captured.
+
 Failure asymmetry (capture vs telemetry):
 
-- Artifact write failure ⇒ the FULL output is printed instead of the receipt
+- Artifact write failure (a genuine OSError/quota/etc., NOT a missing-env
+  default) ⇒ the FULL output is printed instead of the receipt
   (no hidden loss — parent invariant 1; no silent fallback).
 - Artifact write success but event emission failure ⇒ the receipt still
   prints; the event is spooled to a local outbox under the state root for
@@ -26,12 +36,16 @@ Failure asymmetry (capture vs telemetry):
   when the artifact exists.
 
 .. versionadded:: OMN-13094
+.. versionchanged:: OMN-13537
+   Artifact store root defaults to ``<state_root>/artifacts`` when unset
+   (was: KeyError → fail-open, receipts silently dropped).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import time
 import traceback
@@ -43,7 +57,10 @@ from typing import cast
 import click
 from pydantic import JsonValue, ValidationError
 
-from omnibase_core.artifacts.artifact_store import ArtifactStore
+from omnibase_core.artifacts.artifact_store import (
+    ARTIFACT_STORE_ROOT_ENV,
+    ArtifactStore,
+)
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
@@ -64,6 +81,12 @@ logger = logging.getLogger(__name__)
 # (matching the workflow_result.json convention — plan Open Question 4).
 CAPTURE_DIR_NAME = "captures"
 SPOOL_DIR_NAME = "emit_spool"
+
+# Artifact store root is a sub-directory of the node's state root by default.
+# The receipt's durable captures (capture log + handler result) belong with the
+# run's other state, so the artifact store shares the state root rather than
+# living in an unrelated location.
+ARTIFACT_STORE_DIR_NAME = "artifacts"
 
 # Socket timeout for emit-daemon calls. Emission is telemetry, never the
 # critical path — a slow daemon must not stall the dispatch.
@@ -252,6 +275,40 @@ def _print_full_output_on_capture_failure(
         click.echo(json.dumps(workflow_data, indent=2))
 
 
+def _resolve_artifact_store_root(state_root: Path) -> Path:
+    """Resolve the artifact store root for receipt-mode capture (boundary).
+
+    The artifact store (omnibase_core) resolves its root *only* from
+    ``ONEX_ARTIFACT_STORE_ROOT`` and ``KeyError``\\s when unset — fail-fast by
+    design (Operating Rule 8). But the receipt-mode CLI is invoked from operator
+    shells that set ``ONEX_STATE_DIR`` but NOT ``ONEX_ARTIFACT_STORE_ROOT``
+    (only the hook backstop exports it, OMN-13095). Without a default here, the
+    unset env var caught the KeyError and the path **failed open** — receipts
+    were silently never captured (OMN-13537).
+
+    This function is the config-resolution boundary between the CLI's
+    ``--state-root`` flag and the store's env-var contract (the same class of
+    boundary as ``runtime/config_discovery`` / ``service_kernel``): an explicit
+    operator-set ``ONEX_ARTIFACT_STORE_ROOT`` always wins; otherwise the store
+    root defaults to ``<state_root>/artifacts``, the convention the hook backstop
+    already encodes. This is NOT a silent fallback to a wrong path — it is the
+    documented home for this run's durable captures, co-located with the run's
+    other state. The resolved default is published to the environment so the
+    pinned ``ArtifactStore`` constructor reads it through its sole resolution
+    path (one source of truth for the store root; no second resolution surface).
+
+    Returns:
+        The resolved artifact store root (absolute path under ``state_root`` when
+        no explicit override is set).
+    """
+    # Explicit operator override wins; only default when truly unset/empty.
+    if os.environ.get(ARTIFACT_STORE_ROOT_ENV):
+        return Path(os.environ[ARTIFACT_STORE_ROOT_ENV])
+    resolved = (state_root / ARTIFACT_STORE_DIR_NAME).resolve()
+    os.environ[ARTIFACT_STORE_ROOT_ENV] = str(resolved)
+    return resolved
+
+
 def run_receipt_mode(
     *,
     node_name: str,
@@ -318,6 +375,11 @@ def run_receipt_mode(
         ]
 
     # --- Layer B: durable capture (parent invariant 1) -------------------
+    # Resolve the artifact store root BEFORE constructing the store: default it
+    # to <state_root>/artifacts when unset so durable capture succeeds instead
+    # of failing open on a missing ONEX_ARTIFACT_STORE_ROOT (OMN-13537). An
+    # explicit operator override still wins.
+    _resolve_artifact_store_root(state_root)
     handler_result_json = workflow_data.get("handler_result")
     artifact_payloads: list[dict[str, JsonValue]] = []
     artifact_refs: list[ModelArtifactRef] = []
