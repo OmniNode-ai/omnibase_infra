@@ -160,3 +160,73 @@ async def test_wire_from_manifest_non_strict_does_not_raise(
         f"Expected 1 failure in non-strict report, got {report.total_failed}"
     )
     assert report.total_wired == 0
+
+
+def _make_contract_with_real_module_missing_class(name: str) -> ModelDiscoveredContract:
+    """Contract that references a real module but a class that does not exist.
+
+    This is the exact failure mode from OMN-12408: the module is importable but
+    the handler class declared in handler_routing was never written.
+    """
+    return ModelDiscoveredContract(
+        name=name,
+        node_type="EFFECT_GENERIC",
+        contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+        contract_path=Path("/fake/contract.yaml"),
+        entry_point_name=name,
+        package_name="test-package",
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=(f"onex.evt.platform.{name}.v1",),
+            publish_topics=(),
+        ),
+        handler_routing=ModelHandlerRouting(
+            routing_strategy="payload_type_match",
+            handlers=(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        # Real module, class that was never written (OMN-12408 failure mode).
+                        name="HandlerClassThatWasNeverWritten",
+                        module="omnibase_infra.runtime.auto_wiring.handler_wiring",
+                    ),
+                    event_model=None,
+                    operation=None,
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_missing_handler_class_hard_fails_regardless_of_strict_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing handler class causes TypeError crash even without strict mode.
+
+    OMN-12408: a handler_routing entry referencing a class that does not exist
+    in an otherwise-importable module is a build/contract defect. It must produce
+    a hard startup crash (TypeError propagates unchanged through the strict-mode
+    gate) rather than a collectable soft failure that is silently ignored in
+    non-strict mode.
+
+    Contrast with test_wire_from_manifest_non_strict_does_not_raise which uses a
+    non-importable module (ImportError) — that remains a collectable failure under
+    OMN-9126. The missing-class case bypasses the strict-mode gate entirely.
+    """
+    monkeypatch.delenv("ONEX_WIRING_STRICT_MODE", raising=False)
+
+    contract = _make_contract_with_real_module_missing_class(name="node_missing_class")
+    manifest = ModelAutoWiringManifest(contracts=[contract])
+
+    dispatch_engine = MagicMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
+
+    # TypeError propagates from _import_handler_class → _prepare_handler_wiring
+    # → _prepare_contract_wiring (re-raises TypeError) → wire_from_manifest
+    # (re-raises TypeError unchanged, bypassing strict-mode gate).
+    with pytest.raises(TypeError, match="CLASS_NOT_FOUND"):
+        await wire_from_manifest(
+            manifest=manifest,
+            dispatch_engine=dispatch_engine,
+            event_bus=event_bus,
+        )

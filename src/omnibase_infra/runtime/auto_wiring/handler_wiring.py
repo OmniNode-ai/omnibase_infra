@@ -355,11 +355,22 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
 
     Raises:
         ImportError: If the module cannot be imported.
-        AttributeError: If the class is not found in the module.
+        TypeError: If the class is not found in the module (OMN-12408 hard-fail).
+            A handler class declared in a contract but absent from its module is a
+            build/contract defect — not a degradable runtime condition. TypeError is
+            used (rather than AttributeError) so the caller's existing TypeError
+            catch-and-reraise path (which bypasses the ONEX_WIRING_STRICT_MODE gate)
+            propagates this failure as a startup crash regardless of strict mode.
     """
     mod = importlib.import_module(module_path)
-    cls = getattr(mod, class_name)
-    return cls
+    if not hasattr(mod, class_name):
+        raise TypeError(
+            f"CLASS_NOT_FOUND (HANDLER_LOADER_011): class '{class_name}' does not "
+            f"exist in module '{module_path}'. "
+            f"A contract that names a handler class that does not exist is a "
+            f"build/contract defect, not a degradable condition (OMN-12408)."
+        )
+    return getattr(mod, class_name)  # type: ignore[no-any-return]
 
 
 def _assert_is_ownership_query(obj: object) -> None:
