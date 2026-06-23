@@ -136,13 +136,23 @@ for repo in "${SIBLING_REPOS[@]}"; do
     src="${OMNI_HOME}/${repo}"
     dst="${STAGING_DIR}/${repo}"
     echo "staging: ${src} -> ${dst}"
-    rsync -a --delete \
-        --exclude='.git' \
-        --exclude='__pycache__' \
-        --exclude='*.pyc' \
-        --exclude='.venv' \
-        --exclude='*.egg-info' \
-        "${src}/" "${dst}/"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.venv' \
+            --exclude='*.egg-info' \
+            "${src}/" "${dst}/"
+    else
+        rm -rf "${dst}"
+        mkdir -p "${dst}"
+        cp -a "${src}/." "${dst}/"
+        rm -rf "${dst}/.git" "${dst}/.venv"
+        find "${dst}" -name '__pycache__' -type d -prune -exec rm -rf {} +
+        find "${dst}" -name '*.pyc' -type f -delete
+        find "${dst}" -name '*.egg-info' -prune -exec rm -rf {} +
+    fi
     # Record the source HEAD SHA so the lock-pin preflight and provenance can
     # identify exactly which commit was vendored. rsync drops .git, so without
     # this marker the staged tree has no recoverable SHA (OMN-12987).
