@@ -10,7 +10,7 @@
 #     bash docker/runtime_build/stage_workspace.sh
 #
 # On success, creates:
-#   workspace/sibling-repos/<repo-name>/  (rsync'd working tree copy)
+#   workspace/sibling-repos/<repo-name>/  (staged working tree copy)
 #   workspace/sibling-pin-comparison.json (expected-vs-actual pin proof)
 #
 # Sibling-pin preflight (OMN-12977, OMN-13403):
@@ -137,6 +137,7 @@ for repo in "${SIBLING_REPOS[@]}"; do
     dst="${STAGING_DIR}/${repo}"
     echo "staging: ${src} -> ${dst}"
     if command -v rsync >/dev/null 2>&1; then
+        echo "  method: rsync"
         rsync -a --delete \
             --exclude='.git' \
             --exclude='__pycache__' \
@@ -145,6 +146,7 @@ for repo in "${SIBLING_REPOS[@]}"; do
             --exclude='*.egg-info' \
             "${src}/" "${dst}/"
     else
+        echo "  method: cp (rsync unavailable)"
         rm -rf "${dst}"
         mkdir -p "${dst}"
         cp -a "${src}/." "${dst}/"

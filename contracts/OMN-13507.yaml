@@ -18,6 +18,8 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "git -C ../../../omnibase_core merge-base --is-ancestor 8ecb7efc17721dda2ce468b2e5051816ff8e89bc origin/dev"
+      - check_type: "command"
+        check_value: "git -C ../../../omnibase_core merge-base --is-ancestor db7f341353e598df84629b1c32514c78d554ef57 8ecb7efc17721dda2ce468b2e5051816ff8e89bc"
   - id: "dod-002"
     description: "The pinned core source carries all three ModelTaskDelegatedEvent token fields (tokens_input, tokens_output, context_pack_hash). uv sync resolves the new pin; introspection of M.model_fields shows all 3 present, so terminal-emit no longer raises ValidationError under frozen+extra=forbid."
     source: "manual"
