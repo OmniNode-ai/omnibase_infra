@@ -67,6 +67,15 @@ _EXPECTED_SKILLS = frozenset(
         "session",
         "shim_audit",
         "delegate",
+        # OMN-13511: the four dogfood runtime sweeps + skill_functional_audit
+        # were node-backed but unregistered — `onex skill <name>` returned
+        # "Unknown skill" so the sweeps were unrunnable headless.
+        "runtime_sweep",
+        "golden_chain_sweep",
+        "integration_sweep",
+        "contract_sweep",
+        "skill_functional_audit",
+        "dod_sweep",
     }
 )
 
@@ -218,6 +227,90 @@ def test_pr_review_and_hostile_skills_target_existing_nodes() -> None:
             f"{skill_name} -> {mapping.node_name!r} is not a real node in the "
             "omnimarket onex.nodes catalog"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Every node-backed skill MUST be registered in skill_mapping.yaml (OMN-13511)
+#
+# The inverse of the OMN-13531 gate above (mapping -> catalog). OMN-13531 proves
+# every *mapped* node_name exists; this proves every *node-backed sweep skill*
+# is mapped. The live failure that motivated this fixture: runtime_sweep,
+# golden_chain_sweep, integration_sweep, and contract_sweep each had a real
+# omnimarket backing node but were absent from skill_mapping.yaml, so
+# `onex skill <name>` returned "Unknown skill" and the dogfood runtime sweeps
+# were unrunnable headless.
+#
+# Source of truth is the canonical omnimarket onex.nodes catalog (same parse as
+# OMN-13531), NOT a fragile SKILL.md grep. The map below pins each dogfood
+# sweep + audit skill to its backing node; the test asserts that for every pair
+# whose node is in the catalog, the skill is registered AND resolves. A new
+# node-backed sweep that lands in omnimarket but is never wired into the
+# mapping fails here at CI time instead of at dispatch time.
+# --------------------------------------------------------------------------- #
+
+# skill_name -> canonical omnimarket node_name for the dogfood verification
+# family. These are the skills a session is told to dogfood (CLAUDE.md Rule 1:
+# /onex:runtime_sweep, /onex:contract_sweep, etc.). Each entry must be a real
+# node in the omnimarket catalog and a registered `onex skill`.
+_NODE_BACKED_DOGFOOD_SKILLS: dict[str, str] = {
+    "runtime_sweep": "node_runtime_sweep",
+    "golden_chain_sweep": "node_golden_chain_sweep",
+    "integration_sweep": "node_integration_sweep_orchestrator",
+    "contract_sweep": "node_contract_sweep",
+    "skill_functional_audit": "node_skill_functional_audit_compute",
+    "compliance_sweep": "node_compliance_sweep",
+    "data_flow_sweep": "node_data_flow_sweep",
+    "database_sweep": "node_database_sweep",
+    "dod_sweep": "node_dod_sweep_orchestrator",
+    "coverage_sweep": "node_coverage_sweep",
+}
+
+
+def test_every_node_backed_sweep_skill_is_registered() -> None:
+    """Every dogfood sweep with a real backing node is registered + resolves.
+
+    Guards the OMN-13511 regression class (node exists, skill unregistered) for
+    the dogfood verification family. Without this, a sweep can ship a backing
+    node in omnimarket yet stay unrunnable via `onex skill <name>` because the
+    declarative mapping was never updated — exactly how runtime_sweep,
+    golden_chain_sweep, integration_sweep, and contract_sweep regressed.
+    """
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is None:
+        pytest.skip(
+            "omnimarket source tree not resolvable "
+            "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
+        )
+
+    declared_nodes = _omnimarket_declared_nodes(omnimarket_root)
+    registry = load_skill_registry()
+    by_name = {s.skill_name: s for s in registry.skills}
+
+    unregistered: dict[str, str] = {}
+    mismatched: dict[str, str] = {}
+    for skill_name, node_name in _NODE_BACKED_DOGFOOD_SKILLS.items():
+        # Only enforce registration for nodes the catalog actually carries; a
+        # skill whose backing node was deleted/renamed is a different bug class
+        # (covered by the OMN-13531 mapping->catalog gate).
+        if node_name not in declared_nodes:
+            continue
+        mapping = by_name.get(skill_name)
+        if mapping is None:
+            unregistered[skill_name] = node_name
+            continue
+        if mapping.node_name != node_name:
+            mismatched[skill_name] = (
+                f"mapped to {mapping.node_name!r}, expected {node_name!r}"
+            )
+
+    assert not unregistered, (
+        "node-backed dogfood sweep skill(s) absent from skill_mapping.yaml — "
+        "`onex skill <name>` returns 'Unknown skill' so the sweep is unrunnable "
+        f"headless (OMN-13511): {unregistered}"
+    )
+    assert not mismatched, (
+        f"dogfood sweep skill(s) wired to the wrong backing node: {mismatched}"
+    )
 
 
 def test_registry_rejects_duplicate_skill_names() -> None:
@@ -558,6 +651,89 @@ def test_gap_payload_validates_against_request_model() -> None:
     assert request.subcommand.value == "detect"
     assert request.scope == "local"
     assert request.severity_threshold.value == "CRITICAL"
+
+
+def test_contract_sweep_payload_validates_against_request_model() -> None:
+    """The OMN-13511 contract_sweep mapping builds an acceptable payload.
+
+    The node request model is ``extra="forbid"``, so every CLI arg the mapping
+    surfaces must be a real request-model field — this proves it for the
+    newly-registered sweep rather than only that it dispatches.
+    """
+    handler_module = pytest.importorskip(
+        "omnimarket.nodes.node_contract_sweep.handlers.handler_contract_sweep"
+    )
+    ContractSweepRequest = handler_module.ContractSweepRequest
+
+    registry = load_skill_registry()
+    contract_sweep = registry.get("contract_sweep")
+    assert contract_sweep is not None
+    assert contract_sweep.node_name == "node_contract_sweep"
+    payload = _parse_skill_args(
+        contract_sweep, ("--repos", "omnibase_core,omnibase_infra", "--dry-run")
+    )
+    request = ContractSweepRequest.model_validate(payload)
+    assert request.repos == ["omnibase_core", "omnibase_infra"]
+    assert request.dry_run is True
+
+
+def test_runtime_sweep_payload_validates_against_request_model() -> None:
+    """The OMN-13511 runtime_sweep mapping builds an acceptable payload."""
+    handler_module = pytest.importorskip(
+        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
+    )
+    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
+
+    registry = load_skill_registry()
+    runtime_sweep = registry.get("runtime_sweep")
+    assert runtime_sweep is not None
+    assert runtime_sweep.node_name == "node_runtime_sweep"
+    payload = _parse_skill_args(runtime_sweep, ("--dry-run",))
+    request = RuntimeSweepRequest.model_validate(payload)
+    assert request.dry_run is True
+
+
+def test_integration_sweep_payload_validates_against_request_model() -> None:
+    """The OMN-13511 integration_sweep mapping builds an acceptable payload."""
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_integration_sweep_orchestrator.models."
+        "model_integration_sweep_orchestrator_request"
+    )
+    ModelIntegrationSweepOrchestratorRequest = (
+        request_module.ModelIntegrationSweepOrchestratorRequest
+    )
+
+    registry = load_skill_registry()
+    integration_sweep = registry.get("integration_sweep")
+    assert integration_sweep is not None
+    assert integration_sweep.node_name == "node_integration_sweep_orchestrator"
+    payload = _parse_skill_args(
+        integration_sweep, ("--scope", "post-merge", "--tickets", "OMN-1,OMN-2")
+    )
+    request = ModelIntegrationSweepOrchestratorRequest.model_validate(payload)
+    assert request.scope == "post-merge"
+    assert request.tickets == ["OMN-1", "OMN-2"]
+    # run_surface_probes defaults to True via the mapping default.
+    assert request.run_surface_probes is True
+
+
+def test_skill_functional_audit_payload_validates_against_request_model() -> None:
+    """The OMN-13511 skill_functional_audit mapping builds an acceptable payload."""
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_skill_functional_audit_compute.models."
+        "model_skill_functional_audit_compute_request"
+    )
+    ModelSkillFunctionalAuditComputeRequest = (
+        request_module.ModelSkillFunctionalAuditComputeRequest
+    )
+
+    registry = load_skill_registry()
+    audit = registry.get("skill_functional_audit")
+    assert audit is not None
+    assert audit.node_name == "node_skill_functional_audit_compute"
+    payload = _parse_skill_args(audit, ("--skills-filter", "merge_sweep,gap"))
+    request = ModelSkillFunctionalAuditComputeRequest.model_validate(payload)
+    assert request.skills_filter == ["merge_sweep", "gap"]
 
 
 def test_command_writes_payload_under_state_root_not_tmp(

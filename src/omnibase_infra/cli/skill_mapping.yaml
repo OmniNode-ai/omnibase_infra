@@ -41,6 +41,53 @@ skills:
       - {name: flows, payload_field: flows, arg_type: string_list}
       - {name: collect, payload_field: collect, arg_type: boolean, default: false}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # OMN-13511: the four dogfood runtime sweeps + skill_functional_audit were
+  # node-backed in omnimarket but never registered here, so `onex skill
+  # <name>` returned "Unknown skill" and the sweeps were unrunnable headless.
+  # Each node_name is the canonical omnimarket onex.nodes entry point; each arg
+  # maps onto a field the node's request model accepts (extra="forbid" — only
+  # request-model fields may be surfaced as CLI args). The handlers self-collect
+  # their runtime/census metadata, so most sweeps expose only run-mode flags.
+  - skill_name: runtime_sweep
+    node_name: node_runtime_sweep
+    result_model: omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep.RuntimeSweepResult
+    args:
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: golden_chain_sweep
+    node_name: node_golden_chain_sweep
+    result_model: omnimarket.nodes.node_golden_chain_sweep.handlers.handler_golden_chain_sweep.GoldenChainSweepResult
+    args:
+      - {name: idle-gate, payload_field: idle_gate, arg_type: boolean, default: false}
+  - skill_name: integration_sweep
+    node_name: node_integration_sweep_orchestrator
+    result_model: omnimarket.nodes.node_integration_sweep_orchestrator.models.model_integration_sweep_orchestrator_result.ModelIntegrationSweepOrchestratorResult
+    args:
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: tickets, payload_field: tickets, arg_type: string_list}
+      - {name: run-surface-probes, payload_field: run_surface_probes, arg_type: boolean, default: true}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: contract_sweep
+    node_name: node_contract_sweep
+    result_model: omnimarket.nodes.node_contract_sweep.handlers.handler_contract_sweep.ContractSweepResult
+    args:
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: dod_sweep
+    node_name: node_dod_sweep_orchestrator
+    result_model: omnimarket.nodes.node_dod_sweep_orchestrator.models.model_dod_sweep_orchestrator_result.ModelDodSweepOrchestratorResult
+    args:
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: ticket-ids, payload_field: ticket_ids, arg_type: string_list}
+      - {name: gh-search-query, payload_field: gh_search_query, arg_type: string}
+      - {name: gh-repo, payload_field: gh_repo, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: skill_functional_audit
+    node_name: node_skill_functional_audit_compute
+    result_model: omnimarket.nodes.node_skill_functional_audit_compute.models.model_skill_functional_audit_compute_result.ModelSkillFunctionalAuditComputeResult
+    args:
+      - {name: skills-filter, payload_field: skills_filter, arg_type: string_list}
+      - {name: skills-roots, payload_field: skills_roots, arg_type: string_list}
+      - {name: nodes-root, payload_field: nodes_root, arg_type: string}
   - skill_name: auto_merge
     node_name: node_auto_merge_effect
     result_model: omnimarket.nodes.node_auto_merge_effect.models.model_auto_merge_result.ModelAutoMergeResult
