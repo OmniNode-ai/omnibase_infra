@@ -1,0 +1,48 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13109
+title: 'Runner-fleet monitor: silent-wedge + crash-loop detection'
+summary: >-
+  Upgrade runner-monitor.sh detection so it catches the two failure modes the legacy container+registration check missed: (a) SILENT-WEDGE — a runner that is Up (healthy) and online/registered but idle while jobs sit queued past a threshold (registered but not pulling work), and (b) CRASH-LOOP-ON-RESTART — a container with a climbing RestartCount or repeated config.sh re-registration markers. Both alert to Slack with the SAFE force-recreate remediation recipe (fresh registration token, named services only, detached). Auto-bounce is gated OFF by default; the script remains observe-and-alert.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Behavioral shell-driven tests prove the upgraded monitor flags a wedged runner the legacy logic passed, flags crash-loop, and never invokes docker restart / empty-filter bounce.
+    command: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks <PR> --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001-wedge
+    description: >-
+      The upgraded monitor flags a SILENT-WEDGE (runner online + busy=0 while a self-hosted job has been queued past the threshold) — the exact state the legacy container+registration logic returned CLEAN. Test drives the real runner-monitor.sh end-to-end with mocked docker/curl/gh/date and asserts wedge_count >= 1.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py::test_silent_wedge_is_flagged_where_legacy_logic_passed -q'
+  - id: dod-002-crashloop
+    description: >-
+      The upgraded monitor flags CRASH-LOOP via climbing RestartCount and via repeated config.sh re-registration log markers, even when the container momentarily reports Up (healthy).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest "tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py::test_crashloop_flagged_on_high_restart_count" "tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py::test_crashloop_flagged_on_reregistration_log_markers" -q'
+  - id: dod-003-no-mutation
+    description: >-
+      Safety invariant: with auto-bounce OFF (default) the monitor never invokes docker restart or an empty-filter docker compose recreate against the fleet; the documented remediation is force-recreate of NAMED services only with a freshly minted registration token.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest "tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py::test_monitor_never_runs_docker_restart_or_empty_bounce" "tests/unit/observability/runner_health/test_runner_monitor_wedge_detection.py::test_script_documents_safe_bounce_and_forbids_docker_restart" -q'
+  - id: dod-004-suite
+    description: Full runner_health unit suite stays green (no regression to existing monitor/collector/janitor tests).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/observability/runner_health/ -q'
