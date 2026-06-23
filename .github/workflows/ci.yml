@@ -1289,7 +1289,7 @@ jobs:
 
       - name: Download all JUnit XML shards
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: test-results-*
           path: junit-shards
