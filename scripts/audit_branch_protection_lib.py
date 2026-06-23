@@ -27,6 +27,19 @@ the audit logic testable without spawning bash/gh as child processes.
 PAGE_SIZE = 100
 """GitHub REST pagination page size; 100 is the API maximum (OMN-9034 thread 7)."""
 
+PR_ONLY_CONTEXTS: frozenset[str] = frozenset({"main-target-guard"})
+"""Required contexts whose check-runs bind to the PR head SHA, never to a
+default-branch commit, so Check B can never observe them on `main`.
+
+`main-target-guard` (.github/workflows/main-target-guard.yml, OMN-12243)
+triggers ONLY on `pull_request` events targeting `main` and binds its
+check-run to the PR HEAD SHA (a feature-branch tip). It therefore can never
+appear in `main`'s commit check-runs and was permanently mis-flagged as an
+orphan across every repo that requires it. Excluded from orphan detection —
+verified live, not config drift (OMN-13517). Genuinely-stale contexts on a
+repo (e.g. a renamed CI job) are still flagged because they are not in this
+allowlist."""
+
 
 def parse_required_approving_review_count(protection_json: str) -> int:
     """Extract required_approving_review_count from a branch-protection API response.
@@ -126,8 +139,14 @@ def collect_seen_check_run_names(
 
 
 def find_orphan_contexts(required: list[str], seen: set[str]) -> list[str]:
-    """Return contexts that appear in `required` but not in `seen` check-run names."""
-    return [c for c in required if c not in seen]
+    """Return contexts in `required` but absent from `seen` check-run names.
+
+    Contexts in `PR_ONLY_CONTEXTS` are excluded: their check-runs bind to the
+    PR head SHA (pull_request events) and never appear on default-branch
+    commits, so Check B can never observe them — flagging them is a false
+    positive (OMN-13517). All other unseen contexts are genuine orphans.
+    """
+    return [c for c in required if c not in seen and c not in PR_ONLY_CONTEXTS]
 
 
 def audit_repo(
