@@ -2602,6 +2602,55 @@ async def bootstrap() -> int:
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
 
+                # OMN-12409: Wire result appliers for all manifest contracts that
+                # declare published_events but are not yet in auto_wiring_result_appliers.
+                #
+                # ORCHESTRATOR contracts were already registered above (build_loop,
+                # delegate_skill, registration).  EFFECT/REDUCER/COMPUTE contracts that
+                # return a model destined for a declared topic would have their handler
+                # output silently dropped without an applier.  Scan every contract in the
+                # filtered manifest; for each one with a non-empty published_events map
+                # that has not been explicitly registered, build a DispatchResultApplier
+                # from the contract's own discovered contract_path — this resolves the
+                # actual package-installed YAML, not a guessed path.
+                if event_bus is not None:
+                    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                        load_published_events_map,
+                    )
+                    from omnibase_infra.runtime.service_dispatch_result_applier import (
+                        DispatchResultApplier,
+                    )
+
+                    for _contract in filtered_manifest.contracts:
+                        if _contract.name in auto_wiring_result_appliers:
+                            # Explicit registration takes precedence.
+                            continue
+                        if _contract.event_bus is None:
+                            continue
+                        _pe_map = load_published_events_map(
+                            Path(_contract.contract_path),
+                            logger,
+                        )
+                        if not _pe_map:
+                            continue
+                        _topics = list(_pe_map.values())
+                        auto_wiring_result_appliers[_contract.name] = (
+                            DispatchResultApplier(
+                                event_bus=event_bus,
+                                output_topic=_topics[0],
+                                output_topic_map=_pe_map,
+                                allowed_output_topics=_topics,
+                            )
+                        )
+                        logger.info(
+                            "Auto-wiring result applier registered from published_events "
+                            "(contract=%s, node_type=%s, topics=%s, correlation_id=%s)",
+                            _contract.name,
+                            _contract.node_type,
+                            _topics,
+                            correlation_id,
+                        )
+
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
