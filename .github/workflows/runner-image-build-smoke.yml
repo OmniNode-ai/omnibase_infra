@@ -128,7 +128,7 @@ jobs:
           echo "Runner image build smoke PASSED: identity bound + prebuilt env baked."
 
       # OMN-12585: assert the baked runner can execute node24 actions
-      # (actions/checkout@v6, used 73x across workflows). The OMN-12567 image
+      # (actions/checkout@v7, used across workflows). The OMN-12567 image
       # pinned RUNNER_VERSION=2.323.0, which predates node24 execution support
       # (landed in actions/runner 2.327.0); rolling it to the live fleet (2.334.0)
       # downgraded the runner and broke "Set up job" with `'using: node24' is not
@@ -144,7 +144,7 @@ jobs:
             set -euo pipefail
             node24="${RUNNER_HOME}/externals/node24/bin/node"
             if [[ ! -x "${node24}" ]]; then
-              echo "::error::baked runner has no executable node24 at ${node24}; it cannot run node24 actions (actions/checkout@v6). RUNNER_VERSION is too old (< 2.327.0)."
+              echo "::error::baked runner has no executable node24 at ${node24}; it cannot run node24 actions (actions/checkout@v7). RUNNER_VERSION is too old (< 2.327.0)."
               echo "externals dir contents:"
               ls -la "${RUNNER_HOME}/externals" 2>/dev/null || echo "no externals dir"
               exit 1

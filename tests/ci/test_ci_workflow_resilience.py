@@ -37,7 +37,7 @@ CODEQL_CONFIG = REPO_ROOT / ".github" / "codeql" / "codeql-config.yml"
 SETUP_PYTHON_UV_ACTION = (
     REPO_ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 )
-CHECKOUT_V6_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
+CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 
 
@@ -63,9 +63,8 @@ def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
 
     assert job["timeout-minutes"] == 15
 
-    checkout_step = next(
-        step for step in steps if step.get("uses") == "actions/checkout@v6"
-    )
+    checkout_step = next(step for step in steps if step.get("name") == "Checkout code")
+    assert checkout_step["uses"] == "actions/checkout@v7"
     assert checkout_step["timeout-minutes"] == 10
     assert checkout_step["with"]["fetch-depth"] == 2
     assert checkout_step["with"]["fetch-tags"] is False
@@ -811,7 +810,7 @@ def test_codeql_uses_repo_config_that_ignores_github_metadata() -> None:
         for step in workflow["jobs"]["codeql"]["steps"]
         if step.get("name") == "Checkout repository"
     )
-    assert checkout_step["uses"] == f"actions/checkout@{CHECKOUT_V6_SHA}"
+    assert checkout_step["uses"] == f"actions/checkout@{CHECKOUT_V7_SHA}"
     assert checkout_step["with"]["persist-credentials"] is False
 
     init_step = next(
