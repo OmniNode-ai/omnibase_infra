@@ -56,7 +56,7 @@ DELEGATION_OWNER_TICKET = "OMN-13471"
 FLEET_OWNER_TICKET = "OMN-13471"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: scanner-internal baseline YAML row
 class BaselineEntry:
     """One accepted hard-fail in the ratchet baseline."""
 
@@ -112,7 +112,7 @@ class BaselineEntry:
         )
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: scanner-internal aggregate scan result
 class ScanResult:
     """Aggregated scan result across a set of node directories."""
 

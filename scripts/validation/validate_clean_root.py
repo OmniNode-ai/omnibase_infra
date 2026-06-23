@@ -139,6 +139,7 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         # Common optional directories
         "config",
         "contracts",
+        "drift",
         "docker",
         "examples",
         "benchmarks",

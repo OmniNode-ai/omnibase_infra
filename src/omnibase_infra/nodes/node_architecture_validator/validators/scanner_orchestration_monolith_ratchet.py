@@ -59,7 +59,7 @@ MONOLITH_BASELINE_RELATIVE_PATH = (
 # node dirs and discover all node dirs through the Signal B module surface.
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # internal-dataclass-ok: scanner-internal baseline YAML row
 class MonolithBaselineEntry:
     """One accepted orchestration-monolith finding (or assessed not-applicable)."""
 
@@ -125,7 +125,7 @@ class MonolithBaselineEntry:
         )
 
 
-@dataclass
+@dataclass  # internal-dataclass-ok: scanner-internal aggregate scan result
 class MonolithScanResult:
     """Aggregated Signal B scan result across a set of node directories."""
 

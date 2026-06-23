@@ -14,7 +14,7 @@ evidence_requirements:
   - kind: tests
     description: "Focused CLI/runtime/adapters unit coverage passes for converted boundary models."
     command: "uv run pytest tests/unit/cli/ tests/unit/adapters/ tests/unit/runtime/ -q"
-  - kind: validation
+  - kind: ci
     description: "Raw topic literal invariant remains clean after deriving demo reset prefixes from topic constants."
     command: "uv run python scripts/validation/check_topic_literals.py --baseline scripts/validation/topic_literal_baseline.txt"
   - kind: manual
