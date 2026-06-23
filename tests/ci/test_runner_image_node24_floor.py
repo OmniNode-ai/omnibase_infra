@@ -6,7 +6,7 @@ not downgrade the live fleet (OMN-12585).
 Background. The OMN-12567 versioned runner image pinned
 ``ARG RUNNER_VERSION=2.323.0`` while the live fleet ran ``2.334.0``. Rolling that
 image to the fleet *downgraded* the GitHub Actions runner, and ``2.323.0`` cannot
-execute ``node24`` actions (``actions/checkout@v6``, used 73x across workflows).
+execute ``node24`` actions (``actions/checkout@v7``, used across workflows).
 It fails at "Set up job" with ``'using: node24' is not supported``. node24
 execution support landed in actions/runner ``2.327.0`` (actions/runner#3940).
 
@@ -44,7 +44,7 @@ RUNNER_DOCKERFILE = REPO_ROOT / "docker" / "runners" / "Dockerfile"
 LOCK_FILE = REPO_ROOT / "docker" / "runners" / "runner-image.lock.json"
 
 # node24 *execution* support landed in actions/runner 2.327.0 (actions/runner
-# #3940). Below this, `actions/checkout@v6` (using: node24) fails at "Set up job".
+# #3940). Below this, `actions/checkout@v7` (using: node24) fails at "Set up job".
 NODE24_FLOOR = (2, 327, 0)
 
 # The live self-hosted fleet runs 2.334.0 (verified 2026-06-02, OMN-12585). The
@@ -85,7 +85,7 @@ def test_dockerfile_runner_version_is_node24_capable() -> None:
     version = _parse(_dockerfile_runner_version())
     assert version >= NODE24_FLOOR, (
         f"RUNNER_VERSION {_fmt(version)} predates node24 execution support "
-        f"({_fmt(NODE24_FLOOR)}); actions/checkout@v6 (using: node24) would fail "
+        f"({_fmt(NODE24_FLOOR)}); actions/checkout@v7 (using: node24) would fail "
         "at 'Set up job' with \"'using: node24' is not supported\""
     )
 

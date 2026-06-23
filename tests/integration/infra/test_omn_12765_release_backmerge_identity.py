@@ -33,5 +33,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     )
 
     # OMN-13486: identity regenerated for the current dev/runtime proof inputs.
-    assert lock["identity_digest"] == "6276c51d98f177780c62787405e416c9"
-    assert lock["shared_env_digest"] == "2d761320b0fe185d656b4d63"
+    assert lock["identity_digest"] == "da0dc5140fae53e84399503a0e5f8eb3"
+    assert lock["shared_env_digest"] == "8238ed24bfdfc3816dde8016"
