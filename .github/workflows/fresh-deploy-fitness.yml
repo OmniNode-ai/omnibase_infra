@@ -134,6 +134,7 @@ jobs:
         uses: ./.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache-enabled: "false"
       - name: Sibling-pin recurrence ratchet — logic regression gate
         run: |
           uv run --frozen pytest tests/scripts/test_check_sibling_lock_pins.py -q -p no:cacheprovider
