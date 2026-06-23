@@ -618,6 +618,91 @@ def run_imperative_orchestrators(
     return True
 
 
+def run_orchestration_monoliths(
+    verbose: bool = False, files: list[str] | None = None
+) -> bool:
+    """Run the ARCH-004 Signal B orchestration-monolith ratchet (OMN-13486).
+
+    Signal B is a DISTINCT rule from Signal A
+    (``run_imperative_orchestrators``). It detects the Class-B monolith — a
+    single oversized + complex orchestrator handler that is not executor-bound,
+    independent of FSM decorativeness (the build_loop / session /
+    memory_lifecycle / swarm_dispatch shape that carries 0 handler-owned
+    ``_transition`` calls). Wired through OMN-12550 (validator gating) /
+    OMN-13325 (ratchet enforcement) — the SAME path as Signal A, NOT a parallel
+    hook.
+
+    Modes:
+        - With ``files`` (pre-commit): changed-node ratchet — only node
+          directories containing a changed file are scanned, fail on a
+          NEW / worsened / untracked monolith (``--check-changed --ratchet``).
+        - Without ``files`` (CI/manual full report): full report over the repo
+          (``--check-all --report``), non-blocking on its own.
+
+    The baseline lives at
+    ``architecture-handshakes/orchestration-monolith-baseline.yaml`` (a DISTINCT
+    dimension from the Signal A baseline) and can only shrink.
+
+    Args:
+        verbose: Enable verbose output.
+        files: Optional list of changed files (from pre-commit). If provided,
+            only the node directories containing those files are ratcheted.
+    """
+    try:
+        from omnibase_infra.nodes.node_architecture_validator.validators.scanner_orchestration_monolith_ratchet import (
+            discover_node_dirs,
+            load_monolith_baseline,
+            monolith_ratchet_violations,
+            node_dirs_for_changed_files,
+            scan_node_dirs_for_monolith,
+        )
+    except ImportError as e:
+        print(f"Skipping orchestration-monolith ratchet: {e}")
+        return True
+
+    from pathlib import Path as _Path
+
+    repo_root = _Path.cwd()
+    # Derive the repo key from the working tree (worktrees nest the repo name in
+    # a ticket dir, so the immediate dir name is authoritative); baseline entries
+    # are keyed by repo::node.
+    repo_name = repo_root.name
+    baseline = load_monolith_baseline(
+        repo_root / "architecture-handshakes" / "orchestration-monolith-baseline.yaml"
+    )
+
+    if files:
+        node_dirs = node_dirs_for_changed_files(repo_root, files)
+        if not node_dirs:
+            if verbose:
+                print("Orchestration Monoliths: SKIP (no node dirs in changeset)")
+            return True
+        result = scan_node_dirs_for_monolith(repo_name, node_dirs, repo_root=repo_root)
+        failures = monolith_ratchet_violations(result.hard_fails, baseline)
+        passed = not failures
+        if verbose or not passed:
+            print(f"Orchestration Monoliths: {'PASS' if passed else 'FAIL'}")
+            print(
+                f"  Changed node dirs: {len(node_dirs)}, "
+                f"monolith hard-fails: {len(result.hard_fails)}"
+            )
+            for f in failures:
+                print(f"  - {f}")
+        return passed
+
+    # Full report mode (non-blocking on its own).
+    node_dirs = discover_node_dirs(repo_root)
+    result = scan_node_dirs_for_monolith(repo_name, node_dirs, repo_root=repo_root)
+    print(
+        f"Orchestration Monoliths (full report): "
+        f"{len(result.hard_fails)} monolith node(s) across {len(node_dirs)} dirs."
+    )
+    if verbose:
+        for line in result.report_lines:
+            print(line)
+    return True
+
+
 def run_io_audit(verbose: bool = False) -> bool:
     """Run I/O purity audit for REDUCER and COMPUTE nodes.
 
@@ -1158,6 +1243,7 @@ def main() -> int:
             "localhandler",
             "declarative_nodes",
             "imperative_orchestrators",
+            "orchestration_monoliths",
             "io_audit",
             "imports",
             "markdown_links",
@@ -1170,7 +1256,7 @@ def main() -> int:
         nargs="*",
         help=(
             "Optional list of files to validate (for declarative_nodes, "
-            "imperative_orchestrators, or markdown_links)"
+            "imperative_orchestrators, orchestration_monoliths, or markdown_links)"
         ),
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -1193,6 +1279,7 @@ def main() -> int:
         "localhandler": run_localhandler,
         "declarative_nodes": run_declarative_nodes,
         "imperative_orchestrators": run_imperative_orchestrators,
+        "orchestration_monoliths": run_orchestration_monoliths,
         "io_audit": run_io_audit,
         "imports": run_imports,
         "markdown_links": run_markdown_links,
@@ -1214,6 +1301,11 @@ def main() -> int:
         # files this runs the full non-blocking report.
         files = args.files if args.files else None
         success = run_imperative_orchestrators(args.verbose, files=files)
+    elif args.validator == "orchestration_monoliths":
+        # Pass changed files for the changed-node ratchet (pre-commit); without
+        # files this runs the full non-blocking report (ARCH-004 Signal B).
+        files = args.files if args.files else None
+        success = run_orchestration_monoliths(args.verbose, files=files)
     else:
         success = validator_map[args.validator](args.verbose)
 
