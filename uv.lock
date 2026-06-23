@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=bd98c188f4bf5d173b9054527d8459efe9e7bddc" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c" },
 ]
 
 [[package]]
@@ -2198,7 +2198,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=bd98c188f4bf5d173b9054527d8459efe9e7bddc" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.64" },
@@ -2254,7 +2254,7 @@ dev = [
 [[package]]
 name = "omnibase-spi"
 version = "0.22.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?branch=main#b7bac17636ae53fb4c51f071377a0c93501d0c27" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c#3c99ed45c5aa9e25fef17a108a40915b0a2e794c" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
