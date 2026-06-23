@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -28,6 +31,28 @@ class HandlerForwardOutbound:
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
+
+    async def handle(
+        self,
+        envelope: Any,
+    ) -> ModelHandlerOutput[ModelGatewayEnvelope]:
+        """Dispatch entrypoint: extract gateway envelope, apply outbound transform, return compute output."""
+        payload = envelope.payload if hasattr(envelope, "payload") else envelope
+        if isinstance(payload, dict):
+            gateway_envelope = ModelGatewayEnvelope.model_validate(payload)
+        else:
+            gateway_envelope = payload
+        transformed = self.forward_outbound(gateway_envelope)
+        envelope_id = getattr(envelope, "envelope_id", gateway_envelope.envelope_id)
+        correlation_id = getattr(
+            envelope, "correlation_id", gateway_envelope.correlation_id
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=envelope_id,
+            correlation_id=correlation_id,
+            handler_id=type(self).__name__,
+            result=transformed,
+        )
 
     def forward_outbound(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
         """Return an outbound envelope with a validated tenant wire topic."""
