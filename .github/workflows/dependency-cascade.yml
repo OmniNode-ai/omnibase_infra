@@ -119,7 +119,7 @@ jobs:
 
       - name: Checkout downstream repo
         if: steps.token_check.outputs.has_token == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/${{ matrix.repo }}
           token: ${{ secrets.cross-repo-pat || secrets.CROSS_REPO_PAT }}

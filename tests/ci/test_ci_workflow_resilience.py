@@ -64,7 +64,7 @@ def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
     assert job["timeout-minutes"] == 15
 
     checkout_step = next(step for step in steps if step.get("name") == "Checkout code")
-    assert checkout_step["uses"] == "actions/checkout@v7"
+    assert checkout_step["uses"] == f"actions/checkout@{CHECKOUT_V7_SHA}"
     assert checkout_step["timeout-minutes"] == 10
     assert checkout_step["with"]["fetch-depth"] == 2
     assert checkout_step["with"]["fetch-tags"] is False
