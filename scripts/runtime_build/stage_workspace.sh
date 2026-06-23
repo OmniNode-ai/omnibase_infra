@@ -103,6 +103,50 @@ fi
 STAGING_DIR="workspace/sibling-repos"
 mkdir -p "${STAGING_DIR}"
 
+stage_repo_tree() {
+    local src="$1"
+    local dst="$2"
+
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.venv' \
+            --exclude='*.egg-info' \
+            "${src}/" "${dst}/"
+        return
+    fi
+
+    SRC="${src}" DST="${dst}" python3 - <<'PY'
+from __future__ import annotations
+
+import fnmatch
+import os
+import shutil
+from pathlib import Path
+
+src = Path(os.environ["SRC"])
+dst = Path(os.environ["DST"])
+
+if dst.exists():
+    shutil.rmtree(dst)
+
+
+def ignore(_directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    for name in names:
+        if name in {".git", "__pycache__", ".venv"}:
+            ignored.add(name)
+        elif fnmatch.fnmatch(name, "*.pyc") or fnmatch.fnmatch(name, "*.egg-info"):
+            ignored.add(name)
+    return ignored
+
+
+shutil.copytree(src, dst, ignore=ignore)
+PY
+}
+
 # ---------------------------------------------------------------------------
 # Per-repo VCS provenance (OMN-13030): record {vcs_ref, vcs_dirty, vcs_branch}
 # for every sibling at staging time. rsync drops .git, so the staged tree has
@@ -136,13 +180,7 @@ for repo in "${SIBLING_REPOS[@]}"; do
     src="${OMNI_HOME}/${repo}"
     dst="${STAGING_DIR}/${repo}"
     echo "staging: ${src} -> ${dst}"
-    rsync -a --delete \
-        --exclude='.git' \
-        --exclude='__pycache__' \
-        --exclude='*.pyc' \
-        --exclude='.venv' \
-        --exclude='*.egg-info' \
-        "${src}/" "${dst}/"
+    stage_repo_tree "${src}" "${dst}"
     # Record the source HEAD SHA so the lock-pin preflight and provenance can
     # identify exactly which commit was vendored. rsync drops .git, so without
     # this marker the staged tree has no recoverable SHA (OMN-12987).
