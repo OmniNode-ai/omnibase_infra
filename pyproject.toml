@@ -172,7 +172,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 # OMN-13507: re-point core pin from db7f341353 (OMN-13444, #1296) to core dev
-# HEAD bd98c188 (a strict descendant of db7f341 on omnibase_core dev). The old
+# HEAD 287511f20 (a strict descendant of db7f341 on omnibase_core dev). The old
 # pin PREDATED the ModelTaskDelegatedEvent token fields (tokens_input/
 # tokens_output @ #1300/81c865f6, context_pack_hash @ #1299/1c412207b), so a
 # release-mode runtime build vendored a core whose frozen+extra=forbid wire
@@ -180,7 +180,7 @@ override-dependencies = [
 # Now also carries the OMN-13515 RuntimeLocal event_bus fix merged to core dev.
 # New pin carries all token fields; version stays 0.46.0 (override bound
 # >=0.44.0,<0.47.0 unchanged). Mirrors the OMN-13504 omnimarket relock.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "bd98c188f4bf5d173b9054527d8459efe9e7bddc" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "287511f20a18a3a407348d8d80554d96d925b843" }
 # OMN-13507: pin spi to omnibase_spi dev HEAD 3c99ed45 (was branch=main @
 # b7bac176). The floating main pin resolved to a commit off omnibase_spi main
 # that has DIVERGED from dev (b7bac176 is not an ancestor of dev HEAD), so the
