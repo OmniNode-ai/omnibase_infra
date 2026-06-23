@@ -40,7 +40,10 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.protocols import ProtocolEventBusLike
-from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _contract_declares_db_io,
+    wire_from_manifest,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -290,12 +293,14 @@ def test_manifest_scan_builds_applier_for_effect_contract(tmp_path: Path) -> Non
     for _contract in manifest.contracts:
         if _contract.name in auto_wiring_result_appliers:
             continue
-        if _contract.event_bus is None:
+        if _contract.event_bus is None or not _contract.event_bus.publish_topics:
+            continue
+        if _contract_declares_db_io(_contract):
             continue
         pe_map = load_published_events_map(Path(_contract.contract_path))
         if not pe_map:
             continue
-        topics = list(pe_map.values())
+        topics = tuple(_contract.event_bus.publish_topics)
         auto_wiring_result_appliers[_contract.name] = DispatchResultApplier(
             event_bus=event_bus_mock,
             output_topic=topics[0],
@@ -351,12 +356,14 @@ def test_manifest_scan_skips_already_registered_contracts(tmp_path: Path) -> Non
     for _contract in manifest.contracts:
         if _contract.name in auto_wiring_result_appliers:
             continue  # skip already-registered
-        if _contract.event_bus is None:
+        if _contract.event_bus is None or not _contract.event_bus.publish_topics:
+            continue
+        if _contract_declares_db_io(_contract):
             continue
         pe_map = load_published_events_map(Path(_contract.contract_path))
         if not pe_map:
             continue
-        topics = list(pe_map.values())
+        topics = tuple(_contract.event_bus.publish_topics)
         auto_wiring_result_appliers[_contract.name] = DispatchResultApplier(
             event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic=topics[0],
@@ -373,7 +380,6 @@ def test_manifest_scan_skips_already_registered_contracts(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_effect_contract_handler_result_published_via_auto_wiring(
     tmp_path: Path,
 ) -> None:

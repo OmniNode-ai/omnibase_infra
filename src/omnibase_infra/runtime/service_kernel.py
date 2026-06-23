@@ -2614,6 +2614,9 @@ async def bootstrap() -> int:
                 # from the contract's own discovered contract_path — this resolves the
                 # actual package-installed YAML, not a guessed path.
                 if event_bus is not None:
+                    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                        _contract_declares_db_io,
+                    )
                     from omnibase_infra.runtime.event_bus_subcontract_wiring import (
                         load_published_events_map,
                     )
@@ -2625,7 +2628,12 @@ async def bootstrap() -> int:
                         if _contract.name in auto_wiring_result_appliers:
                             # Explicit registration takes precedence.
                             continue
-                        if _contract.event_bus is None:
+                        if (
+                            _contract.event_bus is None
+                            or not _contract.event_bus.publish_topics
+                        ):
+                            continue
+                        if _contract_declares_db_io(_contract):
                             continue
                         _pe_map = load_published_events_map(
                             Path(_contract.contract_path),
@@ -2633,7 +2641,7 @@ async def bootstrap() -> int:
                         )
                         if not _pe_map:
                             continue
-                        _topics = list(_pe_map.values())
+                        _topics = tuple(_contract.event_bus.publish_topics)
                         auto_wiring_result_appliers[_contract.name] = (
                             DispatchResultApplier(
                                 event_bus=event_bus,
