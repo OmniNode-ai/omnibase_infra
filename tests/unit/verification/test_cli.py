@@ -142,8 +142,20 @@ class TestCLIMain:
         assert len(data) == 1
         assert exit_code in (0, 2)
 
-    def test_registration_only(self, tmp_path: Path, capsys: Any) -> None:
+    def test_registration_only(
+        self,
+        tmp_path: Path,
+        capsys: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """--registration-only finds and verifies registration contracts."""
+        # Hermeticity: clear OMNIBASE_INFRA_DB_URL so _make_runtime_db_query_fn()
+        # returns None. When the var leaks in from a developer shell or a CI
+        # runner pointed at a live Postgres, the DB-backed checks PASS against
+        # real data and main() returns 0 instead of the asserted (1, 2). The
+        # "No runtime DB is configured in this unit test" precondition below is
+        # only true once this var is removed.
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
         # Create the 3 registration contract dirs
         for node_name in (
             "node_registration_orchestrator",
