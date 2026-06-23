@@ -48,6 +48,8 @@ from omnibase_infra.cli.cli_delegate import (
 
 pytestmark = pytest.mark.unit
 
+KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
+
 # A proof contract that runs a deterministic in-process handler — no vLLM, no
 # network. It stands in for the delegate node so the CLI wiring (payload write,
 # receipt-mode dispatch, single typed result) is exercised end-to-end.
@@ -288,11 +290,11 @@ class TestBusSelection:
         }
 
     def test_kafka_with_bootstrap_threads_broker(self) -> None:
-        # The live-bus path: event_bus=kafka + the dev broker bootstrap so
+        # The live-bus path: event_bus=kafka + the configured broker bootstrap so
         # RuntimeLocal routes through EventBusKafka.from_bootstrap.
         assert build_backend_overrides(
-            bus="kafka", kafka_bootstrap="localhost:19092"
-        ) == {"event_bus": "kafka", "kafka_bootstrap": "localhost:19092"}
+            bus="kafka", kafka_bootstrap=KAFKA_BOOTSTRAP_ARG
+        ) == {"event_bus": "kafka", "kafka_bootstrap": KAFKA_BOOTSTRAP_ARG}
 
     def test_kafka_without_bootstrap_omits_key(self) -> None:
         # No bootstrap => Kafka bus resolves from KAFKA_BOOTSTRAP_SERVERS; the
@@ -305,7 +307,7 @@ class TestBusSelection:
         # Passing a broker with the default in-memory bus is a misconfiguration
         # (the command would silently never reach a broker) — fail loud.
         with pytest.raises(ValueError, match="only valid with --bus kafka"):
-            build_backend_overrides(bus="inmemory", kafka_bootstrap="localhost:19092")
+            build_backend_overrides(bus="inmemory", kafka_bootstrap=KAFKA_BOOTSTRAP_ARG)
 
     def test_unknown_bus_fails_loud(self) -> None:
         with pytest.raises(ValueError, match="Unsupported bus"):
@@ -334,7 +336,7 @@ class TestBusSelection:
             task_type="document",
             max_tokens=None,
             bus="kafka",
-            kafka_bootstrap="localhost:19092",
+            kafka_bootstrap=KAFKA_BOOTSTRAP_ARG,
             state_root=tmp_path / "state",
             timeout=60,
             verbose=False,
@@ -344,7 +346,7 @@ class TestBusSelection:
         assert exit_code == 0
         assert captured["backend_overrides"] == {
             "event_bus": "kafka",
-            "kafka_bootstrap": "localhost:19092",
+            "kafka_bootstrap": KAFKA_BOOTSTRAP_ARG,
         }
 
     def test_run_delegate_defaults_to_inmemory_overrides(
@@ -403,7 +405,7 @@ class TestBusSelection:
                 "--bus",
                 "kafka",
                 "--kafka-bootstrap",
-                "localhost:19092",
+                KAFKA_BOOTSTRAP_ARG,
                 "--state-root",
                 str(tmp_path / "state"),
                 "--emit-socket",
@@ -415,5 +417,33 @@ class TestBusSelection:
         assert result.exit_code == 0, result.output
         assert captured["backend_overrides"] == {
             "event_bus": "kafka",
-            "kafka_bootstrap": "localhost:19092",
+            "kafka_bootstrap": KAFKA_BOOTSTRAP_ARG,
         }
+
+    def test_cli_bootstrap_without_kafka_is_usage_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "document the router",
+                "--kafka-bootstrap",
+                KAFKA_BOOTSTRAP_ARG,
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "only valid with --bus kafka" in result.output

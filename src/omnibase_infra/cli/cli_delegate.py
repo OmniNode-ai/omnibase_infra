@@ -21,8 +21,8 @@ Bus target (OMN-13532). By default the CLI runs the orchestrator in-process on
 ``EventBusInmemory`` — fully self-contained, no broker required. When a live
 delegation must reach a running runtime, ``--bus kafka --kafka-bootstrap
 host:port`` selects the Kafka event bus so the typed
-``ModelDelegateSkillRequest`` command is published to
-``onex.cmd.omnimarket.delegate-skill.v1`` on the named broker, where the
+``ModelDelegateSkillRequest`` command is published to the delegate-skill
+command topic declared in the contract's ``event_bus.publish_topics``, where the
 deployed ``node_delegate_skill_orchestrator`` consumer picks it up
 (``feedback_bus_is_the_transport`` — the bus is THE transport). The bus
 selection and bootstrap override flow straight through ``backend_overrides`` to
@@ -239,8 +239,8 @@ def _write_payload(
     default=None,
     help=(
         "Kafka bootstrap servers (host:port) for --bus kafka. Omit to resolve "
-        "from KAFKA_BOOTSTRAP_SERVERS. The dev lane on .201 advertises "
-        "localhost:19092 (probe from .201). Only valid with --bus kafka."
+        "from KAFKA_BOOTSTRAP_SERVERS, for example from ~/.omnibase/.env. "
+        "Only valid with --bus kafka."
     ),
 )
 @click.option(
@@ -298,11 +298,11 @@ def delegate_command(
         onex delegate "explain what a calendar app needs"
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
-        # Publish to the live dev broker so a deployed runtime dispatches it:
-        onex delegate "document the router" --bus kafka --kafka-bootstrap localhost:19092
+        # Publish through the configured Kafka broker so a deployed runtime dispatches it:
+        onex delegate "document the router" --bus kafka --kafka-bootstrap "$KAFKA_BOOTSTRAP_SERVERS"
     """
-    sys.exit(
-        run_delegate(
+    try:
+        exit_code = run_delegate(
             prompt=prompt,
             task_type=task_type,
             max_tokens=max_tokens,
@@ -313,7 +313,9 @@ def delegate_command(
             verbose=verbose,
             emit_socket=emit_socket,
         )
-    )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    sys.exit(exit_code)
 
 
 def run_delegate(
