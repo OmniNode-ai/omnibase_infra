@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -113,6 +116,22 @@ def _run_stage(omni_home: Path, build_ctx: Path) -> subprocess.CompletedProcess[
     )
 
 
+def _path_without_rsync(tmp_path: Path) -> str:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for command in ("bash", "dirname", "git", "mkdir"):
+        resolved = shutil.which(command)
+        assert resolved is not None
+        (bin_dir / command).symlink_to(resolved)
+    python_shim = bin_dir / "python3"
+    python_shim.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="utf-8",
+    )
+    python_shim.chmod(0o755)
+    return str(bin_dir)
+
+
 @pytest.mark.unit
 def test_stage_writes_per_repo_vcs_provenance(tmp_path: Path) -> None:
     omni_home = _make_omni_home(tmp_path, dirty_repo="omnimarket")
@@ -134,6 +153,33 @@ def test_stage_writes_per_repo_vcs_provenance(tmp_path: Path) -> None:
     # The dirty repo is flagged; clean repos are not.
     assert siblings["omnimarket"]["vcs_dirty"] is True
     assert siblings["omnibase_core"]["vcs_dirty"] is False
+
+
+@pytest.mark.unit
+def test_stage_writes_vcs_provenance_without_rsync(tmp_path: Path) -> None:
+    omni_home = _make_omni_home(tmp_path)
+    build_ctx = tmp_path / "ctx"
+    (build_ctx / "workspace").mkdir(parents=True)
+    env = {
+        **os.environ,
+        "OMNI_HOME": str(omni_home),
+        "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
+        "PATH": _path_without_rsync(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", str(STAGE_SCRIPT)],
+        cwd=build_ctx,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (build_ctx / "workspace" / "sibling-vcs-provenance.json").exists()
+    assert not (
+        build_ctx / "workspace" / "sibling-repos" / "omnibase_core" / ".git"
+    ).exists()
 
 
 @pytest.mark.unit

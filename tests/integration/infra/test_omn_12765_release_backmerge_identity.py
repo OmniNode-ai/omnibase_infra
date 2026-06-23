@@ -32,7 +32,6 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13472: identity regenerated after refreshing the shared CI env binding
-    # for the current dev/runtime proof inputs.
-    assert lock["identity_digest"] == "a5397671d0c377acef2862ca5ff5d7c4"
-    assert lock["shared_env_digest"] == "a4615f062775d0b9e025d38f"
+    # OMN-13486: identity regenerated for the current dev/runtime proof inputs.
+    assert lock["identity_digest"] == "6276c51d98f177780c62787405e416c9"
+    assert lock["shared_env_digest"] == "2d761320b0fe185d656b4d63"
