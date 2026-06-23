@@ -57,6 +57,7 @@ See Also:
 
 from __future__ import annotations
 
+import importlib
 import logging
 import re
 from pathlib import Path
@@ -475,6 +476,62 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
     )
 
 
+def validate_handler_class_exists(
+    handler_class: str,
+    handler_module: str,
+    contract_path: Path,
+) -> None:
+    """Verify that a handler class declared in a contract actually exists.
+
+    Imports the declared module and checks that the named class is present.
+    Raises ProtocolConfigurationError on any failure so the defect is surfaced
+    at startup (or CI validation time) rather than silently producing an empty
+    consumer group.
+
+    Args:
+        handler_class: Class name declared in the contract's handler.name field.
+        handler_module: Module path declared in the contract's handler.module field.
+        contract_path: Path to the originating contract.yaml (used in error messages).
+
+    Raises:
+        ProtocolConfigurationError: If the module cannot be imported
+            (error code: MODULE_NOT_FOUND / HANDLER_LOADER_010) or the class
+            is not present in the module
+            (error code: CLASS_NOT_FOUND / HANDLER_LOADER_011).
+
+    Part of OMN-12408: Runtime auto-wiring silently skips entire contract on
+    one broken handler entry — should fail loud.
+    """
+    try:
+        module = importlib.import_module(handler_module)
+    except ImportError as exc:
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="validate_handler_class_exists",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"MODULE_NOT_FOUND (HANDLER_LOADER_010): cannot import handler module "
+            f"'{handler_module}' declared in {contract_path}. "
+            f"Ensure the module exists and is importable. Original error: {exc}",
+            context=ctx,
+        ) from exc
+
+    if not hasattr(module, handler_class):
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="validate_handler_class_exists",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"CLASS_NOT_FOUND (HANDLER_LOADER_011): class '{handler_class}' does not "
+            f"exist in module '{handler_module}', declared in {contract_path}. "
+            f"A contract that names a handler that does not exist is a build defect, "
+            f"not a degradable condition.",
+            context=ctx,
+        )
+
+
 def load_handler_class_info_from_contract(
     contract_path: Path,
 ) -> list[dict[str, str]]:
@@ -527,18 +584,48 @@ def load_handler_class_info_from_contract(
         handler_class = handler_info.get("name")
         handler_module = handler_info.get("module")
 
-        if handler_class and handler_module:
-            result.append(
-                {
-                    "handler_class": handler_class,
-                    "handler_module": handler_module,
-                }
+        # OMN-12408: fail loud on missing or unresolvable handler entries.
+        # A contract that names a handler that doesn't exist is a build defect,
+        # not a degradable condition. Silent skips produce empty consumer groups
+        # with no error message, making the chain die at hop 1 silently.
+        if not handler_class:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_handler_class_info_from_contract",
+                target_name=str(contract_path),
             )
-        else:
-            logger.warning(
-                "Skipping handler entry with missing name or module in contract.yaml at %s",
-                contract_path,
+            raise ProtocolConfigurationError(
+                f"MISSING_HANDLER_NAME: handler_routing entry in {contract_path} "
+                f"is missing required handler.name field. "
+                f"Every handler entry must declare both handler.name and handler.module.",
+                context=ctx,
             )
+
+        if not handler_module:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_handler_class_info_from_contract",
+                target_name=str(contract_path),
+            )
+            raise ProtocolConfigurationError(
+                f"MISSING_HANDLER_MODULE: handler_routing entry for '{handler_class}' "
+                f"in {contract_path} is missing required handler.module field. "
+                f"Every handler entry must declare both handler.name and handler.module.",
+                context=ctx,
+            )
+
+        # Verify the class actually exists in the declared module.
+        # This catches the exact failure mode in OMN-12408: a handler class name
+        # declared in the contract but never written (e.g. only a delta() function
+        # was written, never the class referenced in handler_routing).
+        validate_handler_class_exists(handler_class, handler_module, contract_path)
+
+        result.append(
+            {
+                "handler_class": handler_class,
+                "handler_module": handler_module,
+            }
+        )
 
     logger.debug(
         "Loaded %d handler class info entries from contract.yaml at %s",
@@ -558,4 +645,5 @@ __all__ = [
     "load_and_validate_contract_yaml",
     "load_handler_class_info_from_contract",
     "load_handler_routing_subcontract",
+    "validate_handler_class_exists",
 ]
