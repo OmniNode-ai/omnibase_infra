@@ -15,6 +15,8 @@ a live runtime.
 from __future__ import annotations
 
 import json
+import os
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -98,6 +100,126 @@ def test_registry_result_models_are_fully_qualified() -> None:
         assert skill.node_name.startswith("node_"), skill.node_name
 
 
+# --------------------------------------------------------------------------- #
+# skill_mapping.yaml node_name -> real node catalog resolution (OMN-13531)
+#
+# Every node_name in skill_mapping.yaml MUST resolve to a node that actually
+# exists in the canonical omnimarket entry-point catalog. The live failure that
+# motivated this fixture: `onex skill pr_review_bot` dispatched to
+# `node_pr_review_orchestrator`, but the resolver raised
+# `Unknown node node_pr_review_orchestrator` because the mapping referenced a
+# node that the installed/declared catalog did not carry (stale skill->node
+# mapping after the OMN-13212 node_pr_review_bot decomposition). The existing
+# tests only asserted `node_name.startswith("node_")` and monkeypatched
+# `_resolve_packaged_contract`, so no test ever proved the target node exists.
+#
+# omnimarket is NOT a declared dependency of omnibase_infra and is not installed
+# in this repo's CI, so resolving against the live `onex.nodes` entry points
+# would be a false gate. Instead we read the canonical source of truth: the
+# `[project.entry-points."onex.nodes"]` table in omnimarket's pyproject.toml
+# (the same sibling-checkout pattern node-migration-sync.yml already uses for
+# the omnimarket node tree). The check skips cleanly when the source is not
+# resolvable locally; CI wires the sibling checkout so it runs as a real gate.
+# --------------------------------------------------------------------------- #
+
+
+def _resolve_omnimarket_src() -> Path | None:
+    """Resolve the omnimarket repo root if available for the catalog check.
+
+    Mirrors the resolution order used by node-migration-sync
+    (tests/unit/migrations/test_node_migration_discovery.py): an explicit
+    ``OMNIMARKET_SRC`` env (CI sibling checkout) first, then ``OMNI_HOME``.
+    """
+    explicit = os.environ.get("OMNIMARKET_SRC")
+    if explicit and (Path(explicit) / "pyproject.toml").is_file():
+        return Path(explicit)
+    omni_home = os.environ.get("OMNI_HOME")
+    if omni_home and (Path(omni_home) / "omnimarket" / "pyproject.toml").is_file():
+        return Path(omni_home) / "omnimarket"
+    return None
+
+
+def _omnimarket_declared_nodes(omnimarket_root: Path) -> frozenset[str]:
+    """Parse omnimarket's canonical ``onex.nodes`` entry-point declarations.
+
+    This is the source-of-truth node catalog: ``onex node <name>`` /
+    ``onex skill <name>`` resolve ``<name>`` via this exact entry-point group
+    (see ``omnibase_infra.cli.cli_node._resolve_packaged_contract``).
+    """
+    data = tomllib.loads((omnimarket_root / "pyproject.toml").read_text())
+    entry_points = data.get("project", {}).get("entry-points", {}).get("onex.nodes", {})
+    return frozenset(entry_points.keys())
+
+
+def test_every_mapped_node_resolves_in_omnimarket_catalog() -> None:
+    """Every skill_mapping.yaml node_name exists in the canonical node catalog.
+
+    Guards against the stale skill->node mapping class of bug (OMN-13531): a
+    dispatch entry that points at a node which no longer exists in the catalog
+    surfaces only at dispatch time as `Unknown node <name>`. This pins the
+    whole table — pr_review, pr_review_bot, hostile_reviewer, and the rest.
+    """
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is None:
+        pytest.skip(
+            "omnimarket source tree not resolvable "
+            "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
+        )
+
+    declared_nodes = _omnimarket_declared_nodes(omnimarket_root)
+    assert declared_nodes, (
+        "parsed zero onex.nodes entry points from omnimarket pyproject.toml at "
+        f"{omnimarket_root}; the catalog source-of-truth could not be read"
+    )
+
+    registry = load_skill_registry()
+    unresolved = {
+        skill.skill_name: skill.node_name
+        for skill in registry.skills
+        if skill.node_name not in declared_nodes
+    }
+    assert not unresolved, (
+        "skill_mapping.yaml references node_name(s) absent from the canonical "
+        "omnimarket onex.nodes catalog — `onex skill <name>` will fail with "
+        f"`Unknown node ...` at dispatch time: {unresolved}"
+    )
+
+
+def test_pr_review_and_hostile_skills_target_existing_nodes() -> None:
+    """Targeted regression for the OMN-13531 stale-mapping triplet.
+
+    Explicitly proves pr_review_bot / pr_review / hostile_reviewer resolve to
+    nodes the catalog actually carries, independent of the table-wide sweep so
+    a regression on these three names is unambiguous in the failure output.
+    """
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is None:
+        pytest.skip(
+            "omnimarket source tree not resolvable "
+            "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
+        )
+
+    declared_nodes = _omnimarket_declared_nodes(omnimarket_root)
+    registry = load_skill_registry()
+    by_name = {s.skill_name: s for s in registry.skills}
+
+    for skill_name in ("pr_review_bot", "pr_review", "hostile_reviewer"):
+        mapping = by_name.get(skill_name)
+        assert mapping is not None, f"{skill_name} missing from skill_mapping.yaml"
+        # The decomposed-but-deleted shells must never reappear in the mapping.
+        assert mapping.node_name not in {
+            "node_pr_review_bot",
+            "node_hostile_reviewer",
+        }, (
+            f"{skill_name} maps to the deleted shell node {mapping.node_name!r}; "
+            "the OMN-13212 decomposition removed it from the catalog"
+        )
+        assert mapping.node_name in declared_nodes, (
+            f"{skill_name} -> {mapping.node_name!r} is not a real node in the "
+            "omnimarket onex.nodes catalog"
+        )
+
+
 def test_registry_rejects_duplicate_skill_names() -> None:
     with pytest.raises(ValueError, match="duplicate skill_name"):
         ModelSkillMappingRegistry(
@@ -156,7 +278,7 @@ def _mapping_with(*args: ModelSkillArgSpec, **kw: object) -> ModelSkillMapping:
         node_name="node_t",
         result_model="a.B",
         args=tuple(args),
-        **kw,  # type: ignore[arg-type]
+        **kw,
     )
 
 
