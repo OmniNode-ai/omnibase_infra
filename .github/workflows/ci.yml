@@ -133,6 +133,15 @@ jobs:
             done
           fi
 
+      # OMN-13530: every operation_match (or absent-strategy) handler_routing
+      # entry must declare a non-empty 'operation' field. A missing operation
+      # makes the contract fail closed at RuntimeLocal startup ('handlers[i].
+      # operation is missing' / result=failed) — the 0.46.0 regression that
+      # took down the headless automation fleet. SYNC with pre-commit hook
+      # 'operation-match-requires-operation'.
+      - name: operation_match operation-field gate (OMN-13530)
+        run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
+
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 

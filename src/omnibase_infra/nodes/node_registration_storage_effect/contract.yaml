@@ -165,12 +165,14 @@ handler_routing:
   routing_strategy: "handler_type_match"
   default_handler: "postgresql"
   handlers:
-    - handler_type: "postgresql"
+    - operation: registration_storage_postgres
+      handler_type: "postgresql"
       handler:
         name: "HandlerRegistrationStoragePostgres"
         module: "omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres"
       description: "PostgreSQL storage handler"
-    - handler_type: "mock"
+    - operation: registration_storage_mock
+      handler_type: "mock"
       handler:
         name: "HandlerRegistrationStorageMock"
         module: "omnibase_infra.handlers.registration_storage.handler_registration_storage_mock"

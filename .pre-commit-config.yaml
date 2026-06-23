@@ -218,6 +218,20 @@ repos:
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
+      # OMN-13530: require an 'operation' field on every operation_match (or
+      # absent-strategy) handler_routing entry. A missing operation makes the
+      # contract fail closed at RuntimeLocal startup ('handlers[i].operation is
+      # missing' / result=failed) — the 0.46.0 regression that took down the
+      # headless automation fleet. Canonical core validator, run as a local hook
+      # against the pinned omnibase_core. SYNC with ci.yml step
+      # "operation_match operation-field gate".
+      - id: operation-match-requires-operation
+        name: operation_match handler operation-field gate (OMN-13530)
+        entry: uv run python -m omnibase_core.validators.operation_match_requires_operation
+        language: system
+        files: (^|/)contract\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement

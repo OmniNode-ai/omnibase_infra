@@ -180,7 +180,7 @@ override-dependencies = [
 # Now also carries the OMN-13515 RuntimeLocal event_bus fix merged to core dev.
 # New pin carries all token fields; version stays 0.46.0 (override bound
 # >=0.44.0,<0.47.0 unchanged). Mirrors the OMN-13504 omnimarket relock.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "bd98c188f4bf5d173b9054527d8459efe9e7bddc" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "287511f20a18a3a407348d8d80554d96d925b843" }
 # OMN-13507: pin spi to omnibase_spi dev HEAD 3c99ed45 (was branch=main @
 # b7bac176). The floating main pin resolved to a commit off omnibase_spi main
 # that has DIVERGED from dev (b7bac176 is not an ancestor of dev HEAD), so the
