@@ -226,6 +226,21 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py imperative_orchestrators --verbose
 
+      # ARCH-004 Signal B orchestration-monolith ratchet (OMN-13486).
+      # Full report over the repo: surfaces every Class-B orchestration monolith
+      # (oversized + complex + not executor-bound), independent of FSM
+      # decorativeness — a DISTINCT signal from Signal A. Non-blocking INITIALLY
+      # (continue-on-error) while the baseline is above threshold; the
+      # changed-node ratchet (pre-commit, blocking) stops regressions. Rides
+      # OMN-12550 / OMN-13325 — same path as Signal A, not a fresh hook.
+      - name: Run orchestration-monolith ratchet report (ARCH-004 Signal B)
+        continue-on-error: true
+        run: |
+          echo "================================================================"
+          echo "Orchestration-Monolith Ratchet Report (ARCH-004 Signal B, OMN-13486)"
+          echo "================================================================"
+          uv run python scripts/validate.py orchestration_monoliths --verbose
+
       - name: Run markdown link validation
         run: |
           echo "================================================================"
