@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeBrokerDiskWatermarkCompute
+#
+# Probes docker data-root filesystem + per-broker-volume usage and cross-checks
+# redpanda storage_min_free_bytes headroom. Returns structured breach results
+# at warn (85%) and p0 (95%) watermarks so a downstream orchestrator can
+# create Linear tickets. Eliminates the class of demo-day outages described in
+# OMN-13009 (error system:28 No space left on device).
+#
+# Related Tickets:
+#   - OMN-13009: P0 Redpanda broker storage exhaustion (error system:28)
+#   - OMN-13008: Automated worktree GC + .201 docker/disk GC + disk watermark alert ratchet
+name: "node_broker_disk_watermark_compute"
+contract_name: "node_broker_disk_watermark_compute"
+node_name: "node_broker_disk_watermark_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Compute node that probes the docker data-root filesystem (via docker info -> DockerRootDir, NOT host /) and per-broker-volume disk usage, then classifies each against warn (85%) and p0 (95%) watermarks. Also cross-checks that remaining free bytes exceed redpanda storage_min_free_bytes (default 10 MiB). Returns a list of ModelBrokerDiskCheck records — one per volume plus one for the data-root — each with severity CLEAN / WARN / P0. A downstream orchestrator creates Linear tickets on P0 and Slack alerts on WARN. docker info and shutil.disk_usage are injected seams for testability.
+
+input_model:
+  name: "ModelBrokerDiskWatermarkInput"
+  module: "omnibase_infra.nodes.node_broker_disk_watermark_compute.models.model_broker_disk_watermark_input"
+  description: "Configuration for disk watermark probe: broker volume names, thresholds, and injectable docker-info seam."
+output_model:
+  name: "ModelBrokerDiskWatermarkOutput"
+  module: "omnibase_infra.nodes.node_broker_disk_watermark_compute.models.model_broker_disk_watermark_output"
+  description: "Probe results: list of per-volume checks with severity classification and free-bytes headroom."
+capabilities:
+  - name: "broker.disk.probe"
+    description: "Probe docker data-root + broker volumes for storage exhaustion risk"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "broker.disk.probe"
+      handler_class: "HandlerBrokerDiskWatermark"
+      handler_module: "omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark"
+      description: "Probe docker data-root filesystem + named broker volumes and classify against watermarks"
+      input_model:
+        name: "ModelBrokerDiskWatermarkInput"
+        module: "omnibase_infra.nodes.node_broker_disk_watermark_compute.models.model_broker_disk_watermark_input"
+        description: "Input for disk watermark probe."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "DockerInfoUnavailableError"
+      description: "docker info command failed or is unavailable"
+      recoverable: false
+    - name: "DiskProbeError"
+      description: "shutil.disk_usage failed for a path"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "watermark_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Probes docker data-root + broker volumes for storage exhaustion risk (OMN-13009 ratchet)"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-06-23"
+  tags:
+    - compute
+    - broker
+    - disk
+    - watermark
+    - redpanda
+    - storage
+    - alerting
+  related_tickets:
+    - "OMN-13009"
+    - "OMN-13008"
