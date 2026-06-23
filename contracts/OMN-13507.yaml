@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13507"
+title: "Re-lock omnibase_infra dev omnibase-core pin to dev HEAD carrying ModelTaskDelegatedEvent token fields"
+summary: >
+  The dev omninode-runtime image (built in RELEASE mode) bundled omnibase-core pinned to db7f341353e598df84629b1c32514c78d554ef57 (OMN-13444, #1296), which PREDATES the ModelTaskDelegatedEvent token-field additions. As a result the running container's frozen+extra=forbid wire event lacked tokens_input, tokens_output (#1300 / 81c865f6 / OMN-13408) and context_pack_hash (#1299 / 1c412207b / OMN-13407), so terminal-emit raised a pydantic ValidationError and delegation terminal rows never persisted (blocking the OMN-13408 / P0-3 live proof). This change repoints the omnibase-core git pin in pyproject.toml [tool.uv.sources] rev= and [tool.uv] override-dependencies, mirrored into uv.lock via uv lock --upgrade-package omnibase-core, from db7f341353e598df84629b1c32514c78d554ef57 to core dev HEAD 8ecb7efc17721dda2ce468b2e5051816ff8e89bc (a strict descendant of the old pin on omnibase_core dev that carries all three fields). Version stays 0.46.0; the override bound >=0.44.0,<0.47.0 is unchanged. Pure dependency-pin re-lock; no source, version specifier, migration, schema, endpoint, or env change -- only pyproject.toml pins + uv.lock. Mirrors the OMN-13504 omnimarket relock.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "New core pin 8ecb7efc17721dda2ce468b2e5051816ff8e89bc is an ancestor of omnibase_core origin/dev (merge-base --is-ancestor exits 0) AND a strict descendant of the prior pin db7f341353e598df84629b1c32514c78d554ef57. The OMN-12977 sibling-pin guard requires the lock pin to be an ancestor of the synced clone HEAD for the workspace build."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "git -C ../../../omnibase_core merge-base --is-ancestor 8ecb7efc17721dda2ce468b2e5051816ff8e89bc origin/dev"
+      - check_type: "command"
+        check_value: "git -C ../../../omnibase_core merge-base --is-ancestor db7f341353e598df84629b1c32514c78d554ef57 8ecb7efc17721dda2ce468b2e5051816ff8e89bc"
+  - id: "dod-002"
+    description: "The pinned core source carries all three ModelTaskDelegatedEvent token fields (tokens_input, tokens_output, context_pack_hash). uv sync resolves the new pin; introspection of M.model_fields shows all 3 present, so terminal-emit no longer raises ValidationError under frozen+extra=forbid."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python -c \"from omnibase_core.models.delegation.wire.model_task_delegated_event import ModelTaskDelegatedEvent as M; assert {'tokens_input','tokens_output','context_pack_hash'} <= set(M.model_fields)\""
+  - id: "dod-003"
+    description: "Lock resolves and the package imports: uv sync --all-extras resolves the env; python -c 'import omnibase_core' loads v0.46.0. ruff check + format clean on the changed files; no old SHA (db7f341353) remains in pyproject.toml or uv.lock; new SHA present in both."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python -c 'import omnibase_core; print(omnibase_core.__version__)'"
+  - id: "dod-deploy"
+    description: "Deploy-gate evidence: pure dependency-pin re-lock -- only pyproject.toml [tool.uv.sources]/override-dependencies omnibase-core SHA and uv.lock change; no source, migration, schema, endpoint, or env-for-model change. After merge, a dev-lane redeploy (deploy-runtime.sh, pre-authorized per feedback_dev_lane_start_is_preauthorized) vendors the token-bearing core so terminal rows persist. No prod/stability/judge mutation. The live deploy is a separate gated step, not performed by this PR."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "printf 'deploy gate: dev-lane only; re-lock unblocks the subsequent gated dev redeploy; no prod mutation'"

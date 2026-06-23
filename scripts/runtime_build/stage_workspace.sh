@@ -10,7 +10,7 @@
 #     bash docker/runtime_build/stage_workspace.sh
 #
 # On success, creates:
-#   workspace/sibling-repos/<repo-name>/  (rsync'd working tree copy)
+#   workspace/sibling-repos/<repo-name>/  (staged working tree copy)
 #   workspace/sibling-pin-comparison.json (expected-vs-actual pin proof)
 #
 # Sibling-pin preflight (OMN-12977, OMN-13403):

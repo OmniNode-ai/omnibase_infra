@@ -182,7 +182,7 @@ class TestReceiptModeSuccess:
             # hash verification.
             blobs.append(store.read_blob(ref))
             meta = store.read_meta(ref)
-            assert meta["source_system"] == "onex_cli"
+            assert meta.source_system == "onex_cli"
 
         capture_file = next((state_root / CAPTURE_DIR_NAME).glob("proof_noop-*.log"))
         assert capture_file.read_bytes() in blobs

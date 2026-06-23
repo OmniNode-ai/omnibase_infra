@@ -15,11 +15,12 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    # OMN-13445: pin advanced to the Phase-1b core SHA (OMN-13444 / core #1296)
-    # that relocated RuntimeLocal + adapter + the 5 local-runtime protocols into
-    # omnibase_core.runtime / omnibase_core.protocols.runtime; infra re-points
-    # onto the core-resident runtime here.
-    expected_core = "db7f341353e598df84629b1c32514c78d554ef57"
+    # OMN-13507: pin advanced to core dev HEAD bd98c188 (a strict descendant of
+    # the Phase-1b SHA db7f341) so the runtime image bundles a
+    # ModelTaskDelegatedEvent carrying tokens_input/tokens_output (#1300/OMN-13408)
+    # + context_pack_hash (#1299/OMN-13407); terminal-emit no longer raises
+    # ValidationError under frozen+extra=forbid.
+    expected_core = "bd98c188f4bf5d173b9054527d8459efe9e7bddc"
 
     assert expected_core in pyproject
     assert expected_core in uv_lock
@@ -32,6 +33,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13486: identity regenerated for the current dev/runtime proof inputs.
-    assert lock["identity_digest"] == "da0dc5140fae53e84399503a0e5f8eb3"
-    assert lock["shared_env_digest"] == "8238ed24bfdfc3816dde8016"
+    # OMN-13507: identity regenerated after merging the current dev/runtime
+    # proof inputs with the advanced omnibase-core pin.
+    assert lock["identity_digest"] == "8a8d47cf703f5c590517ce203b2c3e83"
+    assert lock["shared_env_digest"] == "0846c76fac6fae4673127b05"
