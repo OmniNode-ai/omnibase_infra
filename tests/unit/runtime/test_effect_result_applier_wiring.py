@@ -39,6 +39,7 @@ from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -177,7 +178,7 @@ async def test_applier_routes_effect_returned_model_to_correct_topic(
     pe_map = load_published_events_map(contract_path)
     topics = list(pe_map.values())
 
-    event_bus = AsyncMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
     applier = DispatchResultApplier(
         event_bus=event_bus,
         output_topic=topics[0],
@@ -213,7 +214,7 @@ async def test_applier_routes_alternate_effect_output_to_correct_topic(
     pe_map = load_published_events_map(contract_path)
     topics = list(pe_map.values())
 
-    event_bus = AsyncMock()
+    event_bus = AsyncMock(spec=ProtocolEventBusLike)
     applier = DispatchResultApplier(
         event_bus=event_bus,
         output_topic=topics[0],
@@ -283,7 +284,7 @@ def test_manifest_scan_builds_applier_for_effect_contract(tmp_path: Path) -> Non
     manifest = ModelAutoWiringManifest(contracts=contracts, errors=())
 
     # Kernel logic: scan manifest.contracts for published_events.
-    event_bus_mock = AsyncMock()
+    event_bus_mock = AsyncMock(spec=ProtocolEventBusLike)
     auto_wiring_result_appliers: dict[str, object] = {}
 
     for _contract in manifest.contracts:
@@ -357,7 +358,7 @@ def test_manifest_scan_skips_already_registered_contracts(tmp_path: Path) -> Non
             continue
         topics = list(pe_map.values())
         auto_wiring_result_appliers[_contract.name] = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic=topics[0],
             output_topic_map=pe_map,
             allowed_output_topics=topics,
