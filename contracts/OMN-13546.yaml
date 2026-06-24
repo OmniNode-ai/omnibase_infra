@@ -1,0 +1,43 @@
+# OMN-13546 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-13546"
+title: "fix(OMN-13546): add handle() dispatch entrypoints to HandlerForwardOutbound + HandlerConsumeInbound"
+summary: >-
+  HandlerForwardOutbound and HandlerConsumeInbound in node_bus_forwarder_effect implemented domain-named transform methods but not the canonical handle() dispatch entrypoint checked by runtime auto-wiring. The fix adds async handle() methods that return ModelHandlerOutput.for_compute() with transformed gateway envelopes while preserving the existing pure transform methods.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit tests cover handle() dispatch entrypoints on both gateway forwarder handlers."
+    command: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_handler_dispatch_entrypoints.py -v"
+  - kind: "tests"
+    description: "Full node_bus_forwarder_effect unit suite remains green."
+    command: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/ -v"
+  - kind: "ci"
+    description: "Central OCC evidence for OMN-13546 is carried by onex_change_control PR #2996."
+    command: "gh pr view 2996 --repo OmniNode-ai/onex_change_control --json headRefOid"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-dispatch-entrypoint-tests"
+    description: "Focused dispatch-entrypoint tests pass for HandlerForwardOutbound and HandlerConsumeInbound."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_handler_dispatch_entrypoints.py -v"
+  - id: "dod-forwarder-unit-suite"
+    description: "The full node_bus_forwarder_effect unit suite passes."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/ -v"
+  - id: "dod-deploy-validation"
+    description: "Post-merge deploy validation must verify runtime-effects no longer emits missing handle() dispatch errors for the gateway forwarder handlers."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime-effects after merge, then verify node_bus_forwarder_effect gateway forwarder dispatch does not raise missing handle()/handle_async() ModelOnexError"
