@@ -1,4 +1,4 @@
-# OMN-11294 Delegate-Skill Stability Runtime Hot-Patch Proof
+# Delegate-Skill Stability Runtime Hot-Patch Proof
 
 Date: 2026-05-20
 Runtime host: `<user>@<onex-host>`
@@ -6,7 +6,7 @@ Runtime lane: `stability-test`
 
 ## Context
 
-`OMN-11073` fixed the runtime-owned delegation dispatch port in source and merged
+A prior patch fixed the runtime-owned delegation dispatch port in source and merged
 as `omnibase_infra#1624`, but the stability runtime on the runtime host still had a stale
 loaded copy of `RuntimeDelegationDispatchPort`.
 

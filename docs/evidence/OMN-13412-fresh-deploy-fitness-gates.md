@@ -1,4 +1,4 @@
-# OMN-13412 — Fresh-deploy fitness gates (Wave E) — dod_evidence
+# Fresh-deploy fitness gates (Wave E) — dod_evidence
 
 Wire 7 fresh-deploy fitness validators as enforcement (required CI + pre-commit),
 not detection. Each broken input fails CI with a non-zero exit BEFORE merge.
@@ -7,7 +7,7 @@ not detection. Each broken input fails CI with a non-zero exit BEFORE merge.
 
 | # | Gate | Logic | CI wiring | Pre-commit |
 |---|------|-------|-----------|------------|
-| 1 | sibling-pin recurrence ratchet | `scripts/runtime_build/check_sibling_lock_pins.py` (OMN-12977, A4) | `fresh-deploy-fitness.yml` → `sibling-lock-pins` (ratchet logic regression gate) + live compare inside Dockerfile.runtime provenance step | n/a (build-time direction; CI test gate) |
+| 1 | sibling-pin recurrence ratchet | `scripts/runtime_build/check_sibling_lock_pins.py` | `fresh-deploy-fitness.yml` → `sibling-lock-pins` (ratchet logic regression gate) + live compare inside Dockerfile.runtime provenance step | n/a (build-time direction; CI test gate) |
 | 2 | build-provenance version-skew | `scripts/check-pinned-wheels.py` (A6) | `fresh-deploy-fitness.yml` → `pinned-wheel-skew` (lifts the build-time assertion into CI; version-skew fails the build not the deploy) | n/a (needs `gh` auth) |
 | 3 | scratch-Postgres cold-apply | `scripts/run-migrations.py` | `ci.yml` → `migration-integration` (blank PG service, applies 0001→N, asserts 24 tables, fails on any error) — pre-existing required job | n/a |
 | 4 | vendored-tree byte-equality | `scripts/sync-node-migrations.sh --check` | `node-migration-sync.yml` (pre-existing required) | `onex-check-node-migration-sync` (pre-existing) |
@@ -53,7 +53,7 @@ Each correct input passes (exit 0):
 terminal-cost   exit=0  (annotated legitimate zero paths in service_auto_eval_runner.py)
 context-field   exit=0  (no contract makes an unpinned ROI claim — clean ratchet)
 release-identity exit=0 (pyproject 0.38.4 ahead of latest published v0.38.3)
-sibling-lock-pins exit=0 (clone-ahead descendant note, non-fatal — OMN-13403)
+sibling-lock-pins exit=0 (clone-ahead descendant note, non-fatal)
 ```
 
 ## Local gate results (in worktree)
@@ -65,10 +65,10 @@ sibling-lock-pins exit=0 (clone-ahead descendant note, non-fatal — OMN-13403)
 
 ## Guardrail compliance
 
-- Did NOT modify OMN-13408 cost-path computation. The terminal-cost gate is a
+- Did NOT modify cost-path computation. The terminal-cost gate is a
   static lint; the two annotated `cost_usd=0.0` sites in
   `service_auto_eval_runner.py` are the budget-rejection and exception paths
   (no LLM call / no tokens), annotated `# cost-zero-ok:` — no cost-computation
   logic touched.
-- Did NOT touch OMN-13472 ratchet files.
+- Did NOT touch delegation-telemetry ratchet files.
 - No skip tokens, no `--no-verify`.

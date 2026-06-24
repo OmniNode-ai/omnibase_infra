@@ -29,7 +29,7 @@ Install the core ONEX package with uv
 ## Start Docker Infrastructure
 
 Start PostgreSQL, Redpanda, Valkey, and Infisical via the in-repo Makefile.
-The `Makefile` (OMN-10377) detects a missing/stopped Docker daemon and emits
+The `Makefile` detects a missing/stopped Docker daemon and emits
 an actionable error before doing anything destructive.
 
 - [ ] **Start Docker Infrastructure**

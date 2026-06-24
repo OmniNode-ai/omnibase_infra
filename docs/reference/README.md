@@ -25,7 +25,7 @@ The `onex` CLI is the primary developer and operator interface. Entry point: `om
 
 | Subcommand | Purpose |
 |------------|---------|
-| `onex kafka produce <topic> --payload '<json>'` | Publish a ONEX command envelope to a Kafka topic from a dev machine without SSH. Supports `--dry-run` (print envelope, no publish) and `--envelope` (wrap payload in a standard correlation_id/timestamp envelope). PLAINTEXT auth only (LAN runtime host is unauthenticated from dev machines). (OMN-8435) |
+| `onex kafka produce <topic> --payload '<json>'` | Publish a ONEX command envelope to a Kafka topic from a dev machine without SSH. Supports `--dry-run` (print envelope, no publish) and `--envelope` (wrap payload in a standard correlation_id/timestamp envelope). PLAINTEXT auth only (LAN runtime host is unauthenticated from dev machines). |
 | `onex skill <name> [args...]` | Dispatch an ONEX skill by name through the proven receipt-mode path. Skill-to-node mappings are declared in `src/omnibase_infra/cli/skill_mapping.yaml` — see below. |
 | `onex node <name> [args...]` | Invoke a node directly by its entry-point name. |
 | `onex delegate <args>` | Dispatch a delegation request through the bus. |
@@ -50,7 +50,7 @@ Key fields per entry:
 | `static_payload` | dict | Payload fields injected regardless of CLI args |
 | `classifiers` | dict | Keyword classification for unset fields (used by delegate) |
 
-### headless codex CLI for delegation (OMN-13158)
+### headless codex CLI for delegation
 
 The delegation subsystem (`node_llm_inference_effect` via `HandlerLlmCliSubprocess`) uses the headless/non-interactive codex CLI (`codex --headless`) for delegation inference. The handler spawns the CLI as a subprocess in non-interactive mode, passes the prompt via stdin, and reads the response from stdout. This avoids the OAuth/browser flow required by the interactive CLI. The `codex-cli` entry in the handler's provider map resolves to the installed `codex` binary.
 

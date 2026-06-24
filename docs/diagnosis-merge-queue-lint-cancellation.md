@@ -1,6 +1,6 @@
 # Diagnosis: omnibase_infra dev merge-queue stall — Lint job cancellation
 
-**Ticket scope:** OMN-12432 (#1789), OMN-12416 (#1781), OMN-12421 (#1782), OMN-12433 (#1792)
+**PRs:** #1789, #1781, #1782, #1792
 **Date:** 2026-05-30
 **Status:** Blocked on infrastructure — requires runner-pool decision, not code.
 

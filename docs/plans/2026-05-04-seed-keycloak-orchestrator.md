@@ -1,6 +1,4 @@
 ---
-ticket_id: OMN-10089
----
 
 # Seed-Keycloak Orchestrator Split
 
@@ -8,7 +6,7 @@ ticket_id: OMN-10089
 
 **Goal:** Move the Keycloak seed orchestration (env sourcing, KC_URL polling, localhost-gated `--reset-bootstrap-admin`, `seed-keycloak-clients.py` invocation) out of the top-level `omnibase` Makefile and into `omnibase_infra` where the Docker/Keycloak knowledge belongs. Make Keycloak start on a default `docker compose up -d` so the omnibase distribution Makefile no longer needs to pass `--profile auth`.
 
-**Why:** The top-level `omnibase` repo is the user-facing distribution point — users clone it to run the platform but are not guaranteed to be running Docker. Anything Docker-specific belongs in `omnibase_infra`. Reviewer (jonahgabriel) called this out during PR review of `harsh-omni/omnibase#2`. OMN-10089's acceptance criterion explicitly offers two paths to enable Keycloak by default; this plan picks **"move keycloak service into default profile"** since it preserves the architectural boundary.
+**Why:** The top-level `omnibase` repo is the user-facing distribution point — users clone it to run the platform but are not guaranteed to be running Docker. Anything Docker-specific belongs in `omnibase_infra`. Reviewer (jonahgabriel) called this out during PR review of `harsh-omni/omnibase#2`. The acceptance criterion explicitly offers two paths to enable Keycloak by default; this plan picks **"move keycloak service into default profile"** since it preserves the architectural boundary.
 
 **Scope:** Two files in `omnibase_infra`. No application code; no contract changes; no migrations.
 
@@ -35,13 +33,13 @@ ticket_id: OMN-10089
 
 ## Out of scope
 
-- Changing `seed-keycloak-clients.py` (already merged in PR #1432, OMN-10088).
+- Changing `seed-keycloak-clients.py` (already merged in PR #1432).
 - Changing the catalog/`bundles.yaml` system. Keycloak's `auth` bundle membership stays intact for users who want bundle-driven startup; this plan only touches the legacy direct-compose path.
 - Wiring this script into a top-level Makefile in omnibase_infra (no such Makefile exists today; not creating one in this PR).
 
 ## Cross-repo coordination
 
-This PR must merge before [`harsh-omni/omnibase#2`](https://github.com/harsh-omni/omnibase/pull/2) (OMN-10089 Makefile-side) can be updated to call `bash $(REPOS_DIR)/omnibase_infra/scripts/seed-keycloak.sh` as a thin pass-through and to drop its own `--profile auth` additions. The omnibase PR will be rebased + the body updated to link this PR's merge SHA after merge.
+This PR must merge before [`harsh-omni/omnibase#2`](https://github.com/harsh-omni/omnibase/pull/2) (the Makefile-side companion PR) can be updated to call `bash $(REPOS_DIR)/omnibase_infra/scripts/seed-keycloak.sh` as a thin pass-through and to drop its own `--profile auth` additions. The omnibase PR will be rebased + the body updated to link this PR's merge SHA after merge.
 
 ## Test plan
 

@@ -1,4 +1,4 @@
-# DLQ Quarantine Ownership Semantics (OMN-12619)
+# DLQ Quarantine Ownership Semantics
 
 > Authoritative companion to the `quarantine:` block in
 > `src/omnibase_infra/nodes/node_dlq_replay_effect/contract.yaml`.
