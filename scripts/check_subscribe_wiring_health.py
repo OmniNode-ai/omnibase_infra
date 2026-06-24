@@ -57,10 +57,15 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # omniclaude publishes these via hook scripts, not contract.yaml
     "onex.evt.omniclaude.session-started.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.session-ended.v1": "Published by omniclaude SessionEnd hook, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.session-outcome.v1": "Published by omniclaude SessionEnd hook outcome processing, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.hook-context-injected.v1": "Published by omniclaude hook context injection, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.validator-catch.v1": "Published by omniclaude validator hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.pattern-enforcement.v1": "Published by omniclaude pattern enforcement hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omniintelligence.claude-hook-event.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omniintelligence.tool-content.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "Published by omniintelligence dispatch evaluation, not an omnibase_infra node contract | owner: jonah | expiry: 2026-12-01",
     # GitHub webhooks are external triggers
     "onex.evt.github.pr-webhook.v1": "Published by GitHub webhook relay, not a node | owner: jonah | expiry: 2026-12-01",
     "onex.evt.github.push-webhook.v1": "Published by GitHub webhook relay | owner: jonah | expiry: 2026-12-01",
