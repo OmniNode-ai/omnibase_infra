@@ -35,9 +35,15 @@ class HandlerForwardOutbound:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object],
+        envelope: object,
     ) -> ModelHandlerOutput[ModelGatewayEnvelope]:
-        """Dispatch entrypoint: extract gateway envelope, apply outbound transform, return compute output."""
+        """Dispatch entrypoint: extract gateway envelope, apply outbound transform, return compute output.
+
+        ``envelope`` is typed ``object`` because the runtime dispatcher delivers
+        either a ``ModelEventEnvelope`` instance or its serialized ``dict`` form
+        (OMN-13580); ``_coerce_dispatch_input`` normalizes both to the typed
+        envelope before reading ``.payload``.
+        """
         gateway_envelope, envelope_id, correlation_id = _coerce_dispatch_input(envelope)
         transformed = self.forward_outbound(gateway_envelope)
         return ModelHandlerOutput.for_compute(
@@ -78,9 +84,19 @@ class HandlerForwardOutbound:
 
 
 def _coerce_dispatch_input(
-    envelope: ModelEventEnvelope[object],
+    envelope: object,
 ) -> tuple[ModelGatewayEnvelope, UUID, UUID]:
-    payload = envelope.payload
+    # OMN-13580: the runtime dispatcher delivers the OUTER envelope as a raw
+    # dict, not a ModelEventEnvelope instance. Deserialize to the typed envelope
+    # BEFORE reading ``.payload`` (matching the OMN-12001/12940 dict-vs-typed
+    # coercion pattern) so the handler does not crash with
+    # ``AttributeError: 'dict' object has no attribute 'payload'``.
+    typed_envelope = (
+        envelope
+        if isinstance(envelope, ModelEventEnvelope)
+        else ModelEventEnvelope[object].model_validate(envelope)
+    )
+    payload = typed_envelope.payload
     gateway_envelope = (
         payload
         if isinstance(payload, ModelGatewayEnvelope)
@@ -88,6 +104,6 @@ def _coerce_dispatch_input(
     )
     return (
         gateway_envelope,
-        envelope.envelope_id,
-        envelope.correlation_id or gateway_envelope.correlation_id,
+        typed_envelope.envelope_id,
+        typed_envelope.correlation_id or gateway_envelope.correlation_id,
     )

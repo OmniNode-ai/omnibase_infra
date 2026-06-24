@@ -101,6 +101,20 @@ def _make_dispatch_envelope(
     )
 
 
+def _make_dispatch_envelope_dict(
+    gateway_envelope: ModelGatewayEnvelope,
+) -> dict[str, object]:
+    """Raw-dict envelope as the live runtime dispatcher actually delivers it.
+
+    OMN-13580: on stability-test the dispatcher passes the OUTER envelope as a
+    serialized ``dict`` (not a ``ModelEventEnvelope`` instance). The handler
+    must deserialize this dict to the typed envelope before reading ``.payload``
+    or it crashes with ``AttributeError: 'dict' object has no attribute
+    'payload'`` (the defect that fired 24x against CID-terminal steps).
+    """
+    return _make_dispatch_envelope(gateway_envelope).model_dump()
+
+
 @pytest.mark.asyncio
 async def test_handler_forward_outbound_handle_returns_model_handler_output() -> None:
     """HandlerForwardOutbound.handle() returns a valid ModelHandlerOutput (no AttributeError)."""
@@ -129,6 +143,48 @@ async def test_handler_consume_inbound_handle_returns_model_handler_output() -> 
 
     assert isinstance(result, ModelHandlerOutput)
     assert result.result is not None
+    assert isinstance(result.result, ModelGatewayEnvelope)
+    assert result.result.canonical_topic == INBOUND_TOPIC
+    assert result.result.source_topic == WIRE_INBOUND_TOPIC
+    assert result.correlation_id == gw_envelope.correlation_id
+
+
+@pytest.mark.asyncio
+async def test_handler_forward_outbound_handle_accepts_raw_dict_envelope() -> None:
+    """OMN-13580: handle() deserializes a raw-dict envelope before reading .payload.
+
+    Reproduces the live stability-test crash where the dispatcher delivers the
+    outer envelope as a serialized dict. Pre-fix this raised
+    ``AttributeError: 'dict' object has no attribute 'payload'``.
+    """
+    handler = HandlerForwardOutbound(config=_config())
+    gw_envelope = _outbound_gateway_envelope()
+    dispatch_envelope_dict = _make_dispatch_envelope_dict(gw_envelope)
+
+    result = await handler.handle(dispatch_envelope_dict)
+
+    assert isinstance(result, ModelHandlerOutput)
+    assert isinstance(result.result, ModelGatewayEnvelope)
+    assert result.result.wire_topic == WIRE_OUTBOUND_TOPIC
+    assert result.result.source_topic == OUTBOUND_TOPIC
+    assert result.correlation_id == gw_envelope.correlation_id
+
+
+@pytest.mark.asyncio
+async def test_handler_consume_inbound_handle_accepts_raw_dict_envelope() -> None:
+    """OMN-13580: handle() deserializes a raw-dict envelope before reading .payload.
+
+    Reproduces the live stability-test crash where the dispatcher delivers the
+    outer envelope as a serialized dict. Pre-fix this raised
+    ``AttributeError: 'dict' object has no attribute 'payload'``.
+    """
+    handler = HandlerConsumeInbound(config=_config())
+    gw_envelope = _inbound_gateway_envelope()
+    dispatch_envelope_dict = _make_dispatch_envelope_dict(gw_envelope)
+
+    result = await handler.handle(dispatch_envelope_dict)
+
+    assert isinstance(result, ModelHandlerOutput)
     assert isinstance(result.result, ModelGatewayEnvelope)
     assert result.result.canonical_topic == INBOUND_TOPIC
     assert result.result.source_topic == WIRE_INBOUND_TOPIC
