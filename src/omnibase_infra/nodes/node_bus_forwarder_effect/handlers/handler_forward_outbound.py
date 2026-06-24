@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol
+from uuid import UUID
 
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -16,6 +17,12 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     prefix_topic,
 )
+
+
+class GatewayDispatchEnvelope(Protocol):
+    envelope_id: UUID
+    correlation_id: UUID | None
+    payload: object
 
 
 class HandlerForwardOutbound:
@@ -34,19 +41,11 @@ class HandlerForwardOutbound:
 
     async def handle(
         self,
-        envelope: Any,
+        envelope: GatewayDispatchEnvelope,
     ) -> ModelHandlerOutput[ModelGatewayEnvelope]:
         """Dispatch entrypoint: extract gateway envelope, apply outbound transform, return compute output."""
-        payload = envelope.payload if hasattr(envelope, "payload") else envelope
-        if isinstance(payload, dict):
-            gateway_envelope = ModelGatewayEnvelope.model_validate(payload)
-        else:
-            gateway_envelope = payload
+        gateway_envelope, envelope_id, correlation_id = _coerce_dispatch_input(envelope)
         transformed = self.forward_outbound(gateway_envelope)
-        envelope_id = getattr(envelope, "envelope_id", gateway_envelope.envelope_id)
-        correlation_id = getattr(
-            envelope, "correlation_id", gateway_envelope.correlation_id
-        )
         return ModelHandlerOutput.for_compute(
             input_envelope_id=envelope_id,
             correlation_id=correlation_id,
@@ -82,3 +81,19 @@ class HandlerForwardOutbound:
                 "HandlerForwardOutbound requires ModelGatewayForwarderConfig"
             )
         return self._config
+
+
+def _coerce_dispatch_input(
+    envelope: GatewayDispatchEnvelope,
+) -> tuple[ModelGatewayEnvelope, UUID, UUID]:
+    payload = envelope.payload
+    gateway_envelope = (
+        payload
+        if isinstance(payload, ModelGatewayEnvelope)
+        else ModelGatewayEnvelope.model_validate(payload)
+    )
+    return (
+        gateway_envelope,
+        envelope.envelope_id,
+        envelope.correlation_id or gateway_envelope.correlation_id,
+    )

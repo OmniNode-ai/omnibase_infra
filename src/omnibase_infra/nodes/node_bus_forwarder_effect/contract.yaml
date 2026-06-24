@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 name: "node_bus_forwarder_effect"
 contract_name: "node_bus_forwarder_effect"
@@ -13,13 +13,10 @@ node_version:
   minor: 1
   patch: 0
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway
-  topics between a local runtime bus and the hosted cloud Kafka edge. The node
-  owns all publishes; handlers only validate and return transformed envelopes.
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes.
 
 runtime_profiles:
   - effects
-
 input_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
@@ -28,7 +25,6 @@ output_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
   description: "Validated gateway envelope after prefix add/strip transformation."
-
 config:
   name: "ModelGatewayForwarderConfig"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_config"
@@ -61,7 +57,6 @@ config:
       drain_deadline_seconds: 30
     dedupe:
       retention_hours: 24
-
 event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
@@ -71,7 +66,6 @@ event_bus:
     - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
     - "onex.evt.omnibase-infra.inference-response.v1"
     - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
-
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -80,14 +74,13 @@ handler_routing:
         name: "HandlerForwardOutbound"
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_forward_outbound"
         handler_type: "COMPUTE"
-      description: "Validate local bare topic and add the tenant cloud wire prefix."
+      description: "Canonical handle() dispatch entrypoint validates local bare topic and delegates to the tenant cloud wire-prefix transform."
     - operation: "gateway.consume_inbound"
       handler:
         name: "HandlerConsumeInbound"
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound"
         handler_type: "COMPUTE"
-      description: "Validate tenant-prefixed cloud topic and strip to a bare local topic."
-
+      description: "Canonical handle() dispatch entrypoint validates tenant-prefixed cloud topic and delegates to the bare local-topic transform."
 capabilities:
   - name: "tenant_prefix_transform"
     description: "Adds and strips tenant wire prefixes with envelope validation."
@@ -95,7 +88,6 @@ capabilities:
     description: "Rejects any canonical topic not declared in mirror topic sets."
   - name: "node_owned_publish"
     description: "Handlers never publish; the effect node owns both bus legs."
-
 metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
