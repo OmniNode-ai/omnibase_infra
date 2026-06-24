@@ -85,7 +85,8 @@ RUN set -eu; \\
     npm install -g \\
         @openai/codex@0.141.0 \\
         @openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64 \\
-        @anthropic-ai/claude-code@2.1.181; \\
+        @anthropic-ai/claude-code@2.1.181 \\
+        @anthropic-ai/claude-code-linux-x64@2.1.181; \\
     npm cache clean --force
 """,
         encoding="utf-8",
@@ -98,6 +99,7 @@ RUN set -eu; \\
         ("@openai/codex", "0.141.0"),
         ("@openai/codex-linux-x64", "0.141.0-linux-x64"),
         ("@anthropic-ai/claude-code", "2.1.181"),
+        ("@anthropic-ai/claude-code-linux-x64", "2.1.181"),
     }
 
 
@@ -150,6 +152,7 @@ def test_real_dockerfile_pins_codex_and_claude_exactly() -> None:
     assert by_pkg.get("@openai/codex") == "0.141.0"
     assert by_pkg.get("@openai/codex-linux-x64") == "0.141.0-linux-x64"
     assert by_pkg.get("@anthropic-ai/claude-code") == "2.1.181"
+    assert by_pkg.get("@anthropic-ai/claude-code-linux-x64") == "2.1.181"
     # And every npm global install in the real Dockerfile passes the pin gate.
     for entry in entries:
         assert _mod._check_npm_exact_pin(entry) is None
