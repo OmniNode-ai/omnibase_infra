@@ -67,7 +67,7 @@ PRODUCTION_PUBLISHED_PORTS = {
     "18081",
     "9644",
     "16379",
-    "8880",
+    "8881",  # OMN-13417: dev lane infisical host port (was 8880)
     "8085",
     "8086",
     "8087",

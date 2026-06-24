@@ -15,9 +15,11 @@ hardcoded_env:
   AUTH_SECRET: '${INFISICAL_AUTH_SECRET}'
   TELEMETRY_ENABLED: 'false'
 operational_defaults:
-  SITE_URL: http://localhost:8880
+  # OMN-13417: dev lane host port is 8881 so `onex up core` no longer collides
+  # with the stability-test lane infisical (host 8880) on a shared host.
+  SITE_URL: http://localhost:8881
 ports:
-  external: 8880
+  external: 8881
   internal: 8080
 healthcheck:
   test: wget -q --spider http://localhost:8080/api/status
