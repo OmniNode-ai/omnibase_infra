@@ -35,5 +35,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-13507: identity regenerated after merging the current dev/runtime
     # proof inputs with the advanced omnibase-core pin.
-    assert lock["identity_digest"] == "853775aaffea34fc213a4762d8d3c1c5"
-    assert lock["shared_env_digest"] == "fde01e7001d8554737ff597f"
+    assert lock["identity_digest"] == "0c5a9abb40c62663d082e518108eff79"
+    assert lock["shared_env_digest"] == "2460958e434880f1fe20f33f"
