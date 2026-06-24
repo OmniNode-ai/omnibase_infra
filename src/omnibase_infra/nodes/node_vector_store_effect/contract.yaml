@@ -45,10 +45,22 @@ handler_routing:
         name: "HandlerVectorSearch"
         module: "omnibase_infra.nodes.node_vector_store_effect.handlers.handler_vector_search"
         handler_type: "HTTP"
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+  # Qdrant HTTP endpoint URL for the vector-store effect (OMN-13558 Wave-1
+  # endpoint→overlay migration). Declared with the ${env.VAR} overlay convention
+  # so an operator overlay / the per-lane service env supplies the real endpoint
+  # — never a hardcoded http://localhost:6333 in source. The handlers resolve it
+  # through omnibase_infra.runtime.overlay.contract_env_ref.expand_contract_env_refs
+  # (the one sanctioned env-reading boundary) and fail closed: an unset/empty
+  # value raises rather than silently defaulting to localhost.
+  qdrant_url: "${env.QDRANT_URL}"
 dependencies:
   - type: "environment"
     name: "QDRANT_URL"
-    description: "Qdrant HTTP endpoint URL"
+    description: "Qdrant HTTP endpoint URL (resolved via descriptor.qdrant_url overlay)"
 error_handling:
   retry_policy:
     max_retries: 2

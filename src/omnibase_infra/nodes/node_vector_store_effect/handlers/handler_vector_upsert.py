@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_vector_store_effect.contract_descriptor import (
+    contract_qdrant_url,
+)
 from omnibase_infra.nodes.node_vector_store_effect.models.model_vector_store_request import (
     ModelVectorStoreRequest,
 )
@@ -153,9 +156,7 @@ class HandlerVectorUpsert:
 
         from qdrant_client import QdrantClient
 
-        qdrant_url = os.environ.get(  # ONEX_EXCLUDE: archive port
-            "QDRANT_URL", "http://localhost:6333"
-        )
+        qdrant_url = contract_qdrant_url()
         self._qdrant_client = QdrantClient(url=qdrant_url)
         return self._qdrant_client
 
