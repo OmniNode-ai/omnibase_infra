@@ -15,6 +15,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
@@ -31,6 +32,7 @@ def _route(
     terminal_events: tuple[str, ...],
     command_topic: str | None = None,
     contract_name: str = "node_delegation_orchestrator",
+    contract_path: str | None = None,
 ) -> ModelRuntimeLocalIngressRoute:
     return ModelRuntimeLocalIngressRoute(
         node_name=contract_name,
@@ -43,45 +45,32 @@ def _route(
         event_type=f"{package_name}.delegation-request",
         terminal_event=terminal_events[0] if terminal_events else None,
         terminal_events=terminal_events,
-        contract_path=f"/contracts/{package_name}/node_delegation_orchestrator.yaml",
+        contract_path=(
+            contract_path
+            if contract_path is not None
+            else f"/contracts/{package_name}/node_delegation_orchestrator.yaml"
+        ),
         package_name=package_name,
     )
 
 
-def test_select_delegation_route_prefers_success_failure_terminal_interface() -> None:
+def test_select_delegation_route_binds_omnimarket_only() -> None:
+    """Resolution binds the omnimarket route and ignores the infra surface.
+
+    OMN-13547: the empty infra shell was deleted; resolution must bind
+    omnimarket regardless of whether a (now-impossible) infra route would
+    otherwise satisfy the terminal interface.
+    """
     routes = {
         "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _route(
             package_name="omnimarket",
-            terminal_events=("onex.evt.omnimarket.delegation-completed.v1",),
+            terminal_events=(
+                "onex.evt.omnimarket.delegation-completed.v1",
+                "onex.evt.omnimarket.delegation-failed.v1",
+            ),
         ),
         "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate": _route(
             package_name="omnibase_infra",
-            terminal_events=(
-                "onex.evt.omnibase-infra.delegation-completed.v1",
-                "onex.evt.omnibase-infra.delegation-failed.v1",
-            ),
-        ),
-    }
-
-    selected = _select_delegation_route(routes)
-
-    assert (
-        selected.alias
-        == "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate"
-    )
-
-
-def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> None:
-    routes = {
-        "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate": _route(
-            package_name="omnibase_infra",
-            terminal_events=(
-                "onex.evt.omnibase-infra.delegation-completed.v1",
-                "onex.evt.omnibase-infra.delegation-failed.v1",
-            ),
-        ),
-        "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _route(
-            package_name="omnimarket",
             terminal_events=(
                 "onex.evt.omnibase-infra.delegation-completed.v1",
                 "onex.evt.omnibase-infra.delegation-failed.v1",
@@ -95,9 +84,56 @@ def test_select_delegation_route_prefers_omnimarket_when_contracts_overlap() -> 
         selected.alias
         == "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
     )
+    assert selected.route.package_name == "omnimarket"
 
 
-def test_select_delegation_route_rejects_invalid_public_fallback() -> None:
+def test_select_delegation_route_fails_closed_when_only_infra_route_present() -> None:
+    """No omnimarket engine -> fail closed; never resolve a non-omnimarket route.
+
+    OMN-13547: there is no infra-local fallback. A residual infra-shaped route
+    must NOT be selected; the resolver raises a typed InfraUnavailableError.
+    """
+    routes = {
+        "omnibase_infra.node_delegation_orchestrator.delegation.orchestrate": _route(
+            package_name="omnibase_infra",
+            terminal_events=(
+                "onex.evt.omnibase-infra.delegation-completed.v1",
+                "onex.evt.omnibase-infra.delegation-failed.v1",
+            ),
+        ),
+    }
+
+    with pytest.raises(InfraUnavailableError, match="No omnimarket delegation engine"):
+        _select_delegation_route(routes)
+
+
+def test_select_delegation_route_fails_closed_when_no_route_present() -> None:
+    """Empty route map -> fail closed (omnimarket package absent)."""
+    with pytest.raises(InfraUnavailableError, match="No omnimarket delegation engine"):
+        _select_delegation_route({})
+
+
+def test_select_delegation_route_resolves_single_omnimarket_route() -> None:
+    routes = {
+        "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(
+                "onex.evt.omnimarket.delegation-completed.v1",
+                "onex.evt.omnimarket.delegation-failed.v1",
+            ),
+        ),
+    }
+
+    selected = _select_delegation_route(routes)
+
+    assert (
+        selected.alias
+        == "omnimarket.node_delegation_orchestrator.delegation.orchestrate"
+    )
+
+
+def test_select_delegation_route_rejects_invalid_omnimarket_route() -> None:
+    """An omnimarket route without a success+failure terminal interface fails closed."""
     routes = {
         "delegation.orchestrate": _route(
             package_name="omnimarket",
@@ -106,11 +142,12 @@ def test_select_delegation_route_rejects_invalid_public_fallback() -> None:
         ),
     }
 
-    with pytest.raises(RuntimeError, match="delegation dispatch route"):
+    with pytest.raises(InfraUnavailableError, match="No omnimarket delegation engine"):
         _select_delegation_route(routes)
 
 
-def test_select_delegation_route_accepts_valid_public_fallback() -> None:
+def test_select_delegation_route_accepts_valid_public_omnimarket_fallback() -> None:
+    """The bare 'delegation.orchestrate' alias resolves only for omnimarket."""
     route = _route(
         package_name="omnimarket",
         terminal_events=(
@@ -123,6 +160,47 @@ def test_select_delegation_route_accepts_valid_public_fallback() -> None:
 
     assert selected.alias == "delegation.orchestrate"
     assert selected.route is route
+
+
+def test_select_delegation_route_rejects_bare_alias_for_non_omnimarket() -> None:
+    """The bare alias must NOT resolve a non-omnimarket (e.g. infra) route."""
+    route = _route(
+        package_name="omnibase_infra",
+        terminal_events=(
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+        ),
+    )
+
+    with pytest.raises(InfraUnavailableError, match="No omnimarket delegation engine"):
+        _select_delegation_route({"delegation.orchestrate": route})
+
+
+def test_select_delegation_route_ambiguous_omnimarket_routes_fail_closed() -> None:
+    """Two distinct omnimarket routes with the interface -> ambiguous, fail closed."""
+    routes = {
+        "delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(
+                "onex.evt.omnimarket.delegation-completed.v1",
+                "onex.evt.omnimarket.delegation-failed.v1",
+            ),
+            command_topic="onex.cmd.omnimarket.delegation-request.v1",
+            contract_path="/contracts/omnimarket/node_delegation_orchestrator.yaml",
+        ),
+        "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _route(
+            package_name="omnimarket",
+            terminal_events=(
+                "onex.evt.omnimarket.delegation-completed-alt.v1",
+                "onex.evt.omnimarket.delegation-failed-alt.v1",
+            ),
+            command_topic="onex.cmd.omnimarket.delegation-request-alt.v1",
+            contract_path="/contracts/omnimarket/node_delegation_orchestrator_alt.yaml",
+        ),
+    }
+
+    with pytest.raises(InfraUnavailableError, match="Ambiguous delegation dispatch"):
+        _select_delegation_route(routes)
 
 
 async def _dispatch_with_fake_broker(
