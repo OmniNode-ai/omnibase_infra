@@ -157,7 +157,7 @@ feat(runtime): implement policy registry for orchestrators [agent: agent-contrac
 - Add container wiring for policy resolution
 - Include comprehensive unit tests
 
-Resolves: OMN-812
+Resolves: #812
 ```
 
 ### Co-Authored Commits

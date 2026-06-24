@@ -486,7 +486,7 @@ Remaining Targets:
 2. Complete H1 Legacy Migration
 ```
 
-## Terminal Correlator Pattern (OMN-13118)
+## Terminal Correlator Pattern
 
 Some EFFECT handlers drive a request/response interaction over the bus: they publish a command, then block until the correlated terminal event arrives on a reply topic (correlating by `correlation_id`). The `HandlerContextRoiRunner` is the motivating case: per (task x arm x trial) it publishes `node-generation-requested.v1` and must wait for `node-generation-completed.v1` or `node-generation-failed.v1` before recording an attempt-reduction row.
 
@@ -494,7 +494,7 @@ Some EFFECT handlers drive a request/response interaction over the bus: they pub
 
 The earlier design built a brand-new OS thread + asyncio event loop + `AIOKafkaConsumer` + `AIOKafkaClient` (full bootstrap / metadata fetch / partition coordination) for EVERY trial, and tore each down right after. Five offset/subscription patches (#1969–#1972) tuned this per-trial-ephemeral substrate and all failed the live K>=10 battery gate with the same wedge: a new client per trial races its own bootstrap and teardown against the fast terminal, so the COMPLETED leg silently never delivers while only the empty-set FAILED leg times out.
 
-### Long-lived correlator (OMN-13118 Tier B)
+### Long-lived correlator (Tier B)
 
 **Implementation**: `src/omnibase_infra/runtime/service_terminal_event_consumer.py`
 

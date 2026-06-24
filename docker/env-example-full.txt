@@ -70,7 +70,7 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # OMNIBASE_INFRA_DB_URL=postgresql://postgres:YOUR_PASSWORD_HERE@postgres:5432/omnibase_infra
 
 # =============================================================================
-# Per-Service Database Roles (DB-SPLIT-05 / OMN-2056)
+# Per-Service Database Roles
 # =============================================================================
 # Each service gets its own database and restricted role.
 #
@@ -160,7 +160,7 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # Host port mapping for the main runtime service
 # RUNTIME_MAIN_PORT=8085
 
-# OMN-8784: ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC were removed. Topics are
+# ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC were removed. Topics are
 # derived from each node's contract.yaml event_bus declaration; setting
 # either env var now raises ProtocolConfigurationError at kernel bootstrap.
 

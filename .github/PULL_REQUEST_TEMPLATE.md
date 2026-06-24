@@ -10,7 +10,7 @@
 
 <!-- How were these changes tested? -->
 
-## Runtime startup gate (OMN-9126)
+## Runtime startup gate
 
 If this PR touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signatures, or kernel-level registration:
 - [ ] Test loads the **real** contract manifest from disk (no fake/stub handlers)
@@ -36,8 +36,8 @@ Does this PR introduce or tighten a strict/blocking gate (handler wiring, servic
 - [ ] **Yes, but behind a feature flag** — gate is currently OFF in prod:
   - Flag config: <!-- link flag config here -->
 
-> Retro OMN-8735: gate merged 47 hours before compliance fixes → crash-loop window. Gate PRs must never land before their consumers are fixed.
+> A gate merged before its compliance fixes caused a crash-loop window. Gate PRs must never land before their consumers are fixed.
 
 ## Related issues
 
-<!-- OMN-XXXX -->
+<!-- Link any related issues here -->

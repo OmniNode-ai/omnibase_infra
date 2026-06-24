@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
-# `<onex-host>` disk-GC / worktree-reaper units (OMN-13008)
+# `<onex-host>` disk-GC / worktree-reaper units
 
 Two coexisting systemd USER timers implement the **two-layer merge-triggered
 worktree GC** model. Neither replaces the other — both are retained.
@@ -15,7 +15,7 @@ worktree GC** model. Neither replaces the other — both are retained.
   reading the `onex.evt.github.pr-merged.v1` projection `?since=<cursor>`.
 - **Layer 2** is the cursor-INDEPENDENT backstop that reconciles events missed
   during downtime / dropped before the cursor advanced. **`onex-disk-gc.timer`
-  must stay installed** (T6 / OMN-13230 retention rule).
+  must stay installed** (retention rule: always keep the hourly backstop running).
 
 Both layers drive the same safety core (`omniclaude/scripts/prune-worktrees.sh`:
 merged + clean + pushed-only; dirty → SKIP). The Mac equivalent of both layers is
