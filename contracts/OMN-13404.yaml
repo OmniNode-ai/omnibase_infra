@@ -27,7 +27,14 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "docker run -d --rm --name rte2e-coldtest-pg -e POSTGRES_PASSWORD=test postgres:16; createdb omnidash_analytics; for f in 0007..0019; do psql -d omnidash_analytics -v ON_ERROR_STOP=1 -f $f; done  # all clean (60-cold-apply-proof.log)"
+        check_value: >
+          bash -lc 'docker run -d --rm --name rte2e-coldtest-pg -e POSTGRES_PASSWORD=test postgres:16;
+          trap "docker rm -f rte2e-coldtest-pg >/dev/null 2>&1 || true" EXIT;
+          until docker exec rte2e-coldtest-pg pg_isready -U postgres >/dev/null; do sleep 1; done;
+          docker exec rte2e-coldtest-pg createdb -U postgres omnidash_analytics;
+          for f in docker/migrations/forward/nodes/node_projection_delegation/00{07..19}_*.sql; do
+          docker exec -i rte2e-coldtest-pg psql -U postgres -d omnidash_analytics -v ON_ERROR_STOP=1 < "$f";
+          done'
   - id: "dod-003"
     description: >
       sync-node-migrations --check passes once omnimarket dev carries the fix (after the paired source PR merges). Locally, run against the fixed omnimarket worktree reports in-sync (0 drift) for this file.
