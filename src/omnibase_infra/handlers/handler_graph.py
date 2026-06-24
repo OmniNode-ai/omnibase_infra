@@ -33,7 +33,6 @@ Circuit Breaker Pattern:
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from collections.abc import Mapping
@@ -80,6 +79,9 @@ from omnibase_infra.handlers.models.graph import (
     ModelGraphHandlerPayload,
     ModelGraphQueryPayload,
     ModelGraphRecord,
+)
+from omnibase_infra.handlers.models.graph.contract_descriptor import (
+    contract_graph_bolt_uri,
 )
 from omnibase_infra.handlers.models.model_graph_handler_response import (
     ModelGraphHandlerResponse,
@@ -262,24 +264,20 @@ class HandlerGraph(
         # (passed by _populate_handlers_from_registry via initialize(effective_config)).
         resolved_uri: str
         if isinstance(connection_uri, dict):
-            # Resolve URI from dict keys, then env vars, then hard-coded default.
-            _env_memgraph = os.environ.get("MEMGRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
-            _env_graph = os.environ.get("GRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
-            # Build from OMNIMEMORY_MEMGRAPH_HOST/PORT (compose-aligned) [OMN-5357]
-            _env_host = os.environ.get("OMNIMEMORY_MEMGRAPH_HOST")  # ONEX_EXCLUDE: env
-            _env_port = os.environ.get(
-                "OMNIMEMORY_MEMGRAPH_PORT", "7687"
-            )  # ONEX_EXCLUDE: env
-            _env_composed = f"bolt://{_env_host}:{_env_port}" if _env_host else None
+            # Resolve URI from explicit dict-key overrides, else the
+            # contract-declared overlay endpoint (OMN-13558 Wave-1
+            # endpoint→overlay migration). The descriptor binds
+            # ``descriptor.graph_bolt_uri == ${env.GRAPH_BOLT_URI}`` through the
+            # sanctioned overlay boundary (``expand_contract_env_refs``) and fails
+            # closed when GRAPH_BOLT_URI is unset — never a silent
+            # ``bolt://localhost:7687`` default. Explicit ``connection_uri`` /
+            # ``bolt_uri`` keys still win when supplied by the caller.
             resolved_uri = (
                 str(connection_uri["connection_uri"])
                 if "connection_uri" in connection_uri
                 else str(connection_uri["bolt_uri"])
                 if "bolt_uri" in connection_uri
-                else _env_memgraph
-                or _env_graph
-                or _env_composed
-                or "bolt://localhost:7687"
+                else contract_graph_bolt_uri()
             )
             dict_auth = connection_uri.get("auth")
             if (
