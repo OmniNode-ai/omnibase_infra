@@ -1,4 +1,4 @@
-# Volume Config Drift Gate + Re-seed Procedure (OMN-12958)
+# Volume Config Drift Gate + Re-seed Procedure
 
 ## Problem
 
@@ -6,7 +6,7 @@ The Bifrost delegation contract is rendered once at container startup to a Docke
 named volume at `/app/data/delegation/bifrost_delegation.yaml`. That volume
 survives `docker compose build` and container recreate, so the **deployed (volume)
 copy can silently diverge from the packaged source** shipped in the image. Two
-prior incidents (folded into OMN-12945) were caused by exactly this:
+prior incidents were caused by exactly this:
 
 - a stale gemini backend binding persisted on the volume after the packaged
   source was updated, and
@@ -15,7 +15,7 @@ prior incidents (folded into OMN-12945) were caused by exactly this:
 There are two competing authorities:
 
 1. **Packaged source** — `omnimarket/configs/bifrost_delegation.yaml` baked into
-   the image (canonical home since OMN-10865; legacy fallback
+   the image (canonical home; legacy fallback
    `omnibase_infra/configs/bifrost_delegation.yaml`).
 2. **Volume copy** — `/app/data/delegation/bifrost_delegation.yaml`, written once
    and then trusted on subsequent boots when it already has populated endpoints
@@ -25,10 +25,10 @@ Additionally, `BIFROST_CONTRACT_PATH=""` (empty) silently **disables** packaged
 rendering entirely (the renderer returns `None`).
 
 > **Scope note.** Reconciling the two authorities into one (Infisical > bootstrap
-> overlay precedence) is the P1.2b / OMN-12803 epic. This runbook is the tactical
-> drift **gate + re-seed** stopgap: it makes drift *visible and ticketed*, and
-> gives operators a deterministic re-seed step. It does not change which authority
-> wins at render time.
+> overlay precedence) is ongoing work. This runbook is the tactical drift
+> **gate + re-seed** stopgap: it makes drift *visible and ticketed*, and gives
+> operators a deterministic re-seed step. It does not change which authority wins
+> at render time.
 
 ## Ratchet shipped with this runbook
 

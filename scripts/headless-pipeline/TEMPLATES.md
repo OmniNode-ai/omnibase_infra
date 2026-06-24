@@ -1,7 +1,5 @@
 # Headless Pipeline Stage Templates
 
-> **Ticket**: OMN-6984 | **Parent**: OMN-6936
->
 > Per-stage command templates for the headless close-out pipeline.
 > Each template defines the exact `claude -p` invocation for one pipeline stage,
 > including tool allowlists, prompts, and expected output schema.

@@ -1,6 +1,5 @@
-# OMN-12575 Phase 1 — Live Runtime Deployment Baseline & Evidence
+# Phase 1 — Live Runtime Deployment Baseline & Evidence
 
-- Ticket: OMN-12575 (Phase 1 of epic OMN-12574 — Node-Based Runtime Deployment and OCC Automation)
 - Date captured: 2026-06-01
 - Mode: STRICTLY READ-ONLY. No runtime mutation, no deploy/build/restart, no runtime host mutation, no empty commits.
 - Design doc: `omni_home/docs/plans/2026-06-01-node-based-runtime-deployment-occ-tdd.md`
@@ -93,7 +92,7 @@ lanes; deploy-agent reach is already Kafka-only via `handler_redeploy_kafka`.
 
 ## Item 2 — Live consumer groups for the reused nodes
 
-### Claim (from design doc B3)
+### Claim (from design doc)
 `node_runtime_sweep`, `node_runtime_source_attestor_effect`, and `node_runtime_manifest_reducer`
 are live (Stable). `node_deployment_evidence_reducer`, `node_occ_pr_writer_effect`,
 `node_readiness_gate_orchestrator`, and `node_evidence_pipeline_orchestrator` have **no live
@@ -267,7 +266,7 @@ The agent cannot target stability-test (18085 / `-stability-test`) or prod (2808
 cannot deploy a pinned digest. **Verdict: B2 CONFIRMED — lane/digest truth cannot be enforced until
 this boundary carries them.**
 
-### Note on CI bypass (B1)
+### Note on CI bypass
 Not independently re-probed in this read-only pass; the design doc's reference to
 `runtime-rebuild-trigger.yml` / `trigger_rebuild_on_merge.py` hardcoding `origin/main` is recorded
 here as **from-doc, re-verify in Phase 2** rather than asserted live.

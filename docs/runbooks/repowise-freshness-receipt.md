@@ -1,6 +1,5 @@
 # Repowise Freshness Receipt
 
-**Ticket:** OMN-12378
 **Script:** `scripts/emit_repowise_freshness_receipt.py`
 
 ## Purpose
@@ -18,9 +17,8 @@ freshness state that produced them.
 Run **manually after `pull-all.sh`** to capture the post-sync freshness state,
 and again after a Repowise reindex to confirm the index is current.
 
-> **Follow-up (OMN-12368):** No automated closeout flow yet wires this script.
-> Invoke it manually until the OMN-12368 closeout flow adopts it as an automatic
-> post-reindex step.
+> **Follow-up:** No automated closeout flow yet wires this script. Invoke it
+> manually until a closeout flow adopts it as an automatic post-reindex step.
 
 ## Prerequisites
 

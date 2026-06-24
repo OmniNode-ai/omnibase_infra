@@ -1,7 +1,5 @@
 # Stability-Test Runtime Lane
 
-Ticket: OMN-10281, extended by OMN-10345
-
 This runbook defines the first non-deploying prep slice for a separate
 stability-test runtime lane. It does not start, restart, deploy, or mutate any
 runtime host. In particular, it must not mutate the runtime host.
@@ -128,7 +126,7 @@ uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py -q
 uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
 ```
 
-## Worker Replica Census (OMN-12990)
+## Worker Replica Census
 
 The base compose sets the runtime-worker deploy replicas to
 `${WORKER_REPLICAS:-0}` — a soft default of **zero**. The stability lane's

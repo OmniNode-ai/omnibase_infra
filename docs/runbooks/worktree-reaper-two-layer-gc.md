@@ -1,15 +1,13 @@
 # Merge-Triggered Worktree GC — Two-Layer Model (Event-First + Timer-Backstop)
 
-**Epic:** OMN-13008 (merge-triggered worktree reaper)
-**Tickets:** T4 (OMN-13228, event-first reaper) · T6 (OMN-13230, timer backstop + this runbook)
 **Owners:** runtime host systemd units in `deploy/disk-gc/`; Mac launchd daemon in
 `omniclaude/scripts/worktree-reaper-daemon.sh`.
 
 ## Why this exists
 
 Stale worktrees for already-merged PRs accumulate under the worktrees root and —
-alongside docker images — filled `/data` on the runtime host on 2026-06-11 (the OMN-13009
-demo-day incident). The fix is to garbage-collect a worktree as soon as its PR
+alongside docker images — filled `/data` on the runtime host during a prior demo-day
+incident. The fix is to garbage-collect a worktree as soon as its PR
 merges, removing ONLY worktrees whose PR is merged (or whose remote branch is
 gone) AND that are clean AND fully pushed.
 
@@ -22,7 +20,7 @@ state** — every merged-and-clean worktree removed — using the SAME safety co
 
 | Layer | What | Trigger | Latency | Cursor |
 |-------|------|---------|---------|--------|
-| **1 — event-first** | Reap each newly-merged PR's worktree | `onex.evt.github.pr-merged.v1` projection read `?since=<cursor>` | Reaped within ≤1 poll interval of the merge event materializing (target ≤60s) | Advances a monotonic cursor on a fully-successful execute pass |
+| **1 — event-first** | Reap each newly-merged PR's worktree | `onex.evt.github.pr-merged.v1` projection read `?since=<cursor>` | Reaped within one poll interval of the merge event materializing (target 60 s) | Advances a monotonic cursor on a fully-successful execute pass |
 | **2 — timer-backstop** | Cursor-INDEPENDENT full reconciliation: reap ALL already-merged worktrees still present | Periodic timer (hourly) + once on daemon start | Up to one backstop interval | None — it is a reconciliation, not a windowed advance |
 
 Layer 1 is the steady-state fast path. Layer 2 is the safety net for events that
@@ -40,8 +38,7 @@ Neither layer re-implements GC safety. Both drive the canonical
 - the working tree is **clean** (no uncommitted changes → otherwise SKIP), **AND**
 - there are **no unpushed commits** (no-upstream defaults to SKIP, never DELETE).
 
-Detached-HEAD and dirty worktrees are SKIPPED, never deleted. Salvage of dirty
-worktrees is out of scope (OMN-13044 owns that). Default-SKIP on any ambiguity:
+Detached-HEAD and dirty worktrees are SKIPPED, never deleted. Salvage of dirty worktrees is out of scope for this runbook. Default-SKIP on any ambiguity:
 a prune failure, a projection fetch error, or a malformed event leaves the cursor
 un-advanced (Layer 1) or the root marked failed for retry (Layer 2).
 
@@ -114,11 +111,11 @@ launchctl list | grep ai.omninode.worktree-reaper
 
 Both layers are proven to converge on the same end state:
 
-- **Layer 1 (event path)** — proven in T4 (OMN-13228): a throwaway merged PR's
+- **Layer 1 (event path)** — proven via integration test: a throwaway merged PR's
   worktree is reaped within one poll interval; the cursor advances; dirty /
   unpushed worktrees SKIP. Tests in `omniclaude/tests/scripts/test_worktree_reaper.py`
   (`test_merged_clean_row_drives_prune_script`, `test_dirty_or_unpushed_worktree_is_skipped`).
-- **Layer 2 (backstop / catch-up)** — proven in T6 (OMN-13230):
+- **Layer 2 (backstop / catch-up)** — proven via integration test:
   `test_catch_up_sweep_converges_on_seeded_stale_merged_worktree_and_skips_dirty`
   seeds a stale-but-merged worktree and a dirty merged worktree, runs the catch-up
   sweep through the real prune subprocess path, and asserts the clean one is

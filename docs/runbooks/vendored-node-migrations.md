@@ -1,6 +1,6 @@
 > **Navigation**: [Home](../index.md) > Runbooks > Vendored Node Migrations
 
-# Vendored Node Migration Runbook (OMN-13124)
+# Vendored Node Migration Runbook
 
 Operator guide for the vendored-node-migration pattern: how it works, when to use it, how to run the sync, and how the CI gate enforces consistency.
 
@@ -22,14 +22,14 @@ Operator guide for the vendored-node-migration pattern: how it works, when to us
 
 ## Why This Pattern Exists
 
-Omnimarket projection nodes ship SQL that creates their backing tables. Before OMN-13124, landing a node-owned view in the runtime required:
+Omnimarket projection nodes ship SQL that creates their backing tables. Before this pattern was introduced, landing a node-owned view in the runtime required:
 
 1. Manually copying the SQL into `docker/migrations/forward/` (infra repo).
 2. Manually renumbering the file to avoid a numeric collision with the flat infra migration sequence.
 
-That renumber is a footgun: the source SQL and the infra copy drift, and every new node migration repeats the dance. The `node_projection_pattern_learning` node (OMN-13124) exposed this when its migration was merged to omnimarket without a vendored copy, causing `pattern_learning_artifacts` to be absent from `omnidash_analytics` on a clean redeploy.
+That renumber is a footgun: the source SQL and the infra copy drift, and every new node migration repeats the dance. The `node_projection_pattern_learning` node exposed this when its migration was merged to omnimarket without a vendored copy, causing `pattern_learning_artifacts` to be absent from `omnidash_analytics` on a clean redeploy.
 
-The vendored-node-migration pattern fixes this:
+The vendored-node-migration pattern was introduced to fix this:
 
 - Omnimarket projection nodes ship SQL under `src/omnimarket/nodes/<node>/migrations/*.sql`.
 - `scripts/sync-node-migrations.sh` mirrors those files 1:1 into `docker/migrations/forward/nodes/<node>/`.
@@ -92,7 +92,7 @@ After the sync runs successfully, stage and commit the changes under `docker/mig
 
 ```bash
 git add docker/migrations/forward/nodes/
-git commit -m "chore(OMN-XXXXX): vendor omnimarket node migrations"
+git commit -m "chore: vendor omnimarket node migrations"
 ```
 
 ---
@@ -174,5 +174,5 @@ A previous manual deployment created the table outside the migration runner. Opt
 - `scripts/sync-node-migrations.sh` — vendor sync script
 - `.github/workflows/node-migration-sync.yml` — CI gate
 - `docker/migrations/forward/` — migration directory
-- [CI Test Strategy — node-migration-sync gate](../testing/CI_TEST_STRATEGY.md#node-migration-sync-omn-13124)
-- [Current Node Architecture — vendored migration pattern](../architecture/CURRENT_NODE_ARCHITECTURE.md#vendored-node-migration-pattern-omn-13124)
+- [CI Test Strategy — node-migration-sync gate](../testing/CI_TEST_STRATEGY.md#node-migration-sync)
+- [Current Node Architecture — vendored migration pattern](../architecture/CURRENT_NODE_ARCHITECTURE.md#vendored-node-migration-pattern)
