@@ -1109,6 +1109,35 @@ def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
     return list(db_io.get("db_tables") or [])
 
 
+def _read_dlq_topics(contract_path: Path) -> list[str]:
+    """Read ``event_bus.dlq_topics`` from a contract YAML. Returns [] if absent.
+
+    OMN-13548 (D-03): projection handlers declare the DLQ destination for
+    malformed inbound events under ``event_bus.dlq_topics`` (the same field the
+    omnimarket projection runners read). The typed ``ModelEventBusSubcontract``
+    does not carry this field, so the wiring reads it from the raw contract YAML
+    exactly as ``_read_db_io_tables`` reads ``db_io.db_tables``. The DLQ topic is
+    therefore resolved from the contract — never hardcoded in this module.
+
+    Raises on YAML parse / file I/O failures so a broken contract is surfaced
+    rather than silently degrading to a no-DLQ projection wiring.
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except FileNotFoundError:
+        return []
+    if not isinstance(raw, dict):
+        return []
+    event_bus = raw.get("event_bus") or {}
+    if not isinstance(event_bus, dict):
+        return []
+    return [str(t) for t in (event_bus.get("dlq_topics") or [])]
+
+
 def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_db_io_tables(contract.contract_path))
 
@@ -1275,22 +1304,154 @@ def _extract_rows_upserted(result: object) -> int:
     return 0
 
 
+async def _route_projection_error_to_dlq(
+    event_bus: object | None,
+    dlq_topics: list[str],
+    envelope: object,
+    handler_name: str,
+    failure_reason: str,
+) -> bool:
+    """Publish a malformed/erroring projection event to its contract DLQ topic.
+
+    OMN-13548 (D-03): when a projection handler raises (most commonly a
+    ``ValidationError`` because the inbound event is missing a required field),
+    the wiring previously logged at ERROR and dropped the message — no DLQ row,
+    no durable trace. This routes the offending raw envelope to the
+    contract-declared DLQ topic (``event_bus.dlq_topics[0]``) so the dropped
+    event is recoverable on the bus. The DLQ envelope carries the offending
+    payload, the failure reason, the handler name, and the correlation_id
+    (hoisted to the top level so the failure is recoverable by correlation even
+    when the payload itself is unparseable).
+
+    Generic for ALL projection handlers, not delegation-only. Best-effort:
+    returns ``True`` when the DLQ envelope was published, ``False`` when no DLQ
+    topic is declared, no publishable event bus is available, or the publish
+    itself fails (each logged at ERROR). A DLQ publish failure never propagates,
+    so it cannot wedge the consumer.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    if not dlq_topics:
+        logger.error(
+            "Projection handler %s dropped a malformed/erroring event with NO DLQ "
+            "topic declared in contract.event_bus.dlq_topics: %s",
+            handler_name,
+            failure_reason,
+        )
+        return False
+    if event_bus is None or not hasattr(event_bus, "publish"):
+        logger.error(
+            "Projection handler %s would route malformed/erroring event to DLQ %s "
+            "but no publishable event bus is bound: %s",
+            handler_name,
+            dlq_topics[0],
+            failure_reason,
+        )
+        return False
+
+    dlq_topic = dlq_topics[0]
+    payload = _extract_dispatch_payload(envelope)
+    correlation = _extract_dispatch_correlation_id(envelope, payload)
+    correlation_id = str(correlation) if correlation is not None else ""
+    original_message: object
+    model_dump = getattr(payload, "model_dump", None)
+    if isinstance(payload, Mapping):
+        original_message = dict(payload)
+    elif callable(model_dump):
+        original_message = model_dump(mode="json")
+    else:
+        original_message = {"raw": str(payload)}
+    dlq_envelope = {
+        "original_message": original_message,
+        "failure_reason": failure_reason,
+        "correlation_id": correlation_id,
+        "retry_count": 0,
+        "failed_at": datetime.now(UTC).isoformat(),
+        "handler": handler_name,
+    }
+    raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
+    publish = getattr(event_bus, "publish", None)
+    if not callable(publish):
+        logger.error(
+            "Projection handler %s would route malformed/erroring event to DLQ %s "
+            "but the bound event bus publish attribute is not callable: %s",
+            handler_name,
+            dlq_topic,
+            failure_reason,
+        )
+        return False
+    try:
+        await publish(dlq_topic, None, raw)
+    except Exception as exc:  # noqa: BLE001 — DLQ publish is best-effort; never wedge the consumer
+        logger.error(
+            "Projection handler %s failed to route malformed/erroring event to DLQ %s "
+            "(correlation_id=%s): %s",
+            handler_name,
+            dlq_topic,
+            correlation_id,
+            _sanitize_exc(exc),
+        )
+        return False
+    logger.warning(
+        "Projection handler %s routed malformed/erroring event to DLQ %s "
+        "(correlation_id=%s): %s",
+        handler_name,
+        dlq_topic,
+        correlation_id,
+        failure_reason,
+    )
+    return True
+
+
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: wiring-internal sink bundle; event_bus is a non-serializable publishable object
+class ProjectionDispatchSinks:
+    """Bus-side output sinks for a projection dispatch callback.
+
+    Bundles the optional bus, terminal-event topic, and DLQ topics so the
+    callback factory stays within the parameter-count budget while each sink
+    remains an explicitly named, typed field. A frozen dataclass (not a Pydantic
+    model) keeps this wiring-internal value object out of the model layer:
+    ``event_bus`` is an arbitrary publishable object (in-memory bus, Kafka
+    wiring, or a test double), so no schema validation is wanted here.
+    """
+
+    event_bus: object | None = None
+    terminal_event: str | None = None
+    dlq_topics: tuple[str, ...] = ()
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     db_tables: list[dict[str, str]],
     subscribe_topics: tuple[str, ...],
-    event_bus: object | None = None,
-    terminal_event: str | None = None,
+    sinks: ProjectionDispatchSinks | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
     input_data alongside _event_type derived from the topic name.
 
-    When event_bus and terminal_event are provided, emits a terminal event
-    envelope to terminal_event after each successful projection so downstream
-    Pattern-B consumers and golden-chain tests can observe completion.
+    ``sinks`` carries the bus-side outputs. When ``sinks.event_bus`` and
+    ``sinks.terminal_event`` are set, a terminal event envelope is emitted to
+    that topic after each successful projection so downstream Pattern-B
+    consumers and golden-chain tests can observe completion.
+
+    OMN-13548 (D-03): when ``sinks.dlq_topics`` is supplied (resolved from the
+    contract's ``event_bus.dlq_topics``) and the projection handler raises, the
+    offending raw envelope is routed to the DLQ topic instead of being logged +
+    dropped silently. This is the robust layer for the fail-loud/observability
+    guarantee: a malformed inbound event whose ``ValidationError`` escapes the
+    handler is now durably captured on the bus on the REAL dispatch path, not
+    only when a handler happens to catch it internally.
     """
+    sinks = sinks or ProjectionDispatchSinks()
+    event_bus = sinks.event_bus
+    terminal_event = sinks.terminal_event
+    dlq_topics = list(sinks.dlq_topics)
+    handler_name = type(handler_instance).__name__
     database = (
         db_tables[0].get("database", "omnidash_analytics")
         if db_tables
@@ -1388,17 +1549,38 @@ def _make_projection_dispatch_callback(
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "
                 "handler=%s topic=%s error_type=%s",
-                type(handler_instance).__name__,
+                handler_name,
                 _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
+            )
+            # OMN-13548 (D-03): route the offending event to the contract DLQ
+            # instead of dropping it silently.
+            await _route_projection_error_to_dlq(
+                event_bus,
+                dlq_topics,
+                envelope,
+                handler_name,
+                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
-                type(handler_instance).__name__,
+                handler_name,
                 _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
                 exc,
+            )
+            # OMN-13548 (D-03): a ValidationError (e.g. a malformed delegation
+            # event missing a required field) raised by the projection handler
+            # on the REAL dispatch path lands here. Route the raw envelope to the
+            # contract-declared DLQ topic so the dropped event is durably
+            # recoverable on the bus rather than vanishing after this log line.
+            await _route_projection_error_to_dlq(
+                event_bus,
+                dlq_topics,
+                envelope,
+                handler_name,
+                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
 
         if projected and event_bus is not None and terminal_event is not None:
@@ -3367,18 +3549,28 @@ def _prepare_handler_wiring(
             and contract.terminal_event in contract.event_bus.publish_topics
             else None
         )
+        # OMN-13548 (D-03): resolve the malformed-event DLQ destination from the
+        # contract's event_bus.dlq_topics (not the typed subcontract, which omits
+        # the field) so a projection handler error routes to the bus instead of
+        # being logged + dropped. Never hardcoded here.
+        projection_dlq_topics = _read_dlq_topics(contract.contract_path)
         callback = _make_projection_dispatch_callback(
             handler_instance,
             db_tables,
             subscribe_topics,
-            event_bus=event_bus,
-            terminal_event=projection_terminal_event,
+            sinks=ProjectionDispatchSinks(
+                event_bus=event_bus,
+                terminal_event=projection_terminal_event,
+                dlq_topics=tuple(projection_dlq_topics),
+            ),
         )
         logger.info(
-            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s terminal_event=%s",
+            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
+            "terminal_event=%s dlq_topics=%s",
             handler_ref.name,
             [t.get("name") for t in db_tables],
             projection_terminal_event,
+            projection_dlq_topics,
         )
         # Projection handlers route by topic/db_io, not event_model; leave
         # them untyped so the projection dispatch path is unchanged.

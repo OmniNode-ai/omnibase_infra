@@ -13,10 +13,12 @@ import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _DB_URL_ENV_MAP,
+    ProjectionDispatchSinks,
     _build_sync_db_adapter,
     _make_dispatch_callback,
     _make_projection_dispatch_callback,
     _read_db_io_tables,
+    _read_dlq_topics,
 )
 
 _PATCH_BUILD_ADAPTER = (
@@ -501,8 +503,10 @@ def test_projection_callback_emits_terminal_event_on_success() -> None:
         handler,
         db_tables,
         ("onex.evt.omniclaude.task-delegated.v1",),
-        event_bus=fake_bus,
-        terminal_event=terminal_topic,
+        sinks=ProjectionDispatchSinks(
+            event_bus=fake_bus,
+            terminal_event=terminal_topic,
+        ),
     )
 
     envelope = MagicMock()
@@ -554,8 +558,10 @@ def test_projection_callback_does_not_emit_terminal_event_on_zero_rows() -> None
         ZeroRowHandler(),
         db_tables,
         ("onex.evt.omniclaude.task-delegated.v1",),
-        event_bus=FakeEventBus(),
-        terminal_event=terminal_topic,
+        sinks=ProjectionDispatchSinks(
+            event_bus=FakeEventBus(),
+            terminal_event=terminal_topic,
+        ),
     )
 
     envelope = MagicMock()
@@ -599,8 +605,10 @@ def test_projection_callback_emits_terminal_event_from_materialized_dict() -> No
         FakeHandler(),
         db_tables,
         ("onex.evt.omniclaude.task-delegated.v1",),
-        event_bus=FakeEventBus(),
-        terminal_event=terminal_topic,
+        sinks=ProjectionDispatchSinks(
+            event_bus=FakeEventBus(),
+            terminal_event=terminal_topic,
+        ),
     )
     envelope = {
         "payload": {"task_type": "code-review"},
@@ -647,8 +655,10 @@ def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> 
         handler,
         db_tables,
         (),
-        event_bus=fake_bus,
-        terminal_event=terminal_topic,
+        sinks=ProjectionDispatchSinks(
+            event_bus=fake_bus,
+            terminal_event=terminal_topic,
+        ),
     )
 
     envelope = MagicMock()
@@ -681,8 +691,10 @@ def test_projection_callback_no_terminal_event_when_bus_is_none() -> None:
         handler,
         db_tables,
         (),
-        event_bus=None,
-        terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+        sinks=ProjectionDispatchSinks(
+            event_bus=None,
+            terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+        ),
     )
 
     envelope = MagicMock()
@@ -722,8 +734,10 @@ def test_projection_callback_terminal_event_publish_failure_does_not_propagate(
         handler,
         db_tables,
         (),
-        event_bus=BrokenEventBus(),
-        terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+        sinks=ProjectionDispatchSinks(
+            event_bus=BrokenEventBus(),
+            terminal_event="onex.evt.omnimarket.projection-delegation-applied.v1",
+        ),
     )
 
     envelope = MagicMock()
@@ -814,3 +828,174 @@ def test_omniintelligence_is_accepted_db_identity_per_db_url_contract() -> None:
     assert "OMNIINTELLIGENCE_DB_URL" in captured_env
     assert len(received) == 1
     assert received[0]["_db"] is fake_adapter
+
+
+# ---------------------------------------------------------------------------
+# Tests: _read_dlq_topics (OMN-13548 / D-03)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_read_dlq_topics_returns_declared(tmp_path: Path) -> None:
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        "name: test\n"
+        "event_bus:\n"
+        "  dlq_topics:\n"
+        "    - onex.dlq.omnimarket.projection-delegation-malformed.v1\n"
+    )
+    assert _read_dlq_topics(contract) == [
+        "onex.dlq.omnimarket.projection-delegation-malformed.v1"
+    ]
+
+
+@pytest.mark.unit
+def test_read_dlq_topics_empty_when_absent(tmp_path: Path) -> None:
+    contract = tmp_path / "contract.yaml"
+    contract.write_text("name: test\nevent_bus:\n  subscribe_topics: []\n")
+    assert _read_dlq_topics(contract) == []
+
+
+@pytest.mark.unit
+def test_read_dlq_topics_empty_on_missing_file() -> None:
+    assert _read_dlq_topics(Path("/nonexistent/contract.yaml")) == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: projection-handler-error -> DLQ on the REAL dispatch path
+# (OMN-13548 / D-03). These exercise the wiring's projection dispatch callback
+# directly — NOT a direct handler call — so a malformed envelope whose
+# ValidationError escapes the handler must produce a DLQ publish.
+# ---------------------------------------------------------------------------
+
+_DLQ_TOPIC = "onex.dlq.omnimarket.projection-delegation-malformed.v1"
+
+
+class _CapturingEventBus:
+    """Minimal event bus capturing publish(topic, key, value) calls."""
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, object, bytes]] = []
+
+    async def publish(self, topic: str, key: object, value: bytes) -> None:
+        self.published.append((topic, key, value))
+
+
+def _raising_validation_handler() -> object:
+    """A projection handler whose handle() raises ValidationError, mirroring the
+    real path where the inbound delegation event is missing task_type."""
+    from pydantic import BaseModel, ValidationError
+
+    class _RequiresTaskType(BaseModel):
+        task_type: str
+
+    class _ValidatingHandler:
+        def handle(self, input_data: dict) -> dict:
+            # Validate against a model requiring task_type — a malformed event
+            # (no task_type) raises ValidationError that escapes handle(), which
+            # is exactly the live failure proven in OMN-13548.
+            try:
+                _RequiresTaskType.model_validate(
+                    {k: v for k, v in input_data.items() if not k.startswith("_")}
+                )
+            except ValidationError:
+                raise
+            return {"rows_upserted": 1}
+
+    return _ValidatingHandler()
+
+
+@pytest.mark.unit
+def test_projection_callback_routes_validation_error_to_dlq() -> None:
+    """A malformed envelope through the dispatch callback publishes to the DLQ.
+
+    This is the de-fake of the prior boundary-faked unit tests: the handler
+    error is raised on the wiring's dispatch path and the wiring (not the
+    handler) routes the offending envelope to the contract-declared DLQ topic.
+    """
+    import json
+
+    bus = _CapturingEventBus()
+    callback = _make_projection_dispatch_callback(
+        _raising_validation_handler(),
+        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=(_DLQ_TOPIC,)),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    # Malformed: missing required task_type.
+    envelope.payload = {"correlation_id": "corr-malformed-1", "delegated_to": "glm"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert len(bus.published) == 1, (
+        "malformed event must produce exactly one DLQ publish"
+    )
+    topic, _key, value = bus.published[0]
+    assert topic == _DLQ_TOPIC
+    dlq = json.loads(value.decode("utf-8"))
+    assert dlq["correlation_id"] == "corr-malformed-1"
+    assert dlq["handler"] == "_ValidatingHandler"
+    assert "ValidationError" in dlq["failure_reason"]
+    assert dlq["original_message"]["delegated_to"] == "glm"
+
+
+@pytest.mark.unit
+def test_projection_callback_no_dlq_publish_on_success() -> None:
+    """A well-formed event projects normally and never touches the DLQ."""
+    bus = _CapturingEventBus()
+    callback = _make_projection_dispatch_callback(
+        _raising_validation_handler(),
+        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=(_DLQ_TOPIC,)),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"correlation_id": "corr-ok-1", "task_type": "release-proof"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            asyncio.run(callback(envelope))
+
+    assert bus.published == []
+
+
+@pytest.mark.unit
+def test_projection_callback_logs_error_when_no_dlq_topic_declared(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With no DLQ topic declared, the error is logged loudly (no silent drop)."""
+    bus = _CapturingEventBus()
+    callback = _make_projection_dispatch_callback(
+        _raising_validation_handler(),
+        [{"name": "delegation_events", "database": "omnidash_analytics"}],
+        ("onex.evt.omniclaude.task-delegated.v1",),
+        sinks=ProjectionDispatchSinks(event_bus=bus, dlq_topics=()),
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.omniclaude.task-delegated.v1"
+    envelope.payload = {"correlation_id": "corr-nodlq-1"}
+
+    with caplog.at_level(logging.ERROR):
+        with patch(
+            _PATCH_ENVIRON_GET,
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+                asyncio.run(callback(envelope))
+
+    assert bus.published == []
+    assert any("NO DLQ topic declared" in r.message for r in caplog.records)
