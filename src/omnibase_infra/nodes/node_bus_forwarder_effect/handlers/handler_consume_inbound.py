@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol
 from uuid import UUID
 
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -18,12 +18,6 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
     prefix_topic,
     strip_topic_prefix,
 )
-
-
-class GatewayDispatchEnvelope(Protocol):
-    envelope_id: UUID
-    correlation_id: UUID | None
-    payload: object
 
 
 class HandlerConsumeInbound:
@@ -42,7 +36,7 @@ class HandlerConsumeInbound:
 
     async def handle(
         self,
-        envelope: GatewayDispatchEnvelope,
+        envelope: ModelEventEnvelope[object],
     ) -> ModelHandlerOutput[ModelGatewayEnvelope]:
         """Dispatch entrypoint: extract gateway envelope, apply inbound transform, return compute output."""
         gateway_envelope, envelope_id, correlation_id = _coerce_dispatch_input(envelope)
@@ -88,7 +82,7 @@ class HandlerConsumeInbound:
 
 
 def _coerce_dispatch_input(
-    envelope: GatewayDispatchEnvelope,
+    envelope: ModelEventEnvelope[object],
 ) -> tuple[ModelGatewayEnvelope, UUID, UUID]:
     payload = envelope.payload
     gateway_envelope = (

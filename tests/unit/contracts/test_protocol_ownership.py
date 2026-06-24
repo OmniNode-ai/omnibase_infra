@@ -156,8 +156,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolLifecycleEventSink": "nodes/node_remote_agent_invoke_effect/services/lifecycle_event_sink.py",
     # [NODE] OMN-12909 gateway forwarder bus adapter surface for local/cloud bus DI.
     "ProtocolGatewayBus": "nodes/node_bus_forwarder_effect/services/service_gateway_forwarder.py",
-    # [NODE] OMN-13546 gateway dispatcher envelope shape used by handle() entrypoint tests.
-    "GatewayDispatchEnvelope": "nodes/node_bus_forwarder_effect/handlers/handler_forward_outbound.py",
     # [NODE] OMN-10392 replay compute narrows the AIOKafkaConsumer surface and
     # Kafka record/key shapes for isolated replay handler tests.
     "ProtocolKafkaMessage": "nodes/node_kafka_replay_compute/protocols/protocol_kafka_message.py",

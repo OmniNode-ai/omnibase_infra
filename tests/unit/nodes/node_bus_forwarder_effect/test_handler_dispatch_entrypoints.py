@@ -8,12 +8,12 @@ ModelHandlerOutput so the runtime dispatcher does not raise AttributeError on di
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound import (
     HandlerConsumeInbound,
 )
@@ -90,9 +90,11 @@ def _inbound_gateway_envelope() -> ModelGatewayEnvelope:
     )
 
 
-def _make_dispatch_envelope(gateway_envelope: ModelGatewayEnvelope) -> SimpleNamespace:
-    """Minimal stand-in for ModelEventEnvelope as seen by the auto-wiring engine."""
-    return SimpleNamespace(
+def _make_dispatch_envelope(
+    gateway_envelope: ModelGatewayEnvelope,
+) -> ModelEventEnvelope[object]:
+    """Canonical ModelEventEnvelope as materialized by the auto-wiring engine."""
+    return ModelEventEnvelope[object](
         envelope_id=gateway_envelope.envelope_id,
         correlation_id=gateway_envelope.correlation_id,
         payload=gateway_envelope.model_dump(),
