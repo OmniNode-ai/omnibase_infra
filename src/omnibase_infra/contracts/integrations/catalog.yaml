@@ -108,7 +108,8 @@ integrations:
     nodes: []
     health_check:
       type: http
-      endpoint: "http://localhost:8880/api/status"
+      # OMN-13417: dev lane infisical host port is 8881 (stability lane = 8880).
+      endpoint: "http://localhost:8881/api/status"
     env_vars:
       - INFISICAL_ADDR
       - INFISICAL_CLIENT_ID
