@@ -76,8 +76,15 @@ def _parse_topics_from_rpk_describe_json(stdout: str) -> set[str]:
     return topics
 
 
-def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
-    """List topic-scoped consumer groups derived from a base group ID."""
+# Per-topic split-group infix. The Kafka event bus scopes each consumer group
+# per topic as "...__t.{topic}" (see util_consumer_group.apply_instance_discriminator
+# and event_bus_kafka._scope_group_id_per_topic). The optional ".__i.{instance}"
+# infix is appended *before* the topic suffix in multi-container runtimes.
+_TOPIC_SUFFIX_INFIX = ".__t."
+
+
+def _rpk_group_list() -> list[dict[str, object]]:
+    """Return the raw ``rpk group list --format json`` payload as a list."""
     try:
         result = subprocess.run(
             ["rpk", "group", "list", "--format", "json"],
@@ -100,10 +107,33 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"rpk returned invalid JSON: {result.stdout[:200]}") from exc
 
-    direct_prefix = f"{base_group_id}.__t."
+    return groups if isinstance(groups, list) else []
+
+
+def _topic_from_split_group_name(group_name: str) -> str | None:
+    """Extract the subscribed topic from a per-topic split-group name.
+
+    The runtime scopes each consumer group per topic with a ``.__t.{topic}``
+    suffix, e.g.::
+
+        local.omnibase_infra.node_registration_orchestrator.consume.1.1.1.__i.runtime-main.__t.onex.evt.platform.node-heartbeat.v1
+
+    Returns the topic (everything after the *last* ``.__t.`` infix) or None if
+    the group is not a per-topic split group.
+    """
+    marker = group_name.rfind(_TOPIC_SUFFIX_INFIX)
+    if marker == -1:
+        return None
+    topic = group_name[marker + len(_TOPIC_SUFFIX_INFIX) :]
+    return topic or None
+
+
+def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
+    """List topic-scoped consumer groups derived from a base group ID."""
+    direct_prefix = f"{base_group_id}{_TOPIC_SUFFIX_INFIX}"
     instance_prefix = f"{base_group_id}.__i."
     scoped_groups: list[str] = []
-    for group in groups if isinstance(groups, list) else []:
+    for group in _rpk_group_list():
         group_name = group.get("name", "") if isinstance(group, dict) else ""
         if isinstance(group_name, str) and group_name.startswith(
             (direct_prefix, instance_prefix)
@@ -112,11 +142,52 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
     return scoped_groups
 
 
-def _rpk_fallback(group_id: str) -> set[str]:
+def _discover_split_group_topics(contract_name: str) -> set[str]:
+    """Discover subscribed topics from live per-topic split-groups by contract name.
+
+    The legacy group-id derivation can compute a base group name that no longer
+    matches the live runtime (e.g. when the service/version/node-name naming
+    convention has drifted). Rather than reconstruct the exact base group, this
+    discovers the runtime's actual per-topic split-groups directly: any live
+    consumer group whose name contains the contract's node name AND carries a
+    ``.__t.{topic}`` suffix contributes its topic. The topic is parsed straight
+    from the group name, so this stays correct across instance/version drift.
+
+    Args:
+        contract_name: The node name (e.g. ``node_registration_orchestrator``).
+
+    Returns:
+        The set of topics subscribed by live split-groups for this node. Empty
+        when no matching split-group exists on the broker.
+    """
+    topics: set[str] = set()
+    for group in _rpk_group_list():
+        group_name = group.get("name", "") if isinstance(group, dict) else ""
+        if not isinstance(group_name, str) or contract_name not in group_name:
+            continue
+        topic = _topic_from_split_group_name(group_name)
+        if topic is not None:
+            topics.add(topic)
+    return topics
+
+
+def _rpk_fallback(group_id: str, *, contract_name: str | None = None) -> set[str]:
     """Fallback: query subscribed topics via rpk CLI.
+
+    Resolution order (each step only runs if the previous returned nothing):
+
+    1. Describe ``group_id`` directly (the derived base group).
+    2. Aggregate per-topic split-groups anchored on ``group_id``
+       (``{group_id}.__t.{topic}`` / ``{group_id}.__i.{instance}.__t.{topic}``).
+    3. Discover live split-groups by ``contract_name`` and parse the topic
+       directly from the group name. This handles the case where the derived
+       base group name no longer matches the live naming convention (the root
+       cause of the recurring false 7/7-missing FAIL, OMN-13554).
 
     Args:
         group_id: Consumer group ID to describe.
+        contract_name: The node name used to discover live split-groups when
+            the derived base group does not exist on the broker.
 
     Returns:
         Set of topic names the group is subscribed to.
@@ -159,6 +230,14 @@ def _rpk_fallback(group_id: str) -> set[str]:
         if scoped_result.returncode != 0:
             continue
         scoped_topics.update(_parse_topics_from_rpk_describe_json(scoped_result.stdout))
+    if scoped_topics:
+        return scoped_topics
+
+    # The derived base group did not match the live runtime naming convention.
+    # Discover the actual per-topic split-groups by contract name and read the
+    # topic straight from each group name (OMN-13554).
+    if contract_name:
+        return _discover_split_group_topics(contract_name)
     return scoped_topics
 
 
@@ -299,8 +378,12 @@ def check_subscriptions(
         identity=identity,
     )
 
-    # Resolve the admin function
-    admin_fn: KafkaAdminFn = kafka_admin_fn or _rpk_fallback
+    # Resolve the admin function. The default rpk fallback is bound to the
+    # contract name so it can discover live per-topic split-groups when the
+    # derived base group does not match the live runtime convention (OMN-13554).
+    admin_fn: KafkaAdminFn = kafka_admin_fn or (
+        lambda gid: _rpk_fallback(gid, contract_name=parsed_contract.name)
+    )
 
     # Query subscribed topics
     try:
