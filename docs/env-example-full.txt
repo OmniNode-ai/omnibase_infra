@@ -48,7 +48,7 @@
 #   e.g., postgresql://role:pass@<your-server-ip>:5432/omnibase_infra
 OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnibase_infra
 OMNICLAUDE_DB_URL=postgresql://role_omniclaude:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniclaude
-# Path to omnidash checkout — used by bootstrap-infisical.sh Step 1d to run read-model migrations (OMN-3748)
+# Path to omnidash checkout — used by bootstrap-infisical.sh Step 1d to run read-model migrations
 OMNIDASH_DIR=/path/to/omnidash
 OMNIINTELLIGENCE_DB_URL=postgresql://role_omniintelligence:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniintelligence
 OMNIMEMORY_ENABLED=true
@@ -76,7 +76,7 @@ OMNINODE_CLOUD_DB_URL=postgresql://role_omninode_cloud:__REPLACE_WITH_SECURE_PAS
 #   KAFKA_BOOTSTRAP_SERVERS=<your-server-ip>:19092
 KAFKA_BOOTSTRAP_SERVERS=your-kafka-host:19092
 
-# Enable event-based agent routing via Kafka (OMN-3894).
+# Enable event-based agent routing via Kafka.
 # When true, ProtocolEventBusPublisher registers and routing flows through Kafka.
 # Docker containers default to true via compose; host scripts should set explicitly.
 USE_EVENT_ROUTING=true
@@ -183,7 +183,7 @@ REDPANDA_PORT=19092
 REDPANDA_PROXY_PORT=18092
 REDPANDA_SEGMENT_MS=86400000
 
-# RedPanda resource limits (OMN-2917 / OMN-2915 — connection exhaustion prevention)
+# RedPanda resource limits — connection exhaustion prevention
 # REDPANDA_MEMORY: memory allocated to the Redpanda broker.
 #   Default in docker-compose.infra.yml: 8G (up from legacy hardcoded 1G).
 #   Override here for machines with less RAM or for production tuning.
@@ -211,7 +211,7 @@ POSTGRES_ADAPTER_PORT=18085
 # Slack Web API (chat.postMessage with threading support)
 # Bot Token: Slack App -> OAuth & Permissions -> Bot User OAuth Token (xoxb-...)
 # Required scopes: chat:write
-# SLACK_WEBHOOK_URL removed (OMN-3332) -- use SLACK_BOT_TOKEN + SLACK_CHANNEL_ID only.
+# SLACK_WEBHOOK_URL removed -- use SLACK_BOT_TOKEN + SLACK_CHANNEL_ID only.
 # SLACK_BOT_TOKEN=xoxb-__REPLACE_WITH_BOT_TOKEN__
 # Channel ID: Right-click channel in Slack -> View channel details -> copy ID
 # SLACK_CHANNEL_ID=__REPLACE_WITH_CHANNEL_ID__
@@ -230,7 +230,7 @@ POSTGRES_ADAPTER_PORT=18085
 # Example: ./contracts, /app/contracts, /etc/onex/contracts
 # ONEX_CONTRACTS_DIR=./contracts
 
-# Path to omniclaude skills root for cross-repo topic discovery (OMN-4597)
+# Path to omniclaude skills root for cross-repo topic discovery
 # When set, TopicProvisioner scans topics.yaml files under this path and merges
 # the discovered skill topics into the provisioned topic set at runtime startup.
 # Default: unset (skill-manifest discovery disabled)
@@ -256,7 +256,7 @@ ONEX_GROUP_ID=onex-runtime-main
 # Example: 8085 (standard), 8080 (common alternative), 3000 (Node.js convention)
 ONEX_HTTP_PORT=8085
 
-# OMN-8784: ONEX_INPUT_TOPIC was removed from the kernel. Topics are now
+# ONEX_INPUT_TOPIC was removed from the kernel. Topics are now
 # derived from each node's contract.yaml event_bus declaration. Setting this
 # var now raises ProtocolConfigurationError at kernel bootstrap.
 
@@ -265,7 +265,7 @@ ONEX_HTTP_PORT=8085
 # Example: DEBUG (verbose), INFO (standard), WARNING (quiet)
 ONEX_LOG_LEVEL=INFO
 
-# OMN-8784: ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC were removed from the kernel.
+# ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC were removed from the kernel.
 # Topics are now derived from each node's contract.yaml event_bus declaration.
 # Setting either var raises ProtocolConfigurationError at kernel bootstrap.
 # The same rule applies to any future ONEX_EFFECTS_*_TOPIC overrides.
@@ -625,7 +625,7 @@ ONEX_LOG_LEVEL=INFO
 # OTEL_TRACES_EXPORTER=otlp
 # OTEL_METRICS_EXPORTER=otlp
 
-# Arize Phoenix (LLM observability — OTLP HTTP backend) [OMN-3542]
+# Arize Phoenix (LLM observability — OTLP HTTP backend)
 # Phoenix runs as a runtime-profile Docker service (omnibase-infra-phoenix).
 # Docker-internal consumers reach it at phoenix:6006; host scripts use localhost:6006.
 # PHOENIX_PORT=6006

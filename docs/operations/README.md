@@ -59,7 +59,7 @@ When creating operational documentation:
 
 Quick lookup for defects fixed on `dev` since 2026-06-01. If a deployed runtime version predates the PR listed, apply the update to resolve the symptom.
 
-### Dispatch savings-consumer typed-decode failure (OMN-13149)
+### Dispatch savings-consumer typed-decode failure
 
 **Symptom**: The `savings-estimation-consumer` service logs decode errors for `ModelSavingsEstimationEvent` payloads and silently drops events; the savings projection table stops updating.
 
@@ -71,7 +71,7 @@ Quick lookup for defects fixed on `dev` since 2026-06-01. If a deployed runtime 
 
 ---
 
-### Runtime executor `operation_match` import-skip failure (OMN-13141)
+### Runtime executor `operation_match` import-skip failure
 
 **Symptom**: The runtime executor silently skips handlers whose contracts declare `routing_strategy: operation_match`. The handler is loaded but never invoked; the operation returns an empty result without error.
 
@@ -87,4 +87,4 @@ Quick lookup for defects fixed on `dev` since 2026-06-01. If a deployed runtime 
 
 - [Architecture Documentation](../architecture/)
 - [Validation Documentation](../validation/)
-- [Message Dispatch Engine — terminal correlator](../architecture/MESSAGE_DISPATCH_ENGINE.md#terminal-correlator-pattern-omn-13118)
+- [Message Dispatch Engine — terminal correlator](../architecture/MESSAGE_DISPATCH_ENGINE.md#terminal-correlator-pattern)

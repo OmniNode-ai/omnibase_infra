@@ -4,7 +4,7 @@
 
 This document provides a high-level overview of the ONEX (OmniNode eXecution) architecture used in `omnibase_infra`.
 
-> _Node counts and the package-structure listing in this document were verified against code on this refresh (OMN-13465): 109 `node_<name>/` directories and 107 `contract.yaml` files under `src/omnibase_infra/nodes/`._
+> _Node counts and the package-structure listing in this document were verified against code on this refresh: 109 `node_<name>/` directories and 107 `contract.yaml` files under `src/omnibase_infra/nodes/`._
 
 ## Design Philosophy
 
@@ -722,7 +722,7 @@ flowchart TB
 
 ## Node Families
 
-`omnibase_infra` ships 109 node directories (107 `contract.yaml` files) under `src/omnibase_infra/nodes/`, verified against code on this refresh (OMN-13465). The table below summarizes the **primary documented families** — a curated subset of 29 nodes detailed in [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md). Additional node families not enumerated here include delegation/routing, merge-sweep, coding-agent, RSD scoring, scope extraction, and GitHub/Gmail effect integrations. Each family follows the EFFECT → COMPUTE → REDUCER → ORCHESTRATOR flow where applicable.
+`omnibase_infra` ships 109 node directories (107 `contract.yaml` files) under `src/omnibase_infra/nodes/`, verified against code on this refresh. The table below summarizes the **primary documented families** — a curated subset of 29 nodes detailed in [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md). Additional node families not enumerated here include delegation/routing, merge-sweep, coding-agent, RSD scoring, scope extraction, and GitHub/Gmail effect integrations. Each family follows the EFFECT → COMPUTE → REDUCER → ORCHESTRATOR flow where applicable.
 
 | Family | Node Count | Purpose |
 |--------|-----------|---------|

@@ -699,7 +699,7 @@ uv run pytest tests/integration/registration/e2e/test_two_way_registration_e2e.p
 ```
 
 Two-layer environment loading applies to E2E tests:
-1. `.env` (base — points to remote infra at `192.168.86.200`)
+1. `.env` (base — points to remote infra at `<onex-host>`)
 2. `tests/integration/registration/e2e/.env.docker` (override — redirects to local Docker infra at container-internal addresses)
 
 ---

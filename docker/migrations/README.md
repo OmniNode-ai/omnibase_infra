@@ -56,7 +56,7 @@ Main migrations represent a logical unit of schema change. They are numbered seq
 - `004_capability_fields_concurrent.sql` - Production concurrent indexes (companion to 003)
 - `005_create_contracts_topics.sql` - Contract and topic tracking tables
 - `020-027` - Agent observability and analytics tables
-- `028_absorb_omniclaude_columns.sql` - Absorb project context columns + agent_activity_realtime view (OMN-2057)
+- `028_absorb_omniclaude_columns.sql` - Absorb project context columns + agent_activity_realtime view
 
 **When to increment the main number:**
 - New tables or major schema changes
@@ -130,7 +130,7 @@ forward/
   025_create_agent_execution_logs_table.sql           # Main: execution logs
   026_injection_effectiveness_tables.sql              # Main: injection effectiveness
   027_create_agent_status_events_table.sql            # Main: agent status events
-  028_absorb_omniclaude_columns.sql                   # Main: absorb omniclaude columns (OMN-2057)
+  028_absorb_omniclaude_columns.sql                   # Main: absorb omniclaude columns
 ```
 
 **Next available:** `029_*.sql`
@@ -143,7 +143,7 @@ Every migration should include a header comment with:
 -- =============================================================================
 -- MIGRATION: Brief Description
 -- =============================================================================
--- Ticket: OMN-XXXX (Feature Name)
+-- Ticket: (Feature Name)
 -- Version: 1.0.0
 -- Companion to: NNN_parent_migration.sql (if sub-migration)
 --

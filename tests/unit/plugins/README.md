@@ -1,6 +1,6 @@
 # PluginCompute Unit Tests
 
-Comprehensive unit tests for the PluginCompute system (OMN-813 Phase 2b).
+Comprehensive unit tests for the PluginCompute system.
 
 ## Current Status
 
@@ -156,7 +156,7 @@ Compute plugins integrate with the COMPUTE layer of ONEX's 4-node architecture:
 
 ## Related Work
 
-- **OMN-813 Phase 1**: Protocol definition (completed)
-- **OMN-813 Phase 2a**: Base class and example plugin (completed)
-- **OMN-813 Phase 2b**: Unit tests (completed and active)
-- **PR #45**: ONEX architecture integration documentation (this work)
+- **Phase 1**: Protocol definition (completed)
+- **Phase 2a**: Base class and example plugin (completed)
+- **Phase 2b**: Unit tests (completed and active)
+- **ONEX architecture integration documentation**: See `docs/architecture/`

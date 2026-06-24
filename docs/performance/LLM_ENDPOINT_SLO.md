@@ -15,16 +15,16 @@ performance baselines (see [ADR-004](../decisions/adr-004-performance-baseline-t
 
 | Environment Variable | Host | Port | Model | Status |
 |---------------------|------|------|-------|--------|
-| `LLM_CODER_URL` | 192.168.86.201 | 8000 | Qwen3-Coder-30B-A3B-Instruct AWQ-4bit | Running |
-| `LLM_CODER_FAST_URL` | 192.168.86.201 | 8001 | Qwen3-14B-AWQ | Running |
-| `LLM_EMBEDDING_URL` | 192.168.86.201 | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | Running |
-| `LLM_DEEPSEEK_R1_URL` | 192.168.86.200 | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | Running |
-| `LLM_SMALL_URL` | 192.168.86.105 | TBD | Qwen2.5-Coder-7B-Instruct MLX-4bit | Port TBD |
+| `LLM_CODER_URL` | `<onex-host>` (GPU server) | 8000 | Qwen3-Coder-30B-A3B-Instruct AWQ-4bit | Running |
+| `LLM_CODER_FAST_URL` | `<onex-host>` (GPU server) | 8001 | Qwen3-14B-AWQ | Running |
+| `LLM_EMBEDDING_URL` | `<onex-host>` (GPU server) | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | Running |
+| `LLM_DEEPSEEK_R1_URL` | `<onex-host>` (reasoning host) | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | Running |
+| `LLM_SMALL_URL` | `<onex-host>` (lightweight host) | TBD | Qwen2.5-Coder-7B-Instruct MLX-4bit | Port TBD |
 
 Hardware:
-- **192.168.86.201**: Linux GPU server — coder (ports 8000, 8001) + embeddings (port 8100)
-- **192.168.86.200**: Mac Studio M2 Ultra — reasoning (port 8101)
-- **192.168.86.105**: MacBook Air M4 — lightweight/portable (port TBD)
+- GPU server (`$LLM_CODER_URL`, `$LLM_CODER_FAST_URL`, `$LLM_EMBEDDING_URL`): Linux GPU server — coder (ports 8000, 8001) + embeddings (port 8100)
+- Reasoning host (`$LLM_DEEPSEEK_R1_URL`): Mac Studio M2 Ultra — reasoning (port 8101)
+- Lightweight host (`$LLM_SMALL_URL`): MacBook Air M4 — lightweight/portable (port TBD)
 
 ---
 
@@ -84,12 +84,12 @@ import os
 def select_llm_endpoint(task: str, token_count: int) -> str:
     """Select LLM endpoint based on task type and context size."""
     if task == "embedding":
-        return os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.201:8100")
+        return os.environ["LLM_EMBEDDING_URL"]
     if task == "reasoning":
-        return os.getenv("LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101")
+        return os.environ["LLM_DEEPSEEK_R1_URL"]
     if task == "code" and token_count > 40_000:
-        return os.getenv("LLM_CODER_URL", "http://192.168.86.201:8000")
-    return os.getenv("LLM_CODER_FAST_URL", "http://192.168.86.201:8001")
+        return os.environ["LLM_CODER_URL"]
+    return os.environ["LLM_CODER_FAST_URL"]
 ```
 
 ---
@@ -98,10 +98,10 @@ def select_llm_endpoint(task: str, token_count: int) -> str:
 
 ```bash
 # Check all endpoints
-curl -s http://192.168.86.201:8000/health  # Coder (30B, 64K)
-curl -s http://192.168.86.201:8001/health  # Coder Fast (14B, 40K)
-curl -s http://192.168.86.201:8100/health  # Embeddings
-curl -s http://192.168.86.200:8101/health  # DeepSeek-R1 reasoning
+curl -s "${LLM_CODER_URL%/v1/*}/health"          # Coder (30B, 64K)
+curl -s "${LLM_CODER_FAST_URL%/v1/*}/health"     # Coder Fast (14B, 40K)
+curl -s "${LLM_EMBEDDING_URL%/v1/*}/health"      # Embeddings
+curl -s "${LLM_DEEPSEEK_R1_URL%/v1/*}/health"   # DeepSeek-R1 reasoning
 
 # Expected: HTTP 200 with {"status": "ok"} or similar
 ```
@@ -160,7 +160,7 @@ The following endpoint is **no longer available**:
 
 | Variable | Old value | Status |
 |----------|-----------|--------|
-| `OLLAMA_BASE_URL` | `http://192.168.86.200:11434` | Decommissioned — do not use |
+| `OLLAMA_BASE_URL` | `http://<onex-host>:11434` | Decommissioned — do not use |
 
 All code referencing `OLLAMA_BASE_URL` or port 11434 must be updated to use the
 appropriate endpoint from the table above.

@@ -1,16 +1,15 @@
-# Topic literal suppression baseline for omnibase_infra (OMN-3343).
+# Topic literal suppression baseline for omnibase_infra.
 # Pre-existing violations grandfathered in on 2026-03-02 (updated 2026-03-10 for SPDX line shifts).
 # Format: <repo-relative-path>:<lineno>
 # DO NOT add new entries here — fix violations instead.
 #
-# OMN-13202 removed the 3 "OMN-13195 kept topic_constants.py literals" per-line
-# exemptions: the TOPIC_SESSION_COORDINATION_SIGNAL and TOPIC_DELEGATE_SKILL_*
-# constants were deleted after the enum codegen was migrated to read the
+# In an earlier cleanup pass, the per-line exemptions for
+# TOPIC_SESSION_COORDINATION_SIGNAL and TOPIC_DELEGATE_SKILL_* were removed:
+# those constants were deleted after the enum codegen was migrated to read the
 # contract-declarative runtime/topics.yaml manifest. topic_constants.py now holds
-# zero TOPIC_* literals (only DLQ builders/format helpers remain). OMN-13199 (A5)
-# completed the un-allowlisting: topic_constants.py is not in
-# check_topic_literals.py _EXCLUDED_FILENAMES and has no entries in this baseline;
-# the gate fails closed on any reintroduced literal in that file.
+# zero TOPIC_* literals (only DLQ builders/format helpers remain). That cleanup
+# also un-allowlisted topic_constants.py from check_topic_literals.py
+# _EXCLUDED_FILENAMES; the gate fails closed on any reintroduced literal in that file.
 # Total entries: 123 grandfathered
 src/omnibase_infra/cli/git_hook_relay.py:72
 src/omnibase_infra/cli/git_hook_relay.py:74

@@ -1,4 +1,4 @@
-# OMN-13277 — Harden RuntimeLocal event-driven initial-payload resolution
+# Harden RuntimeLocal event-driven initial-payload resolution
 
 ## Problem
 
@@ -10,11 +10,11 @@ the first subscribe topic. For any node whose command model carries required
 fields, the downstream adapter validation then failed — silently masking the
 real cause and dropping every caller-supplied field.
 
-This was the root-cause class behind OMN-13253 (`onex skill dod_verify` published
+This was the root-cause class behind a previously diagnosed defect where `onex skill dod_verify` published
 `{correlation_id}` only, dropping `ticket_id`, so `ModelDodVerifyStartCommand`
-validation failed even though the `--input` file carried `ticket_id`). Per-node
+validation failed even though the `--input` file carried `ticket_id`. Per-node
 contract patches (top-level `input_model` on each node) were the only line of
-defense; the sibling nodes named in OMN-13253 (`node_handler_correctness_gate`,
+defense; the sibling nodes (`node_handler_correctness_gate`,
 `node_closeout_verifier_compute`, `node_ledger_stats_compute`) were latently
 exposed to the same failure.
 
@@ -53,12 +53,12 @@ exposed to the same failure.
 ## Tests
 
 `tests/unit/runtime/test_run_event_driven_operation_match.py` — extended with two
-OMN-13277 cases (file now 5 tests, all passing):
+new cases (file now 5 tests, all passing):
 
 - `test_event_model_only_contract_seeds_full_payload` — a contract with **no**
   top-level `input_model`, a `payload_type_match` `event_model` carrying a
   required `ticket_id`, and an `--input` file. Asserts the handler receives
-  `ticket_id == "OMN-99999"`, proving the full payload was seeded from the
+  `ticket_id == "TICKET-99999"`, proving the full payload was seeded from the
   routing entry's `event_model` rather than dropped to `{correlation_id}`.
 - `test_no_resolvable_payload_model_fails_loud` — an `operation_match` contract
   with no `event_model`, no `handler.input_model`, and no top-level
@@ -66,7 +66,7 @@ OMN-13277 cases (file now 5 tests, all passing):
   contract (`test_no_resolvable_model`) and states it
   `could not resolve an initial-payload model`.
 
-The three pre-existing OMN-13141 tests in the same file (operation_match boot,
+The three pre-existing tests in the same file (operation_match boot,
 empty-module spy, payload_type_match import guard) remain green — the fail-loud
 check runs after the wiring loop, so the import spy assertion still holds.
 
@@ -89,5 +89,5 @@ Removes the entire "event-driven node silently drops caller input" class:
 `event_model`-only and `handler.input_model`-only contracts now seed the full
 payload, and an unresolvable contract fails loud naming the contract/handlers
 instead of publishing a degenerate payload. Per-node `input_model` contract
-patches become belt-and-suspenders rather than the only defense (OMN-13253 +
-its named sibling nodes).
+patches become belt-and-suspenders rather than the only defense for the
+previously identified defect and its named sibling nodes.

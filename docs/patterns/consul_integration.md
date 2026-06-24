@@ -124,7 +124,7 @@ from omnibase_infra.handlers.models.consul import ModelConsulRegisterPayload
 payload = ModelConsulRegisterPayload(
     consul_service_id="node-effect-123",    # Unique service ID
     name="my-onex-node",                     # Service name in catalog
-    address="192.168.1.100",                 # Service address
+    address="192.0.2.100",                 # Service address
     port=8080,                               # Service port
     tags=["onex", "effect-node"],            # Service tags for filtering
     meta={"version": "1.0.0"},               # Service metadata
@@ -141,7 +141,7 @@ response = await handler.execute({
     "payload": {
         "consul_service_id": "node-effect-123",
         "name": "my-onex-node",
-        "address": "192.168.1.100",
+        "address": "192.0.2.100",
         "port": 8080,
     },
     "correlation_id": str(uuid4()),

@@ -147,7 +147,7 @@ curl -s http://localhost:8087/health | jq '{
 ## Topic Normalization Strategy
 
 Five legacy bare topic names were migrated to ONEX canonical format in
-OMN-2621:
+an earlier normalization pass:
 
 | Legacy Name | ONEX Canonical Name |
 |---|---|

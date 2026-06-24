@@ -1,4 +1,4 @@
-# Chaos Tests (OMN-955)
+# Chaos Tests
 
 Chaos engineering tests for validating system resilience under failure conditions.
 
@@ -191,8 +191,3 @@ Run slow tests separately (useful for nightly builds):
 pytest tests/chaos/ -m "slow" -v
 ```
 
-## Related Tickets
-
-- OMN-955: Chaos scenario tests
-- OMN-954: Effect idempotency
-- OMN-951: Correlation chain validation

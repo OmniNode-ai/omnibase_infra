@@ -1,13 +1,13 @@
-# OMN-11294 Delegate-Skill Stability Runtime Hot-Patch Proof
+# Delegate-Skill Stability Runtime Hot-Patch Proof
 
 Date: 2026-05-20
-Runtime host: `jonah@192.168.86.201`
+Runtime host: `<user>@<onex-host>`
 Runtime lane: `stability-test`
 
 ## Context
 
-`OMN-11073` fixed the runtime-owned delegation dispatch port in source and merged
-as `omnibase_infra#1624`, but the `.201` stability runtime still had a stale
+A prior patch fixed the runtime-owned delegation dispatch port in source and merged
+as `omnibase_infra#1624`, but the stability runtime on the runtime host still had a stale
 loaded copy of `RuntimeDelegationDispatchPort`.
 
 The stale runtime copy caused direct delegate-skill integration to fail before
@@ -47,10 +47,10 @@ stability runtime containers:
 
 ```bash
 scp \
-  /Users/jonah/Code/omni_home/omnibase_infra/src/omnibase_infra/runtime/service_delegation_dispatch_port.py \
-  jonah@192.168.86.201:/tmp/service_delegation_dispatch_port.py
+  $OMNI_HOME/omnibase_infra/src/omnibase_infra/runtime/service_delegation_dispatch_port.py \
+  <user>@<onex-host>:/tmp/service_delegation_dispatch_port.py
 
-ssh jonah@192.168.86.201 '
+ssh <user>@<onex-host> '
   docker cp /tmp/service_delegation_dispatch_port.py \
     omninode-stability-test-runtime:/app/src/omnibase_infra/runtime/service_delegation_dispatch_port.py
   docker cp /tmp/service_delegation_dispatch_port.py \
@@ -67,8 +67,8 @@ changed.
 Health checks after restart:
 
 ```bash
-ssh jonah@192.168.86.201 'curl -fsS http://localhost:18085/health'
-ssh jonah@192.168.86.201 'curl -fsS http://localhost:18086/health'
+ssh <user>@<onex-host> 'curl -fsS http://localhost:18085/health'
+ssh <user>@<onex-host> 'curl -fsS http://localhost:18086/health'
 ```
 
 Observed state:
@@ -81,7 +81,7 @@ Observed state:
 Delegate-skill consumer group:
 
 ```bash
-ssh jonah@192.168.86.201 '
+ssh <user>@<onex-host> '
   docker exec omnibase-infra-stability-test-redpanda \
     rpk group describe \
     stability-test.omnimarket.node_delegate_skill_orchestrator.consume.1.0.0.__i.stability-test-main.__t.onex.cmd.omnimarket.delegate-skill.v1

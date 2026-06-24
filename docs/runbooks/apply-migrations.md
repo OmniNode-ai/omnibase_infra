@@ -239,7 +239,7 @@ wrap in a transaction and check for idempotency before re-applying.
 Omnidash maintains its own `omnidash_analytics` read-model database with SQL migrations
 in `omnidash/migrations/`. These are wired into the bootstrap pipeline as **Step 1d**.
 
-### Canonical projection database (OMN-13362)
+### Canonical projection database
 
 The delegation projection (`node_projection_delegation`, omnimarket) writes to
 **`omnidash_analytics.delegation_events`** — the live, growing table. Node-owned

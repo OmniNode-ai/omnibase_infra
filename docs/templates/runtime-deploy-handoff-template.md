@@ -1,8 +1,8 @@
-# Runtime Deploy Handoff — <OMN-XXXX> — <YYYY-MM-DD>
+# Runtime Deploy Handoff — <ticket> — <YYYY-MM-DD>
 
 > Template for any handoff/OCC doc that claims a runtime was deployed/redeployed.
-> Per OMN-13030, every "deployed SHA" claim must be proven against the image's
-> baked `/app/build-provenance.json`, never copied from a build log or memory.
+> Every "deployed SHA" claim must be proven against the image's baked
+> `/app/build-provenance.json`, never copied from a build log or memory.
 > The `check-evidence-provenance-probe` pre-commit + CI gate rejects a
 > deployed-SHA claim without an adjacent `docker exec ... cat
 > /app/build-provenance.json` probe.

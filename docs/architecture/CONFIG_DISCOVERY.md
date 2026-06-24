@@ -4,7 +4,7 @@
 
 Config discovery is the system that reads ONEX contract YAML files at runtime, extracts which infrastructure transports each node depends on, and prefetches those configuration values from Infisical before the node starts handling requests. This eliminates the need for a sprawling `.env` file listing every config key across every service.
 
-Introduced in  (version 0.10.0).
+Introduced in version 0.10.0.
 
 ---
 
@@ -417,7 +417,7 @@ This means a developer can always override any value by setting the correspondin
 
 ---
 
-## Controlled-Lane Overlay Behavior (OMN-13070)
+## Controlled-Lane Overlay Behavior
 
 Introduced in version 0.10.3. The `ConfigPrefetcher` now distinguishes between controlled and uncontrolled lanes based on the `infisical_required` flag.
 
@@ -439,7 +439,7 @@ The legacy behavior is preserved for local development and CI:
 - Missing keys are logged as warnings and skipped — they are not errors.
 - This allows local development to work identically to the pre-Infisical `.env`-based approach.
 
-### Project-namespace isolation (OMN-12987)
+### Project-namespace isolation
 
 Multi-lane deployments (`dev`, `stability-test`, `prod`) each run under a distinct Docker Compose project name (e.g., `omnibase-infra`, `omnibase-infra-stability-test`, `omnibase-infra-prod`). This project-namespace isolation prevents container-name collisions when multiple lanes run on the same host — each lane's `forward-migration`, `postgres`, and `omninode-runtime` containers carry the project prefix and do not interfere with each other.
 

@@ -232,7 +232,7 @@ def test_release_workflow_verifies_or_bumps_runner_image_identity() -> None:
 
 def test_canary_doc_enumerates_mutating_jobs_and_zero_sync_happy_path() -> None:
     doc = CANARY_DOC.read_text(encoding="utf-8")
-    assert "OMN-12567" in doc
+    assert "versioned **runner image contract**" in doc
     # Mutating jobs are enumerated and must opt out explicitly.
     assert "compliance" in doc
     assert 'shared-env-enabled: "false"' in doc

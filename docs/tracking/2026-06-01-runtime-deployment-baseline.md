@@ -1,14 +1,13 @@
-# OMN-12575 Phase 1 — Live Runtime Deployment Baseline & Evidence
+# Phase 1 — Live Runtime Deployment Baseline & Evidence
 
-- Ticket: OMN-12575 (Phase 1 of epic OMN-12574 — Node-Based Runtime Deployment and OCC Automation)
 - Date captured: 2026-06-01
-- Mode: STRICTLY READ-ONLY. No runtime mutation, no deploy/build/restart, no `.201` mutation, no empty commits.
+- Mode: STRICTLY READ-ONLY. No runtime mutation, no deploy/build/restart, no runtime host mutation, no empty commits.
 - Design doc: `omni_home/docs/plans/2026-06-01-node-based-runtime-deployment-occ-tdd.md`
-- Live host: `192.168.86.201` (reachable from this machine; `ssh jonah@192.168.86.201` → `omninode-pc`).
+- Live host: `<onex-host>` (reachable from this machine; `ssh <user>@<onex-host>` → `omninode-pc`).
 - Probe method: read-only `docker ps`, `docker inspect`, `docker exec <broker> rpk group list`, and `curl /health` / `/v1/introspection/manifest` per lane.
 
 Each item below is structured as **claim / evidence (command + output excerpt) / source**, tagged
-`[live-verified]` (probed on `.201`) or `[from-source]` (read from the repo working tree).
+`[live-verified]` (probed on the runtime host) or `[from-source]` (read from the repo working tree).
 
 ---
 
@@ -84,7 +83,7 @@ prod.omnimarket.node_redeploy.consume.2.0.0.__i.prod-effects.__t.onex.evt.deploy
 
 ### Source
 `omnimarket/src/omnimarket/nodes/node_redeploy/{contract.yaml,handlers/*,models/model_redeploy_state.py}`;
-live `.201` redpanda brokers (dev/stability/prod).
+live runtime host redpanda brokers (dev/stability/prod).
 
 **Verdict: CONFIRMED.** `node_redeploy` is the live, single deployment orchestrator on all three
 lanes; deploy-agent reach is already Kafka-only via `handler_redeploy_kafka`.
@@ -93,7 +92,7 @@ lanes; deploy-agent reach is already Kafka-only via `handler_redeploy_kafka`.
 
 ## Item 2 — Live consumer groups for the reused nodes
 
-### Claim (from design doc B3)
+### Claim (from design doc)
 `node_runtime_sweep`, `node_runtime_source_attestor_effect`, and `node_runtime_manifest_reducer`
 are live (Stable). `node_deployment_evidence_reducer`, `node_occ_pr_writer_effect`,
 `node_readiness_gate_orchestrator`, and `node_evidence_pipeline_orchestrator` have **no live
@@ -147,7 +146,7 @@ done
 No consumer group for `node_deployment_evidence_reducer` on dev, stability-test, or prod.
 
 ### Source
-Live `.201` redpanda brokers (dev/stability/prod), `2026-06-01`.
+Live runtime host redpanda brokers (dev/stability/prod), `2026-06-01`.
 
 **Verdict on the design doc's B3 claim: CONFIRMED with one refinement.**
 - Live (Stable): `node_runtime_sweep`, `node_runtime_source_attestor_effect`,
@@ -201,7 +200,7 @@ All three lanes respond (no 404). Excerpts:
   contract set).
 
 ### Source
-Live `.201` runtime containers + `/health` + `/v1/introspection/manifest`, `2026-06-01`.
+Live runtime host containers + `/health` + `/v1/introspection/manifest`, `2026-06-01`.
 
 **Verdict: CONFIRMED and strengthened.** Not only do version strings differ (prod 0.36.1 vs
 dev/stability 0.37.0), the **image digests differ**: dev and stability share
@@ -237,7 +236,7 @@ local.omnibase_infra.node_runtime_error_triage_effect.consume.1.0.0.__t.onex.evt
 
 ### Source
 `omnibase_infra/src/omnibase_infra/nodes/{node_runtime_source_attestor_effect,node_runtime_manifest_reducer}/`;
-live `.201` dev-lane broker, `2026-06-01`.
+live runtime host dev-lane broker, `2026-06-01`.
 
 **Verdict: CONFIRMED.** Both attestation consumers are live (Stable) on the dev-lane broker,
 consuming `runtime-booted.v1` and `runtime-manifest-published.v1` respectively. The runtime-error
@@ -267,7 +266,7 @@ The agent cannot target stability-test (18085 / `-stability-test`) or prod (2808
 cannot deploy a pinned digest. **Verdict: B2 CONFIRMED — lane/digest truth cannot be enforced until
 this boundary carries them.**
 
-### Note on CI bypass (B1)
+### Note on CI bypass
 Not independently re-probed in this read-only pass; the design doc's reference to
 `runtime-rebuild-trigger.yml` / `trigger_rebuild_on_merge.py` hardcoding `origin/main` is recorded
 here as **from-doc, re-verify in Phase 2** rather than asserted live.

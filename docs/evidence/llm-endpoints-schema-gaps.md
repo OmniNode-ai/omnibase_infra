@@ -1,4 +1,4 @@
-# OMN-11925 LLM Endpoint Topology Schema Gaps
+# LLM Endpoint Topology Schema Gaps
 
 `contracts/llm_endpoints.yaml` currently supports narrow validation for:
 
@@ -20,6 +20,6 @@ contract update:
 - context-window source/provenance separate from `context_window_budgeted`
 - structured alias policy separate from `url_env_var` and `role_env_alias`
 
-OMN-11925 therefore adds validation only for the fields already present in the
-contract and leaves the broader topology schema expansion to a dedicated design
+This document therefore records that validation was added only for the fields already present in the
+contract, and leaves the broader topology schema expansion to a dedicated design
 change.

@@ -1,7 +1,7 @@
 # Judge Compose Profile
 
-`docker/docker-compose.judge.yml` is the OMN-12924 Tier 2 judge reproduction
-lane. It is a minimal local stack for renderable BYO-model-key proof:
+`docker/docker-compose.judge.yml` is the Tier 2 judge reproduction lane. It is
+a minimal local stack for renderable BYO-model-key proof:
 
 - Postgres
 - Redpanda
@@ -18,7 +18,7 @@ or dashboard services.
 
 Tier 2 is best-effort unless this lane passes a cold-clone/cold-compose proof.
 The current proof boundary is non-mutating compose render validation. Running
-containers, changing `.201`, or performing a remote deploy requires explicit
+containers, changing the runtime host, or performing a remote deploy requires explicit
 operator approval.
 
 ## Inputs

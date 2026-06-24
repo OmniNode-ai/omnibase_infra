@@ -323,7 +323,7 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 
 **Total: 29 documented nodes** across 4 archetypes (a curated subset). The live repository contains 109 `node_<name>/` directories under `src/omnibase_infra/nodes/` with 107 `contract.yaml` files; the additional nodes (delegation, merge-sweep, coding-agent, RSD, scope, GitHub/Gmail effects, etc.) are not enumerated in the inventory sections above. Section 3 covers the primary canonical nodes; the full census is maintained by `scripts/validate.py contracts`.
 
-> _Verified against code on this refresh (OMN-13465): `ls -d src/omnibase_infra/nodes/node_* | wc -l` → 109; `find src/omnibase_infra/nodes -name contract.yaml | wc -l` → 107._
+> _Verified against code on this refresh: `ls -d src/omnibase_infra/nodes/node_* | wc -l` → 109; `find src/omnibase_infra/nodes -name contract.yaml | wc -l` → 107._
 
 ---
 
@@ -362,7 +362,7 @@ Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (docu
 
 ---
 
-## Vendored Node Migration Pattern (OMN-13124)
+## Vendored Node Migration Pattern
 
 Nodes that own projection tables ship their SQL migrations under:
 
