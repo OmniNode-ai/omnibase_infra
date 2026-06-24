@@ -72,7 +72,7 @@ DEV_OR_PROD_PUBLISHED_PORTS = {
     "23002",
     "28080",
     "38080",
-    "8880",
+    "8881",  # OMN-13417: dev lane infisical host port (was 8880)
 }
 
 
