@@ -95,11 +95,17 @@ class HandlerRegistryApiGetHealth:
 
         # Qdrant health check
         try:
-            import os
-
             import httpx
 
-            qdrant_url = os.environ["QDRANT_URL"]  # ONEX_EXCLUDE  # fmt: skip
+            from omnibase_infra.nodes.node_vector_store_effect.contract_descriptor import (
+                contract_qdrant_url,
+            )
+
+            # OMN-13558 Wave-1: resolve the Qdrant endpoint through the
+            # vector-store node's overlay-declared descriptor (the qdrant owner)
+            # instead of a direct os.environ read. Fails closed on unset
+            # QDRANT_URL → reported as unhealthy by the surrounding handler.
+            qdrant_url = contract_qdrant_url()
             async with httpx.AsyncClient(timeout=2) as client:
                 resp = await client.get(f"{qdrant_url}/healthz")
                 components["qdrant"] = (
