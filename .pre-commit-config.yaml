@@ -24,7 +24,7 @@ repos:
   # Stub implementation detection + transport-mock lint — sourced from omnibase_core.
   # Rev bumped to OMN-13026 (transport-mock-lint hook added).
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: cfaa6ec863c3026b5e65196151ed76cdad13dae3 # pragma: allowlist secret
+    rev: 309d89fa7254701347f95bf99205cccfb3f6c1df # pragma: allowlist secret
     hooks:
       - id: check-stub-implementations
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
