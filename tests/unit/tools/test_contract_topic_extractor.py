@@ -268,6 +268,85 @@ def test_extract_event_bus_publish_topics(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# event_bus.dlq_topics — contract-declared DLQ destinations (OMN-13548)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_extract_event_bus_dlq_topics(tmp_path: Path) -> None:
+    """event_bus.dlq_topics[] entries reach the provisioner create-set.
+
+    OMN-13548 (D-03): a projection handler's malformed-input DLQ topic is
+    declared under ``event_bus.dlq_topics``. Before this fix the extractor only
+    enumerated subscribe/publish topics, so the DLQ topic was never provisioned
+    on the broker and the handler could not route — silently dropping the row.
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_savings",
+        """
+        event_bus:
+          subscribe_topics:
+            - "onex.evt.omnimarket.savings-estimated.v1"
+          dlq_topics:
+            - "onex.dlq.omnimarket.projection-savings-malformed.v1"
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    results = extractor.extract(tmp_path)
+
+    topics = {e.topic for e in results}
+    assert "onex.dlq.omnimarket.projection-savings-malformed.v1" in topics
+
+    dlq_entry = next(
+        e
+        for e in results
+        if e.topic == "onex.dlq.omnimarket.projection-savings-malformed.v1"
+    )
+    assert dlq_entry.kind == "dlq"
+    assert dlq_entry.producer == "omnimarket"
+    assert dlq_entry.event_name == "projection-savings-malformed"
+    assert dlq_entry.version == "v1"
+
+
+@pytest.mark.unit
+def test_extract_all_projection_dlq_topics_provisioned(tmp_path: Path) -> None:
+    """Both projection DLQ topics (delegation + savings) reach the create-set.
+
+    Proves the general ``dlq_topics`` enumeration — not a hand-listed pair — by
+    declaring two distinct projection contracts and asserting each contract's
+    declared DLQ topic appears in the extracted (i.e. provisioned) topic set.
+    """
+    write_contract(
+        tmp_path,
+        "node_projection_delegation",
+        """
+        event_bus:
+          subscribe_topics:
+            - "onex.evt.omnimarket.delegation-attempted.v1"
+          dlq_topics:
+            - "onex.dlq.omnimarket.projection-delegation-malformed.v1"
+        """,
+    )
+    write_contract(
+        tmp_path,
+        "node_projection_savings",
+        """
+        event_bus:
+          subscribe_topics:
+            - "onex.evt.omnimarket.savings-estimated.v1"
+          dlq_topics:
+            - "onex.dlq.omnimarket.projection-savings-malformed.v1"
+        """,
+    )
+    extractor = ContractTopicExtractor()
+    topics = {e.topic for e in extractor.extract(tmp_path)}
+
+    assert "onex.dlq.omnimarket.projection-delegation-malformed.v1" in topics
+    assert "onex.dlq.omnimarket.projection-savings-malformed.v1" in topics
+
+
+# ---------------------------------------------------------------------------
 # No early break — all sections are always checked
 # ---------------------------------------------------------------------------
 

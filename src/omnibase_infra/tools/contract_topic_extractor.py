@@ -71,6 +71,13 @@ _EVENT_SECTION_KEYS: tuple[str, ...] = (
 _EVENT_BUS_SECTION_KEYS: tuple[str, ...] = (
     "subscribe_topics",
     "publish_topics",
+    # OMN-13548: contract-declared DLQ destinations for malformed inbound
+    # events. Projection handlers (delegation, savings, future) declare their
+    # dead-letter topic under ``event_bus.dlq_topics``; the wiring routes to it
+    # on handler error. Those topics must be provisioned on the broker just like
+    # publish/subscribe topics — otherwise the handler cannot route and the
+    # row is silently dropped (the failure mode that motivated this ticket).
+    "dlq_topics",
 )
 
 
