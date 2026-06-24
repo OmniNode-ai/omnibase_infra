@@ -20,7 +20,9 @@ runtime_profiles:
 input_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
-  description: "Canonical gateway envelope with tenant binding and topic transform fields."
+  description: >
+    Canonical gateway envelope with tenant binding and topic transform fields. Runtime dispatch may wrap this payload in a ModelEventEnvelope instance or its serialized dict form; handlers normalize that outer envelope before reading payload.
+
 output_model:
   name: "ModelGatewayEnvelope"
   module: "omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_envelope"
@@ -74,13 +76,17 @@ handler_routing:
         name: "HandlerForwardOutbound"
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_forward_outbound"
         handler_type: "COMPUTE"
-      description: "Canonical handle() dispatch entrypoint validates local bare topic and delegates to the tenant cloud wire-prefix transform."
+      description: >
+        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the local bare topic, and delegates to the tenant cloud wire-prefix transform.
+
     - operation: "gateway.consume_inbound"
       handler:
         name: "HandlerConsumeInbound"
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound"
         handler_type: "COMPUTE"
-      description: "Canonical handle() dispatch entrypoint validates tenant-prefixed cloud topic and delegates to the bare local-topic transform."
+      description: >
+        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the tenant-prefixed cloud topic, and delegates to the bare local-topic transform.
+
 capabilities:
   - name: "tenant_prefix_transform"
     description: "Adds and strips tenant wire prefixes with envelope validation."
@@ -88,6 +94,8 @@ capabilities:
     description: "Rejects any canonical topic not declared in mirror topic sets."
   - name: "node_owned_publish"
     description: "Handlers never publish; the effect node owns both bus legs."
+  - name: "raw_dispatch_envelope_normalization"
+    description: "Handlers deserialize serialized outer event envelopes before reading payload."
 metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
