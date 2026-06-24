@@ -232,10 +232,10 @@ class HandlerGraph(
                 the URI is resolved from the following keys in priority order:
                   1. ``connection_uri``
                   2. ``bolt_uri``
-                  3. ``MEMGRAPH_BOLT_URI`` environment variable
-                  4. ``GRAPH_BOLT_URI`` environment variable
-                  5. ``OMNIMEMORY_MEMGRAPH_HOST``/``OMNIMEMORY_MEMGRAPH_PORT`` env vars
-                  6. Hard-coded default ``bolt://localhost:7687``
+                  3. the contract-declared ``descriptor.graph_bolt_uri`` (``${env.GRAPH_BOLT_URI}``),
+                     resolved through the overlay seam (``expand_contract_env_refs``) and
+                     failing closed when unset — no silent ``bolt://localhost:7687`` default
+                     (OMN-13558 Wave-1 endpoint→overlay migration).
                 Additional dict keys ``auth`` and ``options`` are also extracted.
             auth: Optional tuple of (username, password) for authentication.
                 Ignored when connection_uri is a dict that contains an ``auth`` key.
