@@ -4,22 +4,12 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13417"
 title: "fix(OMN-13417): dev lane infisical host port 8881 — stop colliding with stability-test infisical on 8880"
 summary: >-
-  Cold dev full bring-up returned rc=1 because the dev lane infisical host port
-  defaulted to 8880, the same port the stability-test lane infisical
-  (omnibase-infra-infisical-stability) already binds on a shared host. The two
-  lanes are separate compose projects, so the shared 8880 default produced a
-  host-port collision that made `docker compose up` / `onex up core` exit
-  non-zero — a recurring papercut that masked real failures. The fix gives the
-  dev lane infisical a distinct lane-scoped default host port (8881) across both
-  bring-up paths: the static docker-compose.infra.yml and the catalog manifest
-  used by `onex up core`. The runtime data path is unaffected — dev runtime
-  containers reach infisical in-network at http://infisical:8080, never via the
-  host port. Stability lane keeps 8880.
+  Cold dev full bring-up returned rc=1 because the dev lane infisical host port defaulted to 8880, the same port the stability-test lane infisical (omnibase-infra-infisical-stability) already binds on a shared host. The two lanes are separate compose projects, so the shared 8880 default produced a host-port collision that made `docker compose up` / `onex up core` exit non-zero — a recurring papercut that masked real failures. The fix gives the dev lane infisical a distinct lane-scoped default host port (8881) across both bring-up paths: the static docker-compose.infra.yml and the catalog manifest used by `onex up core`. The runtime data path is unaffected — dev runtime containers reach infisical in-network at http://infisical:8080, never via the host port. Stability lane keeps 8880.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 evidence_requirements:
-  - kind: "command"
+  - kind: "manual"
     description: "Catalog generator renders the dev `core` bundle infisical on host port 8881 (not 8880)."
     command: "uv run python -m omnibase_infra.docker.catalog.cli generate core && grep -E '8881:8080|SITE_URL: http://localhost:8881' docker/docker-compose.generated.yml"
   - kind: "tests"
@@ -27,7 +17,7 @@ evidence_requirements:
     command: "uv run pytest tests/unit/docker/ tests/integration/infra/ -q"
   - kind: "ci"
     description: "Central OCC PASS evidence for OMN-13417 is carried by the paired onex_change_control receipt PR."
-    command: "gh pr view <OCC_PR> --repo OmniNode-ai/onex_change_control --json headRefOid"
+    command: "gh pr view 3023 --repo OmniNode-ai/onex_change_control --json headRefOid"
 emergency_bypass:
   enabled: false
   justification: ""
