@@ -350,6 +350,84 @@ resolve_compose_project() {
     echo "${compose_project}"
 }
 
+# Compose project -> lane (overlay) mapping. The dev lane (bare omnibase-infra
+# project) runs from docker-compose.infra.yml alone; every non-dev lane LAYERS
+# its overlay so the overlay's container_name + project name + lane network win.
+#
+# OMN-13581: deploy-runtime.sh historically passed ONLY `-f infra.yml` on every
+# `docker compose` call, including warm_broker_topic_provisioning's `up redpanda`
+# step. The base infra compose hardcodes `container_name: omnibase-infra-redpanda`
+# (the DEV name) and the dev network, so running the warmup against a non-dev
+# project (e.g. omnibase-infra-stability-test) makes compose try to (re)create
+# redpanda as the DEV-named container, which collides with the live dev broker,
+# gets a Docker hash prefix, and lands in 'created' -- DESTROYING the lane's own
+# correctly-named broker. That left the stability lane broker-less for ~3 days.
+# Layering the matching overlay gives redpanda the lane-prefixed container_name +
+# lane network, so the lane's broker is targeted and never displaced.
+#
+# This mirrors the authoritative, tested lane->compose-file mapping in
+# scripts/deploy-agent/deploy_agent/executor.py (_LANE_CONFIGS): stability-test
+# layers docker-compose.stability-test.yml, prod layers docker-compose.prod.yml,
+# judge layers docker-compose.judge.yml. The dev project gets no overlay.
+resolve_lane_overlay_filename() {
+    # Echo the overlay compose FILENAME (relative to docker/) for a compose
+    # project, or nothing for the bare dev project. Fails closed: an unknown
+    # non-dev project aborts rather than silently running on the dev config (the
+    # exact failure mode that displaced the lane broker).
+    local compose_project="$1"
+
+    # Lane = compose project suffix after the canonical "omnibase-infra" prefix.
+    # omnibase-infra                -> "" (dev, no overlay)
+    # omnibase-infra-stability-test -> "stability-test"
+    # omnibase-infra-prod           -> "prod"
+    # omnibase-infra-judge          -> "judge"
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+
+    case "${lane}" in
+        "")
+            # Dev lane: infra.yml alone (fixed dev container names are correct here).
+            return 0
+            ;;
+        stability-test|prod|judge)
+            echo "docker-compose.${lane}.yml"
+            return 0
+            ;;
+        *)
+            log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
+            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
+            log_error "  Refusing to deploy: running a non-dev lane on the bare infra.yml config"
+            log_error "  would recreate the DEV-named redpanda and displace this lane's broker"
+            log_error "  (OMN-13581). Add the lane's overlay mapping before deploying it."
+            exit 1
+            ;;
+    esac
+}
+
+resolve_compose_file_args() {
+    # Populate a caller-provided array (passed by name) with the full
+    # `-f <file>` token sequence for a deployment: always
+    # docker-compose.infra.yml, plus the lane overlay (docker-compose.<lane>.yml)
+    # for any non-dev compose project (OMN-13581).
+    #
+    # Usage:
+    #   local -a compose_args
+    #   resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
+    local -n _out_args="$1"
+    local deploy_target="$2"
+    local compose_project="$3"
+
+    local docker_dir="${deploy_target}/docker"
+    _out_args=("-f" "${docker_dir}/docker-compose.infra.yml")
+
+    local overlay_filename
+    overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
+    if [[ -n "${overlay_filename}" ]]; then
+        _out_args+=("-f" "${docker_dir}/${overlay_filename}")
+    fi
+}
+
 # =============================================================================
 # Prerequisites
 # =============================================================================
@@ -1554,17 +1632,18 @@ sanity_check() {
     # Validate that docker compose config resolves cleanly from the deployed directory.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Post-Sync Sanity Check"
 
     log_info "Validating compose configuration from deployed directory..."
-    log_cmd "docker compose -p ${compose_project} -f ${compose_file} config --quiet"
+    log_cmd "docker compose -p ${compose_project} ${compose_args[*]} config --quiet"
 
     local config_output
     if ! config_output="$(docker compose \
         -p "${compose_project}" \
-        -f "${compose_file}" \
+        "${compose_args[@]}" \
         config --quiet 2>&1)"; then
         log_error "Compose configuration validation failed."
         if [[ -n "${config_output}" ]]; then
@@ -1649,7 +1728,8 @@ build_images() {
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Build Images"
 
@@ -1682,7 +1762,7 @@ build_images() {
     local cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
@@ -1787,7 +1867,8 @@ warm_broker_topic_provisioning() {
     # deploy — apply it here, explicitly, before the kernel boots.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Broker Topic-Provisioning Warmup"
 
@@ -1808,7 +1889,7 @@ warm_broker_topic_provisioning() {
     local broker_up_cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --wait
         "${BROKER_READINESS_SERVICE}"
@@ -1834,7 +1915,7 @@ warm_broker_topic_provisioning() {
     local cap_up_cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${BROKER_PARTITION_CAP_SERVICE}"
@@ -1858,7 +1939,8 @@ run_runtime_migration_preflight() {
     # Run bounded migration services before --no-deps runtime restarts.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Runtime Migration Preflight"
 
@@ -1866,7 +1948,7 @@ run_runtime_migration_preflight() {
         local cmd=(
             docker compose
             -p "${compose_project}"
-            -f "${compose_file}"
+            "${compose_args[@]}"
             --profile "${COMPOSE_PROFILE}"
             up -d --no-deps --force-recreate
             "${service}"
@@ -1930,14 +2012,15 @@ restart_services() {
     # Restart runtime containers via docker compose up --force-recreate.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Restart Runtime Services"
 
     local cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${RUNTIME_SERVICES[@]}"
@@ -2057,7 +2140,12 @@ print_compose_commands() {
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    # OMN-13581: print the SAME `-f` token sequence the script executes, including
+    # the lane overlay for non-dev projects, so copy-pasted operator commands do
+    # not silently run on the bare infra.yml config (which displaces the broker).
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    local compose_f="${compose_args[*]}"
     local omni_home="${OMNI_HOME:-}"
     local build_source
     build_source="$(resolve_build_source)"
@@ -2080,7 +2168,7 @@ print_compose_commands() {
     log_info "Build:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
@@ -2097,7 +2185,7 @@ print_compose_commands() {
     log_info "Restart runtime services:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
     log_info "    ${RUNTIME_SERVICES[*]}"
@@ -2105,28 +2193,28 @@ print_compose_commands() {
     log_info "Full stack up (infra + runtime):"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d"
     log_info ""
     log_info "Stop all:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    down"
     log_info ""
     log_info "Logs:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    logs -f"
     log_info ""
     log_info "Status:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    ps"
 }
@@ -2141,6 +2229,11 @@ show_summary() {
     local version="$2"
     local git_sha="$3"
     local compose_project="$4"
+    # OMN-13581: surface the lane-overlay-aware `-f` sequence in operator
+    # next-step commands too, so a copy-paste does not run the lane on infra.yml.
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    local compose_f="${compose_args[*]}"
 
     log_step "Deployment Summary"
 
@@ -2157,14 +2250,14 @@ show_summary() {
         log_info "  To start containers, run:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
-        log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
+        log_info "      ${compose_f} \\"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      up -d"
     else
         log_info "  Containers are running. Check status:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
-        log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
+        log_info "      ${compose_f} \\"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      ps"
     fi
