@@ -17,7 +17,9 @@ from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
 from omnibase_infra.verification.probes.probe_subscription import (
+    _discover_split_group_topics,
     _rpk_fallback,
+    _topic_from_split_group_name,
     check_subscriptions,
 )
 
@@ -288,3 +290,176 @@ class TestRpkFallback:
             "onex.evt.platform.node-heartbeat.v1",
             "onex.intent.platform.runtime-tick.v1",
         }
+
+
+# Live per-topic split-group names as emitted by the runtime (OMN-13554). The
+# base group carries the .__i.{instance} infix and each topic gets its own
+# .__t.{topic} split-group. These mirror the dev-lane broker output verbatim.
+_LIVE_BASE = (
+    "local.omnibase_infra.node_registration_orchestrator.consume.1.1.1.__i.runtime-main"
+)
+_LIVE_TOPICS = (
+    "onex.cmd.platform.node-registration-acked.v1",
+    "onex.cmd.platform.request-introspection.v1",
+    "onex.cmd.platform.topic-catalog-query.v1",
+    "onex.evt.platform.node-heartbeat.v1",
+    "onex.evt.platform.node-introspection.v1",
+    "onex.evt.platform.registry-request-introspection.v1",
+    "onex.intent.platform.runtime-tick.v1",
+)
+_LIVE_SPLIT_GROUPS = tuple(f"{_LIVE_BASE}.__t.{t}" for t in _LIVE_TOPICS)
+
+# The legacy monolithic group the stale derivation computes -- no longer exists
+# on the broker. This is the name that produced the recurring false FAIL.
+_LEGACY_DERIVED_GROUP = "local.runtime_config.registration-orchestrator.consume.1.0.0"
+
+
+@pytest.mark.unit
+class TestTopicFromSplitGroupName:
+    """Parse the topic straight out of a per-topic split-group name."""
+
+    def test_parses_topic_after_last_marker(self) -> None:
+        group = _LIVE_SPLIT_GROUPS[0]
+        assert (
+            _topic_from_split_group_name(group)
+            == "onex.cmd.platform.node-registration-acked.v1"
+        )
+
+    def test_uses_last_marker_when_topic_contains_no_marker(self) -> None:
+        # The .__i. instance infix precedes the single .__t. topic marker; the
+        # parser must split on the LAST .__t. so the topic is returned intact.
+        for group, topic in zip(_LIVE_SPLIT_GROUPS, _LIVE_TOPICS, strict=True):
+            assert _topic_from_split_group_name(group) == topic
+
+    def test_non_split_group_returns_none(self) -> None:
+        assert _topic_from_split_group_name(_LEGACY_DERIVED_GROUP) is None
+
+    def test_empty_topic_suffix_returns_none(self) -> None:
+        assert _topic_from_split_group_name(f"{_LIVE_BASE}.__t.") is None
+
+
+@pytest.mark.unit
+class TestDiscoverSplitGroupTopics:
+    """Discover live split-groups by contract name (the OMN-13554 fix)."""
+
+    def _patch_group_list(
+        self, monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...]
+    ) -> None:
+        monkeypatch.setattr(
+            "omnibase_infra.verification.probes.probe_subscription._rpk_group_list",
+            lambda: [{"name": n} for n in names],
+        )
+
+    def test_discovers_all_live_split_group_topics(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._patch_group_list(monkeypatch, _LIVE_SPLIT_GROUPS)
+        assert _discover_split_group_topics("node_registration_orchestrator") == set(
+            _LIVE_TOPICS
+        )
+
+    def test_ignores_unrelated_node_groups(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        other = "local.omnibase_infra.node_other.consume.1.0.0.__t.onex.evt.foo.v1"
+        self._patch_group_list(monkeypatch, (*_LIVE_SPLIT_GROUPS, other))
+        topics = _discover_split_group_topics("node_registration_orchestrator")
+        assert topics == set(_LIVE_TOPICS)
+        assert "onex.evt.foo.v1" not in topics
+
+    def test_no_match_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_group_list(monkeypatch, (_LEGACY_DERIVED_GROUP,))
+        assert _discover_split_group_topics("node_registration_orchestrator") == set()
+
+
+@pytest.mark.unit
+class TestRpkFallbackDiscoversSplitGroupsByContract:
+    """End-to-end: the derived base group is stale, discovery saves the probe.
+
+    This is the exact OMN-13554 scenario: the stale monolithic group derivation
+    yields a base group that does not exist on the broker, while the live
+    runtime subscribes via per-topic split-groups under a different base name.
+    The fallback must discover those by contract name and return the real topics
+    rather than emitting a false 7/7-missing FAIL.
+    """
+
+    def test_stale_base_group_falls_through_to_contract_discovery(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class CompletedProcessStub:
+            def __init__(
+                self, stdout: str, returncode: int = 0, stderr: str = ""
+            ) -> None:
+                self.stdout = stdout
+                self.returncode = returncode
+                self.stderr = stderr
+
+        def fake_run(
+            args: list[str],
+            capture_output: bool,
+            text: bool,
+            timeout: int,
+            check: bool,
+            env: dict | None = None,
+        ) -> CompletedProcessStub:
+            # describe of the stale base group: exists but has no members.
+            if args[:3] == ["rpk", "group", "describe"]:
+                return CompletedProcessStub(stdout=json.dumps({"members": []}))
+            # list returns only the LIVE split-groups (the stale base is absent,
+            # so its .__t. anchored search finds nothing).
+            if args == ["rpk", "group", "list", "--format", "json"]:
+                return CompletedProcessStub(
+                    stdout=json.dumps([{"name": n} for n in _LIVE_SPLIT_GROUPS])
+                )
+            raise AssertionError(f"Unexpected subprocess invocation: {args}")
+
+        monkeypatch.setattr(
+            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            fake_run,
+        )
+
+        assert _rpk_fallback(
+            _LEGACY_DERIVED_GROUP,
+            contract_name="node_registration_orchestrator",
+        ) == set(_LIVE_TOPICS)
+
+    def test_check_subscriptions_passes_against_live_split_groups(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Force the stale EXACT identity that the runtime_config.yaml derivation
+        # produces, then prove the contract-name discovery still resolves PASS.
+        from omnibase_infra.models import ModelNodeIdentity
+
+        monkeypatch.setattr(
+            "omnibase_infra.verification.probes.probe_subscription._rpk_group_list",
+            lambda: [{"name": n} for n in _LIVE_SPLIT_GROUPS],
+        )
+
+        class CompletedProcessStub:
+            def __init__(self, stdout: str, returncode: int = 0) -> None:
+                self.stdout = stdout
+                self.returncode = returncode
+                self.stderr = ""
+
+        def fake_run(args, **_kwargs):  # type: ignore[no-untyped-def]
+            # describe of the stale base group -> no members; list path goes
+            # through the patched _rpk_group_list above.
+            return CompletedProcessStub(stdout=json.dumps({"members": []}))
+
+        monkeypatch.setattr(
+            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            fake_run,
+        )
+
+        contract = _make_contract(subscribe_topics=_LIVE_TOPICS)
+        results = check_subscriptions(
+            contract,
+            identity=ModelNodeIdentity(
+                env="local",
+                service="runtime_config",
+                node_name="registration-orchestrator",
+                version="1.0.0",
+            ),
+        )
+        assert len(results) == len(_LIVE_TOPICS)
+        assert all(r.verdict == EnumValidationVerdict.PASS for r in results)

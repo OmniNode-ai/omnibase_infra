@@ -55,7 +55,7 @@
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
 #     - Redpanda: 19092 (internal 9092) [always-on]
-#     - Infisical: 8880 (internal 8080) [secrets profile]
+#     - Infisical: 8881 (internal 8080) [secrets profile] (OMN-13417: dev-lane port; stability lane uses 8880)
 #     - Keycloak: 28080 (internal 8080) [default — OMN-10089]
 #   Runtime:
 #     - omninode-runtime: 8085 [runtime profile]
@@ -540,10 +540,15 @@ services:
       # Development defaults are provided in docker/.env.example.
       ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY must be set in .env}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET must be set in .env}
-      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8881}
       TELEMETRY_ENABLED: "false"
     ports:
-      - "${INFISICAL_EXTERNAL_PORT:-8880}:8080"
+      # OMN-13417: dev lane infisical defaults to host port 8881 so a cold dev
+      # `docker compose up` no longer collides with the stability-test lane
+      # infisical (omnibase-infra-infisical-stability), which binds host 8880.
+      # The two lanes are separate compose projects on the same host; sharing the
+      # 8880 default made dev `up` exit rc=1 once stability was already running.
+      - "${INFISICAL_EXTERNAL_PORT:-8881}:8080"
     networks:
       - omnibase-infra-network
     healthcheck:
