@@ -82,7 +82,7 @@ cc_number = "4111-1111-1111-1111"
 raise PaymentError(f"Card declined: {cc_number}")  # NEVER
 
 # IP addresses of users (in some contexts)
-user_ip = "192.168.1.100"
+user_ip = "192.0.2.1"
 # NOTE: Including IPs is context-dependent - avoid in user-facing errors
 raise InfraAuthenticationError(
     f"Blocked request from {user_ip}",  # May be acceptable for security logs

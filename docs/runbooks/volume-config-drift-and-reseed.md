@@ -76,7 +76,7 @@ provenance summary and writes a sidecar JSON next to the deployed contract:
 ### 1. Inspect drift (read-only)
 
 ```bash
-# On the .201 host, against the target lane's runtime container:
+# On the runtime host, against the target lane's runtime container:
 docker exec <runtime-container> cat /app/data/delegation/.config_provenance.json
 ```
 

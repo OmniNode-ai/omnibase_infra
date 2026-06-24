@@ -36,7 +36,7 @@ CONTRACT modes the boot census never consults Kafka.
 
 ### 2. Live runtime confirms filesystem provenance
 
-Read-only probe of stability-test (`192.168.86.201:18085`):
+Read-only probe of stability-test (`<onex-host>:18085`):
 
 ```
 GET /v1/introspection/manifest

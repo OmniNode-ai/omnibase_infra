@@ -2,13 +2,13 @@
 
 **Epic:** OMN-13008 (merge-triggered worktree reaper)
 **Tickets:** T4 (OMN-13228, event-first reaper) · T6 (OMN-13230, timer backstop + this runbook)
-**Owners:** `.201` systemd units in `deploy/disk-gc/`; Mac launchd daemon in
+**Owners:** runtime host systemd units in `deploy/disk-gc/`; Mac launchd daemon in
 `omniclaude/scripts/worktree-reaper-daemon.sh`.
 
 ## Why this exists
 
 Stale worktrees for already-merged PRs accumulate under the worktrees root and —
-alongside docker images — filled `/data` on `.201` on 2026-06-11 (the OMN-13009
+alongside docker images — filled `/data` on the runtime host on 2026-06-11 (the OMN-13009
 demo-day incident). The fix is to garbage-collect a worktree as soon as its PR
 merges, removing ONLY worktrees whose PR is merged (or whose remote branch is
 gone) AND that are clean AND fully pushed.
@@ -45,7 +45,7 @@ worktrees is out of scope (OMN-13044 owns that). Default-SKIP on any ambiguity:
 a prune failure, a projection fetch error, or a malformed event leaves the cursor
 un-advanced (Layer 1) or the root marked failed for retry (Layer 2).
 
-## `.201` (systemd, user scope — no sudo)
+## Runtime host (systemd, user scope — no sudo)
 
 Two coexisting systemd USER units in `deploy/disk-gc/`, installed independently.
 **Both are retained — neither replaces the other.**
@@ -58,7 +58,7 @@ Two coexisting systemd USER units in `deploy/disk-gc/`, installed independently.
 `onex-disk-gc.service` runs three conservative passes in order: `worktree-gc.sh`
 (drives `prune-worktrees.sh`), `disk-gc.sh` (docker/builder/image GC honoring the
 keep-list), and `disk-watermark-check.sh` (emits a bus alert if `/data` crosses
-the watermark). The hourly worktree-GC pass IS the Layer 2 backstop on `.201`.
+the watermark). The hourly worktree-GC pass IS the Layer 2 backstop on the runtime host.
 
 > **Retention rule (T6):** `onex-disk-gc.timer` must stay installed as the
 > hourly backstop. Do NOT remove it when the event-first reaper is running — the
@@ -86,7 +86,7 @@ launchd **periodic** jobs do not fire reliably on this Mac
   event poll.
 - **Layer 2** runs once on daemon start (reconciling anything missed while the
   daemon was down) and then every `ONEX_REAPER_CATCH_UP_INTERVAL` seconds
-  (default 3600 = hourly), the Mac equivalent of `.201`'s `onex-disk-gc.timer`.
+  (default 3600 = hourly), the Mac equivalent of the runtime host's `onex-disk-gc.timer`.
   Set `ONEX_REAPER_CATCH_UP_INTERVAL=0` to disable the periodic backstop.
 
 The catch-up sweep is `run_catch_up_sweep()` in `worktree_reaper.py`: it drives
@@ -135,6 +135,6 @@ window small in steady state.
 
 - `omniclaude/scripts/worktree_reaper.py` — the Mac reaper (both layers).
 - `omniclaude/scripts/prune-worktrees.sh` — the shared safety core.
-- `scripts/worktree-gc.sh` — the `.201` driver invoked by `onex-disk-gc.service`.
-- `deploy/disk-gc/` — `.201` systemd units (`onex-worktree-reaper.*`,
+- `scripts/worktree-gc.sh` — the runtime host driver invoked by `onex-disk-gc.service`.
+- `deploy/disk-gc/` — runtime host systemd units (`onex-worktree-reaper.*`,
   `onex-disk-gc.*`) and installers.

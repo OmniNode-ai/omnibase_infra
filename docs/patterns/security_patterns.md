@@ -44,7 +44,7 @@ Error messages and contexts can inadvertently expose sensitive information. All 
 | Internal Paths | `/home/user/.ssh/id_rsa`, `/var/secrets/` | Path traversal, information disclosure |
 | Private Keys | SSL certificates, encryption keys | Cryptographic compromise |
 | Session Data | Cookies, JWT tokens, session IDs | Session hijacking |
-| Internal IPs | `192.168.x.x`, `10.x.x.x` in production logs | Network reconnaissance |
+| Internal IPs | private LAN addresses (e.g. RFC 1918 ranges) in production logs | Network reconnaissance |
 
 #### SAFE to Include
 

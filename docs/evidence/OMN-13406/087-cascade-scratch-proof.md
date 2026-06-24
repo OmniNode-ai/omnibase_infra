@@ -1,6 +1,6 @@
 # OMN-13406 — 087 CASCADE scratch acceptance proof
 
-Throwaway Postgres 16 (`docker run --rm postgres:16` on .201), torn down after the run.
+Throwaway Postgres 16 (`docker run --rm postgres:16` on the runtime host), torn down after the run.
 Proves: (a) WARM DB (decoy + dependent view) → hardened 087 succeeds, drops both;
 (b) COLD DB (no decoy) → clean no-op; (neg) OLD bare DROP (no CASCADE) → Postgres refuses
 (reproduces the original blocker that the CASCADE fixes).

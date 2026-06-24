@@ -56,7 +56,7 @@ Created new utility module: `src/omnibase_infra/utils/util_dsn_validation.py`
 | Edge Case | Example | Handled |
 |-----------|---------|---------|
 | IPv6 addresses | `postgresql://user:pass@[::1]:5432/db` | ✅ |
-| IPv4 addresses | `postgresql://user:pass@192.168.1.100:5432/db` | ✅ |
+| IPv4 addresses | `postgresql://user:pass@192.0.2.100:5432/db` | ✅ |
 | URL-encoded passwords | `postgresql://user:p%40ssword@host/db` | ✅ Decoded to `p@ssword` |
 | Missing password | `postgresql://user@host:5432/db` | ✅ |
 | Missing port | `postgresql://user:pass@host/db` | ✅ Defaults to 5432 |

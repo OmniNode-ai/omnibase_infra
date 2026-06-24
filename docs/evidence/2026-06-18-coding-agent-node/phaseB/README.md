@@ -2,8 +2,8 @@
 
 **Epic:** OMN-13245 · **Ticket:** OMN-13248 (Phase B)
 **Date:** 2026-06-18
-**Lane:** DEV (project `omnibase-infra`) on `jonah@192.168.86.201` — pre-authorized; stability/prod/judge untouched.
-**Phase 0 dependency:** OMN-13246 PASS (omni_home PR #182, MERGED) — proved headless codex/claude auth in a Linux `.201` container.
+**Lane:** DEV (project `omnibase-infra`) on the runtime host — pre-authorized; stability/prod/judge untouched.
+**Phase 0 dependency:** OMN-13246 PASS (omni_home PR #182, MERGED) — proved headless codex/claude auth in a Linux container on the runtime host.
 
 ## Verdict: PASS
 
@@ -22,15 +22,15 @@ sha256:9ac86cebe5c458f4991166353f2d4ac1c4d5085f4578ba41286f366cd4584229
 rev=6d6acf802178  ver=0.38.3  src=workspace
 ```
 
-Built workspace-mode from the canonical `.201` `/data/omninode/omni_home` clones (intentional dev forward-rebuild: omnibase-infra clone HEAD `6d6acf80` and onex-change-control track ahead of the omnimarket lock pin; recorded via `ALLOW_SIBLING_PIN_DRIFT=1`, never silent). Non-blank identity satisfies the OMN-12965 workspace guard.
+Built workspace-mode from the canonical runtime host `/data/omninode/omni_home` clones (intentional dev forward-rebuild: omnibase-infra clone HEAD `6d6acf80` and onex-change-control track ahead of the omnimarket lock pin; recorded via `ALLOW_SIBLING_PIN_DRIFT=1`, never silent). Non-blank identity satisfies the OMN-12965 workspace guard.
 
 Rollback baseline (the prior healthy image) was `sha256:2a3ea84f52df5fb04aeb116d6e521fa0a60928638d07551073088a900322cada` (rev `6d6acf80`, ver `0.38.3`). Canary passed, so no rollback was performed.
 
 ## Credential source (DEV only — NOT baked, NOT committed)
 
 Both creds are operator-supplied host paths bound read-only:
-- codex: host `/home/jonah/.onex-agent-creds/codex-auth.json` → `/home/omniinfra/.codex/auth.json:ro`
-- claude: host `/home/jonah/.onex-agent-creds/.claude` → `/home/omniinfra/.claude:ro`
+- codex: host `<home>/.onex-agent-creds/codex-auth.json` → `/home/omniinfra/.codex/auth.json:ro`
+- claude: host `<home>/.onex-agent-creds/.claude` → `/home/omniinfra/.claude:ro`
 
 Source: copied via `docker cp` out of the still-running Phase 0 container `onex-phase0-codingagent-auth` (`/home/omniinfra/.codex`, `/home/omniinfra/.claude`). Per Phase 0, claude 2.x on macOS keeps its credential in the Keychain, so the Linux container login — not a Mac file — is the source. Both creds carry refresh tokens.
 

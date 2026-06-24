@@ -4,7 +4,7 @@ Ticket: OMN-10281, extended by OMN-10345
 
 This runbook defines the first non-deploying prep slice for a separate
 stability-test runtime lane. It does not start, restart, deploy, or mutate any
-runtime host. In particular, it must not mutate `.201`.
+runtime host. In particular, it must not mutate the runtime host.
 
 ## Purpose
 
@@ -73,7 +73,7 @@ the two-phase runtime build plan into a concrete runtime lane:
 
 The stability-test Redpanda external listener must advertise one address that is
 reachable by every authorized stability-test operator. Do not advertise
-`localhost` or a LAN-only address such as `192.168.86.201` for this lane: Kafka
+`localhost` or a private LAN-only address for this lane: Kafka
 clients bootstrap on the supplied broker, then reconnect to the broker address
 returned in metadata.
 
@@ -90,7 +90,7 @@ kcat -L -b "$KAFKA_BOOTSTRAP_SERVERS" | sed -n '1,5p'
 ```
 
 The metadata must report broker `0` at the connected-network host and port. If
-it reports `localhost` or `192.168.86.201`, off-LAN clients can open the TCP port
+it reports `localhost` or a private LAN address, off-LAN clients can open the TCP port
 but fail when Kafka redirects them to the advertised broker address.
 
 ## Validation Only
@@ -181,7 +181,7 @@ failure that must block the deploy/verify procedure.
 ## Explicit Non-Goals For This PR
 
 - It does not run `docker compose up`.
-- It does not deploy, restart, or change `.201`.
+- It does not deploy, restart, or change the runtime host.
 - It does not install launchd, cron, systemd, or autoheal hooks.
 - It does not prove runtime health, Redpanda membership, or build-loop to
   ticket-pipeline processing.
@@ -191,5 +191,5 @@ failure that must block the deploy/verify procedure.
 ## Operator Gate
 
 Any command that starts containers, restarts services, deploys to a host, or
-changes `.201` requires explicit operator approval and must produce a separate
+changes the runtime host requires explicit operator approval and must produce a separate
 runtime proof record.

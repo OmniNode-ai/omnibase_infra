@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2025 OmniNode.ai Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
-# `.201` disk-GC / worktree-reaper units (OMN-13008)
+# `<onex-host>` disk-GC / worktree-reaper units (OMN-13008)
 
 Two coexisting systemd USER timers implement the **two-layer merge-triggered
 worktree GC** model. Neither replaces the other — both are retained.

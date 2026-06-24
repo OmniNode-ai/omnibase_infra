@@ -43,7 +43,7 @@ load_dotenv(_docker_env_file, override=True)
 
 **Layer 1**: `<project_root>/.env`
 - Contains credentials: `POSTGRES_PASSWORD`, `OPENAI_API_KEY`, etc.
-- Points to remote infrastructure by default (`192.168.86.200`)
+- Points to remote infrastructure by default (`<onex-host>`)
 - Never committed — contains secrets
 
 **Layer 2**: `tests/integration/registration/e2e/.env.docker`
@@ -179,7 +179,7 @@ pytestmark = [
 
 ## Runtime Container Alignment
 
-The runtime container reads its configuration from the project `.env` (which defaults to remote infrastructure at `192.168.86.200`). E2E tests read from both `.env` and `.env.docker` (which overrides to local Docker).
+The runtime container reads its configuration from the project `.env` (which defaults to remote infrastructure at `<onex-host>`). E2E tests read from both `.env` and `.env.docker` (which overrides to local Docker).
 
 **The misalignment**: Tests talk to local Docker but the runtime container talks to remote infra.
 
@@ -209,9 +209,9 @@ docker compose --env-file .env \
 **Runtime hostname resolution**: The runtime container resolves Docker-internal hostnames (`redpanda`, `postgres`, `consul`) via macOS Docker Desktop's host DNS, which reads `/etc/hosts`. Confirm `/etc/hosts` has the required entries:
 
 ```text
-192.168.86.200 omninode-bridge-redpanda
-192.168.86.200 omninode-bridge-postgres
-192.168.86.200 omninode-bridge-consul
+<onex-host> omninode-bridge-redpanda
+<onex-host> omninode-bridge-postgres
+<onex-host> omninode-bridge-consul
 ```
 
 ---

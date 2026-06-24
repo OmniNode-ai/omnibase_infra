@@ -25,7 +25,7 @@ The `onex` CLI is the primary developer and operator interface. Entry point: `om
 
 | Subcommand | Purpose |
 |------------|---------|
-| `onex kafka produce <topic> --payload '<json>'` | Publish a ONEX command envelope to a Kafka topic from a dev machine without SSH. Supports `--dry-run` (print envelope, no publish) and `--envelope` (wrap payload in a standard correlation_id/timestamp envelope). PLAINTEXT auth only (LAN .201 is unauthenticated from dev machines). (OMN-8435) |
+| `onex kafka produce <topic> --payload '<json>'` | Publish a ONEX command envelope to a Kafka topic from a dev machine without SSH. Supports `--dry-run` (print envelope, no publish) and `--envelope` (wrap payload in a standard correlation_id/timestamp envelope). PLAINTEXT auth only (LAN runtime host is unauthenticated from dev machines). (OMN-8435) |
 | `onex skill <name> [args...]` | Dispatch an ONEX skill by name through the proven receipt-mode path. Skill-to-node mappings are declared in `src/omnibase_infra/cli/skill_mapping.yaml` — see below. |
 | `onex node <name> [args...]` | Invoke a node directly by its entry-point name. |
 | `onex delegate <args>` | Dispatch a delegation request through the bus. |
