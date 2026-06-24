@@ -5,15 +5,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13141"
 title: "fix(OMN-13141): runtime executor skips event_model import for operation_match entries"
 summary: >-
-  Executor companion to OMN-13137's validator half (#1973, merged). _run_event_driven
-  unconditionally imported entry.event_model_module for every resolved routing entry.
-  operation_match entries declare no event_model, so event_model_module is empty and
-  importlib.import_module("") raised ValueError: Empty module name — not caught by the
-  (ImportError, AttributeError) clause, swallowed by the outer except in run_async ->
-  result FAILED. The node never booted end-to-end (e.g. node_integration_sweep_orchestrator).
-  Fix gates the import on a non-empty event_model_module: operation_match forwards the raw
-  decoded payload (input_model_cls=None); only payload_type_match resolves a typed event
-  model. _validate_routing (the OMN-13137 half) is left untouched.
+  Executor companion to OMN-13137's validator half (#1973, merged). _run_event_driven unconditionally imported entry.event_model_module for every resolved routing entry. operation_match entries declare no event_model, so event_model_module is empty and importlib.import_module("") raised ValueError: Empty module name — not caught by the (ImportError, AttributeError) clause, swallowed by the outer except in run_async -> result FAILED. The node never booted end-to-end (e.g. node_integration_sweep_orchestrator). Fix gates the import on a non-empty event_model_module: operation_match forwards the raw decoded payload (input_model_cls=None); only payload_type_match resolves a typed event model. _validate_routing (the OMN-13137 half) is left untouched.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -37,9 +29,7 @@ dod_evidence:
         check_value: "test -f contracts/OMN-13141.yaml"
   - id: "dod-boot-e2e"
     description: >-
-      operation_match contract boots end-to-end through RuntimeLocal.run_async()
-      with no empty-module ValueError, and the payload_type_match import path is
-      unchanged (regression guard). This boot test is the CI gate for the fix.
+      operation_match contract boots end-to-end through RuntimeLocal.run_async() with no empty-module ValueError, and the payload_type_match import path is unchanged (regression guard). This boot test is the CI gate for the fix.
     source: "manual"
     checks:
       - check_type: "command"
@@ -52,10 +42,7 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/runtime/ -q"
   - id: "dod-deploy"
     description: >-
-      Deploy validation: change is an internal correctness fix to the local-runtime
-      event-driven executor (_run_event_driven) and its bus adapter. No new Kafka topics,
-      no schema changes, no container image changes, no API surface changes. Runtime
-      restart picks up the change automatically on next deploy.
+      Deploy validation: change is an internal correctness fix to the local-runtime event-driven executor (_run_event_driven) and its bus adapter. No new Kafka topics, no schema changes, no container image changes, no API surface changes. Runtime restart picks up the change automatically on next deploy.
     source: "manual"
     checks:
       - check_type: "command"

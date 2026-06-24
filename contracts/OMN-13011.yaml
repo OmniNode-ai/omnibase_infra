@@ -4,22 +4,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13011"
 title: "LANE CENSUS RECONCILIATION ratchet — declared desired-state per lane, scheduled + on-demand, drift = auto-ticket"
 summary: >-
-  The class fix for the recurring lane-drift regression. Nothing reconciled the
-  declared desired state of a runtime lane against what is actually running, so
-  the same failure kept recurring with zero signal: volume config drift
-  (OMN-12945), WORKER_REPLICAS silent zero (OMN-12988/12990), and on 2026-06-11
-  prod runtime containers plus the broker network were silently absent for hours
-  during demo prep. This ships a per-lane DESIRED-STATE census: (a) DECLARED in a
-  versioned lane manifest (deploy/lane-census/lane-manifest.yaml) — container set,
-  network, replicas, image-tag pattern per lane (stability-test/prod/judge/dev),
-  derived from the canonical compose lane files; (b) RECONCILED on a schedule on
-  .201 by sharing the OMN-13008 systemd timer (a drop-in 4th ExecStart on
-  onex-disk-gc.service, never a second timer) and on-demand via runtime_sweep;
-  (c) drift = a typed bus event + Linear auto-ticket naming exactly what is
-  missing/extra (container_absent, network_detached, replicas_zero,
-  unexpected_container, oneshot_failed/stuck, image_tag_mismatch). Fail-fast,
-  no warn-only mode (gates-block policy). Builds on the OMN-12988 deploy-agent
-  RUNTIME census (deploy-time) as the complementary steady-state reconciler.
+  The class fix for the recurring lane-drift regression. Nothing reconciled the declared desired state of a runtime lane against what is actually running, so the same failure kept recurring with zero signal: volume config drift (OMN-12945), WORKER_REPLICAS silent zero (OMN-12988/12990), and on 2026-06-11 prod runtime containers plus the broker network were silently absent for hours during demo prep. This ships a per-lane DESIRED-STATE census: (a) DECLARED in a versioned lane manifest (deploy/lane-census/lane-manifest.yaml) — container set, network, replicas, image-tag pattern per lane (stability-test/prod/judge/dev), derived from the canonical compose lane files; (b) RECONCILED on a schedule on .201 by sharing the OMN-13008 systemd timer (a drop-in 4th ExecStart on onex-disk-gc.service, never a second timer) and on-demand via runtime_sweep; (c) drift = a typed bus event + Linear auto-ticket naming exactly what is missing/extra (container_absent, network_detached, replicas_zero, unexpected_container, oneshot_failed/stuck, image_tag_mismatch). Fail-fast, no warn-only mode (gates-block policy). Builds on the OMN-12988 deploy-agent RUNTIME census (deploy-time) as the complementary steady-state reconciler.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -31,22 +16,14 @@ evidence_requirements:
   - kind: "tests"
     description: "Event-builder, manifest-parity, dry-run, and timer-dropin tests pass"
     command: >-
-      uv run pytest
-      tests/unit/scripts/test_lane_census_event.py
-      tests/unit/scripts/test_lane_census_manifest_parity.py
-      tests/unit/scripts/test_lane_census_dry_run.py
-      tests/unit/scripts/test_lane_census_timer_dropin.py -q
+      uv run pytest tests/unit/scripts/test_lane_census_event.py tests/unit/scripts/test_lane_census_manifest_parity.py tests/unit/scripts/test_lane_census_dry_run.py tests/unit/scripts/test_lane_census_timer_dropin.py -q
   - kind: "ci"
     description: "New source passes ruff and mypy --strict"
     command: >-
-      uv run ruff check scripts/lane_census_plan.py scripts/lane_census_event.py
-      && uv run mypy scripts/lane_census_plan.py scripts/lane_census_event.py --strict
+      uv run ruff check scripts/lane_census_plan.py scripts/lane_census_event.py && uv run mypy scripts/lane_census_plan.py scripts/lane_census_event.py --strict
   - kind: "manual"
     description: >-
-      On .201, after OMN-13008's install-disk-gc.sh, run
-      deploy/lane-census/install-lane-census.sh and confirm via
-      `systemctl --user cat onex-disk-gc.service` that the lane-census ExecStart
-      is the 4th pass on the shared unit (no second timer)
+      On .201, after OMN-13008's install-disk-gc.sh, run deploy/lane-census/install-lane-census.sh and confirm via `systemctl --user cat onex-disk-gc.service` that the lane-census ExecStart is the 4th pass on the shared unit (no second timer)
 emergency_bypass:
   enabled: false
   justification: ""

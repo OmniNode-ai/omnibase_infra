@@ -5,18 +5,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13149"
 title: "fix(OMN-13149): savings_estimation consumer decodes typed ModelEventMessage instead of calling .get()"
 summary: >-
-  The savings-estimation consumer is wired in service_kernel via event_bus.subscribe;
-  both the Kafka and in-memory buses deliver a typed ModelEventMessage to the
-  on_message callback. The pre-fix _savings_on_message did json.loads only when msg
-  was str/bytes and otherwise passed the value through unchanged, so a ModelEventMessage
-  reached ServiceSavingsEstimator.ingest_event -> _session_id_for_topic, which calls
-  payload.get("session_id"). ModelEventMessage has no .get(), raising
-  AttributeError: 'ModelEventMessage' object has no attribute 'get' at runtime — the
-  consumer wrote zero rows. Fix adds module-level decode_event_message(message) that
-  reads the JSON payload off the typed .value field directly (strongly typed, fail-fast:
-  raises TypeError on a non-object payload — no getattr-default, no dict-style fallback).
-  The kernel callback now decodes then calls ingest_event(topic, payload). Same
-  dict/typed-model family as OMN-13141 / golden-chain BUG A.
+  The savings-estimation consumer is wired in service_kernel via event_bus.subscribe; both the Kafka and in-memory buses deliver a typed ModelEventMessage to the on_message callback. The pre-fix _savings_on_message did json.loads only when msg was str/bytes and otherwise passed the value through unchanged, so a ModelEventMessage reached ServiceSavingsEstimator.ingest_event -> _session_id_for_topic, which calls payload.get("session_id"). ModelEventMessage has no .get(), raising AttributeError: 'ModelEventMessage' object has no attribute 'get' at runtime — the consumer wrote zero rows. Fix adds module-level decode_event_message(message) that reads the JSON payload off the typed .value field directly (strongly typed, fail-fast: raises TypeError on a non-object payload — no getattr-default, no dict-style fallback). The kernel callback now decodes then calls ingest_event(topic, payload). Same dict/typed-model family as OMN-13141 / golden-chain BUG A.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -40,10 +29,7 @@ dod_evidence:
         check_value: "test -f contracts/OMN-13149.yaml"
   - id: "dod-typed-message-regression"
     description: >-
-      Through the REAL consumer path (EventBusInmemory.subscribe/publish ->
-      on_message(ModelEventMessage) -> decode_event_message -> ingest_event) a typed
-      ModelEventMessage correlates a session; the pre-fix path (typed message straight
-      to ingest_event) reproduces AttributeError. This is the CI gate for the fix.
+      Through the REAL consumer path (EventBusInmemory.subscribe/publish -> on_message(ModelEventMessage) -> decode_event_message -> ingest_event) a typed ModelEventMessage correlates a session; the pre-fix path (typed message straight to ingest_event) reproduces AttributeError. This is the CI gate for the fix.
     source: "manual"
     checks:
       - check_type: "command"
@@ -56,10 +42,7 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/runtime/ tests/unit/services/observability/savings_estimation/ -q"
   - id: "dod-deploy"
     description: >-
-      Deploy validation: change is an internal correctness fix to the savings-estimation
-      consumer wiring in service_kernel (_savings_on_message) plus a module-level decode
-      helper in the consumer. No new Kafka topics, no schema changes, no container image
-      changes, no API surface changes. Runtime restart picks up the change on next deploy.
+      Deploy validation: change is an internal correctness fix to the savings-estimation consumer wiring in service_kernel (_savings_on_message) plus a module-level decode helper in the consumer. No new Kafka topics, no schema changes, no container image changes, no API surface changes. Runtime restart picks up the change on next deploy.
     source: "manual"
     checks:
       - check_type: "command"

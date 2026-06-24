@@ -2,19 +2,8 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13531"
 title: "CI gate asserting every skill_mapping node_name resolves in the canonical omnimarket node catalog"
 summary: >
-  The pr_review_bot / pr_review / hostile_reviewer skill->node mappings drifted after the OMN-13212
-  decomposition. Live failure (reproduced): `onex skill pr_review_bot` dispatched to node_pr_review_orchestrator
-  and the resolver raised `Unknown node node_pr_review_orchestrator`. Root cause is the inverse of the ticket's
-  stated diagnosis: OMN-13212 (omnimarket commit 0f116553, titled "rebuild node_pr_review_bot canonically ...
-  delete shell") DELETED node_pr_review_bot and node_hostile_reviewer and replaced them with
-  node_pr_review_orchestrator and node_hostile_reviewer_orchestrator. The canonical surviving nodes are the
-  *_orchestrator names, which skill_mapping.yaml already targets. The live `Unknown node` came from a STALE
-  installed omnimarket wheel (0.4.3) whose entry-point catalog predates the decomposition, NOT from a wrong
-  mapping. skill_mapping.yaml is therefore unchanged. This PR adds the missing enforcement that converts the
-  drift class from a dispatch-time-only failure into a CI-caught regression: a fixture asserting every mapped
-  node_name is declared in omnimarket's canonical [project.entry-points."onex.nodes"] catalog, plus a workflow
-  (skill-node-mapping-sync.yml) that wires the omnimarket sibling checkout so the test runs as a real pre-merge
-  gate. No source, migration, schema, endpoint, or env change -- a new test + a new CI workflow only.
+  The pr_review_bot / pr_review / hostile_reviewer skill->node mappings drifted after the OMN-13212 decomposition. Live failure (reproduced): `onex skill pr_review_bot` dispatched to node_pr_review_orchestrator and the resolver raised `Unknown node node_pr_review_orchestrator`. Root cause is the inverse of the ticket's stated diagnosis: OMN-13212 (omnimarket commit 0f116553, titled "rebuild node_pr_review_bot canonically ... delete shell") DELETED node_pr_review_bot and node_hostile_reviewer and replaced them with node_pr_review_orchestrator and node_hostile_reviewer_orchestrator. The canonical surviving nodes are the *_orchestrator names, which skill_mapping.yaml already targets. The live `Unknown node` came from a STALE installed omnimarket wheel (0.4.3) whose entry-point catalog predates the decomposition, NOT from a wrong mapping. skill_mapping.yaml is therefore unchanged. This PR adds the missing enforcement that converts the drift class from a dispatch-time-only failure into a CI-caught regression: a fixture asserting every mapped node_name is declared in omnimarket's canonical [project.entry-points."onex.nodes"] catalog, plus a workflow (skill-node-mapping-sync.yml) that wires the omnimarket sibling checkout so the test runs as a real pre-merge gate. No source, migration, schema, endpoint, or env change -- a new test + a new CI workflow only.
+
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,10 +14,7 @@ emergency_bypass:
 dod_evidence:
   - id: "dod-resolver-fixture"
     description: >-
-      test_every_mapped_node_resolves_in_omnimarket_catalog and
-      test_pr_review_and_hostile_skills_target_existing_nodes assert every node_name in skill_mapping.yaml is
-      declared in omnimarket's canonical onex.nodes entry-point catalog (the group cli_node._resolve_packaged_contract
-      resolves against). Resolving the omnimarket source via OMNI_HOME, both tests pass on the corrected mapping.
+      test_every_mapped_node_resolves_in_omnimarket_catalog and test_pr_review_and_hostile_skills_target_existing_nodes assert every node_name in skill_mapping.yaml is declared in omnimarket's canonical onex.nodes entry-point catalog (the group cli_node._resolve_packaged_contract resolves against). Resolving the omnimarket source via OMNI_HOME, both tests pass on the corrected mapping.
     source: "manual"
     status: "verified"
     checks:
@@ -37,9 +23,7 @@ dod_evidence:
           uv run pytest tests/unit/cli/test_cli_skill.py -k "resolves_in_omnimarket_catalog or pr_review_and_hostile_skills_target_existing_nodes" -p no:randomly -q
   - id: "dod-gate-fires-on-drift"
     description: >-
-      The fixture is a real gate, not a vacuous skip: temporarily setting pr_review_bot -> node_pr_review_bot
-      (the deleted shell) fails both new tests with the documented `Unknown node ... at dispatch time` diagnostic;
-      reverted. Proven locally during development.
+      The fixture is a real gate, not a vacuous skip: temporarily setting pr_review_bot -> node_pr_review_bot (the deleted shell) fails both new tests with the documented `Unknown node ... at dispatch time` diagnostic; reverted. Proven locally during development.
     source: "manual"
     status: "verified"
     checks:
@@ -48,11 +32,7 @@ dod_evidence:
           printf 'gate proven: pr_review_bot -> node_pr_review_bot (deleted shell) fails test_every_mapped_node_resolves_in_omnimarket_catalog AND test_pr_review_and_hostile_skills_target_existing_nodes'
   - id: "dod-headless-load-proof"
     description: >-
-      Headless resolution proof after refreshing the catalog to omnimarket dev source: pr_review_bot / pr_review /
-      hostile_reviewer all resolve to a real node with an existing contract.yaml; `onex skill pr_review_bot --dry-run`
-      loads node_pr_review_orchestrator's contract (terminal_event onex.evt.omnimarket.pr-review-bot-completed.v1)
-      with no Unknown-node error. The original failure (installed 0.4.3) was reproduced first:
-      `Unknown node 'node_pr_review_orchestrator'`.
+      Headless resolution proof after refreshing the catalog to omnimarket dev source: pr_review_bot / pr_review / hostile_reviewer all resolve to a real node with an existing contract.yaml; `onex skill pr_review_bot --dry-run` loads node_pr_review_orchestrator's contract (terminal_event onex.evt.omnimarket.pr-review-bot-completed.v1) with no Unknown-node error. The original failure (installed 0.4.3) was reproduced first: `Unknown node 'node_pr_review_orchestrator'`.
     source: "manual"
     status: "verified"
     checks:
@@ -61,9 +41,7 @@ dod_evidence:
           uv run --no-sync python -c "from omnibase_infra.cli.cli_node import _resolve_packaged_contract; from omnibase_infra.cli.cli_skill import load_skill_registry; m={s.skill_name:s.node_name for s in load_skill_registry().skills}; [_resolve_packaged_contract(m[k]) for k in ('pr_review_bot','pr_review','hostile_reviewer')]"
   - id: "dod-ci-gate-wired"
     description: >-
-      skill-node-mapping-sync.yml runs on pull_request (main, dev), push (main), and merge_group, checks out the
-      omnimarket dev sibling (sparse pyproject.toml), and runs the two catalog-resolution tests with OMNIMARKET_SRC
-      pointed at it. Per Rule 5 the detection is wired as a real pre-merge gate, not advisory.
+      skill-node-mapping-sync.yml runs on pull_request (main, dev), push (main), and merge_group, checks out the omnimarket dev sibling (sparse pyproject.toml), and runs the two catalog-resolution tests with OMNIMARKET_SRC pointed at it. Per Rule 5 the detection is wired as a real pre-merge gate, not advisory.
     source: "manual"
     status: "verified"
     checks:

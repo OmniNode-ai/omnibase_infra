@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
@@ -1503,10 +1504,10 @@ class TestConsumerLifecycle:
                     mock_pool.return_value = AsyncMock()
                     mock_pool.return_value.close = AsyncMock()
 
-                    mock_kafka_instance = AsyncMock()
+                    mock_kafka_instance = AsyncMock(spec_set=AIOKafkaConsumer)
                     mock_kafka.return_value = mock_kafka_instance
 
-                    mock_producer_instance = AsyncMock()
+                    mock_producer_instance = AsyncMock(spec_set=AIOKafkaProducer)
                     mock_producer.return_value = mock_producer_instance
 
                     consumer = AgentActionsConsumer(mock_config)
@@ -1563,7 +1564,7 @@ class TestCommitOffsets:
         consumer: AgentActionsConsumer,
     ) -> None:
         """Commit should use offset + 1 (next offset to consume)."""
-        mock_kafka = AsyncMock()
+        mock_kafka = AsyncMock(spec_set=AIOKafkaConsumer)
         consumer._consumer = mock_kafka
 
         from aiokafka import TopicPartition
@@ -1592,7 +1593,7 @@ class TestCommitOffsets:
         consumer: AgentActionsConsumer,
     ) -> None:
         """Empty offsets dict should skip commit call."""
-        mock_kafka = AsyncMock()
+        mock_kafka = AsyncMock(spec_set=AIOKafkaConsumer)
         consumer._consumer = mock_kafka
 
         await consumer._commit_offsets({}, uuid4())
@@ -1607,7 +1608,7 @@ class TestCommitOffsets:
         """Kafka commit errors should be logged but not raised."""
         from aiokafka.errors import KafkaError
 
-        mock_kafka = AsyncMock()
+        mock_kafka = AsyncMock(spec_set=AIOKafkaConsumer)
         mock_kafka.commit = AsyncMock(side_effect=KafkaError())
         consumer._consumer = mock_kafka
 
@@ -1682,7 +1683,7 @@ class TestKafkaReconnectHealth:
             consumer._running = False
             raise TimeoutError
 
-        mock_kafka = AsyncMock()
+        mock_kafka = AsyncMock(spec_set=AIOKafkaConsumer)
         consumer._consumer = mock_kafka
 
         with patch(
@@ -1722,7 +1723,7 @@ class TestKafkaReconnectHealth:
                 consumer._running = False
             raise TimeoutError
 
-        mock_kafka = AsyncMock()
+        mock_kafka = AsyncMock(spec_set=AIOKafkaConsumer)
         consumer._consumer = mock_kafka
 
         with patch(

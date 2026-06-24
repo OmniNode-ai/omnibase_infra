@@ -2,23 +2,8 @@ schema_version: "1.0.0"
 ticket_id: "OMN-13404"
 title: "Vendor fixed 0016_delegation_quality_bar_evidence (cold-apply CREATE OR REPLACE VIEW fix) into deployed forward tree"
 summary: >
-  Re-vendors the OMN-13404 fix for node_projection_delegation migration
-  0016_delegation_quality_bar_evidence from the omnimarket source into
-  docker/migrations/forward/nodes/node_projection_delegation/. The source defect:
-  0016 did CREATE OR REPLACE VIEW projection_delegation_quality_gate AS ... that
-  inserted the new avg_actual_score / avg_required_bar columns AHEAD of the
-  existing by_check_type column, which Postgres rejects on a view that already
-  exists (from 0010) with "ERROR: cannot change name of view column
-  by_check_type to avg_actual_score". Under the forward-migration runner's
-  ON_ERROR_STOP=1, that failure blocked 0017/0018/0019 on every cold lane. The
-  fix preserves the 15 existing column ordinals/names from 0010 and APPENDS the
-  two new columns at ordinals 16-17, making CREATE OR REPLACE VIEW legal;
-  name-based projection consumers are unaffected. This PR only updates the single
-  vendored .sql file, produced byte-identically by
-  scripts/sync-node-migrations.sh against the fixed omnimarket worktree. The
-  node-migration-sync CI gate compares the vendored tree against the omnimarket
-  dev tip, so this PR's node-migration-sync check goes green only AFTER the
-  paired omnimarket source PR merges to dev (standard cross-repo vendor ordering).
+  Re-vendors the OMN-13404 fix for node_projection_delegation migration 0016_delegation_quality_bar_evidence from the omnimarket source into docker/migrations/forward/nodes/node_projection_delegation/. The source defect: 0016 did CREATE OR REPLACE VIEW projection_delegation_quality_gate AS ... that inserted the new avg_actual_score / avg_required_bar columns AHEAD of the existing by_check_type column, which Postgres rejects on a view that already exists (from 0010) with "ERROR: cannot change name of view column by_check_type to avg_actual_score". Under the forward-migration runner's ON_ERROR_STOP=1, that failure blocked 0017/0018/0019 on every cold lane. The fix preserves the 15 existing column ordinals/names from 0010 and APPENDS the two new columns at ordinals 16-17, making CREATE OR REPLACE VIEW legal; name-based projection consumers are unaffected. This PR only updates the single vendored .sql file, produced byte-identically by scripts/sync-node-migrations.sh against the fixed omnimarket worktree. The node-migration-sync CI gate compares the vendored tree against the omnimarket dev tip, so this PR's node-migration-sync check goes green only AFTER the paired omnimarket source PR merges to dev (standard cross-repo vendor ordering).
+
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -29,43 +14,32 @@ emergency_bypass:
 dod_evidence:
   - id: "dod-001"
     description: >
-      Vendored 0016 is byte-identical to the fixed omnimarket source (cmp -s
-      passes). Produced via OMNIMARKET_SRC=<fixed omnimarket worktree> bash
-      scripts/sync-node-migrations.sh — only one file changed.
+      Vendored 0016 is byte-identical to the fixed omnimarket source (cmp -s passes). Produced via OMNIMARKET_SRC=<fixed omnimarket worktree> bash scripts/sync-node-migrations.sh — only one file changed.
+
     source: "manual"
     checks:
       - check_type: "command"
         check_value: "cmp -s ../omnimarket/src/omnimarket/nodes/node_projection_delegation/migrations/0016_delegation_quality_bar_evidence.sql docker/migrations/forward/nodes/node_projection_delegation/0016_delegation_quality_bar_evidence.sql"
   - id: "dod-002"
     description: >
-      MANDATORY EMPIRICAL COLD-APPLY PROOF (shared with the omnimarket PR): a
-      scratch throwaway Postgres 16 with a cold omnidash_analytics DB applied
-      node_projection_delegation 0007..0019 in lexical order with
-      psql -v ON_ERROR_STOP=1 -f (exact runner semantics). All 14 applied clean,
-      including the previously-failing 0016_delegation_quality_bar_evidence and
-      0017/0018/0019. Full log:
-      .onex_state/runtime-e2e-2026-06-21/02-dev-deploy/60-cold-apply-proof.log
+      MANDATORY EMPIRICAL COLD-APPLY PROOF (shared with the omnimarket PR): a scratch throwaway Postgres 16 with a cold omnidash_analytics DB applied node_projection_delegation 0007..0019 in lexical order with psql -v ON_ERROR_STOP=1 -f (exact runner semantics). All 14 applied clean, including the previously-failing 0016_delegation_quality_bar_evidence and 0017/0018/0019. Full log: .onex_state/runtime-e2e-2026-06-21/02-dev-deploy/60-cold-apply-proof.log
+
     source: "manual"
     checks:
       - check_type: "command"
         check_value: "docker run -d --rm --name rte2e-coldtest-pg -e POSTGRES_PASSWORD=test postgres:16; createdb omnidash_analytics; for f in 0007..0019; do psql -d omnidash_analytics -v ON_ERROR_STOP=1 -f $f; done  # all clean (60-cold-apply-proof.log)"
   - id: "dod-003"
     description: >
-      sync-node-migrations --check passes once omnimarket dev carries the fix
-      (after the paired source PR merges). Locally, run against the fixed
-      omnimarket worktree reports in-sync (0 drift) for this file.
+      sync-node-migrations --check passes once omnimarket dev carries the fix (after the paired source PR merges). Locally, run against the fixed omnimarket worktree reports in-sync (0 drift) for this file.
+
     source: "manual"
     checks:
       - check_type: "command"
         check_value: "OMNIMARKET_SRC=$OMNI_HOME/omni_worktrees/OMN-13404/omnimarket bash scripts/sync-node-migrations.sh --check"
   - id: "dod-deploy"
     description: >
-      Deploy-gate evidence: pure re-vendor of one idempotent forward-migration
-      SQL file into the deployed forward tree; the forward-migration runner
-      applies it on the next redeploy. No infra source/contract/schema-intent
-      change. The id-based runner (schema_migrations PK, no checksum) applies the
-      fixed 0016 on every lane (none has it applied — it has been failing
-      everywhere). Proven clean on a cold scratch Postgres (dod-002).
+      Deploy-gate evidence: pure re-vendor of one idempotent forward-migration SQL file into the deployed forward tree; the forward-migration runner applies it on the next redeploy. No infra source/contract/schema-intent change. The id-based runner (schema_migrations PK, no checksum) applies the fixed 0016 on every lane (none has it applied — it has been failing everywhere). Proven clean on a cold scratch Postgres (dod-002).
+
     source: "manual"
     checks:
       - check_type: "command"

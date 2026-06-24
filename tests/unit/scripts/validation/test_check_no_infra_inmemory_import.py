@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 """Tests for the OMN-13419 single-canonical in-memory bus import gate."""
 
 from __future__ import annotations
