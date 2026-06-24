@@ -124,6 +124,18 @@ def _make_runtime_db_query_fn() -> RuntimeDbQueryFn | None:
     return _query
 
 
+def _make_runtime_config() -> VerificationConfig:
+    """Build a VerificationConfig wired for live runtime verification.
+
+    Wires ``db_query_fn`` from ``OMNIBASE_INFRA_DB_URL`` so projection_state
+    probes run against the runtime DB instead of auto-QUARANTINE. ``kafka_admin_fn``
+    and ``watermark_fn`` are intentionally left ``None`` so the publication and
+    subscription probes use their rpk fallbacks, which honor ``RPK_BROKERS`` /
+    ``~/.omnibase/.env`` via the shared ``rpk_env`` helper.
+    """
+    return VerificationConfig(db_query_fn=_make_runtime_db_query_fn())
+
+
 def _aggregate_verdict(
     reports: list[ModelContractVerificationReport],
 ) -> EnumValidationVerdict:
@@ -272,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.contract_path.is_file():
             logger.error("Contract not found: %s", args.contract_path)
             return 1
-        config = VerificationConfig()
+        config = _make_runtime_config()
         report = run_contract_verification(args.contract_path, config)
         return _output_reports([report], args.output_path)
 
@@ -283,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("No contracts found in %s", contracts_dir)
             return 1
 
-        config = VerificationConfig()
+        config = _make_runtime_config()
         reports: list[ModelContractVerificationReport] = []
         for path in contract_paths:
             report = run_contract_verification(path, config)

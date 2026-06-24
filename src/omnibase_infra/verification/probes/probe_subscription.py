@@ -12,10 +12,8 @@ compute_consumer_group_id() -- never hardcoded.
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -30,24 +28,9 @@ from omnibase_infra.verification.contract_parser import (
 from omnibase_infra.verification.models.model_contract_check_result import (
     ModelContractCheckResult,
 )
+from omnibase_infra.verification.probes.util_rpk_env import rpk_env
 
 logger = logging.getLogger(__name__)
-
-_OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
-
-
-def _rpk_env() -> dict[str, str]:
-    """Return os.environ merged with ~/.omnibase/.env for rpk subprocess calls."""
-    env = dict(os.environ)
-    if _OMNIBASE_ENV.exists():
-        with open(_OMNIBASE_ENV) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                env.setdefault(key.strip(), value.strip())
-    return env
 
 
 # Type alias: given a consumer group ID, return the set of topics it subscribes to.
@@ -85,7 +68,7 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
             text=True,
             timeout=10,
             check=False,
-            env=_rpk_env(),
+            env=rpk_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
@@ -131,7 +114,7 @@ def _rpk_fallback(group_id: str) -> set[str]:
             text=True,
             timeout=10,
             check=False,
-            env=_rpk_env(),
+            env=rpk_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
@@ -154,7 +137,7 @@ def _rpk_fallback(group_id: str) -> set[str]:
             text=True,
             timeout=10,
             check=False,
-            env=_rpk_env(),
+            env=rpk_env(),
         )
         if scoped_result.returncode != 0:
             continue
