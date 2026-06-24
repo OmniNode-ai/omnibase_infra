@@ -235,7 +235,6 @@ The test suite validates that none of these patterns appear in logs or outputs:
 
 ## Related Documentation
 
-- **Ticket**: OMN-915 (Mocked E2E Registration Workflow)
 - **Architecture**: `docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md`
 - **Reducer**: `src/omnibase_infra/nodes/reducers/registration_reducer.py`
 - **Effect**: `src/omnibase_infra/nodes/effects/node_registry_effect.py`

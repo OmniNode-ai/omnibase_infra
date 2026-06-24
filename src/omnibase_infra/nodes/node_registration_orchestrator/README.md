@@ -416,7 +416,7 @@ payload: ModelPostgresIntentPayload
 |------|------|-------------|
 | `reducer_protocol` | Protocol | For computing registration intents |
 | `effect_node` | Node | For executing registration operations |
-| `projection_reader` | Protocol | For reading current state (OMN-930) |
+| `projection_reader` | Protocol | For reading current state |
 
 ## Events
 
@@ -449,17 +449,17 @@ This orchestrator is **NOT coroutine-safe** for concurrent workflow invocations.
 
 ## Limitations & Implementation Status
 
-This node is part of the MVP implementation for OMN-888. The following limitations apply:
+This node is part of the MVP registration implementation. The following limitations apply:
 
 ### Current Limitations
 
 | Limitation | Ticket | Description |
 |------------|--------|-------------|
-| Effect Node Integration | OMN-890 | `NodeRegistryEffect` is implemented in `nodes/effects/registry_effect.py`. The `node_registry_effect` module re-exports from this location. Integration with orchestrator workflow pending reducer implementation. |
-| Reducer Not Implemented | OMN-889 | `ProtocolReducer` is defined but no concrete implementation exists. Intent computation is pending. |
-| Projection Reader Not Wired | OMN-930 | `ProtocolProjectionReader` protocol does not exist in `omnibase_spi.protocols`. The `read_projection` workflow step cannot execute. |
-| Time Injection Not Wired | OMN-973 | Contract declares time injection but orchestrator does not parse or use it. Timeout evaluation uses implicit dispatch context. |
-| Intent Models in Infra | OMN-912 | Intent models are currently in `omnibase_infra`. Should be moved to `omnibase_core` for broader reuse. |
+| Effect Node Integration | — | `NodeRegistryEffect` is implemented in `nodes/effects/registry_effect.py`. The `node_registry_effect` module re-exports from this location. Integration with orchestrator workflow pending reducer implementation. |
+| Reducer Not Implemented | — | `ProtocolReducer` is defined but no concrete implementation exists. Intent computation is pending. |
+| Projection Reader Not Wired | — | `ProtocolProjectionReader` protocol does not exist in `omnibase_spi.protocols`. The `read_projection` workflow step cannot execute. |
+| Time Injection Not Wired | — | Contract declares time injection but orchestrator does not parse or use it. Timeout evaluation uses implicit dispatch context. |
+| Intent Models in Infra | — | Intent models are currently in `omnibase_infra`. Should be moved to `omnibase_core` for broader reuse. |
 
 ### Implementation Status
 
@@ -471,8 +471,8 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 | Models | **Complete** | `models/` | Input, output, intent, state models |
 | README | **Complete** | `README.md` | This file |
 | Effect Node | **Complete** | `nodes/effects/registry_effect.py` | Alias at `nodes/node_registry_effect/` |
-| Reducer Impl | **Pending** | N/A | No implementation yet (OMN-889) |
-| Projection Reader | **Pending** | N/A | SPI protocol needed (OMN-930) |
+| Reducer Impl | **Pending** | N/A | No implementation yet |
+| Projection Reader | **Pending** | N/A | SPI protocol needed |
 
 ### What Works Today
 
@@ -489,17 +489,8 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 4. **Timeout Evaluation**: Uses implicit time, not contract-driven injection
 
 Note: The effect node (`NodeRegistryEffect`) is fully implemented and tested. The
-blocker for end-to-end registration is the reducer implementation (OMN-889) which
-must generate intents that the effect node will execute.
-
-## Related Tickets
-
-- **OMN-888**: Infrastructure MVP Node Registration Orchestrator Workflow
-- **OMN-889**: Reducer Implementation (pending)
-- **OMN-890**: Effect Node Implementation (pending)
-- **OMN-912**: Intent Models in omnibase_core (pending)
-- **OMN-930**: Projection Reader Integration
-- **OMN-973**: Time Injection Context for Timeout Evaluation
+blocker for end-to-end registration is the reducer implementation, which must
+generate intents that the effect node will execute.
 
 ## Related Documentation
 

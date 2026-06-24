@@ -1,4 +1,4 @@
-# Replay Tests (OMN-955)
+# Replay Tests
 
 Event replay verification tests for validating reducer determinism, idempotency, and state reconstruction.
 
@@ -226,7 +226,3 @@ def test_cross_instance_determinism(event_factory):
 - [ONEX Architecture](../../docs/architecture/)
 - [Reducer Pattern](../../docs/patterns/)
 
-## Related Tickets
-
-- OMN-955: Event Replay Verification
-- OMN-954: Effect Idempotency
