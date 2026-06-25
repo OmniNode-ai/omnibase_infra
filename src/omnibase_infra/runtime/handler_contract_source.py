@@ -671,6 +671,7 @@ class HandlerContractSource(ProtocolContractSource):
             # Strip extra fields in nested descriptor.retry_policy
             descriptor = validation_data.get("descriptor")
             if isinstance(descriptor, dict):
+                descriptor.pop("graph_bolt_uri", None)
                 retry_policy = descriptor.get("retry_policy")
                 if isinstance(retry_policy, dict):
                     retry_policy.pop("backoff_ms", None)
