@@ -3,17 +3,25 @@
 """Opt-in OpenTelemetry tracing configuration for the ONEX runtime.
 
 Exports traces to an OTLP HTTP endpoint (e.g. Arize Phoenix on port 6006).
-Activation is controlled entirely by environment variables — if
-``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset or empty, tracing is silently
-skipped and the runtime operates without any OTEL overhead.
+The exporter endpoint is resolved from the contract-declared
+``descriptor.otel_exporter_otlp_endpoint`` overlay value (OMN-13558 Wave-1
+endpoint→overlay migration) rather than read directly from ``os.environ`` — if
+the overlay resolves it empty (the var unset), tracing is silently skipped and
+the runtime operates without any OTEL overhead. The ``${env.VAR}`` resolution
+goes through the sanctioned overlay package, so this module no longer reads
+``os.environ`` for the endpoint itself.
 
-Environment Variables:
-    OTEL_EXPORTER_OTLP_ENDPOINT: OTLP HTTP endpoint URL (e.g. ``http://phoenix:6006``).
-        When empty or unset, tracing is disabled.
+Configuration:
+    descriptor.otel_exporter_otlp_endpoint: OTLP HTTP endpoint URL
+        (e.g. ``http://phoenix:6006``), contract-declared as
+        ``${env.OTEL_EXPORTER_OTLP_ENDPOINT:}`` in ``tracing_contract.yaml``.
+        When it resolves empty, tracing is disabled.
     OTEL_SERVICE_NAME: Logical service name attached to all spans.
-        Defaults to ``onex-runtime``.
+        Defaults to ``onex-runtime`` (operator-local span-naming knob, not a
+        service endpoint — Wave-2 config, retained as a direct read for now).
     OTEL_TRACES_EXPORTER: Exporter type. Only ``otlp`` (the default) is
-        currently supported; set to ``none`` to explicitly disable.
+        currently supported; set to ``none`` to explicitly disable (operator-local
+        toggle, not an endpoint — Wave-2 config).
 
 OMN-3811: Initial instrumentation for Phoenix OTEL traces.
 """
@@ -22,6 +30,10 @@ from __future__ import annotations
 
 import logging
 import os
+
+from omnibase_infra.runtime.tracing_contract_descriptor import (
+    contract_otel_exporter_endpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +45,12 @@ def configure_tracing() -> bool:
         ``True`` if tracing was successfully configured, ``False`` if skipped
         (no endpoint configured) or if an error occurred during setup.
     """
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    endpoint = contract_otel_exporter_endpoint()
     if not endpoint:
-        logger.debug("OTEL_EXPORTER_OTLP_ENDPOINT not set — tracing disabled")
+        logger.debug(
+            "descriptor.otel_exporter_otlp_endpoint resolved empty "
+            "(OTEL_EXPORTER_OTLP_ENDPOINT not set) — tracing disabled"
+        )
         return False
 
     exporter_type = os.environ.get("OTEL_TRACES_EXPORTER", "otlp").strip()
