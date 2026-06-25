@@ -1109,6 +1109,43 @@ cleanup_on_exit() {
     rm -rf "${LOCK_DIR}" 2>/dev/null || true
 }
 
+assert_deployed_migration_tree_synced() {
+    # OMN-13415: assert the deployed (bind-mounted) forward-migration tree is
+    # byte-identical to the canonical clone @ the target SHA before any migration
+    # runs. The stability-promotion footgun (stale 0016, missing 0018/0019) made a
+    # lane look "deployed" while applying the wrong migration SQL; this gate makes
+    # that drift abort the deploy instead of silently mis-migrating.
+    local deploy_target="$1"
+    local repo_root="$2"
+    local git_sha="$3"
+    local deployed_tree="${deploy_target}/${MIGRATION_TREE_REL_PATH}"
+
+    if [[ ! -d "${deployed_tree}" ]]; then
+        # No bind-mounted forward-migration tree in this deployment layout; nothing
+        # to assert (matches snapshot_migration_tree's own no-tree tolerance).
+        log_warn "No deployed migration tree at ${deployed_tree}; skipping sync assertion."
+        return 0
+    fi
+
+    local check_script="${repo_root}/scripts/check_deployed_migration_tree_sync.py"
+    if [[ ! -f "${check_script}" ]]; then
+        log_error "Migration-sync gate script missing: ${check_script}"
+        exit 1
+    fi
+
+    log_info "Asserting deployed migration tree == canonical clone @ ${git_sha} (OMN-13415)..."
+    if ! python3 "${check_script}" \
+        --deployed-tree "${deployed_tree}" \
+        --clone-root "${repo_root}" \
+        --ref "${git_sha}" \
+        --tree-rel-path "${MIGRATION_TREE_REL_PATH}"; then
+        log_error "Deployed migration tree is OUT OF SYNC with the canonical clone @ ${git_sha}."
+        log_error "Aborting deploy to avoid applying a stale migration set (OMN-13415)."
+        exit 1
+    fi
+    log_info "Deployed migration tree is in sync with the canonical clone @ ${git_sha}."
+}
+
 snapshot_migration_tree() {
     # Preserve a copy of the freshly-synced vendored forward-migration tree so a
     # later backup-restore (cleanup_on_exit) can re-apply it instead of leaving
@@ -2378,6 +2415,14 @@ main() {
 
     # Phase 6: Sync
     sync_files "${repo_root}" "${deploy_target}"
+
+    # OMN-13415: assert the freshly-synced deployed (bind-mounted) forward-migration
+    # tree is byte-identical to the canonical clone @ the target SHA BEFORE the
+    # forward-migration phase. The stability-promotion footgun was a stale
+    # bind-mounted tree (old 0016, no 0018/0019) that made the lane look "deployed"
+    # while running the wrong migration SQL — caught only by an out-of-band rsync.
+    # This gate makes that drift fail the deploy instead of silently mis-migrating.
+    assert_deployed_migration_tree_synced "${deploy_target}" "${repo_root}" "${git_sha}"
 
     # OMN-13364: snapshot the freshly-synced vendored migration tree so a later
     # backup-restore (cleanup_on_exit) re-applies it instead of reverting the
