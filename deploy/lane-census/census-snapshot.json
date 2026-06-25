@@ -3,12 +3,46 @@
   "event_type": "lane-census-drift",
   "topic": "onex.evt.infra.lane-census-drift.v1",
   "host": "192.168.86.201",
-  "emitted_at": "2026-06-17T13:00:00+00:00",
-  "severity": "warning",
-  "lanes_checked": ["stability-test", "prod", "judge"],
-  "drift_count": 0,
-  "findings": [],
-  "alert_key": "lane-census-drift:192.168.86.201:no-drift",
-  "ticket_title": "lane census: no drift",
-  "ticket_body": "## Lane census\n\nNo drift detected. All declared lanes match live state.\n\nverified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201"
+  "emitted_at": "2026-06-25T05:38:06.179930+00:00",
+  "severity": "critical",
+  "lanes_checked": [
+    "stability-test",
+    "prod",
+    "judge",
+    "dev"
+  ],
+  "drift_count": 4,
+  "findings": [
+    {
+      "lane": "stability-test",
+      "kind": "oneshot_stuck",
+      "container": "omnibase-infra-stability-test-migration-gate",
+      "detail": "migration/init container 'omnibase-infra-stability-test-migration-gate' is still Running (expected run-to-completion): Up 10 days (healthy)",
+      "severity": "warning"
+    },
+    {
+      "lane": "prod",
+      "kind": "oneshot_stuck",
+      "container": "omnibase-infra-prod-migration-gate",
+      "detail": "migration/init container 'omnibase-infra-prod-migration-gate' is still Running (expected run-to-completion): Up 9 minutes (healthy)",
+      "severity": "warning"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-runtime-worker",
+      "detail": "required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "oneshot_stuck",
+      "container": "omnibase-infra-judge-migration-gate",
+      "detail": "migration/init container 'omnibase-infra-judge-migration-gate' is still Running (expected run-to-completion): Up 2 weeks (healthy)",
+      "severity": "warning"
+    }
+  ],
+  "alert_key": "lane-census-drift:192.168.86.201:443b69d781c32ed8",
+  "ticket_title": "fix(infra): lane drift [judge, prod, stability-test] \u2014 1x container_absent, 3x oneshot_stuck",
+  "ticket_body": "## Lane census drift detected\n\nHost: `192.168.86.201`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[warning] oneshot_stuck** `omnibase-infra-stability-test-migration-gate` (stability-test): migration/init container 'omnibase-infra-stability-test-migration-gate' is still Running (expected run-to-completion): Up 10 days (healthy)\n- **[warning] oneshot_stuck** `omnibase-infra-prod-migration-gate` (prod): migration/init container 'omnibase-infra-prod-migration-gate' is still Running (expected run-to-completion): Up 9 minutes (healthy)\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[warning] oneshot_stuck** `omnibase-infra-judge-migration-gate` (judge): migration/init container 'omnibase-infra-judge-migration-gate' is still Running (expected run-to-completion): Up 2 weeks (healthy)\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
 }
