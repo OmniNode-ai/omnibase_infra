@@ -109,6 +109,19 @@ readonly RUNTIME_MIGRATION_ONESHOTS=(
 # preflight must apply the cap explicitly before the kernel provisions topics.
 readonly BROKER_READINESS_SERVICE="redpanda"
 readonly BROKER_PARTITION_CAP_SERVICE="redpanda-partition-cap"
+# Core data-plane infra that the migration preflight + runtime depend on but
+# that the `--no-deps` restart path never starts itself (OMN-13594). On a fully
+# COLD lane (no prior containers) nothing brings postgres/valkey up before
+# run_runtime_migration_preflight runs forward-migration `--no-deps`, so the
+# migration's 30x2s Postgres-readiness probe exhausts -> exit 1 -> auto-rollback.
+# ensure_core_infra_ready() brings these up + waits BEFORE the preflight; on a
+# WARM lane `up -d --wait` on already-healthy services is an idempotent no-op.
+# redpanda is intentionally excluded here -- warm_broker_topic_provisioning owns
+# broker readiness (and its collision-tolerant reachability probe).
+readonly CORE_INFRA_SERVICES=(
+    postgres
+    valkey
+)
 # Cold-start consumer-group join budget (OMN-13220). On a fully-cold lane the
 # kernel joins a consumer group per subscribed topic; with 1300+ topics on a
 # freshly-provisioned broker the default 30s per-consumer KAFKA_TIMEOUT_SECONDS
@@ -1896,6 +1909,50 @@ assert_broker_reachable() {
     return 1
 }
 
+ensure_core_infra_ready() {
+    # Bring up + wait for the core data-plane infra (postgres, valkey) BEFORE the
+    # migration preflight + runtime restart (OMN-13594).
+    #
+    # The `--restart` path runs warm_broker_topic_provisioning ->
+    # run_runtime_migration_preflight -> restart_services, and every one of those
+    # uses `up -d --no-deps`, which bypasses the compose `depends_on` chain. On a
+    # WARM lane that is fine (postgres/valkey are already up). On a fully COLD
+    # lane (no prior containers) NOTHING starts postgres/valkey first, so
+    # forward-migration (`--no-deps`) has no database to connect to: its 30x2s
+    # readiness probe exhausts -> exit 1 -> the deploy auto-rolls back. This is
+    # the exact cold-start defect OMN-13594 filed against this script.
+    #
+    # Bring the core infra up explicitly here and BLOCK on its healthchecks via
+    # `--wait`. On a warm lane this is an idempotent no-op (up -d on a healthy
+    # service does nothing, --wait returns immediately). On a cold lane it
+    # creates + warms postgres/valkey so the preflight's forward-migration sees a
+    # live database on its first attempt.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+
+    log_step "Core Infra Readiness (cold-start guard, OMN-13594)"
+
+    local core_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --wait
+        "${CORE_INFRA_SERVICES[@]}"
+    )
+    log_info "Ensuring core infra healthy before preflight: ${CORE_INFRA_SERVICES[*]}"
+    log_cmd "${core_up_cmd[*]}"
+    if ! "${core_up_cmd[@]}"; then
+        log_error "Core infra (${CORE_INFRA_SERVICES[*]}) did not become healthy."
+        log_error "Migration preflight needs a live Postgres; aborting before it"
+        log_error "wastes the 30x2s readiness budget and triggers a rollback (OMN-13594)."
+        return 1
+    fi
+    log_info "Core infra healthy: ${CORE_INFRA_SERVICES[*]}."
+}
+
 warm_broker_topic_provisioning() {
     # Bring the broker + partition cap to readiness before the --no-deps runtime
     # restart so the cold-start topic-provisioning burst does not crash-loop the
@@ -2471,6 +2528,12 @@ main() {
         fi
         export KAFKA_TIMEOUT_SECONDS="${cold_start_timeout}"
         log_info "Cold-start Kafka consumer-start budget: KAFKA_TIMEOUT_SECONDS=${KAFKA_TIMEOUT_SECONDS}s"
+        # OMN-13594: bring up + wait for postgres/valkey BEFORE the migration
+        # preflight. On a cold lane the preflight's forward-migration runs
+        # `--no-deps` and would otherwise hit a non-existent Postgres, exhaust its
+        # readiness budget, and trigger an auto-rollback. Idempotent no-op on a
+        # warm lane.
+        ensure_core_infra_ready "${deploy_target}" "${compose_project}"
         warm_broker_topic_provisioning "${deploy_target}" "${compose_project}"
         run_runtime_migration_preflight "${deploy_target}" "${compose_project}"
         restart_services "${deploy_target}" "${compose_project}"

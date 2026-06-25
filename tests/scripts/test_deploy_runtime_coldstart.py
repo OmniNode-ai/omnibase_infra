@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Regression coverage for the OMN-13220 cold-start crash-loop fixes.
+"""Regression coverage for the OMN-13220 / OMN-13594 cold-start fixes.
 
-Two distinct fresh-DB / cold-lane failure modes are guarded here:
+Three distinct fresh-DB / cold-lane failure modes are guarded here. Fixes 1-2
+are OMN-13220 (crash-loop); fix 3 is OMN-13594 (migration/postgres ordering).
 
 1. Missing intelligence-migration. The compose file gates omninode-runtime on
    ``intelligence-migration: condition: service_completed_successfully``, but
@@ -182,4 +183,78 @@ def test_compose_runtime_env_reads_kafka_timeout_seconds() -> None:
         "x-runtime-env must declare KAFKA_TIMEOUT_SECONDS with a 30s default so "
         "the deploy-script export propagates to runtime containers while a plain "
         "`docker compose up` keeps the prior steady-state value (OMN-13220)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: core-infra (postgres/valkey) readiness BEFORE the migration preflight
+# OMN-13594 — cold-start migration/postgres ordering defect.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_core_infra_services_lists_postgres_and_valkey() -> None:
+    """CORE_INFRA_SERVICES must contain the data-plane infra the preflight needs.
+
+    On a fully cold lane the migration preflight runs forward-migration with
+    ``up -d --no-deps`` (bypassing depends_on), so postgres must already be up.
+    valkey is the runtime's cache dependency and is brought up in the same wait
+    so the runtime restart does not race a still-starting cache (OMN-13594).
+    """
+    text = _deploy_script_noncomment()
+    match = re.search(r"CORE_INFRA_SERVICES=\((?P<body>.*?)\)", text, re.DOTALL)
+    assert match is not None, "CORE_INFRA_SERVICES array not found"
+    services = match.group("body").split()
+    assert "postgres" in services, (
+        "postgres missing from CORE_INFRA_SERVICES; the migration preflight's "
+        "forward-migration (--no-deps) has no database to connect to on a cold "
+        "lane and exhausts its readiness budget -> rollback (OMN-13594)."
+    )
+    assert "valkey" in services, "valkey missing from CORE_INFRA_SERVICES."
+    # redpanda readiness is owned by warm_broker_topic_provisioning (which has a
+    # collision-tolerant reachability probe); it must not be duplicated here.
+    assert "redpanda" not in services, (
+        "redpanda must NOT be in CORE_INFRA_SERVICES — broker readiness belongs "
+        "to warm_broker_topic_provisioning's reachability probe (OMN-13364)."
+    )
+
+
+@pytest.mark.unit
+def test_ensure_core_infra_ready_defined_and_waits() -> None:
+    """ensure_core_infra_ready must exist and block on the core-infra healthchecks."""
+    text = _deploy_script_text()
+    assert "ensure_core_infra_ready()" in text, (
+        "ensure_core_infra_ready() function is not defined."
+    )
+    # It must bring the core infra up AND wait on health (not fire-and-forget).
+    assert "up -d --no-deps --wait" in text
+    assert '"${CORE_INFRA_SERVICES[@]}"' in text
+    # It must fail the deploy (return 1) if core infra does not become healthy,
+    # rather than letting the preflight waste its 30x2s budget then roll back.
+    assert "did not become healthy." in text
+
+
+@pytest.mark.unit
+def test_core_infra_ready_runs_before_warmup_migration_and_restart() -> None:
+    """ensure_core_infra_ready must run BEFORE warmup/preflight/restart in main().
+
+    This is the OMN-13594 fix: postgres/valkey come up + warm first so the cold
+    lane's forward-migration sees a live database on attempt 1. The ordering
+    invariant is the whole point of the fix and must be locked by a test.
+    """
+    text = _deploy_script_text()
+    core_idx = text.find('ensure_core_infra_ready "${deploy_target}"')
+    warm_idx = text.find('warm_broker_topic_provisioning "${deploy_target}"')
+    migration_idx = text.find('run_runtime_migration_preflight "${deploy_target}"')
+    restart_idx = text.find('restart_services "${deploy_target}"')
+
+    assert core_idx != -1, "ensure_core_infra_ready is not called in main()"
+    assert warm_idx != -1, "warm_broker_topic_provisioning is not called in main()"
+    assert migration_idx != -1, "run_runtime_migration_preflight is not called"
+    assert restart_idx != -1, "restart_services is not called"
+    assert core_idx < warm_idx < migration_idx < restart_idx, (
+        "Order must be core-infra readiness -> broker warmup -> migration "
+        "preflight -> restart. Core infra (postgres/valkey) must be healthy "
+        "before the --no-deps forward-migration runs, or a cold lane rolls back "
+        "(OMN-13594)."
     )
