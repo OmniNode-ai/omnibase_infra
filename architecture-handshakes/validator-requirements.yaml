@@ -1,4 +1,3 @@
----
 # Canonical validator requirements for OmniNode-ai downstream repos.
 #
 # This file is the single source of truth for which validators must be wired
@@ -14,12 +13,10 @@
 #
 # See: OMN-9048 (validator standardization epic), OMN-9051 (spec),
 #      OMN-9115 (spec consumer + enforcement wiring).
-
 schema_version:
   major: 1
   minor: 2
   patch: 0
-
 # Canonical list of all OmniNode repos governed by this spec. The consumer
 # uses this list to reject typos in repo arguments. Keep in sync when
 # onboarding/offboarding a repo; adding a repo here without wiring its
@@ -37,7 +34,6 @@ known_repos:
   - omninode_infra
   - omniweb
   - onex_change_control
-
 # Scopes:
 #   - pre_commit: "required" | "optional"  — entry in .pre-commit-config.yaml
 #   - ci_workflow: "required" | "optional" — .github/workflows/*.yml that runs it
@@ -56,9 +52,7 @@ known_repos:
 #   - ci_workflow_keywords: list of acceptable CI workflow step-name / run-line
 #     substrings. The consumer accepts any repo whose .github/workflows/*.yml
 #     contains at least one step mentioning one of these keywords.
-
 required_validators:
-
   hardcoded-local-paths:
     description: |
       Blocks /Users/, /Volumes/, /home/, C:\Users\ absolute paths in source.
@@ -78,7 +72,6 @@ required_validators:
       allowed: ["^tests/fixtures/", "^docs/"]
       forbidden: ["^tests/$", "^tests/[^f]", "^src/"]
     applies_to_repos: all
-
   spdx-headers:
     description: |
       Enforces MIT SPDX headers on source + tests + scripts + examples.
@@ -97,7 +90,6 @@ required_validators:
       allowed: ["\\.md$", "\\.ya?ml$", "\\.json$"]
       forbidden: ["^tests/", "^src/"]
     applies_to_repos: all
-
   no-hardcoded-topics:
     description: |
       Kafka topic strings must come from contract.yaml, not hardcoded in source.
@@ -124,7 +116,6 @@ required_validators:
       - omniintelligence
       - omninode_infra
       - onex_change_control
-
   stub-implementations:
     description: |
       Blocks NotImplementedError, bare pass, bare TODO docstrings in non-test source.
@@ -150,7 +141,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   enum-governance:
     description: |
       Enforces UPPER_SNAKE_CASE enum members + detects Literal-duplication anti-pattern.
@@ -177,7 +167,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   naming-conventions:
     description: |
       File-naming (model_*, enum_*, protocol_*, handler_*, service_*, node_*) +
@@ -205,7 +194,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   self-gating-workflows:
     description: |
       Blocks cross-repo @main refs in .github/workflows/*.yml (retro §4.8).
@@ -225,7 +213,6 @@ required_validators:
       allowed: []
       forbidden: []
     applies_to_repos: all
-
   branch-protection-rollout-guard:
     description: |
       PreToolUse Claude Code hook that blocks gh api PUT/PATCH .../branches/*/protection
@@ -245,7 +232,6 @@ required_validators:
       forbidden: []
     applies_to_repos:
       - omniclaude
-
   bandit-security:
     description: |
       Python security linting (medium+ severity).
@@ -271,7 +257,6 @@ required_validators:
       - omnimemory
       - omniintelligence
       - omninode_infra
-
   mypy-type-check:
     description: |
       Strict mypy on src/.
@@ -297,7 +282,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   ruff-format-check:
     description: |
       Ruff format + check, universal across Python repos.
@@ -326,7 +310,6 @@ required_validators:
       - omniintelligence
       - omninode_infra
       - onex_change_control
-
   aislop-patterns:
     description: |
       Detects AI-generated boilerplate, narrative docstrings, step_narration anti-patterns.
@@ -346,7 +329,6 @@ required_validators:
       allowed: ["^docs/", "^CHANGELOG\\.md$"]
       forbidden: ["^src/"]
     applies_to_repos: all
-
   pydantic-patterns:
     description: |
       Enforces ConfigDict(frozen=True, extra="forbid"), Field(..., description), no Any, PEP 604 unions.
@@ -373,7 +355,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   single-class-per-file:
     description: |
       Enforces one class per .py file (protocols + TypedDicts exempt).
@@ -400,7 +381,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   detect-secrets:
     description: |
       Yelp/detect-secrets baseline, catches committed API keys / passwords / PEM keys.
@@ -418,7 +398,6 @@ required_validators:
       allowed: ["\\.secrets\\.baseline$", "^tests/fixtures/"]
       forbidden: []
     applies_to_repos: all
-
   no-untracked-todos:
     description: |
       Blocks bare TODO/FIXME. Requires # TODO(OMN-XXXX): format.
@@ -436,7 +415,6 @@ required_validators:
       allowed: ["^docs/"]
       forbidden: ["^src/", "^tests/"]
     applies_to_repos: all
-
   arch-002-no-transport-imports:
     description: |
       Nodes must not import aiokafka/httpx/asyncpg directly (SPI boundary).
@@ -462,7 +440,6 @@ required_validators:
       - omnimarket
       - omnimemory
       - omniintelligence
-
   banned-compose-env-vars:
     description: |
       Detects docker-compose / Kubernetes manifests that reference env vars the
@@ -488,18 +465,15 @@ required_validators:
     applies_to_repos:
       - omnibase_infra
       - omninode_infra
-
 # Handshake metadata
-
 metadata:
   generated_by: "manually authored (OMN-9051); consumer added OMN-9115"
   last_updated: "2026-04-17"
-  next_review: "on any new validator addition — single source of truth, change propagates via OMN-9050
-    bot"
+  next_review: "on any new validator addition — single source of truth, change propagates via OMN-9050 bot"
   related_tickets:
-    - OMN-9048  # validator standardization epic
-    - OMN-9049  # universal handshake coverage
-    - OMN-9050  # pin-bump bot
-    - OMN-9051  # spec file owner
-    - OMN-9058  # env-store abstraction
-    - OMN-9115  # spec consumer + enforcement wiring
+    - OMN-9048 # validator standardization epic
+    - OMN-9049 # universal handshake coverage
+    - OMN-9050 # pin-bump bot
+    - OMN-9051 # spec file owner
+    - OMN-9058 # env-store abstraction
+    - OMN-9115 # spec consumer + enforcement wiring

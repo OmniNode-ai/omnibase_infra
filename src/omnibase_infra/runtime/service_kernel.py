@@ -1626,28 +1626,14 @@ async def bootstrap() -> int:
                     ServiceSavingsEstimator,
                     decode_event_message,
                 )
-                from omnibase_infra.topics import topic_keys
-                from omnibase_infra.topics.service_topic_registry import (
-                    ServiceTopicRegistry,
-                )
 
                 _savings_config = ConfigSavingsEstimation()
                 _savings_estimator = ServiceSavingsEstimator(
                     config=_savings_config,
                 )
-                _savings_topic = ServiceTopicRegistry.from_defaults().resolve(
-                    topic_keys.SAVINGS_ESTIMATED
-                )
+                _savings_topic = _savings_config.produce_topic
 
-                # Subscribe to input topics (resolved via topic registry)
-                _savings_registry = ServiceTopicRegistry.from_defaults()
-                _savings_input_topics = [
-                    _savings_registry.resolve(topic_keys.LLM_CALL_COMPLETED),
-                    _savings_registry.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
-                    _savings_registry.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
-                    _savings_registry.resolve(topic_keys.VALIDATOR_CATCH),
-                    _savings_registry.resolve(topic_keys.PATTERN_ENFORCEMENT),
-                ]
+                _savings_input_topics = list(_savings_config.consumed_topics)
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""

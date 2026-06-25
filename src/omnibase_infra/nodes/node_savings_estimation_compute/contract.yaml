@@ -54,8 +54,21 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
+  # OMN-13533: declare every topic the savings-estimation runtime consumer
+  # actually subscribes to (see services/observability/savings_estimation/
+  # config.py::_default_consumed_topics). Prior to this the contract declared
+  # only session-ended.v1, so the contract-driven topic provisioner
+  # (scripts/create_kafka_topics.py) never created validator-catch.v1 or
+  # hook-context-injected.v1 on the broker — the consumer's subscribe loop then
+  # error-stormed "topic not found in cluster" on every fresh redeploy.
   subscribe_topics:
     - "onex.evt.omniclaude.session-ended.v1"
+    - "onex.evt.omniintelligence.llm-call-completed.v1"
+    - "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
+    - "onex.evt.omniclaude.session-outcome.v1"
+    - "onex.evt.omniclaude.hook-context-injected.v1"
+    - "onex.evt.omniclaude.validator-catch.v1"
+    - "onex.evt.omniclaude.pattern-enforcement.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.savings-estimated.v1"
 topics:
@@ -66,6 +79,18 @@ topics:
   consumes:
     - topic: "onex.evt.omniclaude.session-ended.v1"
       description: "Session ended events that trigger savings estimation computation"
+    - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
+      description: "LLM call completion events correlated by session_id for cost attribution"
+    - topic: "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
+      description: "Dispatch outcome evaluation events correlated by session_id"
+    - topic: "onex.evt.omniclaude.session-outcome.v1"
+      description: "Session outcome events that trigger finalization of a savings estimate"
+    - topic: "onex.evt.omniclaude.hook-context-injected.v1"
+      description: "Hook context injection signals accumulated into injection effectiveness"
+    - topic: "onex.evt.omniclaude.validator-catch.v1"
+      description: "Validator catch events contributing heuristic avoided-rework savings"
+    - topic: "onex.evt.omniclaude.pattern-enforcement.v1"
+      description: "Pattern enforcement events contributing heuristic avoided-rework savings"
 error_handling:
   retry_policy:
     max_retries: 0

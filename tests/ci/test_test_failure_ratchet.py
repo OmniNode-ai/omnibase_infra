@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode Team
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Unit tests for scripts/check_test_failure_ratchet.py and
 scripts/publish_test_failure_baseline.py (OMN-13027).

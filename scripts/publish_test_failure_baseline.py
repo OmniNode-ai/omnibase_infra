@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode Team
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Dev-baseline publisher — OMN-13027.
 

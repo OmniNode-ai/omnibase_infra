@@ -19,5 +19,9 @@ class EnumOmniclaudeTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     EVT_CONTEXT_AUDIT_DLQ_V1 = "onex.evt.omniclaude.context-audit-dlq.v1"  # onex.evt.omniclaude.context-audit-dlq.v1
+    EVT_HOOK_CONTEXT_INJECTED_V1 = "onex.evt.omniclaude.hook-context-injected.v1"  # onex.evt.omniclaude.hook-context-injected.v1
+    EVT_PATTERN_ENFORCEMENT_V1 = "onex.evt.omniclaude.pattern-enforcement.v1"  # onex.evt.omniclaude.pattern-enforcement.v1
     EVT_SESSION_COORDINATION_SIGNAL_V1 = "onex.evt.omniclaude.session-coordination-signal.v1"  # onex.evt.omniclaude.session-coordination-signal.v1
     EVT_SESSION_ENDED_V1 = "onex.evt.omniclaude.session-ended.v1"  # onex.evt.omniclaude.session-ended.v1
+    EVT_SESSION_OUTCOME_V1 = "onex.evt.omniclaude.session-outcome.v1"  # onex.evt.omniclaude.session-outcome.v1
+    EVT_VALIDATOR_CATCH_V1 = "onex.evt.omniclaude.validator-catch.v1"  # onex.evt.omniclaude.validator-catch.v1

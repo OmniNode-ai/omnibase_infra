@@ -427,12 +427,13 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.llm-endpoint-health.v1": "pre-existing parity gap; declared in services/topics.yaml (service-emitted, not node-owned); needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omnibase-infra.routing-decided.v1": "pre-existing parity gap; routing decision event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omniclaude.context-enrichment.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    "onex.evt.omniclaude.hook-context-injected.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    # OMN-13533: hook-context-injected.v1, validator-catch.v1, pattern-enforcement.v1,
+    # session-outcome.v1, dispatch-outcome-evaluated.v1 are now declared in
+    # node_savings_estimation_compute/contract.yaml subscribe_topics (the savings
+    # estimation consumer's real subscriptions), so they are contract-covered and
+    # no longer need allowlisting. The contract-driven provisioner now creates them
+    # on the broker, fixing the consumer-start "topic not found in cluster" storm.
     "onex.evt.omniclaude.injection-recorded.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    "onex.evt.omniclaude.pattern-enforcement.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    "onex.evt.omniclaude.session-outcome.v1": "pre-existing parity gap; omniclaude session-outcome event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    "onex.evt.omniclaude.validator-catch.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
-    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "pre-existing parity gap; omniintelligence evaluation event (cross-repo); contract.yaml owned in omniintelligence | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
     "onex.evt.omniweb.waitlist-signup.v1": "pre-existing parity gap; omniweb waitlist signup event (cross-repo); consumer: waitlist-signup-notifier | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
 }
 # fmt: on

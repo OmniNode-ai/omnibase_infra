@@ -4,12 +4,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-12633"
 title: "feat(OMN-12633): retire ServiceDlqTracking runtime DDL — dlq_replay_history to migration-managed schema"
 summary: >-
-  Removes ServiceDlqTracking._ensure_table_exists() and the CREATE TABLE IF NOT EXISTS
-  call from initialize(). The dlq_replay_history table is now provisioned by the
-  canonical forward migration runner (086_create_dlq_replay_history.sql), making it
-  visible to public.schema_migrations and owned by node_dlq_replay_effect per
-  CONTRACT/NODE/HANDLER (OMN-12525). Adds static-analysis ratchet test preventing
-  re-introduction of imperative DDL.
+  Removes ServiceDlqTracking._ensure_table_exists() and the CREATE TABLE IF NOT EXISTS call from initialize(). The dlq_replay_history table is now provisioned by the canonical forward migration runner (086_create_dlq_replay_history.sql), making it visible to public.schema_migrations and owned by node_dlq_replay_effect per CONTRACT/NODE/HANDLER (OMN-12525). Adds static-analysis ratchet test preventing re-introduction of imperative DDL.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -54,9 +49,7 @@ dod_evidence:
         check_value: "test -f docker/migrations/forward/086_create_dlq_replay_history.sql"
   - id: "dod-deploy"
     description: >-
-      Deploy validation: tech-debt cleanup removing runtime table creation from ServiceDlqTracking.
-      The table must be pre-created by the forward migration runner before DLQ plugin activates.
-      No new Kafka topics; no API surface changes. Migration 086 is idempotent (IF NOT EXISTS).
+      Deploy validation: tech-debt cleanup removing runtime table creation from ServiceDlqTracking. The table must be pre-created by the forward migration runner before DLQ plugin activates. No new Kafka topics; no API surface changes. Migration 086 is idempotent (IF NOT EXISTS).
     source: "manual"
     checks:
       - check_type: "command"

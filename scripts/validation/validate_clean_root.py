@@ -147,8 +147,6 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "bin",
         "deploy",
         "observability",
-        # Immutable DoD receipt evidence lives under drift/dod_receipts.
-        "drift",
         # Docker workspace staging: stage_workspace.sh rsync target (OMN-9470)
         "workspace",
         # Pre-commit hook scripts directory

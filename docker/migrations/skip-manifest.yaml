@@ -30,5 +30,4 @@
 # EXIT CODES for run-forward-migrations.sh
 #   0 — all migrations applied (or skipped by this manifest)
 #   1 — migration failure (nonzero psql exit)
-
 skipped_migrations: []
