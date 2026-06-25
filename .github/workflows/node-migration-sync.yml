@@ -83,3 +83,35 @@ jobs:
             fi
             exit "${rc}"
           fi
+
+  # OMN-13415: logic-regression gate for the deployed-migration-tree sync check.
+  # The PRIMARY enforcement is at deploy time — deploy-runtime.sh calls
+  # check_deployed_migration_tree_sync.py after sync_files and BEFORE the
+  # forward-migration phase, aborting if the bind-mounted deployed tree drifted
+  # from the canonical clone @ the target SHA (the stability-promotion footgun:
+  # stale 0016, missing 0018/0019, lane looked "deployed" but mis-migrated). The
+  # live deploy-time compare cannot run on a hosted CI runner (no deployed tree),
+  # so the enforcement this required gate provides is the comparison LOGIC itself:
+  # if the byte-equality / missing / stale / extra-leftover detection regresses,
+  # its test suite fails and blocks merge.
+  deployed-migration-tree-sync-logic:
+    name: deployed-migration-tree-sync-logic
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 8
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-enabled: "false"
+      - name: Deployed-migration-tree sync — logic regression gate
+        run: |
+          uv run --frozen pytest tests/scripts/test_check_deployed_migration_tree_sync.py -q -p no:cacheprovider
