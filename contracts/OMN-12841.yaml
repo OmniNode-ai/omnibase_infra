@@ -1,0 +1,42 @@
+schema_version: '1.0.0'
+ticket_id: OMN-12841
+title: 'Surface generated COMPUTE nodes as MCP tools via an orchestrator wrapper surface'
+summary: >-
+  Contract-native (Option B): emit, alongside a generated COMPUTE node, a thin declarative NodeOrchestrator wrapper (CONTRACT + handler_routing only, mcp.expose=true + tool_name, routes the inbound MCP invocation to the generated COMPUTE handler) that satisfies the existing orchestrator-only MCP gate WITHOUT relaxing it. The two orchestrator-only gates (service_mcp_tool_sync.py / service_mcp_tool_discovery.py:197-212) are NOT modified. Option A (relaxing the gate for node-type:compute) was rejected.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Discovery-layer wrapper test (wrapper-shaped orchestrator projection converts to a tool; bare compute projection returns None) + generation-layer emitter test (emits BOTH compute + orchestrator wrapper contracts).
+    command: uv run pytest tests/unit/services/mcp/test_service_mcp_wrapper_contract_emitter.py tests/integration/services/mcp/test_service_mcp_tool_discovery.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks <PR> --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      Generation layer emits a declarative ORCHESTRATOR wrapper (mcp.expose=true, tool_name set, payload_type_match handler_routing to the generated COMPUTE handler) ALONGSIDE the generated COMPUTE contract.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/services/mcp/test_service_mcp_wrapper_contract_emitter.py -q'
+  - id: dod-002
+    description: >-
+      Discovery layer: the wrapper-shaped orchestrator projection satisfies the unchanged orchestrator-only gate (non-None tool) while a bare compute projection still returns None (rule preserved, not relaxed).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/services/mcp/test_service_mcp_tool_discovery.py::TestMCPWrapperOrchestratorSatisfiesGate -q'
+  - id: dod-003
+    description: >-
+      Full MCP service suite remains green; no change to the orchestrator-only gates in service_mcp_tool_sync.py or service_mcp_tool_discovery.py.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/services/mcp/ tests/integration/services/mcp/test_service_mcp_tool_discovery.py -q'

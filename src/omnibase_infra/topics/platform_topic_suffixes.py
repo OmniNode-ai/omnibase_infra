@@ -2389,6 +2389,84 @@ and domain plugin topics.
 """
 
 # =============================================================================
+# GENERATED-TOOL TOPIC SUFFIX BUILDERS (OMN-12841)
+# =============================================================================
+#
+# Generated COMPUTE nodes are exposed as MCP tools via a thin declarative
+# ORCHESTRATOR wrapper (Option B). The wrapper subscribes to a per-tool
+# invocation command topic and publishes a per-tool result event topic. These
+# topic names are *generated* (one per tool), so they cannot be pre-registered
+# constants -- they are composed deterministically here, in the one canonical
+# topics module, from the tool name. Keeping the literal "onex.cmd."/"onex.evt."
+# prefixes in this approved file (not in caller modules) preserves the
+# no-hardcoded-topics gate without an allowlist.
+
+# Producer routing domain for generated wrapper surfaces.
+GENERATED_TOOL_PRODUCER = "generated"
+
+
+def _to_kebab_event_name(name: str) -> str:
+    """Convert a snake_case tool/node name to a kebab-case topic event segment.
+
+    Topic producer/event-name segments are kebab-case (see validate_topic_suffix).
+    Generated tool/node names are snake_case (e.g. ``node_sentiment_classifier``),
+    so underscores are converted to hyphens.
+
+    Args:
+        name: Snake_case tool or node name.
+
+    Returns:
+        Kebab-case event-name segment.
+
+    Raises:
+        OnexError: If ``name`` is empty or whitespace-only (fail fast).
+    """
+    if not name or not name.strip():
+        raise OnexError("Generated tool name must be a non-empty string")
+    return name.strip().replace("_", "-")
+
+
+def build_generated_tool_invoke_suffix(tool_name: str) -> str:
+    """Build the validated MCP invocation command suffix for a generated tool.
+
+    Args:
+        tool_name: Generated tool name (snake_case).
+
+    Returns:
+        Validated suffix ``onex.cmd.generated.<tool>-invoke.v1``.
+
+    Raises:
+        OnexError: If the composed suffix fails canonical validation.
+    """
+    event = _to_kebab_event_name(tool_name)
+    suffix = f"onex.cmd.{GENERATED_TOOL_PRODUCER}.{event}-invoke.v1"
+    result = validate_topic_suffix(suffix)
+    if not result.is_valid:
+        raise OnexError(f"Invalid generated invoke suffix '{suffix}': {result.error}")
+    return suffix
+
+
+def build_generated_tool_result_suffix(tool_name: str) -> str:
+    """Build the validated MCP result event suffix for a generated tool.
+
+    Args:
+        tool_name: Generated tool name (snake_case).
+
+    Returns:
+        Validated suffix ``onex.evt.generated.<tool>-result.v1``.
+
+    Raises:
+        OnexError: If the composed suffix fails canonical validation.
+    """
+    event = _to_kebab_event_name(tool_name)
+    suffix = f"onex.evt.{GENERATED_TOOL_PRODUCER}.{event}-result.v1"
+    result = validate_topic_suffix(suffix)
+    if not result.is_valid:
+        raise OnexError(f"Invalid generated result suffix '{suffix}': {result.error}")
+    return suffix
+
+
+# =============================================================================
 # IMPORT-TIME VALIDATION
 # =============================================================================
 

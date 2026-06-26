@@ -198,6 +198,8 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH,
     SUFFIX_WAITLIST_SIGNUP,
     SUFFIX_WIRING_HEALTH_SNAPSHOT,
+    build_generated_tool_invoke_suffix,
+    build_generated_tool_result_suffix,
 )
 from omnibase_infra.topics.topic_resolver import (
     BusDescriptorNotFoundError,
@@ -405,6 +407,8 @@ __all__: list[str] = [
     "SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED",
     # Aggregate collections
     "ALL_PLATFORM_SUFFIXES",
+    "build_generated_tool_invoke_suffix",
+    "build_generated_tool_result_suffix",
     "ALL_PLATFORM_TOPIC_SPECS",
     "ALL_INTELLIGENCE_TOPIC_SPECS",
     "ALL_OMNIBASE_INFRA_TOPIC_SPECS",
