@@ -67,6 +67,11 @@ EVIDENCE_DASHBOARD_CREATE = (
     / "node_evidence_dashboard_reducer"
     / "0001_create_evidence_dashboard_projection_tables.sql"
 )
+PR_LIFECYCLE_LEDGER_CREATE = (
+    NODES_DIR
+    / "node_pr_lifecycle_state_reducer"
+    / "0001_create_pr_lifecycle_ledger_entries.sql"
+)
 
 pytestmark = pytest.mark.unit
 
@@ -295,6 +300,51 @@ class TestVendoredViewMigrations:
         assert (
             "CREATE TABLE IF NOT EXISTS evidence_readiness_aggregate_projection" in sql
         )
+
+    def test_pr_lifecycle_ledger_migration_vendored(self) -> None:
+        """OMN-13321 / F5: the per-iteration PR-ledger projection migration is vendored.
+
+        ``node_pr_lifecycle_state_reducer`` (omnimarket #1440) declares
+        ``projection_api`` over ``pr_lifecycle_ledger_entries`` (topic
+        ``onex.snapshot.projection.pr-lifecycle-ledger.v1``) and UPSERTs one
+        user-readable ledger row per PR EVERY sweep iteration. The node-owned
+        migration that creates ``pr_lifecycle_ledger_entries`` in
+        ``omnidash_analytics`` was merged in the omnimarket source tree but was
+        NEVER vendored into omnibase_infra's tracked forward-migration tree, so
+        the forward-migration runner had no SQL to apply and the table was
+        missing on dev — the OMN-13415 migration-sync guard correctly aborted.
+
+        This guard pins the vendored migration so a clean clone materializes the
+        table under ``run-forward-migrations.sh`` (namespaced id
+        ``node:node_pr_lifecycle_state_reducer:0001_create_pr_lifecycle_ledger_entries.sql``).
+        This is the OMN-13636 migration-gap class made concrete.
+        """
+        assert PR_LIFECYCLE_LEDGER_CREATE.is_file(), (
+            "0001_create_pr_lifecycle_ledger_entries.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_pr_lifecycle_state_reducer/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = PR_LIFECYCLE_LEDGER_CREATE.read_text(encoding="utf-8")
+        # Idempotent create so warm volumes and fresh omnidash_analytics both
+        # reconcile without error.
+        assert "CREATE TABLE IF NOT EXISTS public.pr_lifecycle_ledger_entries" in sql
+        # The conflict key (sweep_id, repo, pr_number, iteration) guarantees one
+        # row per PR per iteration so two consecutive iterations both persist.
+        assert "UNIQUE (sweep_id, repo, pr_number, iteration)" in sql
+        # The ticket-required user-readable ledger fields must all be present.
+        for column in (
+            "sweep_id",
+            "iteration",
+            "found_at",
+            "repo",
+            "pr_number",
+            "initial_state",
+            "action_taken",
+            "evidence",
+            "final_state",
+            "next_check_at",
+        ):
+            assert column in sql, f"ledger column {column!r} missing from migration"
 
 
 class TestNamespacedDiscoveryWiring:
