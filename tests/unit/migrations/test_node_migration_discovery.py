@@ -330,6 +330,10 @@ class TestVendoredViewMigrations:
         assert "CREATE TABLE IF NOT EXISTS public.pr_lifecycle_ledger_entries" in sql
         # The conflict key (sweep_id, repo, pr_number, iteration) guarantees one
         # row per PR per iteration so two consecutive iterations both persist.
+        # The named constraint is added after CREATE TABLE so warm pre-existing
+        # tables also receive the ON CONFLICT target.
+        assert "uq_pr_lifecycle_ledger_sweep_repo_pr_iter" in sql
+        assert "ADD CONSTRAINT uq_pr_lifecycle_ledger_sweep_repo_pr_iter" in sql
         assert "UNIQUE (sweep_id, repo, pr_number, iteration)" in sql
         # The ticket-required user-readable ledger fields must all be present.
         for column in (
