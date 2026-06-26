@@ -350,6 +350,57 @@ pattern_exemptions:
       - docs/plans/2026-06-12-skill-output-suppression-plan.md (Phase 4)
     ticket: OMN-13097
   # ==========================================================================
+  # MCP wrapper-contract emitter Exemptions (OMN-12841)
+  # ==========================================================================
+  # The generated-COMPUTE -> MCP wrapper emitter deals in literal contract
+  # identifiers (node names, the MCP tool_name, and Pydantic model class names),
+  # NOT foreign-key references to entities with separate ID + display_name.
+  # tool_name mirrors the existing ModelMCPContractConfig.tool_name domain term
+  # (the stable MCP tool name); *_node_name / *_model_name are literal contract
+  # name strings the emitter writes verbatim into the generated contract YAML.
+  - file_pattern: 'model_generated_compute_node_spec\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the literal generated COMPUTE node name (the contract 'name' field), not a foreign key to a node entity with a separate ID + display_name.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_generated_compute_node_spec\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is the stable MCP tool name (same domain term as ModelMCPContractConfig.tool_name); it IS the identifier surfaced to MCP clients, not a foreign key to a separate entity.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_generated_compute_node_spec\.py'
+    violation_pattern: "Field 'invocation_input_model_name' might reference an entity"
+    reason: >
+      invocation_input_model_name is the literal Pydantic model class name written into the generated contract's input_model.name, not a foreign key to an entity.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_generated_compute_node_spec\.py'
+    violation_pattern: "Field 'invocation_output_model_name' might reference an entity"
+    reason: >
+      invocation_output_model_name is the literal Pydantic model class name written into the generated contract's output_model.name, not a foreign key to an entity.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_mcp_wrapper_emission\.py'
+    violation_pattern: "Field 'compute_node_name' might reference an entity"
+    reason: >
+      compute_node_name is the literal name of the generated COMPUTE node, not a foreign key to a node entity with a separate ID + display_name.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_mcp_wrapper_emission\.py'
+    violation_pattern: "Field 'wrapper_node_name' might reference an entity"
+    reason: >
+      wrapper_node_name is the literal name of the emitted ORCHESTRATOR wrapper node (the contract 'name' field), not a foreign key to an entity.
+
+    ticket: OMN-12841
+  - file_pattern: 'model_mcp_wrapper_emission\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is the stable MCP tool name carried by the wrapper (same domain term as ModelMCPContractConfig.tool_name), not a foreign key to a separate entity.
+
+    ticket: OMN-12841
+  # ==========================================================================
   # KafkaContractCache Exemptions (OMN-1989)
   # ==========================================================================
   # Thread-safe cache with cohesive CRUD and query operations for contract

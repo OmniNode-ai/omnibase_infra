@@ -21,6 +21,9 @@ from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
 )
 from omnibase_infra.services.mcp.service_mcp_tool_registry import ServiceMCPToolRegistry
 from omnibase_infra.services.mcp.service_mcp_tool_sync import ServiceMCPToolSync
+from omnibase_infra.services.mcp.service_mcp_wrapper_contract_emitter import (
+    ServiceMCPWrapperContractEmitter,
+)
 
 __all__ = [
     "MCPServerLifecycle",
@@ -28,4 +31,5 @@ __all__ = [
     "ServiceMCPToolDiscovery",
     "ServiceMCPToolRegistry",
     "ServiceMCPToolSync",
+    "ServiceMCPWrapperContractEmitter",
 ]
