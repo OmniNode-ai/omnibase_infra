@@ -19,14 +19,16 @@ Version Tracking:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
-from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-if TYPE_CHECKING:
-    from omnibase_infra.models.mcp.model_mcp_tool_definition import (
-        ModelMCPToolDefinition,
-    )
+from omnibase_infra.models.mcp.model_mcp_generated_tool_registration import (
+    ModelMCPGeneratedToolRegistration,
+)
+from omnibase_infra.models.mcp.model_mcp_tool_definition import (
+    ModelMCPToolDefinition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +102,120 @@ class ServiceMCPToolRegistry:
         Note: This is a snapshot and may change immediately after reading.
         """
         return len(self._tools)
+
+    # MCP exposure tags required by ServiceMCPToolSync._is_mcp_exposable for a
+    # generated COMPUTE node (the SEA self-extension loop output, OMN-12827 B2).
+    _TAG_MCP_ENABLED = "mcp-enabled"
+    _TAG_NODE_TYPE_COMPUTE = "node-type:compute"
+    _TAG_GENERATED = "generated"
+    _TAG_PREFIX_MCP_TOOL = "mcp-tool:"
+
+    @staticmethod
+    def _artifact_hash(text: str) -> str:
+        """Return a ``sha256:<hex>`` digest binding a generated artifact."""
+        return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
+
+    async def register_generated_tool(
+        self,
+        *,
+        node_name: str,
+        description: str,
+        contract_yaml: str,
+        handler_source: str,
+        correlation_id: UUID,
+    ) -> ModelMCPGeneratedToolRegistration:
+        """Register a generated COMPUTE node as an MCP tool on the canonical registry.
+
+        This is the canonical replacement for the bespoke SEA
+        ``ToolRegistry.register`` (the in-process generated-tool store that the
+        SEA self-extension loop used). It routes the *registration semantics* of
+        a generated tool onto this canonical registry: the generated node surfaces
+        through the one MCP exposure path (``ServiceMCPToolRegistry`` /
+        ``ServiceMCPToolSync``) instead of a parallel bespoke store.
+
+        The MCP server in ``omnibase_infra`` is the protocol-infra owner of tool
+        registration (feedback_mcp_server_in_omnibase_infra.md). In-process
+        ``exec()``/``invoke()`` of the handler is deliberately NOT part of this
+        method: that hot-load sandbox concern belongs to the Phase 0 generation
+        executor (OMN-13605), not to MCP registration.
+
+        The built tool carries the tags the canonical exposure rule requires for a
+        generated compute node (``mcp-enabled`` + ``node-type:compute`` +
+        ``generated`` + ``mcp-tool:<name>``), so it is surfaced exactly as a
+        hot-reloaded generated node from the bus would be.
+
+        Args:
+            node_name: Generated node name; becomes the canonical MCP tool name.
+            description: AI-friendly description surfaced to MCP clients.
+            contract_yaml: The generating contract YAML (hashed for provenance).
+            handler_source: The generating handler source (hashed for provenance).
+            correlation_id: Correlation id of the generation request.
+
+        Returns:
+            A typed ``ModelMCPGeneratedToolRegistration`` binding the artifact
+            hashes and the registry version key used for the upsert.
+
+        Raises:
+            ValueError: If ``node_name`` is empty (fail fast; no silent default).
+        """
+        if not node_name:
+            raise ValueError("node_name must be a non-empty generated node name")
+
+        contract_hash = self._artifact_hash(contract_yaml)
+        handler_hash = self._artifact_hash(handler_source)
+
+        # Version key binds to the artifact content so re-registering the same
+        # generated artifact is idempotent (same hashes -> same version), while a
+        # revised contract/handler mints a newer version that updates the registry.
+        registry_event_id = self._artifact_hash(contract_hash + handler_hash)
+
+        tags = [
+            self._TAG_MCP_ENABLED,
+            self._TAG_NODE_TYPE_COMPUTE,
+            self._TAG_GENERATED,
+            f"{self._TAG_PREFIX_MCP_TOOL}{node_name}",
+        ]
+
+        tool = ModelMCPToolDefinition(
+            name=node_name,
+            description=description,
+            version="1.0.0",
+            parameters=[],
+            input_schema={"type": "object", "properties": {}},
+            orchestrator_node_id=None,
+            orchestrator_service_id=None,
+            endpoint=None,
+            timeout_seconds=30,
+            metadata={
+                "tags": tags,
+                "node_kind": "generated compute node",
+                "generated_contract_hash": contract_hash,
+                "generated_handler_hash": handler_hash,
+                "generation_correlation_id": str(correlation_id),
+                "source": "generated_tool_registration",
+            },
+        )
+
+        await self.upsert_tool(tool, registry_event_id)
+
+        logger.info(
+            "Generated tool registered on canonical MCP registry",
+            extra={
+                "tool_name": node_name,
+                "registry_event_id": registry_event_id,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        return ModelMCPGeneratedToolRegistration(
+            registration_id=uuid4(),
+            name=node_name,
+            description=description,
+            generated_contract_hash=contract_hash,
+            generated_handler_hash=handler_hash,
+            generation_correlation_id=correlation_id,
+            registry_event_version=registry_event_id,
+        )
 
     async def upsert_tool(
         self,
