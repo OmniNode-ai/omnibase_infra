@@ -189,6 +189,44 @@ class TestVendoredViewMigrations:
             in sql
         )
 
+    def test_context_pack_hash_migration_vendored(self) -> None:
+        """OMN-13593/OMN-13407: the delegation_events.context_pack_hash column migration is vendored.
+
+        0020 adds ``context_pack_hash`` to the canonical ``delegation_events``
+        table so context ON/OFF ROI is measurable from the correlation-trace
+        surface. The projection query for the 4 delegation projection topics
+        (delegation, projection-delegation-events, delegation.decisions,
+        delegation.correlation-trace) reads this column; without the vendored
+        migration a fresh deploy materializes ``delegation_events`` WITHOUT the
+        column, and ``HandlerProjectionDelegation`` DLQ-routes every event with
+        ``column "context_pack_hash" of relation "delegation_events" does not
+        exist`` while the projection API returns HTTP 503 degraded.
+
+        This guard pins the migration so the column ALWAYS materializes under
+        the forward-migration runner on a fresh clone — closing the schema-drift
+        that produced the stability-lane 503 in OMN-13593.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0020_delegation_context_pack_hash.sql"
+        )
+        assert migration.is_file(), (
+            "0020_delegation_context_pack_hash.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        # Idempotent column add so warm volumes reconcile without error.
+        assert (
+            "ADD COLUMN IF NOT EXISTS context_pack_hash TEXT NOT NULL DEFAULT ''" in sql
+        )
+        assert "ALTER TABLE delegation_events" in sql
+        # Index supports context ON/OFF ROI grouping on the correlation-trace surface.
+        assert (
+            "CREATE INDEX IF NOT EXISTS idx_delegation_events_context_pack_hash" in sql
+        )
+
     def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
         """Base migration must be safe when delegation_events already exists."""
         migration = (
