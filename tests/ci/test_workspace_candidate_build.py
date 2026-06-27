@@ -107,6 +107,24 @@ class TestWorkspaceCandidateWorkflow:
     def test_workflow_attests_source_hash(self, workflow_text: str) -> None:
         assert "OMN-9139" in workflow_text
         assert "RUNTIME_SOURCE_HASH=${{ github.sha }}" in workflow_text
+        assert "sed -n 's/^RUNTIME_SOURCE_HASH=//p'" in workflow_text
+        assert 'org.opencontainers.image.revision" }}' not in workflow_text
+
+    def test_workflow_pins_third_party_actions(self, workflow_text: str) -> None:
+        assert "docker/setup-buildx-action@v4" not in workflow_text
+        assert "actions/setup-python@v6" not in workflow_text
+        assert "aws-actions/configure-aws-credentials@v6" not in workflow_text
+        assert "aws-actions/amazon-ecr-login@v2" not in workflow_text
+        assert "docker/build-push-action@v7" not in workflow_text
+        assert "actions/upload-artifact@v7" not in workflow_text
+
+    def test_workflow_does_not_interpolate_sibling_ref_in_shell(
+        self, workflow_text: str
+    ) -> None:
+        assert '--arg sibling_ref "${SIBLING_REF}"' in workflow_text
+        assert 'echo "| sibling ref | \\`${SIBLING_REF}\\` |"' in workflow_text
+        assert '--arg sibling_ref "${{ inputs.sibling_ref }}"' not in workflow_text
+        assert "`${{ inputs.sibling_ref }}`" not in workflow_text
 
     def test_workflow_emits_provenance_manifest(self, workflow_text: str) -> None:
         assert 'build_source: "workspace"' in workflow_text

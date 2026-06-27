@@ -84,12 +84,12 @@ jobs:
           echo "Docker daemon accessible"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
         with:
           driver: docker
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -135,7 +135,7 @@ jobs:
           cat workspace/sibling-vcs-provenance.json
 
       - name: Set up Python for AWS CLI
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -148,7 +148,7 @@ jobs:
           "$HOME/.local/bin/aws" --version
 
       - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@d45db47bd94e3a7d50b9c36da4cfe07ceca89d74 # v6
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/omninode-github-actions-role
@@ -163,7 +163,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
 
       - name: Extract metadata
         id: meta
@@ -204,7 +204,7 @@ jobs:
       # the OCI labels the prod gate / lineage guard consult.
       - name: Build runtime image (workspace stability-candidate)
         id: build-local
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           context: .
           file: docker/Dockerfile.runtime
@@ -245,10 +245,12 @@ jobs:
       # main, so the clean-main assertion does not apply). The hash-equals-HEAD
       # invariant IS enforced here and is NOT weakened.
       - name: Attest baked-in source hash (OMN-9139)
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}
         run: |
           set -euo pipefail
-          BAKED="$(docker inspect "${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}" \
-            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          BAKED="$(docker inspect "${IMAGE_REF}" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^RUNTIME_SOURCE_HASH=//p')"
           EXPECTED="${GITHUB_SHA}"
           if [ -z "$BAKED" ] || [ "$BAKED" = "unknown" ] || [ "$BAKED" = "dev" ]; then
             echo "::error::baked source hash '${BAKED}' is empty/unknown/dev"; exit 1
@@ -310,6 +312,8 @@ jobs:
       # evidence a deploy verifier reads to refuse the candidate for prod.
       - name: Create candidate build manifest
         id: manifest
+        env:
+          SIBLING_REF: ${{ inputs.sibling_ref }}
         run: |
           set -euo pipefail
           mkdir -p ops/digests
@@ -321,7 +325,7 @@ jobs:
             --arg ref "${{ steps.resolve-digest.outputs.image_ref }}" \
             --arg tag "${{ steps.meta.outputs.candidate_tag }}" \
             --arg date "${{ steps.timestamp.outputs.build_date }}" \
-            --arg sibling_ref "${{ inputs.sibling_ref }}" \
+            --arg sibling_ref "${SIBLING_REF}" \
             --arg run_id "$GITHUB_RUN_ID" \
             --argjson siblings "$SIBLINGS" \
             '{
@@ -345,7 +349,7 @@ jobs:
           cat ops/digests/build-manifest.json
 
       - name: Upload candidate build manifest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: build-manifest-candidate-${{ steps.meta.outputs.candidate_tag }}
           path: ops/digests/build-manifest.json
@@ -353,6 +357,8 @@ jobs:
 
       - name: Build summary
         if: always()
+        env:
+          SIBLING_REF: ${{ inputs.sibling_ref }}
         run: |
           {
             echo "# Workspace Stability-Candidate Build (OMN-13656)"
@@ -363,7 +369,7 @@ jobs:
             echo "| promotion_class | stability-candidate |"
             echo "| non_main_lineage | true |"
             echo "| pinnable lanes | dev, stability-test (NEVER prod) |"
-            echo "| sibling ref | \`${{ inputs.sibling_ref }}\` |"
+            echo "| sibling ref | \`${SIBLING_REF}\` |"
             echo "| digest | \`${{ steps.resolve-digest.outputs.digest }}\` |"
             echo "| candidate tag | \`${{ steps.meta.outputs.candidate_tag }}\` |"
             echo ""
