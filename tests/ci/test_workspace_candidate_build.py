@@ -111,12 +111,14 @@ class TestWorkspaceCandidateWorkflow:
         assert 'org.opencontainers.image.revision" }}' not in workflow_text
 
     def test_workflow_pins_third_party_actions(self, workflow_text: str) -> None:
-        assert "docker/setup-buildx-action@v4" not in workflow_text
-        assert "actions/setup-python@v6" not in workflow_text
-        assert "aws-actions/configure-aws-credentials@v6" not in workflow_text
-        assert "aws-actions/amazon-ecr-login@v2" not in workflow_text
-        assert "docker/build-push-action@v7" not in workflow_text
-        assert "actions/upload-artifact@v7" not in workflow_text
+        action_refs = re.findall(r"^\s*uses:\s*([^\s#]+)", workflow_text, re.MULTILINE)
+        assert action_refs
+        for action_ref in action_refs:
+            assert "@" in action_ref, f"{action_ref} is missing an immutable ref"
+            _, ref = action_ref.rsplit("@", 1)
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                f"{action_ref} is not pinned to a 40-character commit SHA"
+            )
 
     def test_workflow_does_not_interpolate_sibling_ref_in_shell(
         self, workflow_text: str
