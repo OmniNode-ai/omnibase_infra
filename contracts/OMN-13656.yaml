@@ -6,8 +6,7 @@ summary: >-
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - ci_workflow
-  - dockerfile
+  - public_api
 evidence_requirements:
   - kind: tests
     description: Workspace stability-candidate build invariants pass
