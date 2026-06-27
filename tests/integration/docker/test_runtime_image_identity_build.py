@@ -131,8 +131,7 @@ def test_workspace_build_with_identity_args_populates_labels(
         )
         # OMN-13656: candidate lineage labels populated.
         assert (
-            _inspect_label(tag, "com.omninode.promotion_class")
-            == "stability-candidate"
+            _inspect_label(tag, "com.omninode.promotion_class") == "stability-candidate"
         )
         assert _inspect_label(tag, "com.omninode.non_main_lineage") == "true"
     finally:
