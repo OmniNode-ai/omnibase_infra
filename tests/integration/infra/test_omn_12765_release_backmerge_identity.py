@@ -33,7 +33,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13507: identity regenerated after merging the current dev/runtime
-    # proof inputs with the advanced omnibase-core pin.
-    assert lock["identity_digest"] == "0c5a9abb40c62663d082e518108eff79"
-    assert lock["shared_env_digest"] == "2460958e434880f1fe20f33f"
+    # OMN-13654: identity regenerated after the Trivy HIGH-CVE dependency bump
+    # updated the runtime shared-env inputs.
+    assert lock["identity_digest"] == "08ca594236ffd27f87325329103c8f98"
+    assert lock["shared_env_digest"] == "9981cffc7324b45ab15b0922"
