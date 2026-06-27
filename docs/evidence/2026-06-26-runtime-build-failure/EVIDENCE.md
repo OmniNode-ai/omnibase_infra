@@ -40,7 +40,7 @@ Added explicit security-floor constraints to `pyproject.toml` (matching the
 existing pyjwt CVE-2026-32597 pattern) so the lock can never silently drift back
 below the CVE-fixed versions:
 
-```
+```toml
 "pyjwt>=2.13.0",
 "python-multipart>=0.0.30",
 "starlette>=1.3.1",
@@ -69,7 +69,7 @@ failing CI build flagged (the only findings in run 28275139143).
 | this branch (fixed) | 0 | 0 |
 
 Command:
-```
+```bash
 trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 uv.lock
 ```
 
