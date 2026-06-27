@@ -34,5 +34,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # entry point to pyproject.toml, merged with the 'skill' entry point from
     # OMN-13097 (both digests bind pyproject.toml + uv.lock; same mechanical
     # regeneration OMN-13094 did for the advanced core pin).
-    assert lock["identity_digest"] == "efc067283a47eb66bfae03322e966b0c"
-    assert lock["shared_env_digest"] == "215aa5ffa92e228bf703615d"
+    assert lock["identity_digest"] == "36d88a277a3c3a10979bf7e4a142292b"
+    assert lock["shared_env_digest"] == "bfc8a9fec199e4604ad96e1c"
