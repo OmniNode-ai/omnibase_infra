@@ -1,0 +1,378 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# build-workspace-candidate-runtime.yml — OMN-13656
+#
+# Builds a SCANNED workspace-from-dev runtime image and pushes it to ECR as an
+# explicitly NON-PROD "stability-candidate". This is the CI counterpart of the
+# local deploy-runtime.sh BUILD_SOURCE=workspace path: it stages the sibling
+# repos at their dev HEAD, builds docker/Dockerfile.runtime in WORKSPACE mode,
+# runs the SAME Trivy scan + the OMN-9139 source-hash attestation + a provenance
+# manifest, and pushes a candidate-tagged image.
+#
+# Lineage guard discipline (OMN-12626):
+#   A workspace build is NON-main-lineage BY DESIGN (it stages dev-HEAD siblings),
+#   so the prod-bound lineage guard does NOT run here. Instead the image is STAMPED
+#   as a stability-candidate (build-manifest BUILD_SOURCE=workspace,
+#   promotion_class=stability-candidate, non_main_lineage:true + OCI labels
+#   com.omninode.promotion_class / com.omninode.non_main_lineage). The omnimarket
+#   prod-promotion gate (node_prod_promotion_gate_compute) REFUSES such an image
+#   for prod unless an explicit candidate-authorizing grant exists. The digest is
+#   pinnable to the dev / stability-test lane kustomization ONLY — never prod.
+#
+# Trigger: workflow_dispatch only (never auto on push). The image NEVER masquerades
+# as a clean-main build under the lineage guard.
+
+name: Build workspace stability-candidate runtime (OMN-13656)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sibling_ref:
+        description: "Git ref to stage sibling repos at (default: dev)."
+        required: false
+        default: "dev"
+        type: string
+      no-cache:
+        description: "Build with --no-cache to force a fresh foundation install."
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: build-workspace-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: omninode-runtime
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  # The sibling repos the workspace build stages. omnibase_core is staged FIRST
+  # (Dockerfile workspace branch reinstalls dev-HEAD core before the others).
+  SIBLING_REPOS: "omnibase_core omnibase_compat onex_change_control omnimarket"
+
+jobs:
+  build-workspace-candidate:
+    name: Build + scan + push workspace stability-candidate
+    permissions:
+      id-token: write
+      contents: read
+    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker job on self-hosted omnibase-ci.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 75
+
+    outputs:
+      image_digest: ${{ steps.resolve-digest.outputs.digest }}
+      image_ref: ${{ steps.resolve-digest.outputs.image_ref }}
+      candidate_tag: ${{ steps.meta.outputs.candidate_tag }}
+
+    steps:
+      - name: Checkout omnibase_infra (the consuming repo / build context)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "::error::Docker daemon is not accessible on this runner."
+            exit 1
+          fi
+          echo "Docker daemon accessible"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+        with:
+          driver: docker
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Stage the sibling repos at their requested ref into a workspace root, then
+      # point OMNI_HOME at it so stage_workspace.sh + the Dockerfile workspace
+      # branch vendor the dev-HEAD siblings. Each clone is shallow at the ref but
+      # carries full enough history for HEAD SHA / branch / status probes that
+      # stage_workspace.sh records as per-repo VCS provenance (OMN-13030).
+      - name: Stage sibling repos at the requested ref
+        id: stage-siblings
+        env:
+          SIBLING_REF: ${{ inputs.sibling_ref }}
+        run: |
+          set -euo pipefail
+          WORKSPACE_ROOT="${RUNNER_TEMP}/omni_workspace"
+          rm -rf "${WORKSPACE_ROOT}"
+          mkdir -p "${WORKSPACE_ROOT}"
+          # The consuming repo (omnibase_infra) is itself a sibling for the
+          # lock-pin preflight; symlink the checked-out tree in.
+          ln -s "${GITHUB_WORKSPACE}" "${WORKSPACE_ROOT}/omnibase_infra"
+          # omnibase_spi is referenced by the lock-pin preflight too.
+          for repo in omnibase_spi ${SIBLING_REPOS}; do
+            echo "::group::clone ${repo}@${SIBLING_REF}"
+            git clone --depth 50 --branch "${SIBLING_REF}" \
+              "https://github.com/OmniNode-ai/${repo}.git" \
+              "${WORKSPACE_ROOT}/${repo}"
+            echo "  ${repo} HEAD: $(git -C "${WORKSPACE_ROOT}/${repo}" rev-parse HEAD)"
+            echo "::endgroup::"
+          done
+          echo "workspace_root=${WORKSPACE_ROOT}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage workspace sibling trees into the build context
+        env:
+          OMNI_HOME: ${{ steps.stage-siblings.outputs.workspace_root }}
+          # The consuming pin authority is omnimarket's uv.lock (OMN-12977).
+          CONSUMER_LOCK: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket/uv.lock
+        run: |
+          set -euo pipefail
+          bash scripts/runtime_build/stage_workspace.sh
+          echo "Staged sibling trees:"
+          ls -1 workspace/sibling-repos/
+          echo "Per-repo VCS provenance:"
+          cat workspace/sibling-vcs-provenance.json
+
+      - name: Set up Python for AWS CLI
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Ensure AWS CLI is available
+        shell: bash
+        run: |
+          if command -v aws >/dev/null 2>&1; then aws --version; exit 0; fi
+          python -m pip install --user 'awscli>=1.33,<2'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/aws" --version
+
+      - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
+        uses: aws-actions/configure-aws-credentials@d45db47bd94e3a7d50b9c36da4cfe07ceca89d74 # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/omninode-github-actions-role
+          role-session-name: gha-build-workspace-candidate
+
+      - name: Verify AWS caller identity
+        shell: bash
+        env:
+          AWS_CLI_CONNECT_TIMEOUT: '10'
+          AWS_CLI_READ_TIMEOUT: '30'
+        run: aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHA_SHORT="${GITHUB_SHA::7}"
+          IMAGE_REPO="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+          # candidate-* tag namespace makes the non-prod lineage unmistakable and
+          # disjoint from the clean-main commit-SHA tags the prod build pushes.
+          CANDIDATE_TAG="candidate-${SHA_SHORT}-$(date -u +'%Y%m%d%H%M%S')"
+          {
+            echo "sha_short=${SHA_SHORT}"
+            echo "image_repo=${IMAGE_REPO}"
+            echo "candidate_tag=${CANDIDATE_TAG}"
+            echo "tags=${IMAGE_REPO}:${CANDIDATE_TAG}"
+            echo "build_date=$(date -u +'%Y%m%d')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate build timestamp
+        id: timestamp
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Read runtime version from pyproject
+        id: version
+        run: |
+          set -euo pipefail
+          VER="$(awk '
+            /^\[project\]/ { in_s=1; next }
+            /^\[/          { in_s=0 }
+            in_s && /^version[[:space:]]*=/ { gsub(/.*=[[:space:]]*"/,""); gsub(/".*/,""); print; exit }
+          ' pyproject.toml)"
+          if [ -z "$VER" ]; then echo "::error::could not read version from pyproject.toml"; exit 1; fi
+          echo "runtime_version=${VER}" >> "$GITHUB_OUTPUT"
+
+      # WORKSPACE-mode build. BUILD_SOURCE=workspace + EXPECTED_BUILD_SOURCE=workspace
+      # selects the staged-sibling install branch; PROMOTION_CLASS / NON_MAIN_LINEAGE
+      # stamp the stability-candidate provenance the Dockerfile guard requires and
+      # the OCI labels the prod gate / lineage guard consult.
+      - name: Build runtime image (workspace stability-candidate)
+        id: build-local
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          context: .
+          file: docker/Dockerfile.runtime
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          no-cache: ${{ inputs.no-cache == true }}
+          build-args: |
+            RUNTIME_VERSION=${{ steps.version.outputs.runtime_version }}
+            BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
+            RUNTIME_SOURCE_HASH=${{ github.sha }}
+            UV_VERSION=${{ env.UV_VERSION }}
+            BUILD_SOURCE=workspace
+            EXPECTED_BUILD_SOURCE=workspace
+            OMNI_HOME=/workspace
+            PROMOTION_CLASS=stability-candidate
+            NON_MAIN_LINEAGE=true
+
+      # SAME Trivy scan as the prod build path — CRITICAL,HIGH, --ignore-unfixed,
+      # exit-code 1. NOT weakened, NOT advisory. A finding fails the build before
+      # any push.
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.34.2
+        with:
+          image-ref: '${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          version: 'v0.69.3'
+
+      # OMN-9139 source-hash attestation: assert the baked-in RUNTIME_SOURCE_HASH
+      # equals the build SHA. Runs inline (not via the reusable workflow, which
+      # re-asserts a clean main tree — a workspace build is intentionally dev/non-
+      # main, so the clean-main assertion does not apply). The hash-equals-HEAD
+      # invariant IS enforced here and is NOT weakened.
+      - name: Attest baked-in source hash (OMN-9139)
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}
+        run: |
+          set -euo pipefail
+          BAKED="$(docker inspect "${IMAGE_REF}" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^RUNTIME_SOURCE_HASH=//p')"
+          EXPECTED="${GITHUB_SHA}"
+          if [ -z "$BAKED" ] || [ "$BAKED" = "unknown" ] || [ "$BAKED" = "dev" ]; then
+            echo "::error::baked source hash '${BAKED}' is empty/unknown/dev"; exit 1
+          fi
+          if [[ "$EXPECTED" == "$BAKED"* ]] || [[ "$BAKED" == "$EXPECTED"* ]]; then
+            echo "source-hash attestation OK: baked='${BAKED}' expected='${EXPECTED}'"
+          else
+            echo "::error::baked source hash '${BAKED}' != HEAD '${EXPECTED}'"; exit 1
+          fi
+
+      # Assert the image carries the non-main-lineage / stability-candidate labels
+      # so it can NEVER masquerade as a clean-main build under the lineage guard.
+      - name: Assert stability-candidate lineage labels
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.candidate_tag }}"
+          BS="$(docker inspect "$IMG" --format '{{ index .Config.Labels "com.omninode.build_source" }}')"
+          PC="$(docker inspect "$IMG" --format '{{ index .Config.Labels "com.omninode.promotion_class" }}')"
+          NL="$(docker inspect "$IMG" --format '{{ index .Config.Labels "com.omninode.non_main_lineage" }}')"
+          echo "build_source=${BS} promotion_class=${PC} non_main_lineage=${NL}"
+          [ "$BS" = "workspace" ] || { echo "::error::build_source label must be workspace"; exit 1; }
+          [ "$PC" = "stability-candidate" ] || { echo "::error::promotion_class label must be stability-candidate"; exit 1; }
+          [ "$NL" = "true" ] || { echo "::error::non_main_lineage label must be true"; exit 1; }
+
+      - name: Push candidate image to Amazon ECR
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Trivy + attestation + lineage labels passed — pushing candidate..."
+          docker push "${{ steps.meta.outputs.tags }}"
+          echo "Pushed: ${{ steps.meta.outputs.tags }}"
+
+      - name: Resolve ECR image digest for candidate tag
+        id: resolve-digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            DIGEST="$(aws ecr describe-images \
+              --repository-name "${ECR_REPOSITORY}" \
+              --image-ids imageTag="${{ steps.meta.outputs.candidate_tag }}" \
+              --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+            if [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+              echo "image_ref=${ECR_REGISTRY}/${ECR_REPOSITORY}@${DIGEST}" >> "$GITHUB_OUTPUT"
+              echo "Resolved digest: ${DIGEST}"
+              exit 0
+            fi
+            echo "digest not yet resolvable (attempt ${attempt}/5); backing off..."
+            sleep $((attempt * 3))
+          done
+          echo "::error::could not resolve ECR digest for the candidate tag"; exit 1
+
+      # Provenance build-manifest. Records BUILD_SOURCE=workspace,
+      # promotion_class=stability-candidate, non_main_lineage:true, the consuming
+      # lock pin authority, and per-sibling VCS provenance (folded from
+      # stage_workspace.sh's sibling-vcs-provenance.json). This is the durable
+      # evidence a deploy verifier reads to refuse the candidate for prod.
+      - name: Create candidate build manifest
+        id: manifest
+        env:
+          SIBLING_REF: ${{ inputs.sibling_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p ops/digests
+          SIBLINGS="$(cat workspace/sibling-vcs-provenance.json)"
+          jq -n \
+            --arg sha "$GITHUB_SHA" \
+            --arg repo "${{ steps.meta.outputs.image_repo }}" \
+            --arg digest "${{ steps.resolve-digest.outputs.digest }}" \
+            --arg ref "${{ steps.resolve-digest.outputs.image_ref }}" \
+            --arg tag "${{ steps.meta.outputs.candidate_tag }}" \
+            --arg date "${{ steps.timestamp.outputs.build_date }}" \
+            --arg sibling_ref "${SIBLING_REF}" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson siblings "$SIBLINGS" \
+            '{
+              build_source: "workspace",
+              promotion_class: "stability-candidate",
+              non_main_lineage: true,
+              pinnable_lanes: ["dev", "stability-test"],
+              prod_pinnable: false,
+              commit_sha: $sha,
+              image_repo: $repo,
+              image_digest: $digest,
+              image_ref: $ref,
+              image_tag: $tag,
+              sibling_ref: $sibling_ref,
+              per_sibling_vcs_provenance: $siblings.siblings,
+              build_date: $date,
+              workflow_run_id: $run_id,
+              ticket: "OMN-13656"
+            }' > ops/digests/build-manifest.json
+          echo "Candidate build manifest:"
+          cat ops/digests/build-manifest.json
+
+      - name: Upload candidate build manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-manifest-candidate-${{ steps.meta.outputs.candidate_tag }}
+          path: ops/digests/build-manifest.json
+          retention-days: 90
+
+      - name: Build summary
+        if: always()
+        env:
+          SIBLING_REF: ${{ inputs.sibling_ref }}
+        run: |
+          {
+            echo "# Workspace Stability-Candidate Build (OMN-13656)"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| build_source | workspace |"
+            echo "| promotion_class | stability-candidate |"
+            echo "| non_main_lineage | true |"
+            echo "| pinnable lanes | dev, stability-test (NEVER prod) |"
+            echo "| sibling ref | \`${SIBLING_REF}\` |"
+            echo "| digest | \`${{ steps.resolve-digest.outputs.digest }}\` |"
+            echo "| candidate tag | \`${{ steps.meta.outputs.candidate_tag }}\` |"
+            echo ""
+            echo "> This image is a NON-main-lineage stability-candidate. The omnimarket"
+            echo "> prod-promotion gate refuses it for prod absent an explicit candidate grant."
+          } >> "$GITHUB_STEP_SUMMARY"

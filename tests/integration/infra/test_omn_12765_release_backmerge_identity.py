@@ -15,12 +15,10 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    # OMN-13507: pin advanced to core dev HEAD 287511f20 (a strict descendant of
-    # the Phase-1b SHA db7f341) so the runtime image bundles a
-    # ModelTaskDelegatedEvent carrying tokens_input/tokens_output (#1300/OMN-13408)
-    # + context_pack_hash (#1299/OMN-13407); terminal-emit no longer raises
-    # ValidationError under frozen+extra=forbid.
-    expected_core = "287511f20a18a3a407348d8d80554d96d925b843"
+    # OMN-12546 S-1b: pin advanced to core dev HEAD 48cf8b0 (successor of
+    # 287511f20 from OMN-13507) so infra imports the promoted rich dispatch
+    # model types from the proven core commit.
+    expected_core = "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d"
 
     assert expected_core in pyproject
     assert expected_core in uv_lock
@@ -33,7 +31,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13654: identity regenerated after the Trivy HIGH-CVE dependency bump
-    # updated the runtime shared-env inputs.
-    assert lock["identity_digest"] == "08ca594236ffd27f87325329103c8f98"
-    assert lock["shared_env_digest"] == "9981cffc7324b45ab15b0922"
+    # OMN-13664: identity regenerated after the uv dependency refresh updated
+    # the runtime shared-env inputs.
+    assert lock["identity_digest"] == "917d844856cec327a8e5c4220348526a"
+    assert lock["shared_env_digest"] == "366971b13c707215ad917d59"

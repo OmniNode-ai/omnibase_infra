@@ -1,0 +1,42 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13656
+title: 'Scanned workspace-from-dev ECR build as a gated stability-candidate'
+summary: >-
+  Add a CI path that builds a SCANNED workspace-from-dev runtime image to ECR as an explicitly non-prod stability-candidate, and stamp it so the omnimarket prod-promotion gate refuses it for prod absent an explicit candidate grant.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Workspace stability-candidate build invariants pass
+    command: uv run pytest tests/ci/test_workspace_candidate_build.py -q
+  - kind: tests
+    description: Prod-lineage + Dockerfile regression suites stay green
+    command: uv run pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      New workflow build-workspace-candidate-runtime.yml stages siblings, builds Dockerfile.runtime in workspace mode, runs the SAME Trivy scan + source-hash attestation + provenance manifest, and pushes a stability-candidate to ECR.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_workspace_candidate_build.py -q'
+  - id: dod-002
+    description: >-
+      Dockerfile stamps com.omninode.promotion_class / non_main_lineage labels and fails closed unless a workspace build is marked stability-candidate.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_workspace_candidate_build.py::TestDockerfileCandidateStamping -q'
+  - id: dod-deploy
+    description: >-
+      No prod kustomization mutation. The candidate is pinnable to dev/stability lanes only; prod refusal is proven by the omnimarket gate test, not a deploy.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_deploy_runtime_prod_lineage.py -q'
