@@ -33,7 +33,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13654: identity regenerated after the Trivy HIGH-CVE dependency bump
-    # updated the runtime shared-env inputs.
-    assert lock["identity_digest"] == "08ca594236ffd27f87325329103c8f98"
-    assert lock["shared_env_digest"] == "9981cffc7324b45ab15b0922"
+    # OMN-13664: identity regenerated after the uv dependency refresh updated
+    # the runtime shared-env inputs.
+    assert lock["identity_digest"] == "917d844856cec327a8e5c4220348526a"
+    assert lock["shared_env_digest"] == "366971b13c707215ad917d59"
