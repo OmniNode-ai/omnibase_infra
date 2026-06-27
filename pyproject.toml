@@ -178,11 +178,11 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-12546 S-1b: re-point core pin to fe2d82cbaa8 which carries the promoted
+# OMN-12546 S-1b: re-point core pin to 48cf8b0be1c which carries the promoted
 # rich ModelDispatchResult + ModelDispatchOutputs + ModelDispatchMetadata +
 # ModelHandlerRef (successor of 287511f20 from OMN-13507).
 # Version stays 0.46.0 (override bound >=0.44.0,<0.47.0 unchanged).
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "fe2d82cbaa852cd2b93bb23ca7e5ba982554b0bc" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d" }
 # OMN-13507: pin spi to omnibase_spi dev HEAD 3c99ed45 (was branch=main @
 # b7bac176). The floating main pin resolved to a commit off omnibase_spi main
 # that has DIVERGED from dev (b7bac176 is not an ancestor of dev HEAD), so the
