@@ -654,6 +654,29 @@ resolve_expected_build_source() {
     echo "${EXPECTED_BUILD_SOURCE:-${build_source}}"
 }
 
+resolve_promotion_class() {
+    # OMN-13669: compute PROMOTION_CLASS OCI label from build_source.
+    # workspace builds are stability-candidates (non-main-lineage dev images);
+    # release/clean-main builds default to clean-main.
+    local build_source="$1"
+    if [[ "${build_source}" == "workspace" ]]; then
+        echo "stability-candidate"
+    else
+        echo "clean-main"
+    fi
+}
+
+resolve_non_main_lineage() {
+    # OMN-13669: compute NON_MAIN_LINEAGE OCI label from build_source.
+    # workspace builds are non-main-lineage; release builds are not.
+    local build_source="$1"
+    if [[ "${build_source}" == "workspace" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
 validate_build_source_config() {
     # Validate build-source selector agreement before staging or Docker build.
     local build_source expected_build_source omni_home
@@ -1795,6 +1818,13 @@ build_images() {
     build_source="$(resolve_build_source)"
     local expected_build_source
     expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    # OMN-13669: stamp OCI provenance labels so the prod-promotion gate and
+    # lineage guard can refuse workspace images for prod. Computed from
+    # build_source: workspace => stability-candidate/true; release => clean-main/false.
+    local promotion_class
+    promotion_class="$(resolve_promotion_class "${build_source}")"
+    local non_main_lineage
+    non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
     local occ_ref="main"
@@ -1824,6 +1854,8 @@ build_images() {
         --build-arg "COMPOSE_PROJECT=${compose_project}"
         --build-arg "BUILD_SOURCE=${build_source}"
         --build-arg "EXPECTED_BUILD_SOURCE=${expected_build_source}"
+        --build-arg "PROMOTION_CLASS=${promotion_class}"
+        --build-arg "NON_MAIN_LINEAGE=${non_main_lineage}"
         --build-arg "OMNI_HOME=${omni_home}"
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
@@ -1831,7 +1863,7 @@ build_images() {
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
-    log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
+    log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
@@ -2245,6 +2277,13 @@ print_compose_commands() {
     build_source="$(resolve_build_source)"
     local expected_build_source
     expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    # OMN-13669: stamp OCI provenance labels so the prod-promotion gate can refuse
+    # workspace images for prod. Computed from build_source (workspace =>
+    # stability-candidate/true; release => clean-main/false).
+    local promotion_class
+    promotion_class="$(resolve_promotion_class "${build_source}")"
+    local non_main_lineage
+    non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
     local occ_ref="main"
@@ -2271,6 +2310,8 @@ print_compose_commands() {
     log_info "    --build-arg COMPOSE_PROJECT=${compose_project} \\"
     log_info "    --build-arg BUILD_SOURCE=${build_source} \\"
     log_info "    --build-arg EXPECTED_BUILD_SOURCE=${expected_build_source} \\"
+    log_info "    --build-arg PROMOTION_CLASS=${promotion_class} \\"
+    log_info "    --build-arg NON_MAIN_LINEAGE=${non_main_lineage} \\"
     log_info "    --build-arg OMNI_HOME=${omni_home} \\"
     log_info "    --build-arg OMNIBASE_COMPAT_REF=${compat_ref} \\"
     log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref} \\"
