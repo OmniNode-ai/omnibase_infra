@@ -475,6 +475,14 @@ ARG RUNTIME_SOURCE_HASH=unknown
 # Docker Compose project name used for this deployment.
 # Lets operators confirm the container belongs to the expected compose stack.
 ARG COMPOSE_PROJECT=unknown
+# OMN-13656: promotion-class provenance. A workspace build (staged dev-HEAD
+# siblings) is a non-main-lineage stability-candidate and must be STAMPED as such
+# on the image so the prod-promotion gate (omnimarket node_prod_promotion_gate_
+# compute) and the lineage guard (OMN-12626) can refuse it for prod. Release
+# builds default to clean-main. The CI workspace path passes
+# PROMOTION_CLASS=stability-candidate explicitly.
+ARG PROMOTION_CLASS=clean-main
+ARG NON_MAIN_LINEAGE=false
 
 RUN set -eu; \
     case "${BUILD_SOURCE}" in \
@@ -507,6 +515,10 @@ RUN set -eu; \
         echo "workspace build requires RUNTIME_VERSION from pyproject (not placeholder 0.1.0) for org.opencontainers.image.version (OMN-12965)" >&2; \
         exit 64; \
       fi; \
+      if [ "${PROMOTION_CLASS}" != "stability-candidate" ] || [ "${NON_MAIN_LINEAGE}" != "true" ]; then \
+        echo "workspace build MUST stamp PROMOTION_CLASS=stability-candidate + NON_MAIN_LINEAGE=true so the prod-promotion gate refuses it for prod (OMN-13656); got PROMOTION_CLASS='${PROMOTION_CLASS}' NON_MAIN_LINEAGE='${NON_MAIN_LINEAGE}'" >&2; \
+        exit 64; \
+      fi; \
     fi
 
 # OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
@@ -520,6 +532,8 @@ LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       com.omninode.build_source="${BUILD_SOURCE}" \
+      com.omninode.promotion_class="${PROMOTION_CLASS}" \
+      com.omninode.non_main_lineage="${NON_MAIN_LINEAGE}" \
       com.omninode.workspace_provenance_manifest="/app/build-provenance.json"
 
 # Runtime environment configuration
