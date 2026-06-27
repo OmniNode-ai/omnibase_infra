@@ -439,7 +439,7 @@ jobs:
               echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test-password@${E2E_REDPANDA_ADVERTISE_HOST}:${POSTGRES_PORT}/omnibase_infra"
             } >> "$GITHUB_ENV"
           else
-            skip_reason="compose services are healthy but unreachable from the runner by Docker DNS, localhost, or Docker host gateway"
+            skip_reason="compose services are healthy but unreachable from the runner by docker dns, localhost, or docker host gateway"
             echo "::warning::${skip_reason}"
             echo "runner_container_id=${runner_container_id:-<none>} runner_on_compose_network=${runner_on_compose_network} e2e_redpanda_advertise_host=${E2E_REDPANDA_ADVERTISE_HOST}"
             echo "RUNTIME_BOOT_SKIP_REASON=${skip_reason}" >> "$GITHUB_ENV"
