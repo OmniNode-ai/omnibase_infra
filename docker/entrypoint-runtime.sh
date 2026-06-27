@@ -66,6 +66,17 @@ echo "========================"
 # omniintelligence (e.g. code_entities, code_relationships), the stored
 # fingerprint was stale and the service failed health checks.
 #
+# OMN-13666: Required vs best-effort stamp policy.
+#   - The runtime's OWN database (omnibase_infra) is REQUIRED. Its db_metadata
+#     row drives the kernel's startup fingerprint assertion; if the stamp cannot
+#     succeed the kernel would start with a NULL/stale fingerprint and crash-loop
+#     anyway, so we fail FAST and loud here with a clear cause.
+#   - Secondary / non-owned databases (e.g. omniintelligence) are BEST-EFFORT.
+#     The runtime DB user legitimately lacks write permission on another
+#     service's db_metadata table ("permission denied for table db_metadata").
+#     A failure there must NOT take the whole runtime down -- it is logged as a
+#     WARNING and boot proceeds. The owning service stamps its own fingerprint.
+#
 # Retry logic: up to 5 attempts with 1s sleep between failures handles
 # transient DB-not-ready conditions at container startup.
 #
@@ -73,19 +84,19 @@ echo "========================"
 #   0 = success (fingerprint stamped)
 #   2 = schema mismatch (no point retrying -- bail immediately)
 #   1 = connection or general error (retry)
-#
-# Fail-open: kernel starts regardless of stamp outcome. The kernel's own
-# fingerprint assertion will catch any real problems.
 
 stamp_fingerprint() {
   # Stamp schema fingerprint for a single database.
-  # Usage: stamp_fingerprint <manifest_name> <db_url>
+  # Usage: stamp_fingerprint <manifest_name> <db_url> <required>
+  #   required="required" -> a failed stamp aborts boot (exit 1)
+  #   required="optional" -> a failed stamp warns and boot continues
   MANIFEST_NAME="$1"
   DB_URL="$2"
+  REQUIRED="$3"
 
   # Safe log: strip scheme and userinfo, show only host:port/db
   SAFE_DSN=$(echo "${DB_URL}" | sed 's|^[^/]*//[^@]*@||')
-  echo "[entrypoint] Stamping schema fingerprint for ${MANIFEST_NAME} (db: ${SAFE_DSN})..."
+  echo "[entrypoint] Stamping schema fingerprint for ${MANIFEST_NAME} (db: ${SAFE_DSN}, ${REQUIRED})..."
 
   STAMP_OK=0
   ATTEMPT=1
@@ -112,20 +123,24 @@ stamp_fingerprint() {
   done
 
   if [ "${STAMP_OK}" -eq 0 ]; then
-    echo "[entrypoint] WARNING: ${MANIFEST_NAME} fingerprint stamp did not succeed -- continuing"
+    if [ "${REQUIRED}" = "required" ]; then
+      echo "[entrypoint] ERROR: ${MANIFEST_NAME} (PRIMARY/owned DB) fingerprint stamp failed -- aborting boot" >&2
+      exit 1
+    fi
+    echo "[entrypoint] WARNING: ${MANIFEST_NAME} (secondary/non-owned DB) fingerprint stamp did not succeed -- continuing best-effort"
   fi
 }
 
-# Stamp omnibase_infra (primary, always required)
+# Stamp omnibase_infra (PRIMARY/owned DB -- REQUIRED: failure aborts boot)
 if [ -n "${OMNIBASE_INFRA_DB_URL:-}" ]; then
-  stamp_fingerprint "omnibase_infra" "${OMNIBASE_INFRA_DB_URL}"
+  stamp_fingerprint "omnibase_infra" "${OMNIBASE_INFRA_DB_URL}" "required"
 else
   echo "[entrypoint] OMNIBASE_INFRA_DB_URL not set -- skipping fingerprint stamp"
 fi
 
-# Stamp omniintelligence (optional, activates only when plugin DB is configured)
+# Stamp omniintelligence (SECONDARY/non-owned DB -- BEST-EFFORT: failure warns)
 if [ -n "${OMNIINTELLIGENCE_DB_URL:-}" ]; then
-  stamp_fingerprint "omniintelligence" "${OMNIINTELLIGENCE_DB_URL}"
+  stamp_fingerprint "omniintelligence" "${OMNIINTELLIGENCE_DB_URL}" "optional"
 else
   echo "[entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping omniintelligence fingerprint stamp"
 fi
