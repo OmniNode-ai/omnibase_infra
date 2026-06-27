@@ -1,0 +1,59 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13664
+title: 'Fix dev-lane embedding endpoint: :8100 (DOWN) → :8002 (live vllm-embeddings)'
+summary: >-
+  The dev-lane Bifrost embedding endpoint was configured to http://192.168.86.201:8100/v1/chat/completions
+  (no process, circuit-breaker OPEN) while the real vllm-embeddings service
+  (text-embedding-qwen3 / qwen3-embedding-0.6b) is UP on :8002. A live patch was applied
+  to .201 dev.bifrost.env + ~/.omnibase/.env, closing the circuit-breaker, but the
+  canonical repo config still shipped :8100 — meaning any redeploy would re-break embedding.
+  This fix makes the canonical config durable: dev.bifrost.yaml (YAML source), dev.bifrost.env
+  (rendered sidecar), docs/env-master-template.env, and config/shared_key_registry.yaml comment
+  are all updated to :8002. Also vendors the pre-existing omnimarket migration drift
+  (node_projection_delegation/0021) that was failing the sync-check gate.
+  NOTE: endpoint config belongs in contract model_routing (OMN-12803/12815/epic) — the :8002
+  fix is the durable interim; contract-resolution is the follow-up target.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Unit tests pass (migration sync check, bifrost/overlay/embed targeted suite).
+    command: 'uv run pytest tests/ -q -m "unit" -k "bifrost or embed or overlay or lane or migration" --timeout=30'
+  - kind: ci
+    description: CI pipeline green on PR
+    command: 'gh pr checks <PR> --repo OmniNode-ai/omnibase_infra'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      dev.bifrost.yaml embedding_endpoint_url updated from :8100 to :8002 (complete URL per OMN-12815).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep -q "8002" docker/lane-overlays/dev.bifrost.yaml && ! grep -q "8100" docker/lane-overlays/dev.bifrost.yaml'
+  - id: dod-002
+    description: >-
+      dev.bifrost.env (rendered sidecar) reflects :8002 for BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" docker/lane-overlays/dev.bifrost.env | grep -q "8002"'
+  - id: dod-003
+    description: >-
+      env-master-template.env LLM_EMBEDDING_URL updated from :8100 to :8002.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep "LLM_EMBEDDING_URL" docs/env-master-template.env | grep -q "8002"'
+  - id: dod-004
+    description: >-
+      Unit tests pass with migration sync check resolved (pre-existing drift vendored).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/migrations/test_node_migration_discovery.py::TestVendoredTreeMatchesSource::test_sync_check_reports_in_sync -q'
