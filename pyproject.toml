@@ -72,10 +72,12 @@ dependencies = [
     # System utilities
     # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
     # Explicitly declared here to enforce minimum version for security compliance.
-    # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
+    # Constraint: >=48.0.1,<49.0.0 (floor raised from 46.0.3 for CVE remediation).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
+    # Security: GHSA-537c-gmf6-5ccf (HIGH) - vulnerable OpenSSL bundled in cryptography
+    #   wheels <48.0.1; fixed in 48.0.1. Trivy gate blocks build at <48.0.1.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
-    "cryptography>=46.0.3,<49.0.0",
+    "cryptography>=48.0.1,<49.0.0",
     "sigstore>=4.0.0,<5.0.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
