@@ -23,6 +23,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import importlib
 import inspect
@@ -1918,7 +1919,24 @@ def _make_sync_event_publisher(
     event_bus: object,
     handler_name: str,
 ) -> Callable[[str, bytes], None]:
-    """Adapt async runtime event-bus publish to legacy sync handler publishers."""
+    """Adapt async runtime event-bus publish to legacy sync handler publishers.
+
+    The publisher is constructed during ``wire_from_manifest`` while the runtime
+    kernel's event loop is running, so that loop is captured here as the owning
+    loop. Legacy sync handlers (e.g. ``HandlerContextRoiRunner``) execute on a
+    ``ThreadPoolExecutor`` worker thread — the dispatch engine offloads blocking
+    sync handlers via ``run_in_executor`` — so a publish issued from inside such
+    a handler runs on a thread that does not own the kernel loop.
+
+    The publish awaitable returned by the event bus binds its internal Futures to
+    the kernel loop. Running that awaitable on a *foreign* loop (the previous
+    behavior: ``asyncio.run`` spun a throwaway loop in the worker thread once
+    ``get_running_loop`` raised ``RuntimeError``) produced the ``got Future
+    attached to a different loop`` warning and 2-3 minute terminal-emission retry
+    delays (OMN-13658). Scheduling the coroutine back onto the owning kernel loop
+    via ``asyncio.run_coroutine_threadsafe`` keeps every Future on its loop, so
+    the publish completes immediately from any thread.
+    """
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):
         raise ModelOnexError(
@@ -1927,21 +1945,25 @@ def _make_sync_event_publisher(
             f"{type(event_bus).__name__!r} has no callable publish()."
         )
 
+    try:
+        kernel_loop = asyncio.get_running_loop()
+    except RuntimeError as exc:
+        raise ModelOnexError(
+            "handler_wiring: the sync event_publisher for handler "
+            f"{handler_name!r} must be constructed on the runtime kernel event "
+            "loop (wire_from_manifest runs on it), but no running loop was found."
+        ) from exc
+
     def _publish(topic: str, payload: bytes) -> None:
         result = publish(topic, None, payload)
         if not inspect.isawaitable(result):
             return
 
         publish_awaitable = cast("Awaitable[object]", result)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_await_event_bus_publish(publish_awaitable))
-            return
 
-        task = loop.create_task(_await_event_bus_publish(publish_awaitable))
-
-        def _log_publish_failure(done: asyncio.Task[None]) -> None:
+        def _log_publish_failure(
+            done: asyncio.Future[None] | concurrent.futures.Future[None],
+        ) -> None:
             try:
                 done.result()
             except Exception as exc:  # noqa: BLE001 — publish boundary logging
@@ -1954,7 +1976,27 @@ def _make_sync_event_publisher(
                     exc,
                 )
 
-        task.add_done_callback(_log_publish_failure)
+        try:
+            running_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is kernel_loop:
+            # Publishing from the kernel loop's own thread (async handler path):
+            # schedule the coroutine directly on it.
+            task = kernel_loop.create_task(_await_event_bus_publish(publish_awaitable))
+            task.add_done_callback(_log_publish_failure)
+            return
+
+        # Publishing from a ThreadPoolExecutor worker thread (or any thread that
+        # does not own the kernel loop): hand the coroutine to the kernel loop in
+        # a thread-safe way so the publish awaitable's Futures stay on their
+        # owning loop. This avoids the "got Future attached to a different loop"
+        # warning and the 2-3 minute retry delay (OMN-13658).
+        future = asyncio.run_coroutine_threadsafe(
+            _await_event_bus_publish(publish_awaitable), kernel_loop
+        )
+        future.add_done_callback(_log_publish_failure)
 
     return _publish
 
