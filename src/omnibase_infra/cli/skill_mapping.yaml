@@ -52,6 +52,7 @@ skills:
     node_name: node_runtime_sweep
     result_model: omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep.RuntimeSweepResult
     args:
+      - {name: scope, payload_field: scope, arg_type: string}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: golden_chain_sweep
     node_name: node_golden_chain_sweep
