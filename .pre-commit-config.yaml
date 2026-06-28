@@ -21,12 +21,19 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
-  # Stub implementation detection + transport-mock lint — sourced from omnibase_core.
-  # Rev bumped to OMN-13026 (transport-mock-lint hook added).
+  # Stub implementation detection + receipt-honesty gate + transport-mock lint —
+  # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
+  # hook added); OMN-13281 wires receipt-honesty to this block.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 309d89fa7254701347f95bf99205cccfb3f6c1df # pragma: allowlist secret
     hooks:
       - id: check-stub-implementations
+      # OMN-13281: scan staged ModelDodReceipt YAML files under
+      # drift/dod_receipts/ for gaming patterns (echo-probe PASS, deferred
+      # evidence in PASS receipts, self-attestation, fake human verifiers,
+      # deploy-keyword echo receipts). Only fires when a receipt YAML is
+      # staged; no-op on commits that touch no receipts.
+      - id: check-receipt-honesty
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
       # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
       # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
