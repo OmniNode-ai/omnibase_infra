@@ -16,16 +16,16 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 evidence_requirements:
-  - kind: config
+  - kind: ci
     description: >-
       All three runtime profiles with secret_resolver_mappings (dev, stability-test,
       judge) contain the slack.bot_token → SLACK_BOT_TOKEN entry.
     command: "grep -c 'logical_name: slack.bot_token' contracts/services/runtime_policy.contract.yaml"
-  - kind: config
+  - kind: ci
     description: >-
       Integration catalog registers node_slack_publish_effect and lists SLACK_MORNING_CHANNEL.
     command: "grep -q 'node_slack_publish_effect' src/omnibase_infra/contracts/integrations/catalog.yaml && grep -q 'SLACK_MORNING_CHANNEL' src/omnibase_infra/contracts/integrations/catalog.yaml"
-  - kind: config
+  - kind: ci
     description: >-
       All overlay files contain the SLACK_MORNING_CHANNEL key with a placeholder value.
     command: "grep -c 'SLACK_MORNING_CHANNEL' config/overlays/mac-dev.yaml config/overlays/linux-server.yaml config/overlays/cloud-k8s.yaml"
