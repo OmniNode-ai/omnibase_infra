@@ -19,9 +19,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-001
     description: >-
-      Reproduction test proves the declarative path now yields a payload carrying
-      reviewer_models=["local"] and judge_model="local" from --repo/--pr-number
-      alone (KeyError on reviewer_models before the fix).
+      Reproduction test proves the declarative path now yields a payload carrying reviewer_models=["local"] and judge_model="local" from --repo/--pr-number alone (KeyError on reviewer_models before the fix).
     source: generated
     checks:
       - check_type: command
