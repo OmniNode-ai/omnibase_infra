@@ -1,33 +1,47 @@
-schema_version: '1.0.0'
-ticket_id: OMN-13719
-title: 'pr_review / pr_review_bot declarative path cannot build ReviewRequest payload'
-summary: 'Add local-first declarative defaults for reviewer_models + judge_model on the pr_review and pr_review_bot skill_mapping entries so `onex skill pr_review --repo X --pr-number N` builds a valid ReviewRequest and runs node_pr_review_orchestrator over the local in-memory bus.'
+---
+schema_version: "1.0.0"
+ticket_id: "OMN-13719"
+title: "pr_review / pr_review_bot declarative path cannot build ReviewRequest payload"
+summary: >-
+  Add local-first declarative defaults for reviewer_models + judge_model on the pr_review and
+  pr_review_bot skill_mapping entries so `onex skill pr_review --repo X --pr-number N` builds
+  a valid ReviewRequest and runs node_pr_review_orchestrator over the local in-memory bus.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 evidence_requirements:
-  - kind: tests
-    description: Declarative pr_review/pr_review_bot path supplies reviewer_models + judge_model defaults
-    command: uv run pytest tests/unit/cli/test_cli_skill.py -q -k pr_review_declarative
-  - kind: ci
-    description: CI pipeline green on PR
-    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+  - kind: "tests"
+    description: "Declarative pr_review/pr_review_bot path supplies reviewer_models + judge_model defaults"
+    command: "uv run pytest tests/unit/cli/test_cli_skill.py -q -k pr_review_declarative"
+  - kind: "ci"
+    description: "CI pipeline green on PR"
+    command: "gh pr checks 2145 --repo OmniNode-ai/omnibase_infra"
 emergency_bypass:
   enabled: false
-  justification: ''
-  follow_up_ticket_id: ''
+  justification: ""
+  follow_up_ticket_id: ""
 dod_evidence:
-  - id: dod-001
+  - id: "dod-001"
     description: >-
-      Reproduction test proves the declarative path now yields a payload carrying reviewer_models=["local"] and judge_model="local" from --repo/--pr-number alone (KeyError on reviewer_models before the fix).
-    source: generated
+      Reproduction test proves the declarative path now yields a payload carrying
+      reviewer_models=["local"] and judge_model="local" from --repo/--pr-number alone
+      (KeyError on reviewer_models before the fix).
+    source: "manual"
     checks:
-      - check_type: command
-        check_value: 'uv run pytest tests/unit/cli/test_cli_skill.py -q -k pr_review_declarative'
-  - id: dod-002
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/cli/test_cli_skill.py -q -k pr_review_declarative"
+  - id: "dod-002"
     description: >-
       Full CLI skill-mapping/registry suite stays green with the new defaults.
-    source: generated
+    source: "manual"
     checks:
-      - check_type: command
-        check_value: 'uv run pytest tests/unit/cli/ -q'
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/cli/ -q"
+  - id: "dod-occ"
+    description: >-
+      OCC contract and receipts landed in onex_change_control PR #3316
+      (branch jonah/omn-13719-occ, SHA 300a4b2fd3fc95c6e1a0b1594c6a5e914286f23a).
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh pr view 3316 --repo OmniNode-ai/onex_change_control --json state --jq .state"
