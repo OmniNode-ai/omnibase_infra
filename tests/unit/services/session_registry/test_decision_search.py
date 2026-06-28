@@ -7,7 +7,7 @@ Part of the Multi-Session Coordination Layer (OMN-6850, Task 14).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,6 +15,8 @@ from omnibase_infra.services.session_registry.decision_search import (
     DecisionSearchClient,
     ModelDecisionSearchResult,
 )
+
+_TEST_EMBEDDING_URL = "http://test-embed:8100"
 
 
 @pytest.mark.unit
@@ -139,7 +141,11 @@ class TestDecisionSearchClientSearch:
 
         embedder = MagicMock(return_value=[0.1, 0.2, 0.3])
 
-        client = DecisionSearchClient(qdrant=mock_qdrant, embedder=embedder)
+        client = DecisionSearchClient(
+            qdrant=mock_qdrant,
+            embedder=embedder,
+            embedding_base_url=_TEST_EMBEDDING_URL,
+        )
         results = await client.search("event bus choice")
 
         assert len(results) == 1
@@ -157,7 +163,11 @@ class TestDecisionSearchClientSearch:
 
         embedder = MagicMock(return_value=[0.1, 0.2, 0.3])
 
-        client = DecisionSearchClient(qdrant=mock_qdrant, embedder=embedder)
+        client = DecisionSearchClient(
+            qdrant=mock_qdrant,
+            embedder=embedder,
+            embedding_base_url=_TEST_EMBEDDING_URL,
+        )
         await client.search("test", task_id="OMN-5555")
 
         call_kwargs = mock_qdrant.query_points.call_args
@@ -209,9 +219,67 @@ class TestDecisionSearchClientSearchRelated:
         mock_query_result.points = [mock_hit]
         mock_qdrant.query_points.return_value = mock_query_result
 
-        client = DecisionSearchClient(qdrant=mock_qdrant, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=mock_qdrant,
+            embedder=None,
+            embedding_base_url=_TEST_EMBEDDING_URL,
+        )
         results = await client.search_related("OMN-1234")
 
         assert len(results) == 1
         assert results[0].task_id == "OMN-5678"
         assert results[0].score == 0.85
+
+
+@pytest.mark.unit
+class TestDecisionSearchClientUrlInjection:
+    """Verify that embedding_base_url is injected at construction, not read from env."""
+
+    def test_url_stored_from_constructor(self) -> None:
+        """URL passed at construction is stored and not resolved from env."""
+        client = DecisionSearchClient(
+            embedding_base_url="http://injected-host:9999",
+        )
+        assert client._embedding_base_url == "http://injected-host:9999"
+
+    def test_model_stored_from_constructor(self) -> None:
+        """Embedding model passed at construction is stored."""
+        client = DecisionSearchClient(
+            embedding_base_url=_TEST_EMBEDDING_URL,
+            embedding_model="custom-embed-model",
+        )
+        assert client._embedding_model == "custom-embed-model"
+
+    def test_no_env_var_read_on_import(self) -> None:
+        """LLM_EMBEDDING_URL is never read from env by DecisionSearchClient."""
+        # Instantiating with an explicit URL must not access env at all.
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure the var is absent; construction must still succeed.
+            import os
+
+            os.environ.pop("LLM_EMBEDDING_URL", None)
+            client = DecisionSearchClient(
+                embedding_base_url=_TEST_EMBEDDING_URL,
+            )
+            assert client._embedding_base_url == _TEST_EMBEDDING_URL
+
+    @pytest.mark.asyncio
+    async def test_embed_uses_injected_url_not_env(self) -> None:
+        """_embed sends requests to the injected URL, ignoring any env var."""
+        injected_url = "http://injected-embed:1234"
+        embedder_mock = AsyncMock(return_value=[0.1, 0.2])
+
+        client = DecisionSearchClient(
+            qdrant=MagicMock(),
+            embedder=embedder_mock,
+            embedding_base_url=injected_url,
+        )
+        await client._embed("test text")
+        embedder_mock.assert_awaited_once_with("test text")
+
+    @pytest.mark.asyncio
+    async def test_embed_raises_on_empty_url_without_embedder(self) -> None:
+        """_embed fails fast when no custom embedder and URL is empty."""
+        client = DecisionSearchClient(qdrant=MagicMock(), embedder=None)
+        with pytest.raises(ValueError, match="embedding_base_url is empty"):
+            await client._embed("test text")

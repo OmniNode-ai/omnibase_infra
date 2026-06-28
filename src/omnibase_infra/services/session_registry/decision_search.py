@@ -27,7 +27,6 @@ Part of the Multi-Session Coordination Layer (OMN-6850, Task 14).
 from __future__ import annotations
 
 import logging
-import os
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,7 +36,6 @@ from qdrant_client.http import models as qdrant_models
 logger = logging.getLogger(__name__)
 
 _COLLECTION_NAME = "session_decisions"
-_DEFAULT_EMBEDDING_URL = os.getenv("LLM_EMBEDDING_URL", "")
 _DEFAULT_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 
 
@@ -69,22 +67,34 @@ class DecisionSearchClient:
     Args:
         qdrant: QdrantClient instance (None for format-only usage).
         embedder: Callable that takes text and returns embedding vector.
-            If None, uses the default HTTP embedding client.
+            When provided, ``embedding_base_url`` is not used.
+        embedding_base_url: Full base URL of the embedding service (e.g.
+            ``"http://192.168.86.201:8100"``). Required when no custom
+            ``embedder`` is provided; must be injected from the node contract
+            or routing authority — no env-var fallback.
+        embedding_model: Model name to request from the embedding API.
+            Defaults to ``"Qwen3-Embedding-8B"``.
     """
 
     def __init__(
         self,
         qdrant: QdrantClient | None = None,
         embedder: object | None = None,
+        embedding_base_url: str = "",
+        embedding_model: str = _DEFAULT_EMBEDDING_MODEL,
     ) -> None:
         self._qdrant = qdrant
         self._embedder = embedder
+        self._embedding_base_url = embedding_base_url
+        self._embedding_model = embedding_model
 
     async def _embed(self, text: str) -> list[float]:
         """Embed text using the configured embedding endpoint.
 
-        Falls back to the default Qwen3-Embedding-8B endpoint if no
-        custom embedder is provided.
+        Uses ``self._embedder`` when provided; otherwise issues an HTTP
+        request to ``self._embedding_base_url``. The URL must have been
+        injected at construction time from the node contract or routing
+        authority — no env-var fallback occurs here.
         """
         if self._embedder is not None and callable(self._embedder):
             result = self._embedder(text)
@@ -94,12 +104,16 @@ class DecisionSearchClient:
             # Why: Runtime validation guarantees the returned value matches the contract.
             return await result  # type: ignore[return-value]
 
-        base_url = os.getenv("LLM_EMBEDDING_URL", _DEFAULT_EMBEDDING_URL)
-        model = os.getenv("LLM_EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL)
+        if not self._embedding_base_url:
+            raise ValueError(
+                "DecisionSearchClient.embedding_base_url is empty; "
+                "inject the URL from the node contract or routing authority "
+                "rather than relying on an env-var fallback."
+            )
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{base_url}/v1/embeddings",
-                json={"input": text, "model": model},
+                f"{self._embedding_base_url}/v1/embeddings",
+                json={"input": text, "model": self._embedding_model},
             )
             response.raise_for_status()
             data = response.json()
