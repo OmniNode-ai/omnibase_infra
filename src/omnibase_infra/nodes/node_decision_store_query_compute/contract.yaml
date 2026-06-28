@@ -50,6 +50,11 @@ capabilities:
 # Handler routing
 handler_routing:
   routing_strategy: "operation_match"
+  # default_handler (module:Class) lets RuntimeLocal resolve a concrete handler
+  # on the compute execution path. Without it the runtime fails closed with
+  # "missing 'terminal_event' topic and no handler spec found" because the
+  # operation_match entries below carry no top-level handler.module/class.
+  default_handler: "omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions:HandlerQueryDecisions"
   handlers:
     - operation: "decision_store.query_decisions"
       handler_class: "HandlerQueryDecisions"
