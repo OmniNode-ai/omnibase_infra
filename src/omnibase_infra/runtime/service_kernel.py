@@ -1896,26 +1896,45 @@ async def bootstrap() -> int:
         # takes ~12 minutes. If Intelligence goes first, later plugins never
         # get their consumers started before the runtime is restarted or killed.
 
-        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
-        # Imported lazily here (not at module scope) so a missing/unavailable
-        # omnimarket dependency degrades gracefully instead of crashing kernel
-        # startup, and to avoid a module-load circular import.
-        try:
-            from omnimarket.nodes.node_delegation_orchestrator.plugin import (
-                PluginDelegation,
-            )
+        # Try to load and register PluginDelegation via entry-point discovery
+        # (graceful degradation - OMN-13690). omnimarket is optional and can be
+        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
+        # Discovery via "onex.domain_plugins" avoids a direct infra-to-omnimarket
+        # import which violates the compat→core→spi→infra layering rule.
+        if is_runtime_package_active("omnimarket"):
+            try:
+                from importlib.metadata import entry_points
 
-            plugin_registry.register(PluginDelegation())
+                delegation_eps = [
+                    e
+                    for e in entry_points(group="onex.domain_plugins")
+                    if e.name == "delegation"
+                ]
+                if delegation_eps:
+                    PluginDelegation = delegation_eps[0].load()
+                    plugin_registry.register(PluginDelegation())
+                    logger.info(
+                        "PluginDelegation registered (correlation_id=%s)",
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "omnimarket not installed, delegation plugin not available "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "PluginDelegation failed to initialize, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+        else:
             logger.info(
-                "PluginDelegation registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDelegation failed to initialize, continuing without it "
+                "PluginDelegation skipped by active runtime package filter "
                 "(correlation_id=%s)",
                 correlation_id,
-                exc_info=True,
             )
 
         # Try to register PluginLlm (OMN-6600: LLM domain plugin).
