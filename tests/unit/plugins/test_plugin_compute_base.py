@@ -1,17 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for PluginCompute base class and protocol conformance.
+"""Unit tests for PluginComputeBase abstract base class and protocol conformance.
 
 Tests verify:
-- Protocol conformance for base class and example plugins
+- Protocol conformance for base class
 - Abstract base class behavior
 - Validation hook execution order
-- Determinism guarantees
-- PluginJsonNormalizer functionality
-
-NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormalizer
-are implemented. Uncomment imports below once implementation is complete.
+- Context propagation
 
 Note on Type Annotations:
     This test module intentionally uses dict types for test plugin implementations
@@ -22,9 +18,6 @@ Note on Type Annotations:
 
 import pytest
 
-from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
-
-# Implementations are now complete - imports activated
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 
 
@@ -45,16 +38,6 @@ class TestProtocolConformance:
                 return input_data
 
         instance = ConcretePlugin()
-
-        # Act & Assert: Verify protocol conformance via duck typing
-        # ProtocolPluginCompute requires 'execute' method
-        assert hasattr(instance, "execute"), "Must have 'execute' method"
-        assert callable(instance.execute), "'execute' must be callable"
-
-    def test_protocol_conformance_with_example(self) -> None:
-        """PluginJsonNormalizer conforms to ProtocolPluginCompute."""
-        # Arrange
-        instance = PluginJsonNormalizer()
 
         # Act & Assert: Verify protocol conformance via duck typing
         # ProtocolPluginCompute requires 'execute' method
@@ -168,244 +151,6 @@ class TestValidationHooks:
         # Act & Assert: Validation error propagates when called manually
         with pytest.raises(ValueError, match="Missing required_field"):
             plugin.validate_input(input_data)
-
-
-class TestDeterminism:
-    """Test determinism guarantees for compute plugins."""
-
-    def test_same_input_produces_same_output(self) -> None:
-        """Same input produces identical output (core determinism)."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {"json": {"z": 3, "a": 1, "m": 2}}
-        context = {"correlation_id": "test-123"}
-
-        # Act: Execute twice with same input
-        result1 = plugin.execute(input_data, context)
-        result2 = plugin.execute(input_data, context)
-
-        # Assert: Results are identical
-        assert result1 == result2
-
-    def test_determinism_across_multiple_calls(self) -> None:
-        """Repeated calls with same input produce identical results."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {"json": {"nested": {"z": 1, "a": 2}, "top": "level"}}
-        context = {"correlation_id": "test-123"}
-
-        # Act: Execute 5 times
-        results = [plugin.execute(input_data, context) for _ in range(5)]
-
-        # Assert: All results identical
-        assert all(result == results[0] for result in results)
-
-    def test_different_input_produces_different_output(self) -> None:
-        """Different inputs produce different outputs."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input1 = {"json": {"key": "value1"}}
-        input2 = {"json": {"key": "value2"}}
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result1 = plugin.execute(input1, context)
-        result2 = plugin.execute(input2, context)
-
-        # Assert: Different inputs yield different outputs
-        assert result1 != result2
-
-
-class TestPluginJsonNormalizer:
-    """Test PluginJsonNormalizer functionality."""
-
-    def test_normalizes_simple_dict(self) -> None:
-        """Sorts keys in simple dictionary."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {"json": {"z": 3, "a": 1, "m": 2}}
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result = plugin.execute(input_data, context)
-
-        # Assert: Keys sorted alphabetically
-        # Plugin returns {"normalized": {...}} structure
-        normalized = result.get("normalized", result)
-        assert list(normalized.keys()) == ["a", "m", "z"]
-        assert normalized == {"a": 1, "m": 2, "z": 3}
-
-    def test_normalizes_nested_dict(self) -> None:
-        """Recursively sorts keys in nested dictionaries."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {
-            "json": {
-                "outer_z": {"inner_z": 3, "inner_a": 1},
-                "outer_a": {"inner_m": 2},
-            }
-        }
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result = plugin.execute(input_data, context)
-
-        # Assert: All levels sorted
-        normalized = result.get("normalized", result)
-        assert list(normalized.keys()) == ["outer_a", "outer_z"]
-        assert list(normalized["outer_z"].keys()) == ["inner_a", "inner_z"]
-        assert list(normalized["outer_a"].keys()) == ["inner_m"]
-
-    def test_normalizes_dict_with_lists(self) -> None:
-        """Handles lists within dictionaries."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {"json": {"z": [3, 2, 1], "a": ["x", "y"]}}
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result = plugin.execute(input_data, context)
-
-        # Assert: Keys sorted, lists preserved
-        normalized = result.get("normalized", result)
-        assert list(normalized.keys()) == ["a", "z"]
-        assert normalized["z"] == [3, 2, 1]  # List order preserved
-        assert normalized["a"] == ["x", "y"]
-
-    def test_normalizes_empty_dict(self) -> None:
-        """Handles empty dictionary edge case."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data: dict[str, object] = {"json": {}}
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result = plugin.execute(input_data, context)
-
-        # Assert: Empty dict handled gracefully
-        normalized = result.get("normalized", result)
-        assert normalized == {}
-
-    def test_preserves_values(self) -> None:
-        """Values unchanged, only keys sorted."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {
-            "json": {
-                "z": {"complex": [1, 2, 3], "value": True},
-                "a": None,
-                "m": 42,
-            }
-        }
-        context = {"correlation_id": "test-123"}
-
-        # Act
-        result = plugin.execute(input_data, context)
-
-        # Assert: Values exactly preserved
-        normalized = result.get("normalized", result)
-        assert normalized["z"]["complex"] == [1, 2, 3]
-        assert normalized["z"]["value"] is True
-        assert normalized["a"] is None
-        assert normalized["m"] == 42
-
-    def test_deterministic_normalization(self) -> None:
-        """Same JSON produces same normalized output."""
-        # Arrange
-        plugin = PluginJsonNormalizer()
-        input_data = {
-            "json": {
-                "users": [
-                    {"name": "Alice", "id": 2},
-                    {"name": "Bob", "id": 1},
-                ],
-                "metadata": {"version": "1.0", "created": "2025-01-01"},
-            }
-        }
-        context = {"correlation_id": "test-123"}
-
-        # Act: Normalize multiple times
-        result1 = plugin.execute(input_data, context)
-        result2 = plugin.execute(input_data, context)
-        result3 = plugin.execute(input_data, context)
-
-        # Assert: All results identical
-        assert result1 == result2 == result3
-        normalized = result1.get("normalized", result1)
-        assert list(normalized.keys()) == ["metadata", "users"]
-        assert list(normalized["metadata"].keys()) == ["created", "version"]
-
-
-class TestValidationHookIntegration:
-    """Test validation hooks with PluginJsonNormalizer."""
-
-    def test_validation_hooks_execute_in_order(self) -> None:
-        """Validation hooks must be called manually in correct order."""
-        # Arrange: Track execution order
-        execution_order: list[str] = []
-
-        class TrackedNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, object]) -> None:
-                execution_order.append("validate_input")
-                super().validate_input(input_data)
-
-            def validate_output(self, output_data: dict[str, object]) -> None:
-                execution_order.append("validate_output")
-                super().validate_output(output_data)
-
-            def execute(
-                self, input_data: dict[str, object], context: dict[str, object]
-            ) -> dict[str, object]:
-                execution_order.append("execute")
-                return super().execute(input_data, context)
-
-        plugin = TrackedNormalizer()
-        input_data = {"json": {"z": 1, "a": 2}}
-        context = {"correlation_id": "test-123"}
-
-        # Act: Manually call hooks in correct order
-        plugin.validate_input(input_data)
-        output = plugin.execute(input_data, context)
-        plugin.validate_output(output)
-
-        # Assert: Correct execution order
-        assert execution_order == ["validate_input", "execute", "validate_output"]
-
-    def test_input_validation_failure(self) -> None:
-        """Input validation errors prevent execution when called manually."""
-
-        # Arrange: Plugin with strict input validation
-        class StrictNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, object]) -> None:
-                if not input_data.get("json"):
-                    raise ValueError("Input must not be empty")
-
-        plugin = StrictNormalizer()
-
-        # Act & Assert: Empty input raises error when validated
-        with pytest.raises(ValueError, match="Input must not be empty"):
-            plugin.validate_input({})
-
-    def test_output_validation_failure(self) -> None:
-        """Output validation errors propagate when called manually."""
-
-        # Arrange: Plugin with strict output validation
-        class StrictNormalizer(PluginJsonNormalizer):
-            def validate_output(self, output_data: dict[str, object]) -> None:
-                normalized = output_data.get("normalized", output_data)
-                if isinstance(normalized, dict) and len(normalized) > 5:
-                    raise ValueError("Output too large")
-
-        plugin = StrictNormalizer()
-        large_input = {"json": {f"key_{i}": i for i in range(10)}}
-        context = {"correlation_id": "test-123"}
-
-        # Act: Execute and then validate output manually
-        output = plugin.execute(large_input, context)
-
-        # Assert: Large output raises error when validated
-        with pytest.raises(ValueError, match="Output too large"):
-            plugin.validate_output(output)
 
 
 class TestContextPropagation:
