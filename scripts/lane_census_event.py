@@ -128,7 +128,6 @@ def build_event(
 
 
 def main() -> int:
-
     host = os.environ.get("LANE_CENSUS_HOST", "")
     if not host:
         # Fail-fast: never silently fabricate a host into the alert_key.
