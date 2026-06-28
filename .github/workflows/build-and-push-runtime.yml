@@ -192,12 +192,46 @@ jobs:
       - name: Push image to Amazon ECR
         if: success()
         shell: bash
+        env:
+          # OMN-13687: bounded retry config for the docker push. Mirrors the
+          # exponential-backoff idiom in .github/actions/resolve-ecr-digest.
+          PUSH_MAX_ATTEMPTS: '5'
+          PUSH_INITIAL_DELAY: '10'
+          PUSH_MAX_DELAY: '120'
+          PUSH_BACKOFF_FACTOR: '2'
         run: |
           echo "Trivy scan passed — pushing image to ECR..."
+          # OMN-13687: wrap `docker push` in a bounded retry loop to absorb the
+          # transient network EOF on a blob HEAD seen on the .201 self-hosted
+          # runner -> ECR path. Additive only: image tags and digest
+          # computation are unchanged; this only retries the network push.
+          push_with_retry() {
+            local tag="$1"
+            local delay="$PUSH_INITIAL_DELAY"
+            local attempt
+            for attempt in $(seq 1 "$PUSH_MAX_ATTEMPTS"); do
+              echo "Attempt ${attempt}/${PUSH_MAX_ATTEMPTS}: docker push ${tag}"
+              if docker push "${tag}"; then
+                echo "Pushed ${tag} on attempt ${attempt}"
+                return 0
+              fi
+              if [[ "${attempt}" -lt "$PUSH_MAX_ATTEMPTS" ]]; then
+                echo "::warning::push attempt ${attempt} for ${tag} failed; retrying in ${delay}s..."
+                sleep "${delay}"
+                delay=$((delay * PUSH_BACKOFF_FACTOR))
+                if [[ "${delay}" -gt "$PUSH_MAX_DELAY" ]]; then
+                  delay="$PUSH_MAX_DELAY"
+                fi
+              fi
+            done
+            echo "::error::docker push ${tag} failed after ${PUSH_MAX_ATTEMPTS} attempts"
+            return 1
+          }
+
           IFS=',' read -ra TAGS <<< "${{ steps.meta.outputs.tags }}"
           for TAG in "${TAGS[@]}"; do
             echo "Pushing: ${TAG}"
-            docker push "${TAG}"
+            push_with_retry "${TAG}"
           done
           echo "All tags pushed successfully"
 
