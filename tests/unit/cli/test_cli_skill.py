@@ -313,6 +313,87 @@ def test_every_node_backed_sweep_skill_is_registered() -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# OMN-13712: node-proven WIRE-MAP skills converge onto `onex skill <name>`.
+#
+# Each skill below already had a working omnimarket backing node proven over
+# the local in-memory bus (`onex node <name>`, migration=WIRE-MAP +
+# verdict=WORKS-E2E in docs/evidence/2026-06-28-skill-e2e-foreground/matrix.md)
+# but no skill_mapping entry, so the only documented invocation was the remote
+# `onex run-node` path. Before this change `onex skill bus_audit` (etc.)
+# returned "Unknown skill". This pins each skill to its backing node and proves
+# the node resolves in the canonical omnimarket catalog.
+# --------------------------------------------------------------------------- #
+_OMN_13712_WIRE_MAP_SKILLS: dict[str, str] = {
+    "agent_healthcheck": "node_worker_stall_recovery",
+    "env_parity": "node_env_parity_compute",
+    "bus_audit": "node_bus_audit_compute",
+    "plan_audit": "node_plan_audit_compute",
+    "recall": "node_recall_compute",
+    "dispatch_watchdog": "node_dispatch_watchdog_orchestrator",
+    "env_sync_alert": "node_env_sync_alert_effect",
+    "resume_session": "node_resume_session_compute",
+    "verification_receipt_generator": "node_verification_receipt_generator",
+    "rrh": "node_rrh_compute",
+    "rewind": "node_rewind_compute",
+    "checkpoint": "node_checkpoint_compute",
+    "insights_to_plan": "node_insights_to_plan_compute",
+    "local_review": "node_local_review",
+    "autopilot": "node_autopilot_orchestrator",
+    "two_strike_arbiter": "node_two_strike_arbiter",
+    "feature_dashboard": "node_feature_dashboard_compute",
+}
+
+
+def test_omn_13712_wire_map_skills_registered() -> None:
+    """Every node-proven WIRE-MAP skill is registered + wired to its node.
+
+    Reproducing assertion for OMN-13712: before the mapping entries existed,
+    `onex skill bus_audit` (and the other 16) returned "Unknown skill" because
+    the backing node was only reachable via the remote `onex run-node` path.
+    """
+    registry = load_skill_registry()
+    by_name = {s.skill_name: s for s in registry.skills}
+
+    missing = sorted(s for s in _OMN_13712_WIRE_MAP_SKILLS if s not in by_name)
+    assert not missing, (
+        "node-proven WIRE-MAP skill(s) absent from skill_mapping.yaml — "
+        f"`onex skill <name>` returns 'Unknown skill': {missing}"
+    )
+
+    mismatched = {
+        skill: f"mapped to {by_name[skill].node_name!r}, expected {node!r}"
+        for skill, node in _OMN_13712_WIRE_MAP_SKILLS.items()
+        if by_name[skill].node_name != node
+    }
+    assert not mismatched, f"WIRE-MAP skill(s) wired to the wrong node: {mismatched}"
+
+
+def test_omn_13712_wire_map_nodes_resolve_in_catalog() -> None:
+    """Every OMN-13712 backing node exists in the omnimarket onex.nodes catalog.
+
+    Without this, a converged skill could ship pointing at a node the catalog
+    does not carry and fail only at dispatch with `Unknown node <name>`.
+    """
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is None:
+        pytest.skip(
+            "omnimarket source tree not resolvable "
+            "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
+        )
+
+    declared_nodes = _omnimarket_declared_nodes(omnimarket_root)
+    unresolved = {
+        skill: node
+        for skill, node in _OMN_13712_WIRE_MAP_SKILLS.items()
+        if node not in declared_nodes
+    }
+    assert not unresolved, (
+        "OMN-13712 skill(s) reference node_name(s) absent from the canonical "
+        f"omnimarket onex.nodes catalog: {unresolved}"
+    )
+
+
 def test_registry_rejects_duplicate_skill_names() -> None:
     with pytest.raises(ValueError, match="duplicate skill_name"):
         ModelSkillMappingRegistry(
