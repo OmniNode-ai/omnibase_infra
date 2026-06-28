@@ -423,6 +423,14 @@ def find_git_repos_direct_children(root: Path) -> list[Path]:
 
 _FAMILY_RE = re.compile(r"^(omni\w+?)(\d+)$")
 
+# Regex that matches the typed Runtime State section header emitted by this
+# generator.  Group 1 captures the ISO-8601 UTC timestamp (minute precision).
+# Example: ## Runtime State — as of 2026-06-28T14:30Z
+_RUNTIME_STATE_RE = re.compile(
+    r"^## Runtime State — as of (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z)",
+    re.MULTILINE,
+)
+
 
 def family_key(repo_name: str) -> str | None:
     """
@@ -877,6 +885,84 @@ def unique_commit_entries(repo_days: list[RepoDay]) -> list[CommitEntry]:
     return uniq
 
 
+def _now_utc_iso_minutes() -> str:
+    """Return current UTC time as YYYY-MM-DDTHH:MMZ (minute precision)."""
+    return dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def parse_runtime_state_timestamp(text: str) -> dt.datetime | None:
+    """Extract the UTC datetime from a '## Runtime State — as of' header.
+
+    Returns a UTC-aware :class:`datetime.datetime` or ``None`` when the
+    section is absent or the timestamp is malformed.
+
+    The expected header format is::
+
+        ## Runtime State — as of YYYY-MM-DDTHH:MMZ
+
+    Args:
+        text: Full Markdown content of a deep-dive document.
+
+    Returns:
+        A UTC-aware datetime on success, or ``None``.
+    """
+    m = _RUNTIME_STATE_RE.search(text)
+    if not m:
+        return None
+    try:
+        return dt.datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def validate_deep_dive_ingest(
+    deep_dive_path: Path,
+    handoff_cutoff: dt.datetime,
+) -> tuple[bool, str]:
+    """Check that a deep-dive's Runtime State section is not stale.
+
+    A deep-dive is safe to ingest when its ``## Runtime State — as of``
+    timestamp is **equal to or newer than** *handoff_cutoff*.  A missing
+    section is always refused because its freshness is unknown.
+
+    Args:
+        deep_dive_path: Path to the deep-dive Markdown file.
+        handoff_cutoff: UTC-aware datetime representing the probe time of the
+            corresponding final handoff.  Documents whose runtime-state
+            timestamp predates this cutoff are considered stale.
+
+    Returns:
+        A ``(ok, message)`` tuple.  *ok* is ``True`` when the document is
+        safe to ingest; *message* describes the outcome either way.
+    """
+    try:
+        text = deep_dive_path.read_text(encoding="utf-8")
+    except OSError as e:
+        return False, f"cannot read {deep_dive_path}: {e}"
+
+    ts = parse_runtime_state_timestamp(text)
+    if ts is None:
+        return False, (
+            f"{deep_dive_path.name}: missing '## Runtime State — as of <timestamp>' "
+            "section; add it or regenerate with generate_deep_dive.py"
+        )
+
+    # Normalise cutoff to UTC-aware for comparison.
+    if handoff_cutoff.tzinfo is None:
+        handoff_cutoff = handoff_cutoff.replace(tzinfo=dt.UTC)
+
+    if ts < handoff_cutoff:
+        return False, (
+            f"{deep_dive_path.name}: runtime state is stale: "
+            f"section timestamp {ts.isoformat()} < handoff cutoff {handoff_cutoff.isoformat()}"
+        )
+
+    return True, (
+        f"{deep_dive_path.name}: runtime state is fresh "
+        f"({ts.isoformat()} >= {handoff_cutoff.isoformat()})"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     _default_root = os.environ.get("OMNI_HOME", ".")
@@ -907,7 +993,49 @@ def main() -> int:
         default=False,
         help="Include repos that only have dirty working trees (no commits today). Default: False.",
     )
+    ap.add_argument(
+        "--validate-ingest",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Validate an existing deep-dive for corpus ingestion. "
+            "Exits 0 if the '## Runtime State — as of' section is not stale "
+            "relative to --handoff-time, non-zero otherwise."
+        ),
+    )
+    ap.add_argument(
+        "--handoff-time",
+        type=str,
+        default=None,
+        metavar="ISO-TIMESTAMP",
+        help=(
+            "UTC probe time of the corresponding final handoff, "
+            "e.g. '2026-06-28T14:30Z'. Required when --validate-ingest is used."
+        ),
+    )
     args = ap.parse_args()
+
+    # Validation mode: check an existing deep-dive for staleness and exit.
+    if args.validate_ingest is not None:
+        if not args.handoff_time:
+            print(
+                "error: --handoff-time is required with --validate-ingest", flush=True
+            )
+            return 2
+        try:
+            cutoff = dt.datetime.fromisoformat(args.handoff_time.replace("Z", "+00:00"))
+        except ValueError:
+            print(
+                f"error: --handoff-time '{args.handoff_time}' is not a valid ISO-8601 timestamp",
+                flush=True,
+            )
+            return 2
+        ok, msg = validate_deep_dive_ingest(
+            Path(args.validate_ingest).expanduser().resolve(), cutoff
+        )
+        print(msg, flush=True)
+        return 0 if ok else 1
 
     date = _today_local() if not args.date else dt.date.fromisoformat(args.date)
     start_s, end_s = _day_window(date)
@@ -1453,6 +1581,53 @@ def main() -> int:
         weight = _CATEGORY_WEIGHTS.get(cat, 0.5)
         points = count * weight
         lines.append(f"| {cat} | {count} | {weight} | {points:.1f} |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # -----------------------------------------------------------------------
+    # Typed sections: Durable Findings vs Runtime State (OMN-13043 / C-3)
+    #
+    # Durable Findings: structural observations from commit and PR history.
+    # These remain valid until the referenced code is changed.
+    #
+    # Runtime State: ephemeral observations captured at generation time.
+    # The '## Runtime State — as of' header carries a machine-readable
+    # UTC timestamp used by --validate-ingest to gate corpus ingestion.
+    # -----------------------------------------------------------------------
+    lines.append("## Durable Findings")
+    lines.append("")
+    lines.append(
+        "*Structural findings derived from commit and PR history in this report.*"
+    )
+    lines.append("*These remain valid until the referenced code is changed.*")
+    lines.append("")
+    lines.append(
+        "<!-- Operator: promote session retrospective findings here. "
+        "Each entry must cite a commit SHA or PR number as evidence. -->"
+    )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    _state_ts = _now_utc_iso_minutes()
+    lines.append(f"## Runtime State — as of {_state_ts}")
+    lines.append("")
+    lines.append("*Ephemeral runtime observations captured at generation time.*")
+    lines.append("*This section has a bounded lifetime — it becomes stale once the*")
+    lines.append("*runtime state changes.  Use*")
+    lines.append(
+        "*`generate_deep_dive.py --validate-ingest <path> --handoff-time <ISO>`*"
+    )
+    lines.append("*to check freshness before corpus ingestion.*")
+    lines.append("")
+    drift_emoji2 = {"green": "green", "yellow": "yellow", "red": "red"}.get(
+        drift.level, drift.level
+    )
+    lines.append(f"- **Drift level at generation**: {drift_emoji2}")
+    lines.append(f"- **Main-dirty repos**: {drift.main_dirty}")
+    lines.append(f"- **Stale feature branches (>72h)**: {drift.stale_branches}")
+    lines.append(f"- **Active worktrees**: {drift.active_worktrees}")
     lines.append("")
     lines.append("---")
     lines.append("")
