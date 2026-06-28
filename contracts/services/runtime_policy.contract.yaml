@@ -48,6 +48,13 @@ profiles:
         source:
           source_type: file
           source_path: /run/secrets/vertex_access_token
+      # OMN-13726: Slack bot token for outbound Slack integrations (alerter,
+      # morning report, etc.). Resolves from env locally; Infisical in prod
+      # (/shared/env/SLACK_BOT_TOKEN). Swappable per lane via this mapping.
+      - logical_name: slack.bot_token
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
     services:
       main:
         runtime_id: dev-main
@@ -116,6 +123,11 @@ profiles:
         source:
           source_type: file
           source_path: /run/secrets/vertex_access_token
+      # OMN-13726: Slack bot token for outbound Slack integrations.
+      - logical_name: slack.bot_token
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
     services:
       main:
         runtime_id: stability-test-main
@@ -184,6 +196,11 @@ profiles:
         source:
           source_type: file
           source_path: /run/secrets/vertex_access_token
+      # OMN-13726: Slack bot token for outbound Slack integrations.
+      - logical_name: slack.bot_token
+        source:
+          source_type: env
+          source_path: SLACK_BOT_TOKEN
     services:
       main:
         runtime_id: judge-main

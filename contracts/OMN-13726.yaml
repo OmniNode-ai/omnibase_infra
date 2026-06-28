@@ -1,0 +1,75 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13726
+title: 'Add slack.bot_token secret resolver mapping and SLACK_MORNING_CHANNEL overlay config'
+summary: >-
+  Config-only change to the runtime policy contract and integration catalog.
+  Adds the logical secret ref slack.bot_token → SLACK_BOT_TOKEN to the
+  secret_resolver_mappings in the dev, stability-test, and judge runtime profiles
+  so that node_slack_publish_effect and node_morning_report_orchestrator can resolve
+  the Slack bot token by logical name (swappable per lane; Infisical-backed in prod).
+  Registers node_slack_publish_effect in the integration_catalog, adds
+  SLACK_MORNING_CHANNEL env_var entry to the slack_alerter integration, and adds
+  the SLACK_MORNING_CHANNEL overlay key (with operator placeholder) to all three
+  machine-class overlay files (mac-dev, linux-server, cloud-k8s) and to the shared
+  key registry. No Python source, no new nodes, no deploy or restart required.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: config
+    description: >-
+      All three runtime profiles with secret_resolver_mappings (dev, stability-test,
+      judge) contain the slack.bot_token → SLACK_BOT_TOKEN entry.
+    command: "grep -c 'logical_name: slack.bot_token' contracts/services/runtime_policy.contract.yaml"
+  - kind: config
+    description: >-
+      Integration catalog registers node_slack_publish_effect and lists SLACK_MORNING_CHANNEL.
+    command: "grep -q 'node_slack_publish_effect' src/omnibase_infra/contracts/integrations/catalog.yaml && grep -q 'SLACK_MORNING_CHANNEL' src/omnibase_infra/contracts/integrations/catalog.yaml"
+  - kind: config
+    description: >-
+      All overlay files contain the SLACK_MORNING_CHANNEL key with a placeholder value.
+    command: "grep -c 'SLACK_MORNING_CHANNEL' config/overlays/mac-dev.yaml config/overlays/linux-server.yaml config/overlays/cloud-k8s.yaml"
+  - kind: ci
+    description: CI pipeline green on PR
+    command: 'gh pr checks <PR> --repo OmniNode-ai/omnibase_infra'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      All three secret_resolver_mappings blocks (dev, stability-test, judge) contain
+      the slack.bot_token → SLACK_BOT_TOKEN mapping entry.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "grep -c 'logical_name: slack.bot_token' contracts/services/runtime_policy.contract.yaml"
+  - id: dod-002
+    description: >-
+      Integration catalog lists node_slack_publish_effect and declares SLACK_MORNING_CHANNEL
+      as a required env var under the slack_alerter integration.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "grep -q 'node_slack_publish_effect' src/omnibase_infra/contracts/integrations/catalog.yaml && grep -q 'SLACK_MORNING_CHANNEL' src/omnibase_infra/contracts/integrations/catalog.yaml"
+  - id: dod-003
+    description: >-
+      All three machine-class overlay files (mac-dev, linux-server, cloud-k8s) carry
+      a clearly-marked PLACEHOLDER_SET_BY_OPERATOR value for SLACK_MORNING_CHANNEL.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "grep -q 'SLACK_MORNING_CHANNEL: \"PLACEHOLDER_SET_BY_OPERATOR\"' config/overlays/mac-dev.yaml && grep -q 'SLACK_MORNING_CHANNEL: \"PLACEHOLDER_SET_BY_OPERATOR\"' config/overlays/linux-server.yaml && grep -q 'SLACK_MORNING_CHANNEL: \"PLACEHOLDER_SET_BY_OPERATOR\"' config/overlays/cloud-k8s.yaml"
+  - id: dod-deploy-assessment
+    description: >-
+      Deploy-gate assessment: this PR is a config-only change (contract YAML, overlay
+      YAML, integration catalog YAML). No Python source files changed, no new nodes or
+      handlers deployed, no broker topics added, no live runtime mutation required before
+      merge. The secret resolver mapping takes effect when the runtime is next deployed
+      or restarted with the updated runtime_policy contract. No deploy or restart is
+      required to merge this PR.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "grep -q 'dod-deploy-assessment' contracts/OMN-13726.yaml && grep -q 'deploy' contracts/OMN-13726.yaml"

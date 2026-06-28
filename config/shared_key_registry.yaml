@@ -131,6 +131,10 @@ shared:
   "/shared/env/":
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
+    # OMN-13726: Default morning-report delivery Slack channel ID.
+    # Seeded per-lane (machine-class overlay → Infisical). VALUE must be set by operator.
+    # Intentionally registered here so seed-infisical.py can provision the /shared/env/ path.
+    - SLACK_MORNING_CHANNEL
     # Linear API key — used by omniclaude, omnimarket, and CI scripts to query/update tickets.
     # Previously seeded at /shared/env/ (OMN-3898); now formally registered. (OMN-8778)
     - LINEAR_API_KEY

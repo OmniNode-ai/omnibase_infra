@@ -69,15 +69,21 @@ integrations:
   - id: slack_alerter
     name: "Slack Alerter"
     type: outbound
-    description: "Sends structured alerts to Slack channels based on runtime triage events"
+    description: "Sends structured alerts and reports to Slack channels based on runtime events"
     nodes:
       - node_slack_alerter_effect
+      # OMN-13723: canonical generic Slack EFFECT primitive (replaces node_slack_alerter_effect long-term)
+      - node_slack_publish_effect
     health_check:
       type: http
       endpoint: "https://slack.com/api/api.test"
     env_vars:
       - SLACK_BOT_TOKEN
       - SLACK_CHANNEL_ID
+      # OMN-13726: Default morning-report delivery channel.
+      # VALUE must be set by operator (e.g. C01234ABCDE). Unset → report dispatch fails closed.
+      # Do NOT hardcode this value in code or skill markdown — resolve from SLACK_MORNING_CHANNEL env.
+      - SLACK_MORNING_CHANNEL
   - id: kafka_event_bus
     name: "Kafka Event Bus (Redpanda)"
     type: infrastructure

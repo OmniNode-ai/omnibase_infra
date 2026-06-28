@@ -40,6 +40,12 @@ overrides:
   # Runtime health endpoints — dev lane
   ONEX_RUNTIME_URL: "http://localhost:8085"
   ONEX_EFFECTS_URL: "http://localhost:8086"
+  # OMN-13726: Default morning-report delivery Slack channel.
+  # OPERATOR ACTION REQUIRED: replace this placeholder with the real Slack channel ID
+  # (e.g. C01234ABCDE) before starting morning-report nodes.
+  # Value intentionally left as placeholder — resolves fail-closed against Slack API if unset.
+  # Do NOT hardcode a real channel ID here; set it in ~/.omnibase/.env or Infisical.
+  SLACK_MORNING_CHANNEL: "PLACEHOLDER_SET_BY_OPERATOR"
 
 # bootstrap_only vars that must always come from ~/.omnibase/.env on this class
 # (never seeded into Infisical — circular bootstrap dep):
