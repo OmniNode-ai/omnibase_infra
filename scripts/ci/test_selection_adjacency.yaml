@@ -109,6 +109,7 @@ adjacency:
   tools:
     reverse_deps: [event_bus, topics]
   # --- leaf / near-leaf modules ---
+  deep_dive: {reverse_deps: []}
   cli: {reverse_deps: []}
   clients: {reverse_deps: []}
   configs: {reverse_deps: []}
