@@ -10,14 +10,14 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 evidence_requirements:
-  - kind: lint
+  - kind: ci
     description: >
       Both manifest files pass yamlfmt formatting and contain no literal secret material.
 
     command: >
       yamlfmt -lint deploy/k8s/onex-prod/omnidash/certificate.yaml deploy/k8s/onex-prod/umami/infisical-secret.yaml && grep -rn 'CHANGEME' deploy/k8s/onex-prod/ || echo 'no literal secrets'
 
-  - kind: review
+  - kind: manual
     description: >
       Applying the Certificate + InfisicalSecret to the onex-prod cluster is the operator gate. The InfisicalSecret requires /prod/umami/ to be seeded in Infisical first.
 
@@ -32,7 +32,6 @@ dod_evidence:
       yamlfmt-formatted manifests contain no literal secrets; SPDX headers present; pre-commit hooks (yamlfmt, trailing-whitespace, end-of-file-fixer) pass on both files.
 
     source: generated
-    status: PASS
     checks:
       - check_type: command
         check_value: "grep -q 'PASS' drift/dod_receipts/OMN-13753/dod-manifest-lint/command.yaml"
@@ -41,7 +40,6 @@ dod_evidence:
       No live cluster mutation performed before merge. Manifests are operator-applied post-merge (OMN-13418 prod promotion gate). PR delivers secret ref declarations only, no literal values.
 
     source: generated
-    status: PASS
     checks:
       - check_type: command
         check_value: "grep -q 'PASS' drift/dod_receipts/OMN-13753/dod-no-pre-merge-deploy/command.yaml"
