@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# PrometheusRule CRD — k8s pod crash alerting for onex-dev namespace (OMN-13751).
+#
+# Prerequisite: kube-prometheus-stack (or prometheus-operator + kube-state-metrics)
+# must be installed and configured to scrape the onex-dev namespace. If the
+# prometheus-operator is not available, use pod-crash-cronjob.yaml instead.
+#
+# Metrics source: kube-state-metrics
+#   kube_pod_container_status_waiting_reason — exposes the waiting reason per
+#   container, which includes "ImagePullBackOff", "ErrImagePull", and
+#   "CrashLoopBackOff" among others.
+#
+# Apply with:
+#   kubectl apply -f observability/k8s/alerting/pod-crash-prometheusrule.yaml
+#
+# Verify rule pickup (after ~2 m Prometheus re-evaluation):
+#   kubectl -n onex-dev get prometheusrule onex-pod-crash-alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: onex-pod-crash-alerts
+  namespace: onex-dev
+  labels:
+    # Label selectors must match the Prometheus CR's ruleSelector — adjust if
+    # your kube-prometheus-stack uses different label keys.
+    prometheus: kube-prometheus
+    role: alert-rules
+    team: platform
+    app.kubernetes.io/part-of: onex
+spec:
+  groups:
+    - name: onex-pod-health
+      rules:
+        # -----------------------------------------------------------------------
+        # Critical: CrashLoopBackOff in onex-dev
+        # -----------------------------------------------------------------------
+        # kube_pod_container_status_waiting_reason == 1 for CrashLoopBackOff
+        # means a container is actively failing its startup command. The `for: 5m`
+        # clause absorbs one-time init failures (e.g. migration jobs that run once)
+        # while catching persistent crash loops within ~7 minutes of onset.
+        - alert: OnexPodCrashLoopBackOff
+          expr: |
+            kube_pod_container_status_waiting_reason{
+              namespace="onex-dev",
+              reason="CrashLoopBackOff"
+            } == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            namespace: onex-dev
+          annotations:
+            summary: "CrashLoopBackOff: {{ $labels.pod }}/{{ $labels.container }}"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace onex-dev) has been in CrashLoopBackOff for at least 5 minutes. Inspect with: kubectl -n onex-dev logs {{ $labels.pod }} -c {{ $labels.container }} and: kubectl -n onex-dev describe pod {{ $labels.pod }}
+            runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/public-surface-uptime.md"
+        # -----------------------------------------------------------------------
+        # Critical: ImagePullBackOff in onex-dev
+        # -----------------------------------------------------------------------
+        # ImagePullBackOff means the node cannot pull the container image — this
+        # blocks ALL containers on the pod from starting. The `for: 5m` clause
+        # avoids alerting on brief throttle back-offs during a fresh deploy.
+        - alert: OnexPodImagePullBackOff
+          expr: |
+            kube_pod_container_status_waiting_reason{
+              namespace="onex-dev",
+              reason=~"ImagePullBackOff|ErrImagePull"
+            } == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            namespace: onex-dev
+          annotations:
+            summary: "ImagePullBackOff: {{ $labels.pod }}/{{ $labels.container }}"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace onex-dev) cannot pull its image (reason: {{ $labels.reason }}). This prevents the pod from starting. Check the image tag, ECR credentials, and the pod's imagePullSecrets. Inspect with: kubectl -n onex-dev describe pod {{ $labels.pod }}
+            runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/public-surface-uptime.md"

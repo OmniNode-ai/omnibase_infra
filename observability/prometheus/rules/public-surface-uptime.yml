@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Prometheus alerting rules for public-surface HTTP uptime (OMN-13751).
+#
+# Metric source: Blackbox Exporter (prom/blackbox-exporter)
+# Targets: https://omninode.ai/, https://www.omninode.ai/,
+#          https://app.omninode.ai/, https://api.omninode.ai/health
+#
+# Root cause for these rules (OMN-13751): the 2026-06-29 omniweb 502 was
+# latent for ~34 days with zero alerting. These rules close that gap by
+# probing each surface every 30 s and alerting on sustained non-2xx.
+#
+# Activation: add the blackbox_exporter + alertmanager services to the
+# observability Docker Compose profile (see prometheus.yml for scrape config).
+# See docs/runbooks/public-surface-uptime.md for full wiring instructions.
+groups:
+  - name: public-surface-uptime
+    rules:
+      # -----------------------------------------------------------------------
+      # Critical: public surface returning non-2xx or unreachable (≥ 3 consecutive
+      # -----------------------------------------------------------------------
+      # probe_success == 0 means the HTTP check failed (non-2xx or TCP timeout).
+      # The `for: 90s` clause means the metric must be 0 for three consecutive
+      # 30 s scrape intervals before the alert fires — matching the N=3 spec
+      # in OMN-13751. This eliminates transient 502s from rolling deploys while
+      # catching sustained outages within ~2 minutes of onset.
+      - alert: PublicSurfaceDown
+        expr: probe_success{job="uptime-check"} == 0
+        for: 90s
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "PUBLIC SURFACE DOWN: {{ $labels.instance }}"
+          description: >-
+            The HTTP probe for {{ $labels.instance }} has returned non-2xx (or is unreachable) for at least 3 consecutive intervals (90 s). This mirrors the 2026-06-29 omniweb 502 pattern which went undetected for ~34 days. Investigate the surface immediately.
+          runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/public-surface-uptime.md"
+      # -----------------------------------------------------------------------
+      # Warning: slow response (probe_duration_seconds > 5 s for 3 minutes)
+      # -----------------------------------------------------------------------
+      # A sustained slow response can precede a hard 502 or indicate upstream
+      # saturation. Lower urgency than a hard outage but worth investigating.
+      - alert: PublicSurfaceSlowResponse
+        expr: probe_duration_seconds{job="uptime-check"} > 5
+        for: 3m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Slow response on {{ $labels.instance }} ({{ $value | humanizeDuration }})"
+          description: >-
+            The HTTP probe for {{ $labels.instance }} has been taking > 5 s for at least 3 minutes. This may precede a hard 502 or indicate upstream saturation. Review application logs and upstream health.
+          runbook: "https://github.com/OmniNode-ai/omnibase_infra/blob/main/docs/runbooks/public-surface-uptime.md"

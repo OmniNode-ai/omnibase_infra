@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Alertmanager configuration for ONEX runtime + public-surface alerting (OMN-13751).
+#
+# Wiring: Prometheus evaluates alert rules; Alertmanager routes firing alerts to
+# the operator Slack channel. Start Alertmanager with `--config.expand-env=true`
+# so ${VAR} references resolve at startup from the environment/Infisical.
+#
+# Required environment variables (set via Infisical or the operator .env):
+#   ALERTMANAGER_SLACK_WEBHOOK_URL  — Slack incoming-webhook URL (non-bot token path).
+#                                     Create at: https://api.slack.com/apps → Incoming Webhooks.
+#   ALERTMANAGER_SLACK_CHANNEL     — Channel name to post to (e.g. #alerts-platform).
+#
+# See docs/runbooks/public-surface-uptime.md for the full activation sequence.
+global:
+  # How long to wait before declaring an alert resolved after the condition clears.
+  resolve_timeout: 5m
+  # Slack webhook URL injected from env at Alertmanager startup.
+  slack_api_url: ${ALERTMANAGER_SLACK_WEBHOOK_URL}
+route:
+  # Default route — all alerts go to the platform Slack channel.
+  group_by:
+    - alertname
+    - team
+    - job
+  # Wait up to 30 s to batch multiple alerts in the same group before sending.
+  group_wait: 30s
+  # Once a group notification has been sent, wait 5 m before sending again for
+  # new alerts in the same group.
+  group_interval: 5m
+  # Re-notify every 4 h while an alert remains firing.
+  repeat_interval: 4h
+  receiver: slack-platform
+receivers:
+  - name: slack-platform
+    slack_configs:
+      - channel: ${ALERTMANAGER_SLACK_CHANNEL}
+        send_resolved: true
+        icon_emoji: ":rotating_light:"
+        title: |
+          [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+        text: |
+          {{ range .Alerts }}
+          *Surface/Service:* {{ .Labels.instance }}
+          *Severity:* {{ .Labels.severity }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Runbook:* {{ .Annotations.runbook }}
+          *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ end }}
+inhibit_rules:
+  # Suppress PublicSurfaceSlowResponse warnings for a surface when PublicSurfaceDown
+  # is already firing — the operator is already paged about the harder failure.
+  - source_matchers:
+      - alertname="PublicSurfaceDown"
+    target_matchers:
+      - alertname="PublicSurfaceSlowResponse"
+    equal:
+      - instance

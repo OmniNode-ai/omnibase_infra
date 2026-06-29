@@ -1,0 +1,173 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# k8s CronJob — pod crash / image-pull alerting for onex-dev namespace (OMN-13751).
+#
+# Purpose: Portable fallback for when kube-prometheus-stack (prometheus-operator +
+# kube-state-metrics) is NOT installed. Runs every 5 minutes; inspects all pods in
+# the onex-dev namespace for ImagePullBackOff and CrashLoopBackOff conditions; fires
+# a Slack alert via incoming webhook when any are found.
+#
+# Prerequisites:
+#   1. A Kubernetes Secret named `alerting-credentials` in the onex-dev namespace
+#      with key `slack_webhook_url` containing the Slack incoming-webhook URL.
+#      Create with:
+#        kubectl -n onex-dev create secret generic alerting-credentials \
+#          --from-literal=slack_webhook_url=https://hooks.slack.com/services/...
+#   2. A ClusterRole / ClusterRoleBinding granting the `onex-alerter` ServiceAccount
+#      `get` + `list` on pods in the onex-dev namespace (defined below).
+#
+# Apply with:
+#   kubectl apply -f observability/k8s/alerting/pod-crash-cronjob.yaml
+#
+# Test immediately (bypass the 5-minute schedule):
+#   kubectl -n onex-dev create job --from=cronjob/pod-crash-alerter pod-crash-manual-test
+#   kubectl -n onex-dev logs -l job-name=pod-crash-manual-test
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: onex-alerter
+  namespace: onex-dev
+  labels:
+    app.kubernetes.io/part-of: onex
+    app.kubernetes.io/component: alerting
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: onex-alerter-pod-reader
+  namespace: onex-dev
+  labels:
+    app.kubernetes.io/part-of: onex
+    app.kubernetes.io/component: alerting
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: onex-alerter-pod-reader
+  namespace: onex-dev
+  labels:
+    app.kubernetes.io/part-of: onex
+    app.kubernetes.io/component: alerting
+subjects:
+  - kind: ServiceAccount
+    name: onex-alerter
+    namespace: onex-dev
+roleRef:
+  kind: Role
+  name: onex-alerter-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pod-crash-alerter
+  namespace: onex-dev
+  labels:
+    app.kubernetes.io/part-of: onex
+    app.kubernetes.io/component: alerting
+    app.kubernetes.io/name: pod-crash-alerter
+  annotations:
+    onex.ai/ticket: OMN-13751
+    onex.ai/purpose: >-
+      Alerts on ImagePullBackOff and CrashLoopBackOff pods in onex-dev via Slack webhook. Fallback for environments without prometheus-operator.
+spec:
+  # Run every 5 minutes.
+  schedule: "*/5 * * * *"
+  # Keep the last 3 successful and 1 failed job for debugging.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # If a previous job is still running when the next schedule fires, skip the
+  # new run rather than running concurrently (avoids duplicate alerts).
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      # Fail the job if it doesn't complete within 4 minutes.
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: onex
+            app.kubernetes.io/component: alerting
+        spec:
+          serviceAccountName: onex-alerter
+          restartPolicy: Never
+          containers:
+            - name: crash-checker
+              # Uses the standard kubectl image — no custom image required.
+              image: bitnami/kubectl:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: alerting-credentials
+                      key: slack_webhook_url
+                - name: NAMESPACE
+                  value: onex-dev
+              command:
+                - /bin/bash
+                - -euo
+                - pipefail
+                - -c
+                - |
+                  # Collect all pods with waiting containers in crash/pull-error states.
+                  REASONS="CrashLoopBackOff|ImagePullBackOff|ErrImagePull|OOMKilled"
+                  PROBLEM_PODS=$(
+                    kubectl get pods -n "${NAMESPACE}" -o json |
+                    python3 -c "
+                  import sys, json
+                  data = json.load(sys.stdin)
+                  hits = []
+                  for pod in data.get('items', []):
+                      name = pod['metadata']['name']
+                      for cs in pod.get('status', {}).get('containerStatuses', []):
+                          w = cs.get('state', {}).get('waiting', {})
+                          reason = w.get('reason', '')
+                          if reason in ('CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'OOMKilled'):
+                              hits.append(f'{name}/{cs[\"name\"]} [{reason}]')
+                  print('\n'.join(hits))
+                  "
+                  )
+
+                  if [ -z "${PROBLEM_PODS}" ]; then
+                    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [OK] No crash/pull-error pods in ${NAMESPACE}"
+                    exit 0
+                  fi
+
+                  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [ALERT] Problem pods found:"
+                  echo "${PROBLEM_PODS}"
+
+                  # Format a Slack message and POST to the webhook.
+                  PAYLOAD=$(python3 -c "
+                  import json, os, sys
+                  pods = os.environ['PROBLEM_PODS']
+                  ns = os.environ['NAMESPACE']
+                  lines = [f'• {p}' for p in pods.strip().split('\n')]
+                  body = {
+                    'text': (
+                      f':rotating_light: *k8s pod crash alert — {ns}*\n'
+                      + '\n'.join(lines)
+                      + '\n\nInspect with: \`kubectl -n {ns} describe pod <name>\`'
+                    )
+                  }
+                  print(json.dumps(body))
+                  " PROBLEM_PODS="${PROBLEM_PODS}")
+
+                  curl -fsSL -X POST \
+                    -H 'Content-Type: application/json' \
+                    -d "${PAYLOAD}" \
+                    "${SLACK_WEBHOOK_URL}"
+
+                  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [SENT] Slack alert delivered"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

@@ -17,6 +17,7 @@ global:
   scrape_timeout: 10s
 rule_files:
   - "rules/runtime-health.yml"
+  - "rules/public-surface-uptime.yml"
 alerting:
   alertmanagers:
     - static_configs:
@@ -46,4 +47,32 @@ scrape_configs:
     static_configs:
       - targets: ["omninode-runtime-effects:9090"]
     metrics_path: /metrics
+    scrape_interval: 30s
+  # ---------------------------------------------------------------------------
+  # Blackbox Exporter — external HTTP uptime probes (OMN-13751)
+  # ---------------------------------------------------------------------------
+  # Probes the four public-facing OmniNode surfaces every 30 s using the
+  # http_2xx module (HTTP 200-299 = success). probe_success == 0 for ≥ 3
+  # consecutive intervals triggers the PublicSurfaceDown alert in
+  # rules/public-surface-uptime.yml.
+  #
+  # Requires: blackbox_exporter running at blackbox-exporter:9115 (add to the
+  # observability Docker Compose profile).
+  - job_name: "uptime-check"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://omninode.ai/
+          - https://www.omninode.ai/
+          - https://app.omninode.ai/
+          - https://api.omninode.ai/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
     scrape_interval: 30s

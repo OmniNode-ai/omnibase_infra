@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13751"
+title: "Add public-surface uptime/502 alerting (omninode.ai/www/app/api synthetic check)"
+summary: >
+  The 2026-06-29 omniweb 502 was latent for ~34 days with no alert. This change extends the existing Prometheus monitoring stack (observability/prometheus/) with: (a) Blackbox Exporter scrape config probing https://omninode.ai/, https://www.omninode.ai/, https://app.omninode.ai/, and https://api.omninode.ai/health every 30 s, alerting via PublicSurfaceDown when any surface fails ≥ 3 consecutive probes (90 s `for` clause); and (b) k8s ImagePullBackOff/CrashLoopBackOff alerting for the onex-dev namespace via a PrometheusRule CRD (prometheus-operator path) and a CronJob (portable fallback). Alertmanager routes to the operator Slack channel. No Python source or migration changes. No prod cluster mutation — manifests require operator `kubectl apply` to activate (gated by OMN-13418).
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: >-
+      Prometheus rules file for public surface uptime exists and is valid YAML. The PublicSurfaceDown rule fires when probe_success{job="uptime-check"} == 0 for 90 s (≥ 3 consecutive 30 s probes). PublicSurfaceSlowResponse fires on probe_duration_seconds > 5 for 3 m.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "test -f observability/prometheus/rules/public-surface-uptime.yml && python3 -c \"import yaml; yaml.safe_load(open('observability/prometheus/rules/public-surface-uptime.yml'))\" && echo 'YAML valid'"
+      - check_type: "command"
+        check_value: "grep -q 'PublicSurfaceDown' observability/prometheus/rules/public-surface-uptime.yml && grep -q 'for: 90s' observability/prometheus/rules/public-surface-uptime.yml"
+  - id: "dod-002"
+    description: >-
+      Prometheus configuration updated to include the new rules file and Blackbox Exporter scrape config targeting all 4 public surfaces.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "grep -q 'public-surface-uptime.yml' observability/prometheus/prometheus.yml && grep -q 'uptime-check' observability/prometheus/prometheus.yml"
+      - check_type: "command"
+        check_value: "grep -q 'https://omninode.ai/' observability/prometheus/prometheus.yml && grep -q 'https://api.omninode.ai/health' observability/prometheus/prometheus.yml"
+  - id: "dod-003"
+    description: >-
+      Alertmanager config exists and routes to Slack (via ALERTMANAGER_SLACK_WEBHOOK_URL env var injected at startup with --config.expand-env=true). Inhibition rule suppresses PublicSurfaceSlowResponse when PublicSurfaceDown is already firing.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "test -f observability/prometheus/alertmanager.yml && python3 -c \"import yaml; yaml.safe_load(open('observability/prometheus/alertmanager.yml'))\" && echo 'YAML valid'"
+      - check_type: "command"
+        check_value: "grep -q 'PublicSurfaceDown' observability/prometheus/alertmanager.yml && grep -q 'slack-platform' observability/prometheus/alertmanager.yml"
+  - id: "dod-004"
+    description: >-
+      k8s PrometheusRule CRD for onex-dev namespace covers both CrashLoopBackOff and ImagePullBackOff/ErrImagePull waiting reasons via kube-state-metrics metric kube_pod_container_status_waiting_reason.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "test -f observability/k8s/alerting/pod-crash-prometheusrule.yaml && python3 -c \"import yaml; list(yaml.safe_load_all(open('observability/k8s/alerting/pod-crash-prometheusrule.yaml')))\" && echo 'YAML valid'"
+      - check_type: "command"
+        check_value: "grep -q 'CrashLoopBackOff' observability/k8s/alerting/pod-crash-prometheusrule.yaml && grep -q 'ImagePullBackOff' observability/k8s/alerting/pod-crash-prometheusrule.yaml && grep -q 'onex-dev' observability/k8s/alerting/pod-crash-prometheusrule.yaml"
+  - id: "dod-005"
+    description: >-
+      k8s CronJob (portable fallback) exists for environments without prometheus-operator. Runs every 5 m; checks pods in onex-dev namespace; fires Slack webhook on ImagePullBackOff/CrashLoopBackOff/OOMKilled. RBAC (ServiceAccount + Role + RoleBinding) declared in the same file.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "test -f observability/k8s/alerting/pod-crash-cronjob.yaml && python3 -c \"import yaml; list(yaml.safe_load_all(open('observability/k8s/alerting/pod-crash-cronjob.yaml')))\" && echo 'YAML valid'"
+      - check_type: "command"
+        check_value: "grep -q 'CrashLoopBackOff' observability/k8s/alerting/pod-crash-cronjob.yaml && grep -q 'onex-dev' observability/k8s/alerting/pod-crash-cronjob.yaml && grep -q 'ServiceAccount' observability/k8s/alerting/pod-crash-cronjob.yaml"
+  - id: "dod-deploy"
+    description: >-
+      Deploy-gate evidence: pure manifest/config/docs change — no Python source, no migration, no runtime schema, no env-for-model change. The new Prometheus rules and k8s manifests require operator `kubectl apply` and Docker Compose profile activation on .201 (both gated by OMN-13418 for any prod-cluster mutation). No autonomous prod cluster mutation performed by this PR.
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "printf 'deploy gate: manifest/config-only PR; prod activation requires operator kubectl apply (OMN-13418 gate); no source or migration changes'"
