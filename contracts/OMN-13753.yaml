@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-13753
+title: "Fix missing prod secrets: omnidash-tls (traefik cert error every ~5m) + umami-credentials"
+summary: >
+  Provisions the two missing onex-prod secrets. (1) deploy/k8s/onex-prod/omnidash/certificate.yaml: explicit cert-manager Certificate for omnidash-tls, covering dash.omninode.ai via letsencrypt-prod ClusterIssuer (HTTP-01). (2) deploy/k8s/onex-prod/umami/infisical-secret.yaml: InfisicalSecret CRD that syncs umami-credentials from Infisical /prod/umami/, following the same pattern as omnidash-secret.yaml in omninode_infra. Includes Path B guidance for imperative provisioning via setup-cluster-secrets.sh. No literal secret values committed. Applying to the cluster is the operator gate (OMN-13418).
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: lint
+    description: >
+      Both manifest files pass yamlfmt formatting and contain no literal secret material.
+
+    command: >
+      yamlfmt -lint deploy/k8s/onex-prod/omnidash/certificate.yaml deploy/k8s/onex-prod/umami/infisical-secret.yaml && grep -rn 'CHANGEME' deploy/k8s/onex-prod/ || echo 'no literal secrets'
+
+  - kind: review
+    description: >
+      Applying the Certificate + InfisicalSecret to the onex-prod cluster is the operator gate. The InfisicalSecret requires /prod/umami/ to be seeded in Infisical first.
+
+    command: "kubectl describe certificate omnidash-tls -n onex-prod"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-manifest-lint
+    description: >
+      yamlfmt-formatted manifests contain no literal secrets; SPDX headers present; pre-commit hooks (yamlfmt, trailing-whitespace, end-of-file-fixer) pass on both files.
+
+    source: generated
+    status: PASS
+    checks:
+      - check_type: command
+        check_value: "grep -q 'PASS' drift/dod_receipts/OMN-13753/dod-manifest-lint/command.yaml"
+  - id: dod-no-pre-merge-deploy
+    description: >
+      No live cluster mutation performed before merge. Manifests are operator-applied post-merge (OMN-13418 prod promotion gate). PR delivers secret ref declarations only, no literal values.
+
+    source: generated
+    status: PASS
+    checks:
+      - check_type: command
+        check_value: "grep -q 'PASS' drift/dod_receipts/OMN-13753/dod-no-pre-merge-deploy/command.yaml"

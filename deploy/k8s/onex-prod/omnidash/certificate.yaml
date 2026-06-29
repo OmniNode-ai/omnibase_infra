@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# cert-manager Certificate for dash.omninode.ai — materialises the omnidash-tls
+# Secret that the omnidash Ingress references via spec.tls[0].secretName.
+#
+# Root cause (OMN-13753): traefik logs
+#   "Error configuring TLS: secret onex-prod/omnidash-tls does not exist"
+# The omnidash Ingress carries the cert-manager.io/cluster-issuer annotation
+# which triggers automatic Certificate issuance, but the Certificate object
+# was lost (namespace recreated, cert-manager restart, or manual deletion).
+# An explicit Certificate resource gives operators a named object they can
+# describe, force-renew, and tie to alerts without relying solely on the
+# implicit Ingress-annotation path.
+#
+# Pre-requisite: cert-manager + ClusterIssuer letsencrypt-prod must be running
+# (k8s/system/cert-manager-clusterissuer.yaml). HTTP-01 challenge requires
+# dash.omninode.ai to resolve to the cluster ingress and the /.well-known/
+# acme-challenge/ path to be reachable by the ACME server.
+#
+# Operator action: kubectl apply -f certificate.yaml -n onex-prod
+# Verify:  kubectl describe certificate omnidash-tls -n onex-prod
+#          kubectl describe certificaterequest -n onex-prod -l cert-manager.io/certificate-name=omnidash-tls
+#
+# Ref: OMN-13753
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: omnidash-tls
+  namespace: onex-prod
+  labels:
+    app.kubernetes.io/name: omnidash
+    app.kubernetes.io/component: tls
+    omninode/env: prod
+    omninode/managed: "true"
+    omninode/plane: control
+spec:
+  secretName: omnidash-tls # pragma: allowlist secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+    - dash.omninode.ai
+  duration: 2160h # 90 days (Let's Encrypt default)
+  renewBefore: 360h # Begin renewal 15 days before expiry

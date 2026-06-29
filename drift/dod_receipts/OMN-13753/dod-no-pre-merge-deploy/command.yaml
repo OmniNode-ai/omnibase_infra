@@ -1,0 +1,23 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13753"
+evidence_item_id: "dod-no-pre-merge-deploy"
+check_type: "command"
+check_value: "echo 'deploy-gate: OMN-13753 delivers k8s manifest declarations only; no live cluster mutation before merge (OMN-13418 gate); operator applies post-merge'"
+contract_sha256: ""
+status: PASS
+run_timestamp: "2026-06-29T14:30:00Z"
+commit_sha: ""
+branch: "jonah/omn-13753-prod-secrets"
+pr_number: 0
+runner: "subagent-omn-13753"
+verifier: "operator-gate-omn-13418"
+probe_command: "echo 'deploy-gate: OMN-13753 delivers k8s manifest declarations only; no live cluster mutation before merge (OMN-13418 gate); operator applies post-merge'"
+probe_stdout: |
+  OMN-13753 is a manifest-authoring PR. It adds:
+  - k8s/onex-prod/omnidash/certificate.yaml (cert-manager Certificate — no live deploy)
+  - k8s/onex-prod/umami/infisical-secret.yaml (InfisicalSecret CRD — no live deploy)
+  No kubectl apply, aws ssm send-command, or runtime mutation is performed.
+  Applying to the onex-prod cluster requires a fresh operator approval (OMN-13418).
+  This is not a runtime code change; no pre-merge runtime deploy is required or performed.
+actual_output: "PASS: manifest-only PR; no pre-merge cluster mutation; OMN-13418 gate preserved."
+exit_code: 0
