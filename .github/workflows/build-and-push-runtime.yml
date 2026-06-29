@@ -58,14 +58,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # OMN-13747: build+push runs on a hosted runner — the .201 self-hosted runner EOFs on docker push to ECR (clean cloud egress required). IAM push grant verified (ECRPushOmninodeRuntimeOMN13687).
+    runs-on: ubuntu-latest
     # Timeout breakdown (cold cache worst case):
     #   Docker build:        ~30 min (protobuf upgrade + cold cache adds ~16 min vs baseline)
     #   ECR push:            ~5 min
@@ -158,6 +152,13 @@ jobs:
       - name: Generate build timestamp
         id: timestamp
         run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Free disk space (hosted runner)
+        shell: bash
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          df -h /
 
       - name: Build runtime image (local)
         id: build-local
