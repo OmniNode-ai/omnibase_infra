@@ -156,7 +156,7 @@ jobs:
       - name: Free disk space (hosted runner)
         shell: bash
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
           sudo docker image prune -af 2>/dev/null || true
           df -h /
 
