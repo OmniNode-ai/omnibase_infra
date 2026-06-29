@@ -985,20 +985,18 @@ jobs:
 
       - name: Upload test results
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.split }}
+          name: test-results-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
           overwrite: true
           retention-days: 7
 
       - name: Upload test durations (for split rebalancing)
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-durations-split-${{ matrix.split }}
+          name: test-durations-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: .test_durations
           overwrite: true
           retention-days: 7
@@ -1302,10 +1300,9 @@ jobs:
 
       - name: Download all JUnit XML shards
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
-        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          pattern: test-results-*
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
           path: junit-shards
           merge-multiple: false
 
