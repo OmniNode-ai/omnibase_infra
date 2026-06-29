@@ -989,6 +989,7 @@ jobs:
         with:
           name: test-results-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
+          overwrite: true
           retention-days: 7
 
       - name: Upload test durations (for split rebalancing)
@@ -997,6 +998,7 @@ jobs:
         with:
           name: test-durations-split-${{ matrix.split }}
           path: .test_durations
+          overwrite: true
           retention-days: 7
 
   # ---------------------------------------------------------------------------
