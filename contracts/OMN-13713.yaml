@@ -1,0 +1,33 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13713
+title: 'Uninvokable/facade nodes — decision_store_query + setup_preflight contract resolution'
+summary: 'Add handler_routing.default_handler to node_decision_store_query_compute and node_setup_preflight_effect so RuntimeLocal resolves a concrete handler instead of failing with "missing terminal_event topic and no handler spec found".'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: RuntimeLocal resolves a handler spec for both previously-uninvokable contracts
+    command: uv run pytest tests/unit/runtime/test_uninvokable_nodes_handler_resolution_omn13713.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: RuntimeLocal._resolve_handler_spec returns the concrete (module, class) for node_decision_store_query_compute and node_setup_preflight_effect after default_handler is declared; before this fix the contracts failed closed with "missing 'terminal_event' topic and no handler spec found".
+    source: generated
+    status: verified
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_uninvokable_nodes_handler_resolution_omn13713.py -q'
+  - id: dod-002-occ
+    description: 'OCC deploy-gate receipt at OCC#3302 (squash-merge commit 63960c8444639edfe96b5327e3256ae9f2cd8b20). Evidence-Source for receipt-gate updated to merge-commit SHA after OCC#3302 squash-merged, invalidating the pre-squash head SHA.'
+    source: manual
+    status: verified
+    checks:
+      - check_type: command
+        check_value: 'true # OCC#3302 merged; deploy-gate evidence in onex_change_control/contracts/OMN-13713.yaml'
