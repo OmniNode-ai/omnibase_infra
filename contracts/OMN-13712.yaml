@@ -1,0 +1,42 @@
+schema_version: '1.0.0'
+ticket_id: OMN-13712
+title: 'Convergence: add skill_mapping.yaml entries for node-proven WIRE-MAP skills'
+summary: >-
+  17 WIRE-MAP skills had a working omnimarket backing node (proven over the local in-memory bus via `onex node <name>` in docs/evidence/2026-06-28-skill-e2e-foreground/matrix.md, rows with migration=WIRE-MAP AND verdict=WORKS-E2E) but no skill_mapping.yaml entry, so the only documented invocation was the remote `onex run-node` path and `onex skill <name>` returned "Unknown skill". This appends one declarative mapping entry per skill (agent_healthcheck, env_parity, bus_audit, plan_audit, recall, dispatch_watchdog, env_sync_alert, resume_session, verification_receipt_generator, rrh, rewind, checkpoint, insights_to_plan, local_review, autopilot, two_strike_arbiter, feature_dashboard), converging each onto the single `onex skill <name>` path. Fixtures are added only where the node input model rejects an empty/defaulted value: a required positional arg (recall query, checkpoint action) or a representative static_payload (env_parity env_by_lane). Pure data + test change; no Python source, no new endpoint, no Plugin*/engine/router. The runtime auto-stamps missing required scalar fields so bare invocation runs over the local bus.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Reproducing tests prove all 17 WIRE-MAP skills are registered, wired to the correct backing node, and resolve in the canonical omnimarket onex.nodes catalog (before this change they returned "Unknown skill").
+    command: 'uv run pytest tests/unit/cli/test_cli_skill.py -q'
+  - kind: ci
+    description: CI pipeline green on PR
+    command: 'gh pr checks <PR> --repo OmniNode-ai/omnibase_infra'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      Every node-proven WIRE-MAP skill is registered in skill_mapping.yaml and wired to its proven backing node.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/cli/test_cli_skill.py::test_omn_13712_wire_map_skills_registered -q'
+  - id: dod-002
+    description: >-
+      Every OMN-13712 backing node resolves in the canonical omnimarket onex.nodes catalog, so `onex skill <name>` cannot fail with `Unknown node` at dispatch time.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/cli/test_cli_skill.py::test_omn_13712_wire_map_nodes_resolve_in_catalog -q'
+  - id: dod-003
+    description: >-
+      The full declarative skill registry still loads, validates, and all result_models are fully qualified (no regression of existing entries).
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/cli/test_cli_skill.py -q'

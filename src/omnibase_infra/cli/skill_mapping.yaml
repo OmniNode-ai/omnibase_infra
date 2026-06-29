@@ -276,8 +276,13 @@ skills:
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
-      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      # OMN-13719: local-first declarative defaults so the convenience path
+      # `onex skill pr_review --repo X --pr-number N` builds a valid ReviewRequest
+      # (reviewer_models is list[str], which runtime run-identity injection does NOT
+      # backfill — without a default the payload fails ReviewRequest validation).
+      # The input model stays strict; only the declarative CLI path defaults here.
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list, default: [local]}
+      - {name: judge-model, payload_field: judge_model, arg_type: string, default: local}
       - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
@@ -287,8 +292,13 @@ skills:
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
-      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      # OMN-13719: local-first declarative defaults so the convenience path
+      # `onex skill pr_review --repo X --pr-number N` builds a valid ReviewRequest
+      # (reviewer_models is list[str], which runtime run-identity injection does NOT
+      # backfill — without a default the payload fails ReviewRequest validation).
+      # The input model stays strict; only the declarative CLI path defaults here.
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list, default: [local]}
+      - {name: judge-model, payload_field: judge_model, arg_type: string, default: local}
       - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
@@ -330,3 +340,189 @@ skills:
           - [["refactor", "cleanup", "simplify"], refactor]
           - [["review", "audit", "check"], review]
           - [["reason", "think through", "decide", "compare"], reasoning]
+  # ===================================================================
+  # OMN-13712: convergence of node-proven WIRE-MAP skills.
+  #
+  # Each skill below already had a working omnimarket backing node proven
+  # over the local in-memory bus (`onex node <name>` this pass — see
+  # docs/evidence/2026-06-28-skill-e2e-foreground/matrix.md, rows with
+  # migration=WIRE-MAP AND verdict=WORKS-E2E) but no skill_mapping entry,
+  # so the only documented invocation was `onex run-node` (remote). These
+  # entries converge them onto the single `onex skill <name>` path.
+  #
+  # APPENDED AS ONE BLOCK at end-of-file to 3-way-merge cleanly with
+  # OMN-13715 / OMN-13718 which edit existing entries in place. Do NOT
+  # interleave with the entries above.
+  #
+  # node_name verified present in omnimarket's onex.nodes entry-point
+  # catalog (the same resolution `onex node`/`onex skill` use). Each
+  # result_model is the backing handler's typed result class; the runtime
+  # auto-stamps missing required scalar fields (correlation_id, empty
+  # strings) so bare invocation runs over the local bus. Only nodes whose
+  # input model rejects an empty/defaulted value carry a fixture: a
+  # required positional arg (recall query, checkpoint action) or a
+  # representative static_payload (env_parity env_by_lane).
+  # ===================================================================
+  - skill_name: agent_healthcheck
+    node_name: node_worker_stall_recovery
+    # The stall-recovery handler returns an untyped dict (status / stall_reason
+    # / checkpoint_path / redispatch_count); it has no typed result model yet,
+    # so the honest schema identity is the dict type. Typing this result is
+    # separate node debt, not part of this convergence wiring.
+    result_model: builtins.dict
+    args:
+      - {name: ticket-id, payload_field: ticket_id, arg_type: string}
+      - {name: agent-id, payload_field: agent_id, arg_type: string}
+      - {name: timeout-minutes, payload_field: timeout_minutes, arg_type: integer}
+      - {name: max-redispatches, payload_field: max_redispatches, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: env_parity
+    node_name: node_env_parity_compute
+    result_model: omnimarket.nodes.node_env_parity_compute.models.model_env_parity_compute_result.ModelEnvParityComputeResult
+    # env_by_lane is a required dict-of-dict (min_length=1) that cannot be a
+    # CLI scalar; this representative two-lane snapshot makes `onex skill
+    # env_parity` compute a real parity result over the local bus (the prod
+    # lane is missing LOG_LEVEL → a real gap). Live snapshot collection is a
+    # future enhancement; this is the proven fixture.
+    static_payload:
+      env_by_lane:
+        dev:
+          ONEX_ENV: dev
+          LOG_LEVEL: DEBUG
+        prod:
+          ONEX_ENV: prod
+          LOG_LEVEL: null
+    args:
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: lanes, payload_field: lanes, arg_type: string_list}
+      - {name: variable-names, payload_field: variable_names, arg_type: string_list}
+  - skill_name: bus_audit
+    node_name: node_bus_audit_compute
+    result_model: omnimarket.nodes.node_bus_audit_compute.models.model_bus_audit_compute_result.ModelBusAuditComputeResult
+    args:
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: failures-only, payload_field: failures_only, arg_type: boolean, default: false}
+      - {name: skip-daemon, payload_field: skip_daemon, arg_type: boolean, default: false}
+      - {name: verbose, payload_field: verbose, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: plan_audit
+    node_name: node_plan_audit_compute
+    result_model: omnimarket.nodes.node_plan_audit_compute.models.model_plan_audit_compute_result.ModelPlanAuditComputeResult
+    args:
+      - {name: plan-path, payload_field: plan_path, arg_type: string}
+  - skill_name: recall
+    node_name: node_recall_compute
+    result_model: omnimarket.nodes.node_recall_compute.models.model_recall_result.ModelRecallResult
+    args:
+      - {name: query, payload_field: query, arg_type: string, positional: true, required: true}
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: max-results, payload_field: max_results, arg_type: integer}
+  - skill_name: dispatch_watchdog
+    node_name: node_dispatch_watchdog_orchestrator
+    result_model: omnimarket.nodes.node_dispatch_watchdog_orchestrator.models.model_watchdog.ModelWatchdogResult
+    args:
+      - {name: epic-id, payload_field: epic_id, arg_type: string}
+      - {name: check-interval-seconds, payload_field: check_interval_seconds, arg_type: integer}
+      - {name: stall-timeout-seconds, payload_field: stall_timeout_seconds, arg_type: integer}
+  - skill_name: env_sync_alert
+    node_name: node_env_sync_alert_effect
+    result_model: omnimarket.nodes.node_env_sync_alert_effect.models.model_env_sync_alert_result.ModelEnvSyncAlertResult
+    args:
+      - {name: log-paths, payload_field: log_paths, arg_type: string_list}
+      - {name: alert-threshold, payload_field: alert_threshold, arg_type: integer}
+      - {name: create-linear-tickets, payload_field: create_linear_tickets, arg_type: boolean, default: false}
+  - skill_name: resume_session
+    node_name: node_resume_session_compute
+    result_model: omnimarket.nodes.node_resume_session_compute.models.model_resume_session_compute_result.ModelResumeSessionComputeResult
+    args:
+      - {name: task-id, payload_field: task_id, arg_type: string}
+      - {name: agent-id, payload_field: agent_id, arg_type: string}
+  - skill_name: verification_receipt_generator
+    node_name: node_verification_receipt_generator
+    result_model: omnimarket.events.verification.ModelVerificationReceipt
+    args:
+      - {name: task-id, payload_field: task_id, arg_type: string}
+      - {name: claim, payload_field: claim, arg_type: string}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: pr-number, payload_field: pr_number, arg_type: integer}
+      - {name: worktree-path, payload_field: worktree_path, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: rrh
+    node_name: node_rrh_compute
+    result_model: omnimarket.nodes.node_rrh_compute.models.model_rrh_compute_result.ModelRrhComputeResult
+    args:
+      - {name: release-id, payload_field: release_id, arg_type: string}
+      - {name: checks, payload_field: checks, arg_type: string_list}
+  - skill_name: rewind
+    node_name: node_rewind_compute
+    result_model: omnimarket.nodes.node_rewind_compute.models.model_rewind_compute_result.ModelRewindComputeResult
+    args:
+      - {name: agent-name, payload_field: agent_name, arg_type: string}
+      - {name: timestamp, payload_field: timestamp, arg_type: string}
+      - {name: window-seconds, payload_field: window_seconds, arg_type: integer}
+  - skill_name: checkpoint
+    node_name: node_checkpoint_compute
+    result_model: omnimarket.nodes.node_checkpoint_compute.models.model_checkpoint_result.ModelCheckpointResult
+    args:
+      - {name: action, payload_field: action, arg_type: string, positional: true, required: true}
+      - {name: checkpoint-id, payload_field: checkpoint_id, arg_type: string}
+  - skill_name: insights_to_plan
+    node_name: node_insights_to_plan_compute
+    result_model: omnimarket.nodes.node_insights_to_plan_compute.models.model_insights_to_plan_compute_result.ModelInsightsToPlanComputeResult
+    args:
+      - {name: html-path, payload_field: html_path, arg_type: string}
+      - {name: source-type, payload_field: source_type, arg_type: string}
+  - skill_name: local_review
+    node_name: node_local_review
+    result_model: omnimarket.nodes.node_local_review.models.model_local_review_state.ModelLocalReviewState
+    args:
+      - {name: max-iterations, payload_field: max_iterations, arg_type: integer}
+      - {name: required-clean-runs, payload_field: required_clean_runs, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: autopilot
+    node_name: node_autopilot_orchestrator
+    result_model: omnimarket.nodes.node_autopilot_orchestrator.models.model_autopilot_phase_result.ModelAutopilotResult
+    args:
+      - {name: mode, payload_field: mode, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: two_strike_arbiter
+    node_name: node_two_strike_arbiter
+    result_model: omnimarket.nodes.node_two_strike_arbiter.models.model_two_strike_result.ModelTwoStrikeResult
+    args:
+      - {name: ticket-id, payload_field: ticket_id, arg_type: string}
+      - {name: repo, payload_field: repo, arg_type: string}
+      - {name: pr-number, payload_field: pr_number, arg_type: integer}
+      - {name: branch, payload_field: branch, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  - skill_name: feature_dashboard
+    node_name: node_feature_dashboard_compute
+    result_model: omnimarket.nodes.node_feature_dashboard_compute.models.model_feature_dashboard_result.ModelFeatureDashboardResult
+    args:
+      - {name: skills, payload_field: skills, arg_type: string_list}
+      - {name: check-types, payload_field: check_types, arg_type: string_list}
+      - {name: repo-root, payload_field: repo_root, arg_type: string}
+  # OMN-13688: pipeline_fill and wave_scheduler were node-backed in omnimarket
+  # but absent from this registry, so `onex skill <name>` returned "Unknown
+  # skill" and the autonomous build-loop could not invoke them headless.
+  # pipeline_fill.correlation_id is auto-injected by RuntimeLocal
+  # (OMN-13591), so never expose it as a CLI arg. pipeline_fill.min_score and
+  # wave_scheduler.healthcheck_config are not supported CLI scalar arg types;
+  # omit them so model defaults apply.
+  - skill_name: pipeline_fill
+    node_name: node_pipeline_fill
+    result_model: omnimarket.nodes.node_pipeline_fill.models.model_pipeline_fill_result.ModelPipelineFillResult
+    args:
+      - {name: top-n, payload_field: top_n, arg_type: integer}
+      - {name: wave-cap, payload_field: wave_cap, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: state-dir, payload_field: state_dir, arg_type: string}
+  - skill_name: wave_scheduler
+    node_name: node_wave_scheduler_orchestrator
+    result_model: omnimarket.nodes.node_wave_scheduler_orchestrator.models.model_wave_scheduler_result.ModelWaveSchedulerResult
+    args:
+      - {name: plan-path, payload_field: plan_path, arg_type: string, positional: true, required: true}
+      - {name: max-concurrency, payload_field: max_concurrency, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: resume, payload_field: resume, arg_type: boolean, default: false}
+      - {name: fail-fast, payload_field: fail_fast, arg_type: boolean, default: false}
+      - {name: defer-repo-conflicts, payload_field: defer_repo_conflicts, arg_type: boolean, default: false}

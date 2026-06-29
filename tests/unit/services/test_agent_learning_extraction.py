@@ -7,8 +7,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.models.agent_learning import EnumLearningTaskType
+from omnibase_infra.services.agent_learning_extraction.config import (
+    ModelAgentLearningExtractionConfig,
+)
 from omnibase_infra.services.agent_learning_extraction.consumer import (
     build_learning_record,
     classify_task_type,
@@ -124,3 +128,27 @@ class TestBuildLearningRecord:
         assert record.repo == "omnibase_infra"
         assert record.ticket_id == "OMN-7100"
         assert record.task_type == EnumLearningTaskType.CI_FIX
+
+
+@pytest.mark.unit
+class TestModelAgentLearningExtractionConfig:
+    """OMN-13697: llm_summary_url must be a required field — no env-var default."""
+
+    def test_missing_llm_summary_url_raises_validation_error(self) -> None:
+        """Config must raise ValidationError (not KeyError) when url is omitted."""
+        with pytest.raises(ValidationError):
+            ModelAgentLearningExtractionConfig()  # type: ignore[call-arg]
+
+    def test_explicit_url_accepted(self) -> None:
+        """Config is valid when llm_summary_url is explicitly provided."""
+        cfg = ModelAgentLearningExtractionConfig(
+            llm_summary_url="http://localhost:8001/v1"
+        )
+        assert cfg.llm_summary_url == "http://localhost:8001/v1"
+
+    def test_no_env_var_side_effect(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Config instantiation must not read LLM_CODER_FAST_URL from the environment."""
+        monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
+        # Should raise ValidationError for missing field, never KeyError from os.environ
+        with pytest.raises(ValidationError):
+            ModelAgentLearningExtractionConfig()  # type: ignore[call-arg]
