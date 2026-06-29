@@ -420,6 +420,43 @@ def test_parse_integer_coercion_and_failure() -> None:
         _parse_skill_args(mapping, ("--pr-number", "notanint"))
 
 
+def test_pr_review_declarative_path_supplies_reviewer_and_judge_defaults() -> None:
+    """OMN-13719 regression: ``onex skill pr_review --repo X --pr-number N`` builds a
+    valid ReviewRequest payload from the real registry.
+
+    Before the fix, ``reviewer-models`` / ``judge-model`` had no declarative default,
+    so the convenience path produced a payload missing ``reviewer_models`` (a
+    ``list[str]`` the runtime run-identity injection does NOT backfill), and the
+    backing ``ReviewRequest`` failed validation with::
+
+        1 validation error for ReviewRequest
+        reviewer_models  Field required [type=missing, ...]
+
+    Both ``pr_review`` and ``pr_review_bot`` share node_pr_review_orchestrator and the
+    same input gap, so both are asserted here.
+    """
+    registry = load_skill_registry()
+    by_name = {s.skill_name: s for s in registry.skills}
+
+    for skill_name in ("pr_review", "pr_review_bot"):
+        mapping = by_name.get(skill_name)
+        assert mapping is not None, f"{skill_name} missing from skill_mapping.yaml"
+        payload = _parse_skill_args(
+            mapping,
+            ("--repo", "OmniNode-ai/omnimarket", "--pr-number", "1505", "--dry-run"),
+        )
+        # The required ReviewRequest fields the declarative path must now supply.
+        assert payload["repo"] == "OmniNode-ai/omnimarket"
+        assert payload["pr_number"] == 1505
+        assert payload["dry_run"] is True
+        # The previously-missing fields are now defaulted (local-first).
+        assert payload["reviewer_models"] == ["local"], (
+            f"{skill_name}: reviewer_models default missing — the declarative path "
+            "cannot build a valid ReviewRequest (OMN-13719 regression)"
+        )
+        assert payload["judge_model"] == "local"
+
+
 def test_parse_positional_joins_tokens() -> None:
     mapping = _mapping_with(
         ModelSkillArgSpec(

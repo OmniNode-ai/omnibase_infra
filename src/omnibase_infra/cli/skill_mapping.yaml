@@ -276,8 +276,13 @@ skills:
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
-      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      # OMN-13719: local-first declarative defaults so the convenience path
+      # `onex skill pr_review --repo X --pr-number N` builds a valid ReviewRequest
+      # (reviewer_models is list[str], which runtime run-identity injection does NOT
+      # backfill — without a default the payload fails ReviewRequest validation).
+      # The input model stays strict; only the declarative CLI path defaults here.
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list, default: [local]}
+      - {name: judge-model, payload_field: judge_model, arg_type: string, default: local}
       - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
@@ -287,8 +292,13 @@ skills:
     args:
       - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
       - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list}
-      - {name: judge-model, payload_field: judge_model, arg_type: string}
+      # OMN-13719: local-first declarative defaults so the convenience path
+      # `onex skill pr_review --repo X --pr-number N` builds a valid ReviewRequest
+      # (reviewer_models is list[str], which runtime run-identity injection does NOT
+      # backfill — without a default the payload fails ReviewRequest validation).
+      # The input model stays strict; only the declarative CLI path defaults here.
+      - {name: reviewer-models, payload_field: reviewer_models, arg_type: string_list, default: [local]}
+      - {name: judge-model, payload_field: judge_model, arg_type: string, default: local}
       - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
