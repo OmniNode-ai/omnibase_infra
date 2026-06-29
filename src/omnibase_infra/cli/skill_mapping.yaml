@@ -330,3 +330,19 @@ skills:
           - [["refactor", "cleanup", "simplify"], refactor]
           - [["review", "audit", "check"], review]
           - [["reason", "think through", "decide", "compare"], reasoning]
+  # OMN-13688: pipeline_fill was node-backed in omnimarket (node_pipeline_fill)
+  # but absent from this registry, so `onex skill pipeline_fill` returned
+  # "Unknown skill" and the autonomous build-loop could not invoke it headless.
+  # correlation_id is a required UUID field on ModelPipelineFillCommand but is
+  # AUTO-INJECTED by RuntimeLocal._inject_missing_run_identity (OMN-13591) —
+  # never expose it as a CLI arg.  min_score is a float (unsupported arg_type);
+  # omit it so the model's default of 0.1 applies.
+  # node_wave_scheduler does NOT exist in omnimarket as of 2026-06-29; skipped.
+  - skill_name: pipeline_fill
+    node_name: node_pipeline_fill
+    result_model: omnimarket.nodes.node_pipeline_fill.models.model_pipeline_fill_result.ModelPipelineFillResult
+    args:
+      - {name: top-n, payload_field: top_n, arg_type: integer}
+      - {name: wave-cap, payload_field: wave_cap, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: state-dir, payload_field: state_dir, arg_type: string}
