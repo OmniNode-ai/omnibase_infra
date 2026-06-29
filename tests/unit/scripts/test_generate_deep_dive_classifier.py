@@ -4,22 +4,12 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-# generate_deep_dive.py is a standalone script, not a package module.
-# Import it via importlib to avoid sys.path manipulation.
-_SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "generate_deep_dive.py"
-_spec = importlib.util.spec_from_file_location("generate_deep_dive", _SCRIPT_PATH)
-assert _spec and _spec.loader
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["generate_deep_dive"] = _mod
-_spec.loader.exec_module(_mod)
-classify_pr = _mod.classify_pr
-is_exempt_pr = _mod.is_exempt_pr
+# The pure classification helpers now live in the shared, importable module
+# ``omnibase_infra.deep_dive`` (OMN-13725) — the single source of truth that
+# ``generate_deep_dive.py`` itself imports from.  Test the module directly.
+from omnibase_infra.deep_dive import classify_pr, is_exempt_pr
 
 
 class TestIsExemptPr:

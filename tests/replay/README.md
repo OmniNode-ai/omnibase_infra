@@ -225,4 +225,3 @@ def test_cross_instance_determinism(event_factory):
 
 - [ONEX Architecture](../../docs/architecture/)
 - [Reducer Pattern](../../docs/patterns/)
-

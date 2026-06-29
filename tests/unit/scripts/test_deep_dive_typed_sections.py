@@ -45,6 +45,14 @@ def _load_module() -> Any:
 
 MOD = _load_module()
 
+# Pure helpers now live in the shared, importable module (OMN-13725); the
+# script imports them from here.  Reference the canonical module directly so
+# the test does not depend on the script re-exporting them.
+from omnibase_infra.deep_dive import (
+    parse_runtime_state_timestamp,
+    validate_deep_dive_ingest,
+)
+
 _UTC = ZoneInfo("UTC")
 
 
@@ -62,7 +70,7 @@ class TestParseRuntimeStateTimestamp:
             "## Runtime State — as of 2026-06-28T14:30Z\n\n"
             "Some content."
         )
-        ts = MOD.parse_runtime_state_timestamp(text)
+        ts = parse_runtime_state_timestamp(text)
         assert ts is not None
         assert ts.year == 2026
         assert ts.month == 6
@@ -73,15 +81,15 @@ class TestParseRuntimeStateTimestamp:
 
     def test_missing_section_returns_none(self) -> None:
         text = "## Durable Findings\n\nSome findings.\n"
-        assert MOD.parse_runtime_state_timestamp(text) is None
+        assert parse_runtime_state_timestamp(text) is None
 
     def test_malformed_timestamp_returns_none(self) -> None:
         text = "## Runtime State — as of NOT-A-DATE\n\nContent."
-        assert MOD.parse_runtime_state_timestamp(text) is None
+        assert parse_runtime_state_timestamp(text) is None
 
     def test_timestamp_is_utc_aware(self) -> None:
         text = "## Runtime State — as of 2026-01-01T00:00Z\n"
-        ts = MOD.parse_runtime_state_timestamp(text)
+        ts = parse_runtime_state_timestamp(text)
         assert ts is not None
         # Must be UTC-aware (offset zero)
         utc_offset = ts.utcoffset()
@@ -89,7 +97,7 @@ class TestParseRuntimeStateTimestamp:
         assert utc_offset.total_seconds() == 0
 
     def test_returns_none_for_empty_string(self) -> None:
-        assert MOD.parse_runtime_state_timestamp("") is None
+        assert parse_runtime_state_timestamp("") is None
 
     def test_section_in_middle_of_document(self) -> None:
         text = (
@@ -99,7 +107,7 @@ class TestParseRuntimeStateTimestamp:
             "Runtime observations.\n\n"
             "## Appendix\n\nMore stuff."
         )
-        ts = MOD.parse_runtime_state_timestamp(text)
+        ts = parse_runtime_state_timestamp(text)
         assert ts is not None
         assert ts.day == 15
         assert ts.month == 3
@@ -132,7 +140,7 @@ class TestValidateDeepDiveIngest:
         )
         path = _write_deep_dive(content)
         cutoff = self._make_cutoff("2026-06-28T14:00Z")
-        ok, msg = MOD.validate_deep_dive_ingest(path, cutoff)
+        ok, msg = validate_deep_dive_ingest(path, cutoff)
         assert ok is True
         assert "fresh" in msg.lower()
 
@@ -141,7 +149,7 @@ class TestValidateDeepDiveIngest:
         content = "## Runtime State — as of 2026-06-28T14:00Z\n\nDrift: yellow."
         path = _write_deep_dive(content)
         cutoff = self._make_cutoff("2026-06-28T14:00Z")
-        ok, _ = MOD.validate_deep_dive_ingest(path, cutoff)
+        ok, _ = validate_deep_dive_ingest(path, cutoff)
         assert ok is True
 
     def test_stale_runtime_state_rejected(self) -> None:
@@ -152,7 +160,7 @@ class TestValidateDeepDiveIngest:
         )
         path = _write_deep_dive(content)
         cutoff = self._make_cutoff("2026-06-10T22:00Z")
-        ok, msg = MOD.validate_deep_dive_ingest(path, cutoff)
+        ok, msg = validate_deep_dive_ingest(path, cutoff)
         assert ok is False
         assert "stale" in msg.lower()
 
@@ -161,7 +169,7 @@ class TestValidateDeepDiveIngest:
         content = "## Durable Findings\n\nSome findings.\n\n## Metrics\n\nNumbers."
         path = _write_deep_dive(content)
         cutoff = self._make_cutoff("2026-06-01T00:00Z")
-        ok, msg = MOD.validate_deep_dive_ingest(path, cutoff)
+        ok, msg = validate_deep_dive_ingest(path, cutoff)
         assert ok is False
         assert "missing" in msg.lower()
 
@@ -170,7 +178,7 @@ class TestValidateDeepDiveIngest:
         cutoff = self._make_cutoff("2026-06-01T00:00Z")
         # Use tmp_path for a path that is guaranteed not to exist.
         missing = tmp_path / "does_not_exist_omn13043.md"
-        ok, msg = MOD.validate_deep_dive_ingest(missing, cutoff)
+        ok, msg = validate_deep_dive_ingest(missing, cutoff)
         assert ok is False
         assert "cannot read" in msg.lower() or "no such" in msg.lower()
 
@@ -179,7 +187,7 @@ class TestValidateDeepDiveIngest:
         content = "## Runtime State — as of 2026-06-10T20:00Z\n\nContent."
         path = _write_deep_dive(content)
         cutoff = self._make_cutoff("2026-06-11T00:00Z")
-        ok, msg = MOD.validate_deep_dive_ingest(path, cutoff)
+        ok, msg = validate_deep_dive_ingest(path, cutoff)
         assert ok is False
         # Both the section timestamp and the handoff cutoff must appear
         assert "2026-06-10T20:00" in msg
@@ -226,14 +234,14 @@ class TestGeneratedOutputSections:
 
     def test_runtime_state_timestamp_is_parseable(self, tmp_path: Path) -> None:
         content = self._run_generator(tmp_path, "2026-06-28")
-        ts = MOD.parse_runtime_state_timestamp(content)
+        ts = parse_runtime_state_timestamp(content)
         assert ts is not None, (
             "Generated output must contain a parseable Runtime State timestamp"
         )
 
     def test_runtime_state_timestamp_is_utc(self, tmp_path: Path) -> None:
         content = self._run_generator(tmp_path, "2026-06-28")
-        ts = MOD.parse_runtime_state_timestamp(content)
+        ts = parse_runtime_state_timestamp(content)
         assert ts is not None
         utc_offset = ts.utcoffset()
         assert utc_offset is not None
@@ -258,5 +266,5 @@ class TestGeneratedOutputSections:
             sys.argv = orig_argv
         # Use a cutoff well before generation — must pass.
         old_cutoff = dt.datetime(2026, 1, 1, 0, 0, 0, tzinfo=dt.UTC)
-        ok, msg = MOD.validate_deep_dive_ingest(out_file, old_cutoff)
+        ok, msg = validate_deep_dive_ingest(out_file, old_cutoff)
         assert ok is True, f"Fresh deep-dive rejected: {msg}"
