@@ -124,7 +124,13 @@ class EmbeddingClient:
     """
 
     def __init__(self, base_url: str) -> None:
-        self._base_url = base_url
+        if not base_url.strip():
+            raise ValueError(
+                "EmbeddingClient.base_url is empty; inject the URL from the node "
+                "contract or routing authority rather than relying on an env-var "
+                "fallback."
+            )
+        self._base_url = base_url.strip()
 
     async def embed(self, text: str) -> list[float]:
         """Generate a 1024-dim embedding vector for the given text.

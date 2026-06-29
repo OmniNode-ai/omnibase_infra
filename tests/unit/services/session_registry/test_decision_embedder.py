@@ -10,6 +10,8 @@ Part of OMN-6850, Task 12/13.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from omnibase_infra.services.session_registry.decision_embedder import (
@@ -129,9 +131,11 @@ class TestEmbeddingClientUrlInjection:
 
     def test_no_env_var_fallback(self) -> None:
         """EmbeddingClient never reads LLM_EMBEDDING_URL from env."""
-        import os
-
-        os.environ.pop("LLM_EMBEDDING_URL", None)
-        # Must not raise even with the env var absent.
-        client = EmbeddingClient(base_url="http://explicit-host:8100")
+        with patch("os.getenv", side_effect=AssertionError("env read")):
+            client = EmbeddingClient(base_url="http://explicit-host:8100")
         assert client._base_url == "http://explicit-host:8100"
+
+    def test_rejects_empty_url(self) -> None:
+        """EmbeddingClient fails fast on missing injected base_url."""
+        with pytest.raises(ValueError, match=r"EmbeddingClient\.base_url is empty"):
+            EmbeddingClient(base_url="   ")
