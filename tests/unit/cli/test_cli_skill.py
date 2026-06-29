@@ -76,6 +76,9 @@ _EXPECTED_SKILLS = frozenset(
         "contract_sweep",
         "skill_functional_audit",
         "dod_sweep",
+        # OMN-13688: pipeline_fill / wave_scheduler node-backed but unregistered
+        "pipeline_fill",
+        "wave_scheduler",
     }
 )
 

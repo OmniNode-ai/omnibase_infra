@@ -501,3 +501,28 @@ skills:
       - {name: skills, payload_field: skills, arg_type: string_list}
       - {name: check-types, payload_field: check_types, arg_type: string_list}
       - {name: repo-root, payload_field: repo_root, arg_type: string}
+  # OMN-13688: pipeline_fill and wave_scheduler were node-backed in omnimarket
+  # but absent from this registry, so `onex skill <name>` returned "Unknown
+  # skill" and the autonomous build-loop could not invoke them headless.
+  # pipeline_fill.correlation_id is auto-injected by RuntimeLocal
+  # (OMN-13591), so never expose it as a CLI arg. pipeline_fill.min_score and
+  # wave_scheduler.healthcheck_config are not supported CLI scalar arg types;
+  # omit them so model defaults apply.
+  - skill_name: pipeline_fill
+    node_name: node_pipeline_fill
+    result_model: omnimarket.nodes.node_pipeline_fill.models.model_pipeline_fill_result.ModelPipelineFillResult
+    args:
+      - {name: top-n, payload_field: top_n, arg_type: integer}
+      - {name: wave-cap, payload_field: wave_cap, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: state-dir, payload_field: state_dir, arg_type: string}
+  - skill_name: wave_scheduler
+    node_name: node_wave_scheduler_orchestrator
+    result_model: omnimarket.nodes.node_wave_scheduler_orchestrator.models.model_wave_scheduler_result.ModelWaveSchedulerResult
+    args:
+      - {name: plan-path, payload_field: plan_path, arg_type: string, positional: true, required: true}
+      - {name: max-concurrency, payload_field: max_concurrency, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: resume, payload_field: resume, arg_type: boolean, default: false}
+      - {name: fail-fast, payload_field: fail_fast, arg_type: boolean, default: false}
+      - {name: defer-repo-conflicts, payload_field: defer_repo_conflicts, arg_type: boolean, default: false}
