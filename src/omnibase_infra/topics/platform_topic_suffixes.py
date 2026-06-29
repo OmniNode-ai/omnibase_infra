@@ -1599,6 +1599,32 @@ SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED: str = (
 )
 """Hook context injection event topic emitted by omniclaude hooks."""
 
+SUFFIX_OMNICLAUDE_PHASE_METRICS: str = "onex.evt.omniclaude.phase-metrics.v1"
+"""Phase metrics event topic emitted by omniclaude build-loop / ticket phase hooks.
+
+Producer: omniclaude phase-metrics hooks
+Consumer: omnibase_infra emit daemon (PHASE_METRICS_REGISTRATION,
+TCB_OUTCOME_REGISTRATION) and demo_loop_gate verification.
+"""
+
+SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED: str = (
+    "onex.evt.omniclaude.notification-blocked.v1"
+)
+"""Notification event topic for agent BLOCKED states.
+
+Producer: omniclaude notification hooks
+Consumer: omnibase_infra emit daemon notification consumer (push-notification relay).
+"""
+
+SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED: str = (
+    "onex.evt.omniclaude.notification-completed.v1"
+)
+"""Notification event topic for agent COMPLETED states.
+
+Producer: omniclaude notification hooks
+Consumer: omnibase_infra emit daemon notification consumer (push-notification relay).
+"""
+
 # =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================
@@ -1695,6 +1721,17 @@ _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
 """Agent observability topic suffixes consumed by ServiceAgentActionsConsumer,
 injection effectiveness consumer (OMN-1889, OMN-2942), and agent learning
 extraction consumer (OMN-7242)."""
+
+_OMNICLAUDE_EMIT_DAEMON_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_PHASE_METRICS,
+    SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+    SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
+)
+"""Emit-daemon topic suffixes for omniclaude phase-metrics and notification events.
+
+Produced by omniclaude hooks; consumed by the omnibase_infra emit daemon
+(phase metrics registrations + notification consumer / push-notification relay).
+Provisioned here so the broker topics exist at startup (OMN-13700)."""
 
 # =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
@@ -2244,6 +2281,12 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     *tuple(
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES
+    ),
+    # Emit-daemon phase-metrics + notification topics (3 partitions -- low-throughput
+    # phase/notification events consumed by the omnibase_infra emit daemon, OMN-13700)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_EMIT_DAEMON_TOPIC_SUFFIXES
     ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.

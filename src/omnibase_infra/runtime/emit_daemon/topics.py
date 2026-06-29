@@ -2,24 +2,31 @@
 # SPDX-License-Identifier: MIT
 """Centralized Kafka topic constants and pre-built registrations for the emit daemon.
 
-All topic strings used by the emit daemon and notification infrastructure
-are defined here as module-level constants. This avoids duplication and
-provides a single place to update topic names.
+Topic strings are sourced from the canonical contract surfaces -- the
+``SUFFIX_OMNICLAUDE_*`` constants in ``platform_topic_suffixes`` for
+omniclaude-produced topics and ``EnumOmnibaseInfraTopic`` for omnibase_infra
+topics -- so this module holds no raw topic literals (OMN-13700, OMN-3343).
+This keeps the contract-driven topic registry the single source of truth.
 
 Domain-specific ``ModelEventRegistration`` constants that reference these
 topics also live here, keeping event_registry.py a generic utility with
 no domain-specific knowledge.
 """
 
+from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
 from omnibase_infra.runtime.emit_daemon.event_registry import ModelEventRegistration
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+    SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
+    SUFFIX_OMNICLAUDE_PHASE_METRICS,
+)
 
-TOPIC_PHASE_METRICS = "onex.evt.omniclaude.phase-metrics.v1"
+TOPIC_PHASE_METRICS = SUFFIX_OMNICLAUDE_PHASE_METRICS
 # Consumed (not emitted) by omnibase_infra, so no ModelEventRegistration needed.
-TOPIC_NOTIFICATION_BLOCKED = "onex.evt.omniclaude.notification-blocked.v1"
-TOPIC_NOTIFICATION_COMPLETED = "onex.evt.omniclaude.notification-completed.v1"
+TOPIC_NOTIFICATION_BLOCKED = SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED
+TOPIC_NOTIFICATION_COMPLETED = SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED
 
-TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
-TOPIC_DEPLOY_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
+TOPIC_BASELINES_COMPUTED = EnumOmnibaseInfraTopic.EVT_BASELINES_COMPUTED_V1.value
 
 PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     event_type="phase.metrics",
@@ -61,7 +68,6 @@ __all__: list[str] = [
     "TOPIC_BASELINES_COMPUTED",
     "TOPIC_PHASE_METRICS",
     "TOPIC_NOTIFICATION_BLOCKED",
-    "TOPIC_DEPLOY_REBUILD_REQUESTED",
     "TOPIC_NOTIFICATION_COMPLETED",
     "PHASE_METRICS_REGISTRATION",
 ]

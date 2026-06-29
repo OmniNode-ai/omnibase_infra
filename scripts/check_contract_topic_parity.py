@@ -283,6 +283,13 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- omniclaude session/tool lifecycle topics (needs contract.yaml in omniclaude) ---
     "onex.evt.omniclaude.session-ended.v1": "session lifecycle topic produced by omniclaude; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.tool-executed.v1": "tool execution topic produced by omniclaude; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    # --- omniclaude emit-daemon phase-metrics + notification topics (OMN-13700) ---
+    # Produced by omniclaude hooks, consumed by the omnibase_infra emit daemon.
+    # Moved from raw literals in emit_daemon/topics.py into platform_topic_suffixes
+    # in this PR; contract.yaml coverage tracked in omniclaude repo.
+    "onex.evt.omniclaude.phase-metrics.v1": "phase metrics topic produced by omniclaude [OMN-13700]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.notification-blocked.v1": "notification topic produced by omniclaude [OMN-13700]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.notification-completed.v1": "notification topic produced by omniclaude [OMN-13700]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     # --- omniintelligence topics (need contract.yaml in omniintelligence) ---
     "onex.cmd.omniintelligence.claude-hook-event.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omniintelligence.decision-recorded.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",

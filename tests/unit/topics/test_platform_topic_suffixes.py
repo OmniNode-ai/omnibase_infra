@@ -547,8 +547,11 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
             SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_PHASE_METRICS,
             SUFFIX_OMNICLAUDE_ROUTING_DECISION,
             SUFFIX_OMNICLAUDE_SESSION_ENDED,
             SUFFIX_OMNICLAUDE_SESSION_OUTCOME,
@@ -593,6 +596,11 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_VALIDATOR_CATCH,
             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
             SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
+            # Emit-daemon phase-metrics + notification topics (OMN-13700) — consumed
+            # by the omnibase_infra emit daemon notification consumer / registrations
+            SUFFIX_OMNICLAUDE_PHASE_METRICS,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
             if spec.suffix in three_partition_suffixes:
