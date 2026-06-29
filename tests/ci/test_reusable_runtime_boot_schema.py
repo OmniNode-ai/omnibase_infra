@@ -203,6 +203,15 @@ def test_e2e_redpanda_internal_listener_advertises_generated_container_name() ->
     )
 
 
+def test_e2e_redpanda_uses_epoll_reactor_backend() -> None:
+    """Compose smoke Redpanda must not depend on scarce host libaio slots."""
+    compose_text = (
+        Path(__file__).resolve().parents[2] / "docker" / "docker-compose.e2e.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "--reactor-backend=epoll" in compose_text
+
+
 def test_real_ssh_user_input_has_empty_default(workflow: Workflow) -> None:
     """SSH user must be parameterized, not hardcoded to `jonah`."""
     inputs = _inputs(workflow)
