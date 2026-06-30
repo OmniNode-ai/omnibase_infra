@@ -9,8 +9,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c" },
+    { name = "omnibase-core", specifier = ">=0.46.1,<0.47.0" },
+    { name = "omnibase-spi", specifier = ">=0.23.0,<0.24.0" },
 ]
 
 [[package]]
@@ -2084,7 +2084,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.46.1"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d#48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2098,6 +2098,10 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/2a/fe53acd14f2feeea5faf5b6df5fa0ba088e001d6f733f57f7477d95e6b2f/omnibase_core-0.46.1.tar.gz", hash = "sha256:d10b6cfc82436a5ad67ca35951d2e095dfb408a8bcb661c85374ad321f2c69e4", size = 8992716, upload-time = "2026-06-30T21:10:23.4Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/f1/b8516eec6b8587fa2f446279545ef1626e04a3a1c82f1f491d9b8db31832/omnibase_core-0.46.1-py3-none-any.whl", hash = "sha256:01551cd2ac4009fb758c71edd1201be8a02406731132965fe782436849dfdfc9", size = 6351486, upload-time = "2026-06-30T21:10:20.427Z" },
 ]
 
 [[package]]
@@ -2199,8 +2203,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c" },
+    { name = "omnibase-core", specifier = ">=0.46.1,<0.47.0" },
+    { name = "omnibase-spi", specifier = ">=0.23.0,<0.24.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.64" },
@@ -2238,7 +2242,7 @@ dev = [
     { name = "kafka-python", specifier = ">=2.0.2,<4.0.0" },
     { name = "locust", specifier = ">=2.31.8,<3.0.0" },
     { name = "mypy", specifier = ">=1.13.0,<3.0.0" },
-    { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main" },
+    { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=2dd26ade7caaa7131e532473ec9d8a207d0e77ab" },
     { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
     { name = "pytest", specifier = ">=8.4.0,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25.0,<1.5.0" },
@@ -2257,18 +2261,22 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.22.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=3c99ed45c5aa9e25fef17a108a40915b0a2e794c#3c99ed45c5aa9e25fef17a108a40915b0a2e794c" }
+version = "0.23.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/00/f69dbf0f4206a47fa64f409f0de76b2a1b4fee82ccc1f19b167893dad065/omnibase_spi-0.23.0.tar.gz", hash = "sha256:ac841935986dc871e96f38442bb4249fbdeb0189761838813f6efa23a2f598c6", size = 1132804, upload-time = "2026-06-30T21:42:58.523Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/58/e4/bc8bc1ea42897ea8e8caf09cff94c82610ed824066db986793f9030722b2/omnibase_spi-0.23.0-py3-none-any.whl", hash = "sha256:c3ad4e9b2aa46697442407adfd633d3d8bc96ae2ad0c115b6dc0d8ef3b11ea5f", size = 743058, upload-time = "2026-06-30T21:42:57.132Z" },
+]
 
 [[package]]
 name = "onex-change-control"
-version = "0.5.0"
-source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#2741a4096e2eaa48ce516a374b9765beda908073" }
+version = "0.5.1"
+source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=2dd26ade7caaa7131e532473ec9d8a207d0e77ab#2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
 dependencies = [
     { name = "colorama" },
     { name = "omnibase-core" },
