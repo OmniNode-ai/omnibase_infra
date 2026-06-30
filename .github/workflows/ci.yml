@@ -987,7 +987,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.split }}
+          name: test-results-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
           retention-days: 7
 
@@ -995,7 +995,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-durations-split-${{ matrix.split }}
+          name: test-durations-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: .test_durations
           retention-days: 7
 
