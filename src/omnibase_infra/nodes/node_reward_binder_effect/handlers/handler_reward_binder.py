@@ -77,14 +77,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
-# Topics — declared in contract.yaml event_bus.publish_topics.
-# These constants mirror the contract for use in handler code.
-# Source of truth: contract.yaml
-# ==============================================================================
-_TOPIC_REWARD_ASSIGNED = SUFFIX_OMNIMEMORY_REWARD_ASSIGNED
-_TOPIC_POLICY_STATE_UPDATED = SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED
-
 
 def _compute_objective_fingerprint(spec: ModelObjectiveSpec) -> str:
     """Compute a tamper-evident SHA-256 fingerprint of the ModelObjectiveSpec.
@@ -340,7 +332,7 @@ class HandlerRewardBinder:
         )
         await self._publish(
             event_type="reward.assigned",
-            topic=_TOPIC_REWARD_ASSIGNED,
+            topic=SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
             payload=json.loads(reward_event.model_dump_json()),
             correlation_id=corr_id,
         )
@@ -361,7 +353,7 @@ class HandlerRewardBinder:
         )
         await self._publish(
             event_type="policy.state.updated",
-            topic=_TOPIC_POLICY_STATE_UPDATED,
+            topic=SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
             payload=json.loads(policy_event.model_dump_json()),
             correlation_id=corr_id,
         )
@@ -372,8 +364,8 @@ class HandlerRewardBinder:
 
         # Build output
         topics: tuple[str, ...] = (
-            _TOPIC_REWARD_ASSIGNED,
-            _TOPIC_POLICY_STATE_UPDATED,
+            SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
+            SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
         )
         output = ModelRewardBinderOutput(
             success=True,

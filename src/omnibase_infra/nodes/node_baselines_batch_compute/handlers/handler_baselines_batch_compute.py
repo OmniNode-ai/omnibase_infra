@@ -61,7 +61,6 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
-_TOPIC_BASELINES_COMPUTED = SUFFIX_BASELINES_COMPUTED
 _EVENT_TYPE_BASELINES_COMPUTED = "baselines.computed"
 
 
@@ -314,7 +313,7 @@ class HandlerBaselinesBatchCompute:
 
         await self._publish(
             event_type=_EVENT_TYPE_BASELINES_COMPUTED,
-            topic=_TOPIC_BASELINES_COMPUTED,
+            topic=SUFFIX_BASELINES_COMPUTED,
             payload=payload,
             correlation_id=correlation_id,
         )
@@ -327,7 +326,7 @@ class HandlerBaselinesBatchCompute:
                 "comparisons": len(comparisons),
                 "trend": len(trend),
                 "breakdown": len(breakdown),
-                "topic": _TOPIC_BASELINES_COMPUTED,
+                "topic": SUFFIX_BASELINES_COMPUTED,
             },
         )
 
