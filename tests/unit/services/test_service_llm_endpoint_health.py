@@ -143,16 +143,24 @@ class TestModelLlmEndpointHealthConfig:
             "https://",
             "http:///health",
             "https:///v1/models",
+            "http://user:pass@",
+            "https://user:pass@/v1/models",
         ],
         ids=[
             "http-empty-netloc",
             "https-empty-netloc",
             "http-empty-netloc-with-path",
             "https-empty-netloc-with-path",
+            "http-userinfo-only-no-host",
+            "https-userinfo-only-no-host",
         ],
     )
     def test_empty_netloc_url_rejected(self, empty_netloc_url: str) -> None:
-        """Endpoint URLs with empty netloc (no hostname) must raise ValidationError."""
+        """Endpoint URLs with no hostname must raise ValidationError.
+
+        Includes userinfo-only authorities (e.g. ``http://user:pass@``) where
+        ``urlparse(...).netloc`` is non-empty but ``parsed.hostname`` is None.
+        """
         with pytest.raises(ValidationError) as exc_info:
             ModelLlmEndpointHealthConfig(
                 endpoints={"bad-ep": empty_netloc_url},

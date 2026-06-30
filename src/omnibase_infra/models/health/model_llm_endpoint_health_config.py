@@ -57,8 +57,11 @@ class ModelLlmEndpointHealthConfig(BaseModel):
         """Validate that every endpoint URL uses an HTTP(S) scheme and has a hostname.
 
         Rejects non-HTTP schemes to prevent accidental use of ``file://``,
-        ``ftp://``, or bare hostnames.  Also rejects URLs with empty netloc
-        (e.g. ``http://``) which would produce invalid probe requests.
+        ``ftp://``, or bare hostnames.  Also rejects URLs with no hostname
+        (e.g. ``http://`` or ``http://user:pass@``) which would produce
+        invalid probe requests.  ``parsed.hostname`` is checked rather than
+        ``parsed.netloc`` because ``netloc`` is non-empty for userinfo-only
+        authorities like ``http://user:pass@`` that have no actual host.
         Explicitly rejects empty strings with a diagnostic message rather
         than permitting them to silently cause probe failures.
         Error messages are sanitized via ``sanitize_url`` to avoid leaking
@@ -66,7 +69,7 @@ class ModelLlmEndpointHealthConfig(BaseModel):
 
         Raises:
             ValueError: If any URL is empty, does not start with ``http://``
-                or ``https://``, or has an empty netloc (no hostname).
+                or ``https://``, or has no hostname.
         """
         for name, url in v.items():
             if not url:
@@ -85,7 +88,7 @@ class ModelLlmEndpointHealthConfig(BaseModel):
                 )
                 raise ValueError(msg)
             parsed = urlparse(url)
-            if not parsed.netloc:
+            if not parsed.hostname:
                 safe_url = sanitize_url(url)
                 msg = (
                     f"Endpoint '{name}' has invalid URL '{safe_url}': "
