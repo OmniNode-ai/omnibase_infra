@@ -28,7 +28,10 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import textwrap
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -140,16 +143,24 @@ class TestModelLlmEndpointHealthConfig:
             "https://",
             "http:///health",
             "https:///v1/models",
+            "http://user:pass@",
+            "https://user:pass@/v1/models",
         ],
         ids=[
             "http-empty-netloc",
             "https-empty-netloc",
             "http-empty-netloc-with-path",
             "https-empty-netloc-with-path",
+            "http-userinfo-only-no-host",
+            "https-userinfo-only-no-host",
         ],
     )
     def test_empty_netloc_url_rejected(self, empty_netloc_url: str) -> None:
-        """Endpoint URLs with empty netloc (no hostname) must raise ValidationError."""
+        """Endpoint URLs with no hostname must raise ValidationError.
+
+        Includes userinfo-only authorities (e.g. ``http://user:pass@``) where
+        ``urlparse(...).netloc`` is non-empty but ``parsed.hostname`` is None.
+        """
         with pytest.raises(ValidationError) as exc_info:
             ModelLlmEndpointHealthConfig(
                 endpoints={"bad-ep": empty_netloc_url},
@@ -244,6 +255,198 @@ class TestModelLlmEndpointHealthConfig:
             ModelLlmEndpointHealthConfig(probe_timeout_seconds=0.1)
         with pytest.raises(ValidationError):
             ModelLlmEndpointHealthConfig(probe_timeout_seconds=60.0)
+
+
+# =============================================================================
+# TestModelLlmEndpointHealthConfigFactory
+# OMN-13699: from_model_registry must source model keys from contract YAML
+# and resolve URLs through an injected env_resolver, not os.getenv directly.
+# =============================================================================
+
+_SAMPLE_REGISTRY_YAML = textwrap.dedent("""\
+    models:
+      - model_key: "qwen3-coder-30b"
+        provider: local
+        transport: http
+        base_url_env: LLM_CODER_URL
+        capabilities:
+          - code_generation
+        context_window: 114688
+        tier: local
+      - model_key: "qwen3-embedding-8b"
+        provider: local
+        transport: http
+        base_url_env: LLM_EMBEDDING_URL
+        capabilities:
+          - embeddings
+        context_window: 8192
+        tier: local
+      - model_key: "claude-sonnet"
+        provider: anthropic
+        transport: oauth
+        capabilities:
+          - reasoning
+        context_window: 200000
+        tier: frontier_api
+      - model_key: "glm-4.5"
+        provider: zhipu
+        transport: http
+        base_url_env: LLM_GLM_URL
+        capabilities:
+          - reasoning
+        context_window: 128000
+        tier: frontier_api
+""")
+
+
+class TestModelLlmEndpointHealthConfigFactory:
+    """Tests for ModelLlmEndpointHealthConfig.from_model_registry (OMN-13699).
+
+    The factory must source model aliases from the routing contract YAML and
+    resolve URLs through an injected env_resolver callable — never by calling
+    os.getenv directly.  Tests mock the env_resolver, not the environment.
+    """
+
+    @pytest.fixture
+    def registry_file(self, tmp_path: Path) -> Path:
+        """Write the sample registry YAML to a temp file and return its path."""
+        f = tmp_path / "model_registry.yaml"
+        f.write_text(_SAMPLE_REGISTRY_YAML, encoding="utf-8")
+        return f
+
+    def _make_resolver(self, env: dict[str, str | None]) -> Callable[[str], str | None]:
+        """Return a mock env_resolver backed by the supplied dict."""
+        return env.get  # type: ignore[return-value]
+
+    @pytest.mark.unit
+    def test_from_model_registry_happy_path(self, registry_file: Path) -> None:
+        """Factory builds config using model keys from the contract, not hardcoded names."""
+        resolver = self._make_resolver(
+            {
+                "LLM_CODER_URL": "http://localhost:8000",
+                "LLM_EMBEDDING_URL": "http://localhost:8100",
+            }
+        )
+        cfg = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=registry_file,
+            env_resolver=resolver,
+        )
+        # Model keys come from the YAML contract, not hardcoded aliases
+        assert "qwen3-coder-30b" in cfg.endpoints
+        assert cfg.endpoints["qwen3-coder-30b"] == "http://localhost:8000"
+        assert "qwen3-embedding-8b" in cfg.endpoints
+        assert cfg.endpoints["qwen3-embedding-8b"] == "http://localhost:8100"
+        # Stale aliases must NOT appear
+        assert "coder-14b" not in cfg.endpoints
+        assert "qwen-embedding" not in cfg.endpoints
+
+    @pytest.mark.unit
+    def test_from_model_registry_skips_non_http_transport(
+        self, registry_file: Path
+    ) -> None:
+        """Models with non-http transport (oauth, sdk) are excluded from health checks."""
+        resolver = self._make_resolver(
+            {
+                "LLM_CODER_URL": "http://localhost:8000",
+                "LLM_EMBEDDING_URL": "http://localhost:8100",
+                "LLM_GLM_URL": "http://localhost:9000",
+            }
+        )
+        cfg = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=registry_file,
+            env_resolver=resolver,
+        )
+        # oauth transport (claude-sonnet) must be skipped
+        assert "claude-sonnet" not in cfg.endpoints
+        # http transport models with env set must be included
+        assert "qwen3-coder-30b" in cfg.endpoints
+        assert "glm-4.5" in cfg.endpoints
+
+    @pytest.mark.unit
+    def test_from_model_registry_skips_unset_env_var(self, registry_file: Path) -> None:
+        """When env_resolver returns None, that endpoint is excluded (not an error)."""
+        resolver = self._make_resolver(
+            {
+                "LLM_CODER_URL": "http://localhost:8000",
+                # LLM_EMBEDDING_URL absent → env_resolver returns None
+            }
+        )
+        cfg = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=registry_file,
+            env_resolver=resolver,
+        )
+        assert "qwen3-coder-30b" in cfg.endpoints
+        assert "qwen3-embedding-8b" not in cfg.endpoints
+
+    @pytest.mark.unit
+    def test_from_model_registry_raises_on_empty_env_var(
+        self, registry_file: Path
+    ) -> None:
+        """env_resolver returning an empty string must raise ValueError — not silent fallback."""
+        resolver = self._make_resolver(
+            {
+                "LLM_CODER_URL": "",  # set but empty → misconfigured
+            }
+        )
+        with pytest.raises(ValueError, match="LLM_CODER_URL"):
+            ModelLlmEndpointHealthConfig.from_model_registry(
+                registry_path=registry_file,
+                env_resolver=resolver,
+            )
+
+    @pytest.mark.unit
+    def test_from_model_registry_raises_on_missing_registry(
+        self, tmp_path: Path
+    ) -> None:
+        """A non-existent registry path must raise ValueError with a clear message."""
+        missing = tmp_path / "does_not_exist.yaml"
+        with pytest.raises(ValueError, match="not found"):
+            ModelLlmEndpointHealthConfig.from_model_registry(
+                registry_path=missing,
+                env_resolver=lambda _: "http://localhost:8000",
+            )
+
+    @pytest.mark.unit
+    def test_from_model_registry_raises_on_invalid_yaml(self, tmp_path: Path) -> None:
+        """Registry YAML without a 'models' key must raise ValueError."""
+        bad = tmp_path / "bad_registry.yaml"
+        bad.write_text("not_models_key: {}", encoding="utf-8")
+        with pytest.raises(ValueError, match="models"):
+            ModelLlmEndpointHealthConfig.from_model_registry(
+                registry_path=bad,
+                env_resolver=lambda _: "http://localhost:8000",
+            )
+
+    @pytest.mark.unit
+    def test_from_model_registry_uses_field_defaults(self, registry_file: Path) -> None:
+        """Factory uses field defaults for probe settings; override via direct construction."""
+        resolver = self._make_resolver({"LLM_CODER_URL": "http://localhost:8000"})
+        cfg = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=registry_file,
+            env_resolver=resolver,
+        )
+        # Factory uses field defaults for probe settings
+        assert cfg.probe_interval_seconds == 30.0
+        assert cfg.probe_timeout_seconds == 5.0
+        # Caller can override by constructing from the resolved endpoints
+        custom = ModelLlmEndpointHealthConfig(
+            endpoints=cfg.endpoints,
+            probe_interval_seconds=60.0,
+            probe_timeout_seconds=10.0,
+        )
+        assert custom.probe_interval_seconds == 60.0
+        assert custom.probe_timeout_seconds == 10.0
+
+    @pytest.mark.unit
+    def test_from_model_registry_empty_registry(self, tmp_path: Path) -> None:
+        """A registry with no models entry produces an empty endpoints dict."""
+        empty_registry = tmp_path / "empty.yaml"
+        empty_registry.write_text("models: []\n", encoding="utf-8")
+        cfg = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=empty_registry,
+            env_resolver=lambda _: "http://localhost:8000",
+        )
+        assert cfg.endpoints == {}
 
 
 # =============================================================================

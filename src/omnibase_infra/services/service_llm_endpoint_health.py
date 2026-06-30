@@ -147,7 +147,7 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
 
         Args:
             endpoint_name: Logical name used in the service name tag
-                (e.g. ``"coder-14b"`` becomes ``llm-endpoint.coder-14b``).
+                (e.g. ``"qwen3-coder-30b"`` becomes ``llm-endpoint.qwen3-coder-30b``).
             threshold: Consecutive failures before the circuit opens.
             reset_timeout: Seconds before an open circuit transitions to
                 half-open.
@@ -230,14 +230,23 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
 class ServiceLlmEndpointHealth:
     """Probes local LLM endpoints and tracks availability.
 
+    Endpoint configuration must be sourced from the routing contract YAML via
+    ``ModelLlmEndpointHealthConfig.from_model_registry()``.  Do **not** build
+    the ``endpoints`` map by calling ``os.getenv`` directly — that pattern
+    hard-codes stale model aliases and produces silent failures on empty env vars.
+
     Usage::
 
-        config = ModelLlmEndpointHealthConfig(
-            endpoints={
-                "coder-14b": os.getenv("LLM_CODER_URL", ""),
-                "qwen-embedding": os.getenv("LLM_EMBEDDING_URL", ""),
-            },
-            probe_interval_seconds=30.0,
+        import os
+        from pathlib import Path
+        from omnibase_infra.models.health.model_llm_endpoint_health_config import (
+            ModelLlmEndpointHealthConfig,
+        )
+
+        registry = Path("docker/catalog/model_registry.yaml")
+        config = ModelLlmEndpointHealthConfig.from_model_registry(
+            registry_path=registry,
+            env_resolver=os.getenv,
         )
         svc = ServiceLlmEndpointHealth(config=config, event_bus=bus)
         await svc.start()       # launches background probe loop
@@ -339,7 +348,7 @@ class ServiceLlmEndpointHealth:
         """Return the status for a single endpoint by logical name.
 
         Args:
-            name: Logical endpoint name (e.g. ``"coder-14b"``).
+            name: Logical endpoint name (e.g. ``"qwen3-coder-30b"``).
 
         Returns:
             The latest status, or ``None`` if not yet probed.
