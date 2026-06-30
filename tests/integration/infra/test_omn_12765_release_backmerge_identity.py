@@ -33,5 +33,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-13664: identity regenerated after the uv dependency refresh updated
     # the runtime shared-env inputs.
-    assert lock["identity_digest"] == "69478f383bcf2afc1450511f3bbb15b0"
-    assert lock["shared_env_digest"] == "b50bdd7ed636ccb0c9bcbf29"
+    assert lock["identity_digest"] == "8b47368ae6ad479a0d113429b20f5c01"
+    assert lock["shared_env_digest"] == "e0ce6a7c774f313932778ddb"
