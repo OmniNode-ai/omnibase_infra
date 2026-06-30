@@ -13,7 +13,9 @@ topics also live here, keeping event_registry.py a generic utility with
 no domain-specific knowledge.
 """
 
-from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
+from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+    EnumOmnibaseInfraTopic,
+)
 from omnibase_infra.runtime.emit_daemon.event_registry import ModelEventRegistration
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
