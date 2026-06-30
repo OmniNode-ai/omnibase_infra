@@ -989,6 +989,7 @@ jobs:
         with:
           name: test-results-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
+          overwrite: true
           retention-days: 7
 
       - name: Upload test durations (for split rebalancing)
@@ -997,6 +998,7 @@ jobs:
         with:
           name: test-durations-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: .test_durations
+          overwrite: true
           retention-days: 7
 
   # ---------------------------------------------------------------------------
@@ -1300,7 +1302,7 @@ jobs:
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
         uses: actions/download-artifact@v8
         with:
-          pattern: test-results-*
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
           path: junit-shards
           merge-multiple: false
 
