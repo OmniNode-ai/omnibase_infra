@@ -28,8 +28,6 @@ import pytest
 from omnibase_core.enums.enum_policy_type import EnumPolicyType
 from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
-    _TOPIC_POLICY_STATE_UPDATED,
-    _TOPIC_REWARD_ASSIGNED,
     HandlerRewardBinder,
     _compute_idempotency_key,
     _compute_objective_fingerprint,
@@ -49,6 +47,10 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec 
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
+)
+from omnibase_infra.topics import (
+    SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
+    SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
 )
 
 pytestmark = pytest.mark.unit
@@ -304,9 +306,9 @@ class TestHandlerRewardBinderExecute:
         assert publisher.call_count == 2
 
         calls = publisher.call_args_list
-        assert calls[0].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
+        assert calls[0].kwargs["topic"] == SUFFIX_OMNIMEMORY_REWARD_ASSIGNED
         assert calls[0].kwargs["event_type"] == "reward.assigned"
-        assert calls[1].kwargs["topic"] == _TOPIC_POLICY_STATE_UPDATED
+        assert calls[1].kwargs["topic"] == SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED
         assert calls[1].kwargs["event_type"] == "policy.state.updated"
 
     @pytest.mark.asyncio
@@ -336,7 +338,10 @@ class TestHandlerRewardBinderExecute:
 
         # Call index 0 is now RewardAssigned (RunEvaluated removed)
         reward_payload = publisher.call_args_list[0].kwargs["payload"]
-        assert publisher.call_args_list[0].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
+        assert (
+            publisher.call_args_list[0].kwargs["topic"]
+            == SUFFIX_OMNIMEMORY_REWARD_ASSIGNED
+        )
         sv = result.score_vector
         assert reward_payload["correctness"] == sv.correctness
         assert reward_payload["safety"] == sv.safety
@@ -471,8 +476,8 @@ class TestHandlerRewardBinderExecute:
 
         output = handler_output.result
         assert isinstance(output, ModelRewardBinderOutput)
-        assert _TOPIC_REWARD_ASSIGNED in output.topics_published
-        assert _TOPIC_POLICY_STATE_UPDATED in output.topics_published
+        assert SUFFIX_OMNIMEMORY_REWARD_ASSIGNED in output.topics_published
+        assert SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED in output.topics_published
         # TOPIC_RUN_EVALUATED removed in OMN-2929 (orphan topic, zero consumers)
 
     @pytest.mark.asyncio

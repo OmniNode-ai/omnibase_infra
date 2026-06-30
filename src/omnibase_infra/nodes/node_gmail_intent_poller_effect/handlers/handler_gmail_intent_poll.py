@@ -58,9 +58,6 @@ from omnibase_infra.topics import SUFFIX_GMAIL_INTENT_RECEIVED
 
 logger = logging.getLogger(__name__)
 
-# Event topic for gmail intent received events
-_GMAIL_INTENT_TOPIC: str = SUFFIX_GMAIL_INTENT_RECEIVED
-
 # Maximum body_text length for event payloads
 _BODY_TEXT_MAX_CHARS: int = 4096
 
@@ -282,7 +279,7 @@ class HandlerGmailIntentPoll:
 
                 # iii. Append event payload to pending_events
                 event_payload: JsonType = {
-                    "event_type": _GMAIL_INTENT_TOPIC,
+                    "event_type": SUFFIX_GMAIL_INTENT_RECEIVED,
                     "message_id": msg.message_id,
                     "subject": msg.subject,
                     "body_text": body_text,

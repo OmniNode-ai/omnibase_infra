@@ -18,11 +18,11 @@ node_name: "node_gmail_intent_poller_effect"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
   Effect node that drains configured Gmail source labels on demand. For each message it applies an idempotency marker label, fetches the full message, extracts URLs, appends a gmail-intent-received event payload to pending_events, then archives the message. A recovery pass runs first to handle crashed mid-run states. Emits to onex.evt.omnibase_infra.gmail-intent-received.v1 with partition key = message_id.
@@ -217,7 +217,9 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-24"
-  updated: "2026-02-24"
+  updated: "2026-06-30"
+  ticket: "OMN-7334"
+  topic_registry_source: "omnibase_infra.topics.SUFFIX_GMAIL_INTENT_RECEIVED"
   tags:
     - effect
     - gmail

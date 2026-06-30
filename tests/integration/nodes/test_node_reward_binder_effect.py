@@ -24,8 +24,8 @@ import pytest
 
 from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
-    _TOPIC_POLICY_STATE_UPDATED,
-    _TOPIC_REWARD_ASSIGNED,
+    SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
+    SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
     HandlerRewardBinder,
     _compute_objective_fingerprint,
 )
@@ -147,8 +147,8 @@ class TestRewardBinderKafkaIntegration:
             publisher = PublisherTopicScoped(
                 event_bus=bus,
                 allowed_topics={
-                    _TOPIC_REWARD_ASSIGNED,
-                    _TOPIC_POLICY_STATE_UPDATED,
+                    SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
+                    SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
                 },
                 environment="dev",
             )
@@ -180,8 +180,8 @@ class TestRewardBinderKafkaIntegration:
             assert output.policy_state_updated_event_id is not None
 
             # Verify two topics published (run-evaluated topic retired in OMN-2929)
-            assert _TOPIC_REWARD_ASSIGNED in output.topics_published
-            assert _TOPIC_POLICY_STATE_UPDATED in output.topics_published
+            assert SUFFIX_OMNIMEMORY_REWARD_ASSIGNED in output.topics_published
+            assert SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED in output.topics_published
         finally:
             await bus.stop()
 
