@@ -814,6 +814,51 @@ def test_runtime_sweep_payload_validates_against_request_model() -> None:
     assert request.dry_run is True
 
 
+def test_runtime_sweep_scope_arg_wired_and_forwarded() -> None:
+    """OMN-13715: --scope is accepted by the CLI mapping and forwarded to the payload.
+
+    Before this fix, runtime_sweep was missing the scope arg in skill_mapping.yaml.
+    Passing --scope caused `Unknown argument '--scope'` (ClickException). After the
+    fix, --scope maps to the ``scope`` payload field and the RuntimeSweepRequest
+    model validates it cleanly (extra="forbid" — if the field is absent from the
+    model the validate call raises).
+    """
+    handler_module = pytest.importorskip(
+        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
+    )
+    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
+
+    registry = load_skill_registry()
+    runtime_sweep = registry.get("runtime_sweep")
+    assert runtime_sweep is not None
+
+    # Before fix: _parse_skill_args raised ClickException("Unknown argument '--scope'")
+    payload = _parse_skill_args(runtime_sweep, ("--scope", "omnidash-only"))
+    assert payload.get("scope") == "omnidash-only"
+
+    # Payload must validate against the request model (extra="forbid").
+    request = RuntimeSweepRequest.model_validate(payload)
+    assert request.scope == "omnidash-only"  # type: ignore[attr-defined]
+
+
+def test_runtime_sweep_scope_arg_omitted_gives_none() -> None:
+    """OMN-13715: omitting --scope leaves scope absent from payload (no default injected)."""
+    handler_module = pytest.importorskip(
+        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
+    )
+    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
+
+    registry = load_skill_registry()
+    runtime_sweep = registry.get("runtime_sweep")
+    assert runtime_sweep is not None
+
+    payload = _parse_skill_args(runtime_sweep, ())
+    # Scope omitted → not in payload → model defaults to None.
+    assert "scope" not in payload or payload.get("scope") is None
+    request = RuntimeSweepRequest.model_validate(payload)
+    assert request.scope is None  # type: ignore[attr-defined]
+
+
 def test_integration_sweep_payload_validates_against_request_model() -> None:
     """The OMN-13511 integration_sweep mapping builds an acceptable payload."""
     request_module = pytest.importorskip(
