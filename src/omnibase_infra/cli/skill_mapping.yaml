@@ -241,7 +241,7 @@ skills:
     node_name: node_plan_to_tickets
     result_model: omnimarket.nodes.node_plan_to_tickets.handlers.handler_plan_to_tickets.ModelPlanToTicketsResult
     args:
-      - {name: plan-path, payload_field: plan_path, arg_type: string, positional: true, required: true}
+      - {name: plan-path, payload_field: plan_path, arg_type: string, required: true}
       - {name: project, payload_field: project, arg_type: string}
       - {name: epic-title, payload_field: epic_title, arg_type: string}
       - {name: no-create-epic, payload_field: no_create_epic, arg_type: boolean, default: false}

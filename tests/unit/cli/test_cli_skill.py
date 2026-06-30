@@ -884,3 +884,29 @@ def test_command_writes_payload_under_state_root_not_tmp(
     # Payload scratch lives under the state root, never /tmp.
     assert state_root in seen_paths[0].parents
     assert "tmp" in seen_paths[0].parts
+
+
+def test_plan_to_tickets_plan_path_is_named_not_positional() -> None:
+    """plan_to_tickets plan-path must be a named --plan-path flag (OMN-13718).
+
+    Regression guard: the original mapping declared plan-path with
+    positional=True, which registered it as a positional argument instead of
+    a named option. This caused `--plan-path` to be rejected as an unknown flag.
+    The fix removes positional=True so --plan-path is the accepted form.
+    """
+    registry = load_skill_registry()
+    skill = registry.get("plan_to_tickets")
+    assert skill is not None, "plan_to_tickets is absent from skill_mapping.yaml"
+
+    plan_path_args = [a for a in skill.args if a.name == "plan-path"]
+    assert plan_path_args, "plan-path arg is absent from plan_to_tickets mapping"
+    arg = plan_path_args[0]
+
+    # The arg must be required (named option, not positional).
+    assert arg.required is True, "plan-path must be required=True"
+    # Must NOT be positional — positional=True causes --plan-path to be rejected.
+    assert not arg.positional, (
+        "plan-path must NOT be positional; positional=True registers it as a "
+        "positional CLI arg and causes `--plan-path <file>` to be rejected as "
+        "'No such option: --plan-path' (OMN-13718 regression)"
+    )
