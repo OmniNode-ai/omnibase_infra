@@ -9,6 +9,12 @@ Related Tickets:
     - OMN-1831: Implement event-driven Slack notifications via runtime
 """
 
+from omnibase_infra.runtime.emit_daemon.models.model_emit_daemon_runtime_input import (
+    ModelEmitDaemonRuntimeInput,
+)
+from omnibase_infra.runtime.emit_daemon.models.model_emit_daemon_runtime_output import (
+    ModelEmitDaemonRuntimeOutput,
+)
 from omnibase_infra.runtime.emit_daemon.models.model_notification_blocked import (
     ModelNotificationBlocked,
 )
@@ -17,6 +23,8 @@ from omnibase_infra.runtime.emit_daemon.models.model_notification_completed impo
 )
 
 __all__ = [
+    "ModelEmitDaemonRuntimeInput",
+    "ModelEmitDaemonRuntimeOutput",
     "ModelNotificationBlocked",
     "ModelNotificationCompleted",
 ]
