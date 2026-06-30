@@ -80,6 +80,19 @@ def test_handler_change_without_contract_change_fails():
 
 
 @pytest.mark.unit
+def test_node_handler_test_change_without_contract_change_passes():
+    """Unit tests under tests/unit/nodes are not production handler changes."""
+    result = run_script(
+        [
+            "tests/unit/nodes/node_llm_inference_effect/handlers/test_handler_llm_cli_subprocess_execution.py",
+        ]
+    )
+    assert result.returncode == 0, (
+        f"Expected PASS for node handler tests.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+@pytest.mark.unit
 def test_skill_prompt_change_with_skill_md_passes():
     """Skill prompt.md change accompanied by SKILL.md change must PASS."""
     result = run_script(
