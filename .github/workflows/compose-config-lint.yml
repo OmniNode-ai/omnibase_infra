@@ -1,0 +1,75 @@
+name: Compose Config Lint (OMN-13037)
+
+# OMN-13037 / Retro B-9: fail when a compose overlay injects a credential or
+# service-address env var for a service the same overlay disables.
+# Catches the OMN-12966 INFISICAL_ADDR pattern statically (PyYAML only).
+on:
+  push:
+    branches: [main, dev, develop]
+    paths:
+      - "docker/docker-compose*.yml"
+      - "scripts/lint_compose_dangling_deps.py"
+      - "tests/scripts/test_lint_compose_dangling_deps.py"
+      - ".github/workflows/compose-config-lint.yml"
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - "docker/docker-compose*.yml"
+      - "scripts/lint_compose_dangling_deps.py"
+      - "tests/scripts/test_lint_compose_dangling_deps.py"
+      - ".github/workflows/compose-config-lint.yml"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+
+jobs:
+  compose-config-lint:
+    name: compose-config-lint
+    permissions:
+      contents: read
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Compose config lint — detect dangling service credentials (OMN-13037)
+        run: |
+          echo "================================================================"
+          echo "Compose Config Lint — OMN-13037 / Retro B-9"
+          echo "Checks: stability-test, prod, judge overlay files"
+          echo "================================================================"
+          uv run python scripts/lint_compose_dangling_deps.py \
+            docker/docker-compose.stability-test.yml \
+            docker/docker-compose.prod.yml \
+            docker/docker-compose.judge.yml
+
+      - name: Unit tests for lint script
+        run: |
+          uv run pytest tests/scripts/test_lint_compose_dangling_deps.py -v --tb=short

@@ -106,6 +106,9 @@ services:
       - --smp 1
       - --memory 1G
       - --reserve-memory 0M
+      # CI self-hosted runners can exhaust host AIO slots before Redpanda
+      # starts; epoll avoids the libaio path for this ephemeral e2e broker.
+      - --reactor-backend=epoll
       - --default-log-level=warn
     ports:
       # Kafka external listener (for host access)

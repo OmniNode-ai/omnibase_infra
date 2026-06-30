@@ -1,0 +1,34 @@
+# OMN-13037 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the compose-config lint gate.
+schema_version: "1.0.0"
+ticket_id: "OMN-13037"
+title: "feat(OMN-13037): compose-config lint — fail when overlay injects credential for disabled service"
+summary: "Retro B-9: static YAML lint gate detecting dangling credential/address env vars for disabled services in compose overlays"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "scripts/lint_compose_dangling_deps.py exists and fails on bad fixture (disabled service + hardcoded INFISICAL_ADDR)"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/test_lint_compose_dangling_deps.py -v"
+  - id: "dod-002"
+    description: "Real overlay files (stability-test, prod, judge) pass the linter with exit 0"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python scripts/lint_compose_dangling_deps.py docker/docker-compose.stability-test.yml docker/docker-compose.prod.yml docker/docker-compose.judge.yml"
+  - id: "dod-deploy"
+    description: >-
+      deploy-gate: this PR adds CI lint tooling only (scripts/lint_compose_dangling_deps.py, tests, .github/workflows/compose-config-lint.yml, contracts/OMN-13037.yaml). No runtime containers, no database schema changes, no service restarts required. The CI workflow runs on compose overlay file changes as a required static analysis gate.
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime not required: CI tooling only, no container behaviour changed"
