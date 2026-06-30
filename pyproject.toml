@@ -178,11 +178,11 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-13762 R3: pin occ to immutable main HEAD SHA (f3a04c1) so the lock is
+# OMN-13762 R3: pin occ to immutable main HEAD SHA (2dd26ad) so the lock is
 # reproducible from pure PyPI + immutable-rev sources; omnibase-core and
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
-onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "f3a04c10740c4bee68179d176a88b986daf6d57d" }
+onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
 [tool.ruff]
 target-version = "py312"
 line-length = 88
