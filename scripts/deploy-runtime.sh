@@ -156,6 +156,14 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# When true (--cold), run the cold-lane FULL bring-up path (OMN-13414): build in
+# workspace mode from the merged-dev siblings, bring up deps + migration
+# one-shots, then bring the WHOLE --profile runtime project up (not just the
+# RUNTIME_SERVICES subset the warm --restart path recreates). Two gotchas this
+# encodes: the runtime profile is mandatory (a bare `up -d` starts nothing) and
+# the build must be workspace-sourced (release packages cannot carry un-released
+# merged-dev code, so a release image starts a cold lane on stale code).
+COLD_FULL_BRINGUP=false
 # When true (--prod, or ONEX_DEPLOY_LANE=prod), the prod promotion-lineage guard
 # runs before any build: the source tree must be clean AND HEAD must be an
 # ancestor-of/equal-to origin/main. Prevents building the prod image from a
@@ -233,6 +241,24 @@ OPTIONS
     --execute           Actually deploy: rsync, write registry, build images.
     --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
+                        WARM path: recreates only the RUNTIME_SERVICES subset
+                        with 'up -d --no-deps'. Use on a lane whose deps + broker
+                        are already up.
+    --cold              COLD-lane FULL bring-up (OMN-13414). For an ephemeral lane
+                        that was GC/idle-reclaimed and torn down to zero
+                        containers. Forces a workspace-mode build from the local
+                        merged-dev siblings (BUILD_SOURCE=workspace + OMNI_HOME +
+                        sibling REF build-args via stage_workspace.sh), brings up
+                        deps + the migration one-shots, then brings the WHOLE
+                        '--profile runtime' project up (every consumer/projection
+                        service, not just RUNTIME_SERVICES). Requires --execute and
+                        OMNI_HOME; incompatible with --prod (workspace images are
+                        non-main-lineage and the prod gate refuses them). Two
+                        gotchas it solves: the runtime profile is mandatory (a bare
+                        'docker compose up -d' starts NOTHING), and the default
+                        BUILD_SOURCE=release cannot rebuild a cold lane from
+                        un-released merged-dev code. See
+                        docs/runbooks/cold-lane-full-bringup.md.
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
     --prod              Enforce the prod promotion-lineage guard before build:
@@ -266,8 +292,11 @@ EXAMPLES
     # Deploy and build images
     ${SCRIPT_NAME} --execute
 
-    # Deploy, build, and restart containers
+    # Deploy, build, and restart containers (WARM lane: deps already up)
     ${SCRIPT_NAME} --execute --restart
+
+    # COLD lane full bring-up from merged dev (workspace build + full --profile up)
+    OMNI_HOME=/path/to/omni_home ${SCRIPT_NAME} --execute --cold
 
     # Redeploy same version (overwrite)
     ${SCRIPT_NAME} --execute --force
@@ -303,6 +332,10 @@ parse_args() {
                 ;;
             --restart)
                 RESTART=true
+                shift
+                ;;
+            --cold)
+                COLD_FULL_BRINGUP=true
                 shift
                 ;;
             --profile)
@@ -343,6 +376,25 @@ parse_args() {
     if [[ "${RESTART}" == true && "${MODE}" != "execute" ]]; then
         log_error "--restart requires --execute"
         exit 1
+    fi
+
+    # OMN-13414: --cold is the cold-lane FULL bring-up. It forces a workspace
+    # build (so a release-pinned BUILD_SOURCE is a contradiction) and produces a
+    # non-main-lineage image the prod-promotion gate refuses (so --prod / prod
+    # lane is incompatible).
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        if [[ "${BUILD_SOURCE:-}" == "release" ]]; then
+            log_error "--cold performs a workspace-mode build from the merged-dev siblings, but BUILD_SOURCE=release was set."
+            log_error "  A release image cannot carry un-released merged-dev code; a cold lane would boot on stale code."
+            log_error "  Unset BUILD_SOURCE (it defaults to workspace under --cold) or set BUILD_SOURCE=workspace."
+            exit 64
+        fi
+        if [[ "${PROD_LANE}" == true ]]; then
+            log_error "--cold is a workspace-mode (non-main-lineage) bring-up and cannot target the prod lane."
+            log_error "  The prod-promotion gate refuses workspace / stability-candidate images (OMN-13669)."
+            log_error "  Promote a clean-main release to prod via the gated node path instead."
+            exit 1
+        fi
     fi
 }
 
@@ -643,6 +695,17 @@ read_repo_ref_or_main() {
 
 resolve_build_source() {
     # Resolve the selected Dockerfile dependency source.
+    #
+    # OMN-13414: a cold-lane FULL bring-up (--cold) must build from the local
+    # workspace siblings at merged-dev SHAs, never from the PyPI release packages
+    # — a release image cannot carry un-released merged-dev code, which is exactly
+    # what a cold/GC-reclaimed lane has to be rebuilt from. --cold therefore forces
+    # workspace mode; validate_build_source_config then requires OMNI_HOME, and
+    # parse_args has already rejected a contradictory BUILD_SOURCE=release.
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        echo "workspace"
+        return 0
+    fi
     echo "${BUILD_SOURCE:-release}"
 }
 
@@ -2134,6 +2197,49 @@ run_runtime_migration_preflight() {
     done
 }
 
+bringup_full_stack() {
+    # Cold-lane FULL bring-up: bring the WHOLE --profile runtime project up
+    # (OMN-13414).
+    #
+    # The warm --restart path recreates only the RUNTIME_SERVICES subset with
+    # `up -d --no-deps`; on a cold/GC-reclaimed lane every other service in the
+    # runtime profile (the projection/consumer fleet, autoheal, etc.) stays down.
+    # This brings the entire project up. Two gotchas it encodes:
+    #
+    #   1. `--profile "${COMPOSE_PROFILE}"` (runtime) is MANDATORY. Runtime
+    #      services are gated behind the compose runtime profile; a bare
+    #      `docker compose up -d` matches NO profiled service and starts nothing.
+    #   2. NO `--no-deps`. Unlike restart_services, the full up honors the compose
+    #      depends_on chain (postgres/valkey -> redpanda + partition-cap ->
+    #      forward/intelligence migration one-shots -> runtime + consumers), so
+    #      the whole stack starts in dependency order. The explicit preflight in
+    #      main() (ensure_core_infra_ready / warm_broker_topic_provisioning /
+    #      run_runtime_migration_preflight) has already warmed deps + the
+    #      one-shots, so this is the idempotent full fan-out over the rest of the
+    #      profile.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+
+    log_step "Cold-Lane Full Bring-Up (OMN-13414)"
+
+    local cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d
+    )
+
+    log_info "Bringing the FULL ${COMPOSE_PROFILE}-profile project up: ${compose_project}"
+    log_cmd "${cmd[*]}"
+
+    "${cmd[@]}"
+
+    log_info "Full project up."
+}
+
 restart_services() {
     # Restart runtime containers via docker compose up --force-recreate.
     local deploy_target="$1"
@@ -2547,8 +2653,15 @@ main() {
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
 
-    # Phase 11: Restart (optional)
-    if [[ "${RESTART}" == true ]]; then
+    # Phase 11: Bring runtime up (optional).
+    #   --cold    -> cold-lane FULL bring-up: deps + migration one-shots + the
+    #               WHOLE --profile runtime project (OMN-13414).
+    #   --restart -> WARM path: deps + migration one-shots + recreate only the
+    #               RUNTIME_SERVICES subset (--no-deps).
+    # Both share the cold-start preflight (core infra readiness, broker partition
+    # cap, migration one-shots, raised Kafka consumer-start budget); they differ
+    # only in the final `up` (full-profile fan-out vs RUNTIME_SERVICES recreate).
+    if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
         # Raise the per-consumer Kafka consumer-start budget for the restart-driven
         # cold boot (OMN-13220). x-runtime-env reads KAFKA_TIMEOUT_SECONDS from the
         # shell environment (default 30s when unset); exporting it here propagates
@@ -2577,11 +2690,17 @@ main() {
         ensure_core_infra_ready "${deploy_target}" "${compose_project}"
         warm_broker_topic_provisioning "${deploy_target}" "${compose_project}"
         run_runtime_migration_preflight "${deploy_target}" "${compose_project}"
-        restart_services "${deploy_target}" "${compose_project}"
+        if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+            # Cold lane: fan out across the WHOLE runtime profile (OMN-13414).
+            bringup_full_stack "${deploy_target}" "${compose_project}"
+        else
+            # Warm lane: recreate only the RUNTIME_SERVICES subset (--no-deps).
+            restart_services "${deploy_target}" "${compose_project}"
+        fi
     fi
 
-    # Phase 12: Verify (only with --restart)
-    if [[ "${RESTART}" == true ]]; then
+    # Phase 12: Verify (after a cold bring-up or a warm --restart)
+    if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
         verify_deployment "${git_sha}" "${compose_project}"
     fi
 
