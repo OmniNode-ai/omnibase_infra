@@ -95,6 +95,7 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "llm.glm.api_key",
         "llm.gemini.api_key",
         "llm.vertex.access_token",
+        "slack.bot_token",
     }
     assert judge_logical_names == logical_names
     assert (

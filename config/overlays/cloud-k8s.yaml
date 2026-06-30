@@ -41,6 +41,12 @@ overrides:
   # Runtime health endpoints — k8s ingress / internal service
   ONEX_RUNTIME_URL: "http://omninode-runtime.default.svc.cluster.local:8085"
   ONEX_EFFECTS_URL: "http://runtime-effects.default.svc.cluster.local:8086"
+  # OMN-13726: Default morning-report delivery Slack channel.
+  # OPERATOR ACTION REQUIRED: replace this placeholder with the real Slack channel ID
+  # (e.g. C01234ABCDE) before starting morning-report nodes.
+  # Value intentionally left as placeholder — resolves fail-closed against Slack API if unset.
+  # On k8s: set via InfisicalSecret CRD referencing /machine-class/cloud-k8s/SLACK_MORNING_CHANNEL.
+  SLACK_MORNING_CHANNEL: "PLACEHOLDER_SET_BY_OPERATOR"
 
 # k8s bootstrap pattern (reference):
 #   The Infisical operator reads INFISICAL_PROJECT_ID and credentials from a

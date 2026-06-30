@@ -32,6 +32,12 @@ overrides:
   # Runtime health endpoints — prod lane
   ONEX_RUNTIME_URL: "http://localhost:28085"
   ONEX_EFFECTS_URL: "http://localhost:28086"
+  # OMN-13726: Default morning-report delivery Slack channel.
+  # OPERATOR ACTION REQUIRED: replace this placeholder with the real Slack channel ID
+  # (e.g. C01234ABCDE) before starting morning-report nodes.
+  # Value intentionally left as placeholder — resolves fail-closed against Slack API if unset.
+  # Do NOT hardcode a real channel ID here; set it via Infisical /machine-class/linux-server/SLACK_MORNING_CHANNEL.
+  SLACK_MORNING_CHANNEL: "PLACEHOLDER_SET_BY_OPERATOR"
 
 # Config materialization note:
 #   `onex init --profile linux-server` writes a runtime compose env file to
