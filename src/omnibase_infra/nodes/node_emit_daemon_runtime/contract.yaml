@@ -49,6 +49,9 @@ consumed_events:
 metadata:
   owner: "omnibase_infra"
   ticket: "OMN-13700"
+  description: >
+    Consumes emit-daemon lifecycle topics produced by omniclaude hooks so omnibase_infra can provision and monitor the runtime topic surface.
+
   tags:
     - runtime
     - emit-daemon
