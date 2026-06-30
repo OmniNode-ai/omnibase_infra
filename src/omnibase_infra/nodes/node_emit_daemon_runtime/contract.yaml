@@ -23,15 +23,9 @@ output_model:
   description: "Runtime emit daemon topic-consumption contract output marker."
 event_bus:
   subscribe_topics:
-    - topic: "onex.evt.omniclaude.phase-metrics.v1"
-      topic_config:
-        partitions: 3
-    - topic: "onex.evt.omniclaude.notification-blocked.v1"
-      topic_config:
-        partitions: 3
-    - topic: "onex.evt.omniclaude.notification-completed.v1"
-      topic_config:
-        partitions: 3
+    - "onex.evt.omniclaude.phase-metrics.v1"
+    - "onex.evt.omniclaude.notification-blocked.v1"
+    - "onex.evt.omniclaude.notification-completed.v1"
   publish_topics: []
 consumed_events:
   - topic: "onex.evt.omniclaude.phase-metrics.v1"
