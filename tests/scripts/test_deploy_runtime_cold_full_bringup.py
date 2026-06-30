@@ -216,6 +216,16 @@ def test_main_cold_runs_verify() -> None:
     )
 
 
+@pytest.mark.unit
+def test_summary_treats_cold_path_as_containers_running() -> None:
+    """After --cold, summary must not tell the operator to start containers."""
+    body = _function_body("show_summary")
+    assert '"${COLD_FULL_BRINGUP}" == false' in body, (
+        "show_summary must treat --cold like --restart because both paths already "
+        "bring containers up before the summary is printed."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Operator-facing documentation in usage()
 # ---------------------------------------------------------------------------

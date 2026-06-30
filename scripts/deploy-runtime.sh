@@ -2487,7 +2487,7 @@ show_summary() {
     log_info ""
     log_info "Next steps (source ~/.omnibase/.env before running):"
 
-    if [[ "${RESTART}" == false ]]; then
+    if [[ "${RESTART}" == false && "${COLD_FULL_BRINGUP}" == false ]]; then
         log_info "  To start containers, run:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
