@@ -66,8 +66,8 @@ endpoints:
       alias (same URL, different role). Rename deferred — see Task 29.
   - slot_id: embeddings-201
     host: 192.168.86.201
-    port: 8100
-    endpoint_url: http://192.168.86.201:8100
+    port: 8002
+    endpoint_url: http://192.168.86.201:8002
     url_env_var: LLM_EMBEDDING_URL
     role_env_alias: null
     model_hf_id: Alibaba-NLP/gte-Qwen2-1.5B-instruct
@@ -76,7 +76,10 @@ endpoints:
     hardware: RTX 4090 (.201)
     context_window_budgeted: 8192
     launchd_unit_or_none: null
-    notes: Canonical runtime embedding endpoint for LLM_EMBEDDING_URL.
+    notes: |
+      Canonical runtime embedding endpoint for LLM_EMBEDDING_URL. Moved
+      :8100 -> :8002 (vllm-embeddings) per OMN-13664/OMN-13807; the legacy
+      :8100 process is down.
   - slot_id: reasoning-deepseek-32b
     host: 192.168.86.200
     port: 8101

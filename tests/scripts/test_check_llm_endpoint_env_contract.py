@@ -52,7 +52,7 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
                 "LLM_CODER_FAST_URL=http://192.168.86.201:8001",
-                "LLM_EMBEDDING_URL=http://192.168.86.201:8100",
+                "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
                 "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
             ]
         )
