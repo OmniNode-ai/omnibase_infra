@@ -37,3 +37,16 @@ topics:
   - onex.evt.omnimemory.document-ingested.v1
   - onex.cmd.omninode.routing-requested.v1
   - onex.evt.omninode.routing-completed.v1
+  # --- Cross-repo consumer-only command topic (OMN-13808) ---
+  # onex.cmd.omnimarket.node-generation-requested.v1 is declared in the
+  # omnimarket node_generation_consumer contract (event_bus.subscribe_topics),
+  # but this broker auto-creates topics only on PRODUCE, not on subscribe. The
+  # only producer is the projection-API /api/generate route, which does not run
+  # on the runtime lane — so the topic stays at 0 partitions and the effects-
+  # profile consumer cannot bind (generation golden chains G-01..G-05 blocked).
+  # omnimarket is not a build dependency of omnibase_infra, so its contract is
+  # not guaranteed to be in the in-repo/installed-package scan on every lane;
+  # mirror the command topic here so the TopicProvisioner creates it explicitly
+  # (p1/r1 default, matching sibling onex.cmd.* topics — see line above for the
+  # onex.cmd.omninode.routing-requested.v1 precedent). Sibling of OMN-13771.
+  - onex.cmd.omnimarket.node-generation-requested.v1
