@@ -2742,7 +2742,9 @@ async def bootstrap() -> int:
 
         # Start HTTP health server before long Kafka subscription work. At this
         # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
-        # startup liveness with runtime_attached=false and attaches runtime later.
+        # startup liveness with runtime_attached=false. RuntimeHostProcess is
+        # created and attached immediately below (OMN-13768), still before the
+        # long-running Kafka subscription work further down.
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
             http_port = int(http_port_str)
@@ -2784,179 +2786,20 @@ async def bootstrap() -> int:
             },
         )
 
-        if (
-            auto_wiring_report is not None
-            and auto_wiring_manifest_for_subscriptions is not None
-        ):
-            # OMN-13237: interleave provision -> confirm-ready -> attach per
-            # wired contract by passing the runtime provisioner. A not-ready
-            # contract is recorded and SKIPPED for attach; it never recycles the
-            # process. The aggregate tri-state is logged for operator visibility.
-            from typing import cast as _cast
-
-            from omnibase_infra.event_bus.model_contract_attach_result import (
-                ModelContractAttachResult,
-            )
-            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
-                ModelRuntimeAttachReadiness,
-            )
-            from omnibase_infra.protocols.protocol_topic_provisioner import (
-                ProtocolTopicProvisioner,
-            )
-
-            _attach_results: list[ModelContractAttachResult] = []
-            auto_wired_subscriptions = await subscribe_wired_contract_topics(
-                manifest=auto_wiring_manifest_for_subscriptions,
-                report=auto_wiring_report,
-                dispatch_engine=dispatch_engine,
-                event_bus=event_bus,
-                environment=environment,
-                result_appliers_by_contract=auto_wiring_result_appliers,
-                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
-                readiness_config=resolve_topic_readiness_config(),
-                attach_results_out=_attach_results,
-            )
-            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
-                tuple(_attach_results)
-            )
-            logger.info(
-                "Per-contract boot interleave: state=%s attached=%d/%d "
-                "(OMN-13237) (correlation_id=%s)",
-                _attach_readiness.state.value,
-                _attach_readiness.attached_contracts,
-                _attach_readiness.required_contracts,
-                correlation_id,
-            )
-            for contract_name, topics in auto_wired_subscriptions.items():
-                for topic in topics:
-                    for pattern in claimed_topic_patterns:
-                        if _topic_matches_pattern(topic, pattern):
-                            logger.warning(
-                                "Topic collision: auto-wired topic '%s' "
-                                "(contract=%s) overlaps with explicit "
-                                "plugin route pattern '%s' "
-                                "(correlation_id=%s)",
-                                topic,
-                                contract_name,
-                                pattern,
-                                correlation_id,
-                            )
-
-        # --- Pass 2: Start consumers for ready plugins only ---
-        # ready_plugins is a subset of activated_plugins: only plugins that
-        # completed wire_handlers() successfully. This prevents starting
-        # consumers for plugins with no handlers/dispatchers wired.
-        for plugin in ready_plugins:
-            plugin_id = plugin.plugin_id
-            try:
-                consumer_result = await plugin.start_consumers(plugin_config)
-                if consumer_result and consumer_result.unsubscribe_callbacks:
-                    plugin_unsubscribe_callbacks.extend(
-                        consumer_result.unsubscribe_callbacks
-                    )
-                logger.info(
-                    "Plugin '%s' consumers started (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                    exc_info=True,
-                )
-
-        plugin_activation_duration = time.time() - plugin_activation_start
-        logger.info(
-            "Plugin activation completed in %.3fs: %d/%d plugins activated "
-            "(correlation_id=%s)",
-            plugin_activation_duration,
-            len(activated_plugins),
-            len(plugin_registry),
-            correlation_id,
-            extra={
-                "activated_plugins": [p.plugin_id for p in activated_plugins],
-                "duration_seconds": plugin_activation_duration,
-            },
-        )
-
-        # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
-        # This router subscribes to contract lifecycle events (registration,
-        # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
-        # The router also runs an internal tick timer for staleness computation.
-        # Uses postgres_pool from the registration plugin.
-        postgres_pool = registration_service.postgres_pool
-        if config.contract_registry.enabled and postgres_pool is not None:
-            # Import postgres handlers for contract persistence
-            # Deferred import to avoid loading heavy dependencies when not needed
-            from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
-                HandlerPostgresCleanupTopics,
-                HandlerPostgresContractUpsert,
-                HandlerPostgresDeactivate,
-                HandlerPostgresHeartbeat,
-                HandlerPostgresMarkStale,
-                HandlerPostgresTopicUpdate,
-            )
-
-            # Create effect handlers keyed by intent_type
-            # These handlers execute PostgreSQL operations for intents from the reducer
-            # Note: Handlers implement ProtocolIntentEffect duck-typing style with
-            # more specific payload types. Cast tells mypy they satisfy the protocol.
-            contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
-                "postgres.upsert_contract": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresContractUpsert(postgres_pool),
-                ),
-                "postgres.update_topic": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresTopicUpdate(postgres_pool),
-                ),
-                "postgres.mark_stale": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresMarkStale(postgres_pool),
-                ),
-                "postgres.update_heartbeat": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresHeartbeat(postgres_pool),
-                ),
-                "postgres.deactivate_contract": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresDeactivate(postgres_pool),
-                ),
-                "postgres.cleanup_topic_references": cast(
-                    "ProtocolIntentEffect",
-                    HandlerPostgresCleanupTopics(postgres_pool),
-                ),
-            }
-
-            # Create reducer and router
-            contract_reducer = ContractRegistryReducer()
-            contract_router = ContractRegistrationEventRouter(
-                container=container,
-                reducer=contract_reducer,
-                effect_handlers=contract_effect_handlers,
-                event_bus=event_bus,
-                tick_interval_seconds=config.contract_registry.tick_interval_seconds,
-            )
-
-            logger.info(
-                "ContractRegistrationEventRouter created (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
-                    "handler_count": len(contract_effect_handlers),
-                },
-            )
-        else:
-            logger.debug(
-                "Contract registry disabled or no postgres_pool (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "contract_registry_enabled": config.contract_registry.enabled,
-                    "postgres_pool_available": postgres_pool is not None,
-                },
-            )
+        # OMN-13768: RuntimeHostProcess is created, registered in the container,
+        # and attached to the health server HERE — before the long-running Kafka
+        # subscription work below (subscribe_wired_contract_topics/plugin consumer
+        # start/ContractRegistrationEventRouter wiring, which the module docstring
+        # notes "may take 10+ min"). Previously this block ran *after* that work,
+        # so ServiceHealth._runtime stayed None for the whole subscription window
+        # and GET /ready raised ProtocolConfigurationError [ONEX_CORE_041]
+        # ("RuntimeHostProcess not available") even though the auto-wired
+        # consumers below were already processing events. None of the
+        # RegistryProtocolBinding/RuntimeHostProcess construction inputs
+        # (container, event_bus, dispatch_engine, node_graph_config,
+        # kernel_profile, contracts_dir, auto_wiring_manifest_for_subscriptions)
+        # depend on the subscription work that used to precede this block, so
+        # the reorder is dependency-safe. See docs/handoffs/2026-07-01 write-up.
 
         # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
@@ -3162,6 +3005,187 @@ async def bootstrap() -> int:
         )
         if _introspection_manifest is not None:
             health_server.attach_manifest(_introspection_manifest)
+
+        # OMN-13768: the long-running Kafka subscription work (per-contract
+        # boot interleave, plugin consumer start, ContractRegistrationEventRouter
+        # wiring) now runs AFTER RuntimeHostProcess is created/registered/attached
+        # above, so GET /ready reflects real event-bus readiness (via
+        # RuntimeHostProcess.readiness_check() -> event_bus.get_readiness_status())
+        # instead of raising ProtocolConfigurationError [ONEX_CORE_041] for the
+        # entire duration of this section.
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            # OMN-13237: interleave provision -> confirm-ready -> attach per
+            # wired contract by passing the runtime provisioner. A not-ready
+            # contract is recorded and SKIPPED for attach; it never recycles the
+            # process. The aggregate tri-state is logged for operator visibility.
+            from typing import cast as _cast
+
+            from omnibase_infra.event_bus.model_contract_attach_result import (
+                ModelContractAttachResult,
+            )
+            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+                ModelRuntimeAttachReadiness,
+            )
+            from omnibase_infra.protocols.protocol_topic_provisioner import (
+                ProtocolTopicProvisioner,
+            )
+
+            _attach_results: list[ModelContractAttachResult] = []
+            auto_wired_subscriptions = await subscribe_wired_contract_topics(
+                manifest=auto_wiring_manifest_for_subscriptions,
+                report=auto_wiring_report,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_appliers_by_contract=auto_wiring_result_appliers,
+                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
+                readiness_config=resolve_topic_readiness_config(),
+                attach_results_out=_attach_results,
+            )
+            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
+                tuple(_attach_results)
+            )
+            logger.info(
+                "Per-contract boot interleave: state=%s attached=%d/%d "
+                "(OMN-13237) (correlation_id=%s)",
+                _attach_readiness.state.value,
+                _attach_readiness.attached_contracts,
+                _attach_readiness.required_contracts,
+                correlation_id,
+            )
+            for contract_name, topics in auto_wired_subscriptions.items():
+                for topic in topics:
+                    for pattern in claimed_topic_patterns:
+                        if _topic_matches_pattern(topic, pattern):
+                            logger.warning(
+                                "Topic collision: auto-wired topic '%s' "
+                                "(contract=%s) overlaps with explicit "
+                                "plugin route pattern '%s' "
+                                "(correlation_id=%s)",
+                                topic,
+                                contract_name,
+                                pattern,
+                                correlation_id,
+                            )
+
+        # --- Pass 2: Start consumers for ready plugins only ---
+        # ready_plugins is a subset of activated_plugins: only plugins that
+        # completed wire_handlers() successfully. This prevents starting
+        # consumers for plugins with no handlers/dispatchers wired.
+        for plugin in ready_plugins:
+            plugin_id = plugin.plugin_id
+            try:
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if consumer_result and consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+                logger.info(
+                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                    exc_info=True,
+                )
+
+        plugin_activation_duration = time.time() - plugin_activation_start
+        logger.info(
+            "Plugin activation completed in %.3fs: %d/%d plugins activated "
+            "(correlation_id=%s)",
+            plugin_activation_duration,
+            len(activated_plugins),
+            len(plugin_registry),
+            correlation_id,
+            extra={
+                "activated_plugins": [p.plugin_id for p in activated_plugins],
+                "duration_seconds": plugin_activation_duration,
+            },
+        )
+
+        # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
+        # This router subscribes to contract lifecycle events (registration,
+        # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
+        # The router also runs an internal tick timer for staleness computation.
+        # Uses postgres_pool from the registration plugin.
+        postgres_pool = registration_service.postgres_pool
+        if config.contract_registry.enabled and postgres_pool is not None:
+            # Import postgres handlers for contract persistence
+            # Deferred import to avoid loading heavy dependencies when not needed
+            from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
+                HandlerPostgresCleanupTopics,
+                HandlerPostgresContractUpsert,
+                HandlerPostgresDeactivate,
+                HandlerPostgresHeartbeat,
+                HandlerPostgresMarkStale,
+                HandlerPostgresTopicUpdate,
+            )
+
+            # Create effect handlers keyed by intent_type
+            # These handlers execute PostgreSQL operations for intents from the reducer
+            # Note: Handlers implement ProtocolIntentEffect duck-typing style with
+            # more specific payload types. Cast tells mypy they satisfy the protocol.
+            contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
+                "postgres.upsert_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresContractUpsert(postgres_pool),
+                ),
+                "postgres.update_topic": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresTopicUpdate(postgres_pool),
+                ),
+                "postgres.mark_stale": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresMarkStale(postgres_pool),
+                ),
+                "postgres.update_heartbeat": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresHeartbeat(postgres_pool),
+                ),
+                "postgres.deactivate_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresDeactivate(postgres_pool),
+                ),
+                "postgres.cleanup_topic_references": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresCleanupTopics(postgres_pool),
+                ),
+            }
+
+            # Create reducer and router
+            contract_reducer = ContractRegistryReducer()
+            contract_router = ContractRegistrationEventRouter(
+                container=container,
+                reducer=contract_reducer,
+                effect_handlers=contract_effect_handlers,
+                event_bus=event_bus,
+                tick_interval_seconds=config.contract_registry.tick_interval_seconds,
+            )
+
+            logger.info(
+                "ContractRegistrationEventRouter created (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
+                    "handler_count": len(contract_effect_handlers),
+                },
+            )
+        else:
+            logger.debug(
+                "Contract registry disabled or no postgres_pool (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "contract_registry_enabled": config.contract_registry.enabled,
+                    "postgres_pool_available": postgres_pool is not None,
+                },
+            )
 
         # 7. Setup graceful shutdown
         shutdown_event = asyncio.Event()
