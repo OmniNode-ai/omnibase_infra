@@ -311,8 +311,8 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="v0.5.4"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.4.tar.gz"
+ARG OMNIBASE_COMPAT_REF="v0.5.5"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.5.tar.gz"
 # Pin to the onex_change_control v0.5.3 release tag.
 ARG ONEX_CHANGE_CONTROL_REF=v0.5.3
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
@@ -645,6 +645,50 @@ RUN set -eu; \
         @anthropic-ai/claude-code@2.1.181 \
         @anthropic-ai/claude-code-linux-x64@2.1.181; \
     npm cache clean --force
+
+# ============================================================================
+# Security: patch npm's bundled Node dependencies (OMN-13762)
+# ============================================================================
+# Node 20 from NodeSource ships npm 10.8.2, whose bundled copies under
+# /usr/lib/node_modules/npm/node_modules/ are flagged CRITICAL/HIGH by Trivy
+# (severity CRITICAL,HIGH, ignore-unfixed):
+#   cross-spawn 7.0.3  -> CVE-2024-21538                 (fixed 7.0.5)
+#   glob        10.4.2 -> CVE-2025-64756                 (fixed 10.5.0/11.1.0)
+#   minimatch   9.0.5  -> CVE-2026-26996/27903/27904     (fixed >=9.0.7 / 10.2.x)
+#   tar         6.2.1  -> CVE-2026-23745/23950/24842/
+#                         26960/29786/31802              (fixed 7.5.11)
+#
+# Remediation is two-step because these are *bundled inside npm itself*:
+#   1. Upgrade npm to 11.18.0 (exact pin — reproducible + satisfies
+#      scripts/check_dockerfile_pins.py; npm@<tag> is rejected). npm 11 already
+#      bundles the patched cross-spawn 7.0.6.
+#   2. Overwrite npm's OWN bundled copies of the four flagged packages with the
+#      patched releases. `npm install -g <pkg>@x` installs a SEPARATE global
+#      package and leaves npm's bundled vulnerable copy in place (Trivy would
+#      still flag it), so instead `npm pack` each patched release and extract it
+#      directly over the bundled copy under $(npm root -g)/npm/node_modules.
+#      Exact versions keep the image reproducible (npm pack is not an
+#      `npm install -g` global-CLI install, so it is outside the pin-check).
+# The Node CLI itself is retained — it backs runtime coding-agent delegation
+# (node_coding_agent_invoke_effect); only the vulnerable bundled deps are bumped.
+RUN set -eu; \
+    npm install -g npm@11.18.0; \
+    npm cache clean --force; \
+    NPM_MODULES="$(npm root -g)/npm/node_modules"; \
+    tmp="$(mktemp -d)"; \
+    for spec in cross-spawn@7.0.6 glob@13.0.6 minimatch@10.2.5 tar@7.5.19; do \
+        pkg="${spec%@*}"; \
+        npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
+        tb="$(ls "$tmp/${pkg}"-*.tgz)"; \
+        rm -rf "${NPM_MODULES:?}/${pkg}"; \
+        mkdir -p "${NPM_MODULES}/${pkg}"; \
+        tar -xzf "$tb" -C "${NPM_MODULES}/${pkg}" --strip-components=1; \
+    done; \
+    rm -rf "$tmp"; \
+    for pkg in cross-spawn glob minimatch tar; do \
+        v="$(node -p "require('${NPM_MODULES}/${pkg}/package.json').version")"; \
+        echo "npm bundled ${pkg} patched to ${v}"; \
+    done
 
 # Build-time assert that both coding-agent CLIs resolved on PATH (mirrors the
 # torch/import asserts in the builder stage L388-403). A missing binary must
