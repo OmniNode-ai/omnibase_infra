@@ -41,11 +41,15 @@ def test_omnibase_compat_pin_includes_delegation_wire_contracts(
     # c1a878f chore: release v0.4.0 (pin as of OMN-12421 baseline)
     # 4d887307 fix(OMN-12245): release delegation escalation DTOs (pin as of OMN-12421 advance)
     # v0.5.4  release tag -> 11325233b202449a216b5c862084be3b5e0cae2c
+    # v0.5.5  release tag -> c0fc71681d046e840e0997c04bd26176785a2992 (OMN-13762):
+    #          delegation DTO set is identical to v0.5.4 (verified against the
+    #          v0.5.5 archive tarball — src/omnibase_compat/contracts/delegation/).
     _DELEGATION_WIRE_VERIFIED_REFS = {
         "3e34ab94fad0a9db1c3b59f0e100c5da659b0792",
         "c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1",
         "4d887307aae34d9d40d389ba91070cb411ce3df5",
         "v0.5.4",
+        "v0.5.5",
     }
     assert ref in _DELEGATION_WIRE_VERIFIED_REFS, (
         f"OMNIBASE_COMPAT_SOURCE pin {ref!r} is not in the verified set of refs "
