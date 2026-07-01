@@ -15,6 +15,7 @@ Comprehensive reference documentation for all ONEX infrastructure validators.
 7. [validate_infra_circular_imports](#validate_infra_circular_imports)
 8. [validate_infra_all](#validate_infra_all)
 9. [get_validation_summary](#get_validation_summary)
+10. [CI-only gates](#ci-only-gates) - dispatcher-route-coverage, transport-mock-lint, node-migration-sync
 
 ---
 
@@ -68,11 +69,11 @@ The following infrastructure packages are forbidden in `omnibase_core`:
 
 ### Known Issues
 
-Some imports have known violations tracked in Linear. When **only** known issues are detected, the validator passes (exit code 0) to avoid blocking CI:
+Some imports have known violations tracked for cleanup. When **only** known issues are detected, the validator passes (exit code 0) to avoid blocking CI:
 
-- `aiohttp`:  - async HTTP client needs migration to infra
-- `redis`:  - Redis client needs migration to infra
-- `consul`:  - Consul TYPE_CHECKING import
+- `aiohttp`: async HTTP client needs migration to infra
+- `redis`: Redis client needs migration to infra
+- `consul`: Consul TYPE_CHECKING import
 
 ### Exit Codes
 
@@ -300,7 +301,7 @@ def validate_infra_patterns(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_PATTERNS_STRICT per ).
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_PATTERNS_STRICT).
 
 ### Returns
 
@@ -314,7 +315,7 @@ def validate_infra_patterns(
 
 ### What It Validates
 
-**Strict Mode** (default per ):
+**Strict Mode** (default):
 - Model prefix naming (`Model*`)
 - snake_case file naming
 - Anti-pattern detection (no `*Manager`, `*Handler`, `*Helper`)
@@ -455,7 +456,7 @@ def validate_infra_union_usage(
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
 - **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `491` (INFRA_MAX_UNIONS).
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per ).
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT).
 
 ### Returns
 
@@ -479,7 +480,7 @@ Infrastructure code needs typed unions for:
 - Message routing and handler dispatch
 - Service integration type safety
 
-**Why max_unions=491**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a buffer above the current baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
+**Why max_unions=491**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a buffer above the current baseline (~485 unions as of the date this was established). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
 
 ### Example Usage
 
@@ -736,8 +737,57 @@ INFRA_UNIONS_STRICT = True      # Strict union validation (flags actual violatio
 
 ---
 
+## CI-only gates
+
+These gates are enforced as CI workflows and/or pre-commit hooks but are not callable via `scripts/validate.py`. They are listed here because developers diagnosing CI failures need a single authoritative reference.
+
+### dispatcher-route-coverage
+
+**Workflow**: `.github/workflows/dispatcher-route-coverage.yml`
+**Trigger**: `pull_request` and `merge_group` on `dev`/`main`
+
+For every `contract.yaml` in omnibase_infra and omnimarket that subscribes to a command topic (`onex.cmd.*`), asserts that the contract also declares a dispatcher route via `handler_routing` or `runtime_dispatch`.
+
+**What fires it**: A contract subscribes to a command topic but has no dispatcher route declared. Commands on that topic will go to DLQ silently in the runtime.
+
+**Fix**: Add `handler_routing` or `runtime_dispatch` entries with at least one `operation_match` or `payload_type_match` handler covering the subscribed command topic.
+
+**Changed-topic fast path**: On pull-request runs, only contracts that changed in the PR are re-checked, so the gate is fast for incremental work. The full scan runs on `merge_group`.
+
+---
+
+### transport-mock-lint
+
+**Pre-commit hook**: `transport-mock-lint` (sourced from `omnibase_core`, rev `cfaa6ec...`)
+**Workflow**: also gated in `.github/workflows/ci.yml`
+**Baseline**: `config/validation/transport_mock_baseline.yaml` (218 violations, 63 files at introduction)
+
+Detects test code that directly imports or instantiates live Kafka, EventBus, or other transport surfaces instead of mock or in-memory substitutes. Existing violations are frozen in the baseline file and are not re-flagged; only net-new violations block the PR.
+
+**What fires it**: A new (or modified) test file imports `KafkaEventBus`, `AIOKafkaConsumer`, `AIOKafkaProducer`, or equivalent live transport classes without using the canonical in-memory mock.
+
+**Fix**: Replace direct transport instantiation with the `event_bus` fixture (returns `EventBusInmemory`) or an appropriate mock.
+
+**Draining the baseline**: Individual site remediation is tracked per file. When all violations in a file are removed, delete that file's entry from the baseline YAML and commit the updated baseline.
+
+---
+
+### node-migration-sync
+
+**Workflow**: `.github/workflows/node-migration-sync.yml`
+**Trigger**: `pull_request` (dev/main), `push` to `main`, `merge_group`
+
+Checks that every SQL migration file under `src/omnimarket/nodes/<node>/migrations/*.sql` has been vendored into `docker/migrations/forward/nodes/<node>/` via `scripts/sync-node-migrations.sh`. The check is run against the current omnimarket `dev` tip on every infra PR.
+
+**What fires it**: An omnimarket node migration was added or changed without the corresponding vendor copy in the infra repo being updated.
+
+**Fix**: Run `scripts/sync-node-migrations.sh` from the repo root, then stage and commit the updated `docker/migrations/forward/nodes/` files. See the [vendored-node-migrations runbook](../runbooks/vendored-node-migrations.md) for full procedure.
+
+---
+
 ## Next Steps
 
 - [Framework Integration](framework_integration.md) - Integration with omnibase_core
 - [Performance Notes](performance_notes.md) - Performance optimization
 - [Troubleshooting](troubleshooting.md) - Common issues and solutions
+- [CI Test Strategy](../testing/CI_TEST_STRATEGY.md) - Full CI gate inventory

@@ -1,0 +1,6 @@
+t+20s status=running restarts=0 health=healthy
+t+40s status=running restarts=0 health=healthy
+t+60s status=running restarts=0 health=healthy
+t+80s status=running restarts=0 health=healthy
+t+100s status=running restarts=0 health=healthy
+t+120s status=running restarts=0 health=healthy

@@ -1,0 +1,90 @@
+# Skill -> Node Catalog Resolution Gate (OMN-13531)
+#
+# WHY THIS EXISTS
+#   `onex skill <name>` resolves the skill's backing node via the declarative
+#   skill->node mapping in src/omnibase_infra/cli/skill_mapping.yaml, then
+#   dispatches through `onex node <node_name>`, which resolves <node_name> via
+#   the `onex.nodes` entry-point group. If the mapping names a node that the
+#   omnimarket catalog no longer carries, the failure surfaces ONLY at dispatch
+#   time as `Unknown node <name>`.
+#
+#   OMN-13531: the pr_review_bot / pr_review / hostile_reviewer entries drifted
+#   after the OMN-13212 node_pr_review_bot decomposition (node_pr_review_bot and
+#   node_hostile_reviewer were deleted and replaced by node_pr_review_orchestrator
+#   / node_hostile_reviewer_orchestrator). The existing unit tests only asserted
+#   `node_name.startswith("node_")` and monkeypatched the resolver, so no test
+#   proved the target node exists. `/onex:pr_review_bot` failed headless with
+#   `Unknown node node_pr_review_orchestrator`.
+#
+#   omnimarket is NOT a declared dependency of omnibase_infra and is not installed
+#   in this repo's CI, so the catalog-resolution test skips when the omnimarket
+#   source tree is unavailable. This gate wires the omnimarket sibling checkout
+#   (same pattern as node-migration-sync.yml) so the test runs as a REAL gate on
+#   every infra PR and merge_group — every mapped node_name must exist in the
+#   canonical omnimarket onex.nodes catalog before merge.
+
+name: skill-node-mapping-sync
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  skill-node-mapping-sync:
+    name: skill-node-mapping-sync
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Checkout omnimarket (sibling — node catalog source of truth)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: omnimarket-src
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          # Sparse checkout: only the entry-point catalog source of truth.
+          sparse-checkout: |
+            pyproject.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          cache-enabled: "false"
+
+      - name: Run skill -> node catalog resolution gate
+        shell: bash
+        env:
+          # The test's resolution order prefers OMNIMARKET_SRC (a repo root
+          # containing pyproject.toml). Point it at the sibling checkout so the
+          # test reads the canonical omnimarket onex.nodes catalog instead of
+          # skipping. A failure here means skill_mapping.yaml references a node
+          # the catalog does not carry — `onex skill <name>` would fail with
+          # `Unknown node ...` at dispatch time.
+          OMNIMARKET_SRC: ${{ github.workspace }}/omnimarket-src
+        run: |
+          set -euo pipefail
+          echo "::group::skill -> node catalog resolution"
+          uv run pytest \
+            tests/unit/cli/test_cli_skill.py \
+            -k "resolves_in_omnimarket_catalog or pr_review_and_hostile_skills_target_existing_nodes" \
+            -p no:randomly -v
+          echo "::endgroup::"

@@ -51,8 +51,7 @@ export DOCKER_BUILDKIT=1
 > Docker Compose project name (`omnibase-infra-runtime`) when invoked from their
 > own `docker/` directories. Running `docker compose up` from the wrong copy
 > causes "invisible deployments" — your code changes have no effect because
-> containers continue to run from a different copy. This is the Feb 15 (OMN-2233)
-> class of incident.
+> containers continue to run from a different copy.
 >
 > **Always use `deploy-runtime.sh` as the deployment entry point:**
 >
@@ -550,8 +549,8 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `RUNTIME_EFFECTS_PORT`       | `8086`                             | Effects runtime exposed port           |
 | **Topics**                   |                                    |                                        |
 | `ONEX_GROUP_ID`              | `onex-runtime-main`                | Consumer group for main runtime        |
-| *ONEX_INPUT_TOPIC*           | *removed (OMN-8784)*               | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
-| *ONEX_OUTPUT_TOPIC*          | *removed (OMN-8784)*               | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
+| *ONEX_INPUT_TOPIC*           | *removed*                          | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
+| *ONEX_OUTPUT_TOPIC*          | *removed*                          | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
 | **OpenTelemetry**            |                                    |                                        |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`| `http://localhost:4317`            | OTLP exporter endpoint                 |
 | `OTEL_SERVICE_NAME`          | `omninode-runtime`                 | Service name for tracing               |

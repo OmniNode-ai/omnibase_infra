@@ -7,8 +7,8 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   EFFECT node that emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult. Publishes two event types in order: RewardAssignedEvent and PolicyStateUpdatedEvent. This is the only node in the objective pipeline that performs I/O. No scoring logic — only emits what ScoringReducer produced. (RunEvaluatedEvent removed in OMN-2929 — canonical event now in node_evidence_collection_effect.)
 
@@ -42,11 +42,13 @@ capabilities:
   - "reward.emit.reward_assigned"
   - "reward.emit.policy_state_updated"
 metadata:
-  description: "Emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult, publishing RunEvaluated, RewardAssigned, and PolicyStateUpdated events"
+  description: "Emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult, publishing RewardAssigned and PolicyStateUpdated events"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-24"
-  ticket: "OMN-2552"
+  updated: "2026-06-30"
+  ticket: "OMN-7334"
+  topic_registry_source: "omnibase_infra.topics SUFFIX_OMNIMEMORY_REWARD_ASSIGNED and SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED"
   tags:
     - effect
     - reward

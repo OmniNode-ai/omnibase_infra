@@ -1,0 +1,67 @@
+# OMN-13237 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13237"
+title: "feat(OMN-13237): per-contract scoped topic provisioning at runtime boot"
+summary: >-
+  Ticket 1 of 2 of epic OMN-12651. Replaces the global create-all-then-subscribe-all big-bang at runtime boot (the cold-broker crash-loop root cause) with a per-wired-contract interleave: provision -> confirm metadata ready -> attach the consumer -> next contract. The seam is the existing post-freeze boot path subscribe_wired_contract_topics in runtime/auto_wiring/handler_wiring.py, which now accepts the runtime TopicProvisioner and, per WIRED contract (in declared order), provisions its subscribe+owned-publish topics via TopicProvisioner.ensure_topic_exists (idempotent), confirms broker metadata converged via the new TopicProvisioner.confirm_topics_ready (deterministic readiness §3.7: topic exists, partition count matches spec, leader per partition, RF where inspectable, classified failure reason), then attaches the consumer. Bounded parallelism across contracts via a max_concurrent_contract_attach knob keeps each contract's provision->ready->attach ORDER invariant (§3.9). A contract whose provision/readiness fails is recorded NOT-READY and SKIPPED for attach — it never aborts the kernel or recycles the process (§3.5/§3.8); the runtime tri-state (ready/degraded/failed) is surfaced via ModelRuntimeAttachReadiness while liveness stays true. The global universe pass (ensure_provisioned_topics_exist) is demoted to a best-effort warm (not deleted, per §3.5) and can be disabled via ONEX_BOOT_UNIVERSE_PROVISION=0 to prove the per-contract confirm carries all owned consumers (W2). Topic names come only from contract event_bus declarations; no new schema/model/enum in omnibase_core; provisions at broker defaults until Ticket 2 (OMN-13238) lands contract-declared per-topic config. Scope = W1/W2/W5/W6/W7 (W3/W4 are Ticket 2).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      New unit + replay suites pass with NO live broker: per-contract interleave call-order + liveness/readiness (W1/W5/W7), deterministic readiness semantics (§3.7), readiness-knob resolution, and the five golden-chain replay fixtures (W6). The full unit + replay suite is green (20749 passed) except one pre-existing failure (tests/unit/verification/test_cli.py::TestCLIMain::test_registration_only) that fails identically on clean origin/dev and is unrelated to this change.
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_per_contract_boot_interleave.py tests/unit/event_bus/test_topic_readiness_semantics.py tests/unit/event_bus/test_topic_readiness_config.py tests/replay/test_topic_provisioning_golden_chains.py -q"
+  - kind: ci
+    description: >-
+      mypy --strict clean on src/; ruff format + check clean; no new onex topic literals (no change to topic_literal_baseline.txt); no_plugin_daemon_classes / scan_freestanding_imperative_io unaffected (interleave lands in the runtime kernel/handler-wiring + existing TopicProvisioner, no new lifecycle owner).
+    command: "uv run mypy src/ --strict"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-per-contract-interleave-order
+    description: >-
+      AC-1 sequencing: the no-global-gather regression test asserts the recorded fake-provisioner/fake-bus call order is the per-contract interleave (A provision -> A ready -> A attach -> B provision -> B ready -> B attach) and is decisively NOT the big-bang order; the W1 call-order test asserts provision precedes ready precedes attach for each contract.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_per_contract_boot_interleave.py::TestPerContractInterleaveOrder -q"
+  - id: dod-not-ready-degraded-never-fatal
+    description: >-
+      AC-3/AC-4 liveness/readiness: a contract whose topics never converge is recorded NOT-READY and skipped for attach while other contracts still attach; the runtime aggregate is DEGRADED (not FAILED, not green), liveness stays true; a core control-plane contract gap is FAILED.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_per_contract_boot_interleave.py::TestNotReadyContractIsDegradedNotFatal -q"
+  - id: dod-deterministic-readiness-semantics
+    description: >-
+      §3.7 readiness is deterministic over broker metadata (not a fixed sleep): READY only when topic exists, partition count matches spec, every partition has a leader, and RF matches where inspectable; failures carry a classified reason (topic-absent / partition-mismatch / no-leader / config/replication-mismatch).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/event_bus/test_topic_readiness_semantics.py -q"
+  - id: dod-golden-chain-replay
+    description: >-
+      AC-5 replay evidence: the five deterministic golden chains (single/multiple subscribe, publish+subscribe, readiness-failure, invalid-config) replay through the pure reducer harness with positive chains terminating at attached and negative chains terminating at not-ready with the runtime still live/degraded.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/replay/test_topic_provisioning_golden_chains.py -q"
+  - id: dod-no-new-topic-literals
+    description: >-
+      AC-7: no new hardcoded onex.*.v* topic strings in new source; the topic-literal arch-invariant passes and the baseline is unchanged.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run python scripts/validation/check_topic_literals.py"
+  - id: dod-deploy-runtime-readiness
+    description: >-
+      Post-merge runtime readiness smoke for the boot-path touch: inside the deployed omninode-runtime container, import the interleave entrypoint and the readiness confirm symbol and assert they load cleanly (proves the per-contract provision->ready->attach wiring imports without breaking the deployed runtime boot).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.auto_wiring.handler_wiring import subscribe_wired_contract_topics; from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner, evaluate_topic_readiness; from omnibase_infra.runtime.service_kernel import resolve_topic_readiness_config; assert hasattr(TopicProvisioner, 'confirm_topics_ready'); print('OMN-13237 per-contract boot interleave deploy readiness smoke ok')\""

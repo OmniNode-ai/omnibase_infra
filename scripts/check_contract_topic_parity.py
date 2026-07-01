@@ -381,6 +381,60 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniintelligence.quality-assessment-completed.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omnidash pattern_quality_metrics projection | owner: jonah | expiry: 2026-09-01",
     # --- platform registration events (OMN-10592/OMN-10593 triage) ---
     "onex.evt.platform.registration-completed.v1": "pre-contract topic suffix in platform_topic_suffixes.py; no contract.yaml producer yet; add contract entry when node_registration_orchestrator publishes this event | owner: jonah | expiry: 2026-09-01",
+    # --- delegation pipeline topics (OMN-13191): contracts owned cross-repo in omnimarket ---
+    # These 13 topics are declared in omnimarket node contracts (node_delegation_orchestrator,
+    # node_delegation_routing_reducer, node_delegation_quality_gate_reducer,
+    # node_llm_delegation_call_effect). This parity scanner only reads omnibase_infra's own
+    # nodes/, so cross-repo-declared topics are correctly classified as python-only here.
+    # The registry value equals the omnimarket contract-declared string (proven in
+    # tests/unit/runtime/test_dispatch_result_applier_topic_routing.py::
+    # TestDelegationTopicRegistryNoDrift). Mirrors the omniintelligence cross-repo entries above.
+    "onex.cmd.omnibase-infra.delegation-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.routing-decision.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-completed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.delegation-failed.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.quality-gate-result.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_routing_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.invocation.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); publisher: node_delegation_orchestrator | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.agent-task-lifecycle.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); remote agent task lifecycle | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_quality_gate_reducer | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.delegation-inference-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_llm_delegation_call_effect | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.inference-response.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); LLM inference response | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.task-delegated.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: omnidash delegation projection | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.baseline-comparison-request.v1": "delegation pipeline; contract.yaml in omnimarket repo (cross-repo provisioning); consumer: node_delegation_orchestrator baseline compute | owner: jonah | expiry: 2026-09-01",
+    # --- pre-existing platform-debt parity gaps (OMN-13188 / OMN-12803 family) ---
+    # These suffixes are in ALL_PROVISIONED_SUFFIXES but have no contract.yaml
+    # declaration in omnibase_infra/nodes/ and were never allowlisted. They were
+    # already red on dev HEAD (verified 2026-06-17) and are unrelated to the
+    # OMN-13202 codegen migration; this PR is the first to touch a topics.yaml
+    # since they appeared, which surfaced the pre-commit-only gate. Tracked for
+    # contract-sourcing under the OMN-13188 "all topics from contracts" epic.
+    "onex.cmd.omnibase-infra.build-loop-build.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-classify.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-closeout.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-fill.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-start.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.cmd.omnibase-infra.build-loop-verify.v1": "pre-existing parity gap; build-loop workflow command; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-build-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-classify-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-closeout-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-cycle-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-failed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-fill-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-started.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.build-loop-verify-completed.v1": "pre-existing parity gap; build-loop workflow event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.effectiveness-data-changed.v1": "pre-existing parity gap; injection-effectiveness projection event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.llm-endpoint-health.v1": "pre-existing parity gap; declared in services/topics.yaml (service-emitted, not node-owned); needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omnibase-infra.routing-decided.v1": "pre-existing parity gap; routing decision event; needs contract.yaml producer | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniclaude.context-enrichment.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    # OMN-13533: hook-context-injected.v1, validator-catch.v1, pattern-enforcement.v1,
+    # session-outcome.v1, dispatch-outcome-evaluated.v1 are now declared in
+    # node_savings_estimation_compute/contract.yaml subscribe_topics (the savings
+    # estimation consumer's real subscriptions), so they are contract-covered and
+    # no longer need allowlisting. The contract-driven provisioner now creates them
+    # on the broker, fixing the consumer-start "topic not found in cluster" storm.
+    "onex.evt.omniclaude.injection-recorded.v1": "pre-existing parity gap; omniclaude hook event (cross-repo); contract.yaml owned in omniclaude | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
+    "onex.evt.omniweb.waitlist-signup.v1": "pre-existing parity gap; omniweb waitlist signup event (cross-repo); consumer: waitlist-signup-notifier | owner: jonah | expiry: 2026-09-01 | epic: OMN-13188",
 }
 # fmt: on
 

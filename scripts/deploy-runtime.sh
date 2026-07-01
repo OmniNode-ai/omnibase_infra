@@ -32,6 +32,7 @@ set -euo pipefail
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
+OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 set -a
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
 source "${HOME}/.omnibase/.env"
@@ -39,7 +40,13 @@ set +a
 if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${OPERATOR_OMNI_HOME}"
 fi
+if [[ -n "${OPERATOR_HEALTH_CHECK_URL}" ]]; then
+    export HEALTH_CHECK_URL="${OPERATOR_HEALTH_CHECK_URL}"
+else
+    unset HEALTH_CHECK_URL
+fi
 unset OPERATOR_OMNI_HOME
+unset OPERATOR_HEALTH_CHECK_URL
 
 # =============================================================================
 # Constants
@@ -70,10 +77,58 @@ readonly RUNTIME_SERVICES=(
     intelligence-api
     omninode-contract-resolver
 )
+# Migration services refreshed (one-shot) before the --no-deps runtime restart.
+# Order matters: forward-migration applies the omnibase_infra schema, then
+# intelligence-migration applies the omniintelligence schema, then migration-gate
+# stamps db_metadata.migrations_complete and stays up as a healthcheck keepalive.
+#
+# OMN-13220: intelligence-migration was MISSING here. The compose file gates
+# omninode-runtime on `intelligence-migration: condition: service_completed_successfully`,
+# but restart_services() uses `up -d --no-deps`, which bypasses depends_on. On a
+# fresh-DB lane that left public.db_metadata for omniintelligence unstamped, so
+# the runtime crash-looped. The preflight must run it explicitly.
+#
+# One-shot services (run-to-completion, exit 0) are listed in
+# RUNTIME_MIGRATION_ONESHOTS so the preflight can `docker wait` on them; the
+# keepalive migration-gate is deliberately excluded from that wait set.
 readonly RUNTIME_MIGRATION_SERVICES=(
     forward-migration
+    intelligence-migration
     migration-gate
 )
+readonly RUNTIME_MIGRATION_ONESHOTS=(
+    forward-migration
+    intelligence-migration
+)
+# Broker readiness services brought up (and waited on) before the runtime
+# restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
+# 1300+-topic provisioning burst on first boot does not exhaust the default
+# single-shard partition ceiling (OMN-11886 / OMN-13220). Because the runtime
+# restart is `--no-deps`, the compose depends_on chain (which includes
+# redpanda-partition-cap as service_completed_successfully) is bypassed, so the
+# preflight must apply the cap explicitly before the kernel provisions topics.
+readonly BROKER_READINESS_SERVICE="redpanda"
+readonly BROKER_PARTITION_CAP_SERVICE="redpanda-partition-cap"
+# Core data-plane infra that the migration preflight + runtime depend on but
+# that the `--no-deps` restart path never starts itself (OMN-13594). On a fully
+# COLD lane (no prior containers) nothing brings postgres/valkey up before
+# run_runtime_migration_preflight runs forward-migration `--no-deps`, so the
+# migration's 30x2s Postgres-readiness probe exhausts -> exit 1 -> auto-rollback.
+# ensure_core_infra_ready() brings these up + waits BEFORE the preflight; on a
+# WARM lane `up -d --wait` on already-healthy services is an idempotent no-op.
+# redpanda is intentionally excluded here -- warm_broker_topic_provisioning owns
+# broker readiness (and its collision-tolerant reachability probe).
+readonly CORE_INFRA_SERVICES=(
+    postgres
+    valkey
+)
+# Cold-start consumer-group join budget (OMN-13220). On a fully-cold lane the
+# kernel joins a consumer group per subscribed topic; with 1300+ topics on a
+# freshly-provisioned broker the default 30s per-consumer KAFKA_TIMEOUT_SECONDS
+# blew on the slow group-coordinator tail and the kernel recycled before it
+# reached healthy. Raise the per-consumer start budget for the restart-driven
+# boot. Operator-overridable; clamped to the config field bound (le=300).
+readonly COLD_START_KAFKA_TIMEOUT_SECONDS="${COLD_START_KAFKA_TIMEOUT_SECONDS:-180}"
 readonly REQUIRED_PROJECTION_TABLES=(
     delegation_events
     node_service_registry
@@ -101,6 +156,14 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# When true (--cold), run the cold-lane FULL bring-up path (OMN-13414): build in
+# workspace mode from the merged-dev siblings, bring up deps + migration
+# one-shots, then bring the WHOLE --profile runtime project up (not just the
+# RUNTIME_SERVICES subset the warm --restart path recreates). Two gotchas this
+# encodes: the runtime profile is mandatory (a bare `up -d` starts nothing) and
+# the build must be workspace-sourced (release packages cannot carry un-released
+# merged-dev code, so a release image starts a cold lane on stale code).
+COLD_FULL_BRINGUP=false
 # When true (--prod, or ONEX_DEPLOY_LANE=prod), the prod promotion-lineage guard
 # runs before any build: the source tree must be clean AND HEAD must be an
 # ancestor-of/equal-to origin/main. Prevents building the prod image from a
@@ -113,6 +176,18 @@ fi
 # moved here as a backup. On success the backup is removed; on failure
 # cleanup_on_exit() restores it.
 FORCE_BACKUP_DIR=""
+# OMN-13364: path (relative to the deploy target) of the vendored forward-migration
+# tree. The backup-restore path in cleanup_on_exit() reverts the WHOLE deployment
+# tree, including freshly-built migrations, which silently regressed the deployed
+# migrations to the pre-build snapshot (dropped node_projection_delegation/
+# 0015_generation_corpus_acceptance.sql in the 2026-06-19 stability redeploy).
+# After a restore, the freshly-synced migration tree is re-applied from this
+# snapshot so the deployed migrations always match the build source (origin/dev).
+readonly MIGRATION_TREE_REL_PATH="docker/migrations/forward"
+# Absolute path to a preserved copy of the freshly-synced vendored migration
+# tree, captured after sync_files() (so the restore can re-apply it). Empty until
+# the snapshot is taken; the snapshot dir is removed on exit.
+MIGRATION_TREE_SNAPSHOT_DIR=""
 # Set to true only when ALL deployment phases complete successfully.
 # Used by cleanup_on_exit to determine if the --force backup can be safely removed.
 DEPLOYMENT_COMPLETE=false
@@ -166,6 +241,24 @@ OPTIONS
     --execute           Actually deploy: rsync, write registry, build images.
     --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
+                        WARM path: recreates only the RUNTIME_SERVICES subset
+                        with 'up -d --no-deps'. Use on a lane whose deps + broker
+                        are already up.
+    --cold              COLD-lane FULL bring-up (OMN-13414). For an ephemeral lane
+                        that was GC/idle-reclaimed and torn down to zero
+                        containers. Forces a workspace-mode build from the local
+                        merged-dev siblings (BUILD_SOURCE=workspace + OMNI_HOME +
+                        sibling REF build-args via stage_workspace.sh), brings up
+                        deps + the migration one-shots, then brings the WHOLE
+                        '--profile runtime' project up (every consumer/projection
+                        service, not just RUNTIME_SERVICES). Requires --execute and
+                        OMNI_HOME; incompatible with --prod (workspace images are
+                        non-main-lineage and the prod gate refuses them). Two
+                        gotchas it solves: the runtime profile is mandatory (a bare
+                        'docker compose up -d' starts NOTHING), and the default
+                        BUILD_SOURCE=release cannot rebuild a cold lane from
+                        un-released merged-dev code. See
+                        docs/runbooks/cold-lane-full-bringup.md.
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
     --prod              Enforce the prod promotion-lineage guard before build:
@@ -199,8 +292,11 @@ EXAMPLES
     # Deploy and build images
     ${SCRIPT_NAME} --execute
 
-    # Deploy, build, and restart containers
+    # Deploy, build, and restart containers (WARM lane: deps already up)
     ${SCRIPT_NAME} --execute --restart
+
+    # COLD lane full bring-up from merged dev (workspace build + full --profile up)
+    OMNI_HOME=/path/to/omni_home ${SCRIPT_NAME} --execute --cold
 
     # Redeploy same version (overwrite)
     ${SCRIPT_NAME} --execute --force
@@ -236,6 +332,10 @@ parse_args() {
                 ;;
             --restart)
                 RESTART=true
+                shift
+                ;;
+            --cold)
+                COLD_FULL_BRINGUP=true
                 shift
                 ;;
             --profile)
@@ -277,6 +377,25 @@ parse_args() {
         log_error "--restart requires --execute"
         exit 1
     fi
+
+    # OMN-13414: --cold is the cold-lane FULL bring-up. It forces a workspace
+    # build (so a release-pinned BUILD_SOURCE is a contradiction) and produces a
+    # non-main-lineage image the prod-promotion gate refuses (so --prod / prod
+    # lane is incompatible).
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        if [[ "${BUILD_SOURCE:-}" == "release" ]]; then
+            log_error "--cold performs a workspace-mode build from the merged-dev siblings, but BUILD_SOURCE=release was set."
+            log_error "  A release image cannot carry un-released merged-dev code; a cold lane would boot on stale code."
+            log_error "  Unset BUILD_SOURCE (it defaults to workspace under --cold) or set BUILD_SOURCE=workspace."
+            exit 64
+        fi
+        if [[ "${PROD_LANE}" == true ]]; then
+            log_error "--cold is a workspace-mode (non-main-lineage) bring-up and cannot target the prod lane."
+            log_error "  The prod-promotion gate refuses workspace / stability-candidate images (OMN-13669)."
+            log_error "  Promote a clean-main release to prod via the gated node path instead."
+            exit 1
+        fi
+    fi
 }
 
 resolve_compose_project() {
@@ -294,6 +413,84 @@ resolve_compose_project() {
     fi
 
     echo "${compose_project}"
+}
+
+# Compose project -> lane (overlay) mapping. The dev lane (bare omnibase-infra
+# project) runs from docker-compose.infra.yml alone; every non-dev lane LAYERS
+# its overlay so the overlay's container_name + project name + lane network win.
+#
+# OMN-13581: deploy-runtime.sh historically passed ONLY `-f infra.yml` on every
+# `docker compose` call, including warm_broker_topic_provisioning's `up redpanda`
+# step. The base infra compose hardcodes `container_name: omnibase-infra-redpanda`
+# (the DEV name) and the dev network, so running the warmup against a non-dev
+# project (e.g. omnibase-infra-stability-test) makes compose try to (re)create
+# redpanda as the DEV-named container, which collides with the live dev broker,
+# gets a Docker hash prefix, and lands in 'created' -- DESTROYING the lane's own
+# correctly-named broker. That left the stability lane broker-less for ~3 days.
+# Layering the matching overlay gives redpanda the lane-prefixed container_name +
+# lane network, so the lane's broker is targeted and never displaced.
+#
+# This mirrors the authoritative, tested lane->compose-file mapping in
+# scripts/deploy-agent/deploy_agent/executor.py (_LANE_CONFIGS): stability-test
+# layers docker-compose.stability-test.yml, prod layers docker-compose.prod.yml,
+# judge layers docker-compose.judge.yml. The dev project gets no overlay.
+resolve_lane_overlay_filename() {
+    # Echo the overlay compose FILENAME (relative to docker/) for a compose
+    # project, or nothing for the bare dev project. Fails closed: an unknown
+    # non-dev project aborts rather than silently running on the dev config (the
+    # exact failure mode that displaced the lane broker).
+    local compose_project="$1"
+
+    # Lane = compose project suffix after the canonical "omnibase-infra" prefix.
+    # omnibase-infra                -> "" (dev, no overlay)
+    # omnibase-infra-stability-test -> "stability-test"
+    # omnibase-infra-prod           -> "prod"
+    # omnibase-infra-judge          -> "judge"
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+
+    case "${lane}" in
+        "")
+            # Dev lane: infra.yml alone (fixed dev container names are correct here).
+            return 0
+            ;;
+        stability-test|prod|judge)
+            echo "docker-compose.${lane}.yml"
+            return 0
+            ;;
+        *)
+            log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
+            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
+            log_error "  Refusing to deploy: running a non-dev lane on the bare infra.yml config"
+            log_error "  would recreate the DEV-named redpanda and displace this lane's broker"
+            log_error "  (OMN-13581). Add the lane's overlay mapping before deploying it."
+            exit 1
+            ;;
+    esac
+}
+
+resolve_compose_file_args() {
+    # Populate a caller-provided array (passed by name) with the full
+    # `-f <file>` token sequence for a deployment: always
+    # docker-compose.infra.yml, plus the lane overlay (docker-compose.<lane>.yml)
+    # for any non-dev compose project (OMN-13581).
+    #
+    # Usage:
+    #   local -a compose_args
+    #   resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
+    local -n _out_args="$1"
+    local deploy_target="$2"
+    local compose_project="$3"
+
+    local docker_dir="${deploy_target}/docker"
+    _out_args=("-f" "${docker_dir}/docker-compose.infra.yml")
+
+    local overlay_filename
+    overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
+    if [[ -n "${overlay_filename}" ]]; then
+        _out_args+=("-f" "${docker_dir}/${overlay_filename}")
+    fi
 }
 
 # =============================================================================
@@ -498,6 +695,17 @@ read_repo_ref_or_main() {
 
 resolve_build_source() {
     # Resolve the selected Dockerfile dependency source.
+    #
+    # OMN-13414: a cold-lane FULL bring-up (--cold) must build from the local
+    # workspace siblings at merged-dev SHAs, never from the PyPI release packages
+    # — a release image cannot carry un-released merged-dev code, which is exactly
+    # what a cold/GC-reclaimed lane has to be rebuilt from. --cold therefore forces
+    # workspace mode; validate_build_source_config then requires OMNI_HOME, and
+    # parse_args has already rejected a contradictory BUILD_SOURCE=release.
+    if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+        echo "workspace"
+        return 0
+    fi
     echo "${BUILD_SOURCE:-release}"
 }
 
@@ -507,6 +715,29 @@ resolve_expected_build_source() {
     # requiring operators to set a second env var by hand.
     local build_source="$1"
     echo "${EXPECTED_BUILD_SOURCE:-${build_source}}"
+}
+
+resolve_promotion_class() {
+    # OMN-13669: compute PROMOTION_CLASS OCI label from build_source.
+    # workspace builds are stability-candidates (non-main-lineage dev images);
+    # release/clean-main builds default to clean-main.
+    local build_source="$1"
+    if [[ "${build_source}" == "workspace" ]]; then
+        echo "stability-candidate"
+    else
+        echo "clean-main"
+    fi
+}
+
+resolve_non_main_lineage() {
+    # OMN-13669: compute NON_MAIN_LINEAGE OCI label from build_source.
+    # workspace builds are non-main-lineage; release builds are not.
+    local build_source="$1"
+    if [[ "${build_source}" == "workspace" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
 }
 
 validate_build_source_config() {
@@ -949,6 +1180,13 @@ cleanup_on_exit() {
                 log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
                 log_error "================================================================="
             else
+                # OMN-13364: the restored tree carries the PRE-BUILD vendored
+                # migration tree. Re-apply the freshly-synced migration tree
+                # (snapshot taken after sync_files) so the deployed migrations
+                # match the build source instead of silently regressing to the
+                # backup's stale snapshot (which dropped a forward migration in
+                # the 2026-06-19 stability redeploy).
+                restore_migration_tree_after_revert "${original_dir}"
                 log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
                 log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
             fi
@@ -960,8 +1198,103 @@ cleanup_on_exit() {
         FORCE_BACKUP_DIR=""
     fi
 
+    # OMN-13364: remove the migration-tree snapshot taken after sync_files.
+    if [[ -n "${MIGRATION_TREE_SNAPSHOT_DIR}" && -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
+        rm -rf "${MIGRATION_TREE_SNAPSHOT_DIR}" 2>/dev/null || true
+    fi
+    MIGRATION_TREE_SNAPSHOT_DIR=""
+
     # Release concurrency lock
     rm -rf "${LOCK_DIR}" 2>/dev/null || true
+}
+
+assert_deployed_migration_tree_synced() {
+    # OMN-13415: assert the deployed (bind-mounted) forward-migration tree is
+    # byte-identical to the canonical clone @ the target SHA before any migration
+    # runs. The stability-promotion footgun (stale 0016, missing 0018/0019) made a
+    # lane look "deployed" while applying the wrong migration SQL; this gate makes
+    # that drift abort the deploy instead of silently mis-migrating.
+    local deploy_target="$1"
+    local repo_root="$2"
+    local git_sha="$3"
+    local deployed_tree="${deploy_target}/${MIGRATION_TREE_REL_PATH}"
+
+    if [[ ! -d "${deployed_tree}" ]]; then
+        # No bind-mounted forward-migration tree in this deployment layout; nothing
+        # to assert (matches snapshot_migration_tree's own no-tree tolerance).
+        log_warn "No deployed migration tree at ${deployed_tree}; skipping sync assertion."
+        return 0
+    fi
+
+    local check_script="${repo_root}/scripts/check_deployed_migration_tree_sync.py"
+    if [[ ! -f "${check_script}" ]]; then
+        log_error "Migration-sync gate script missing: ${check_script}"
+        exit 1
+    fi
+
+    log_info "Asserting deployed migration tree == canonical clone @ ${git_sha} (OMN-13415)..."
+    if ! python3 "${check_script}" \
+        --deployed-tree "${deployed_tree}" \
+        --clone-root "${repo_root}" \
+        --ref "${git_sha}" \
+        --tree-rel-path "${MIGRATION_TREE_REL_PATH}"; then
+        log_error "Deployed migration tree is OUT OF SYNC with the canonical clone @ ${git_sha}."
+        log_error "Aborting deploy to avoid applying a stale migration set (OMN-13415)."
+        exit 1
+    fi
+    log_info "Deployed migration tree is in sync with the canonical clone @ ${git_sha}."
+}
+
+snapshot_migration_tree() {
+    # Preserve a copy of the freshly-synced vendored forward-migration tree so a
+    # later backup-restore (cleanup_on_exit) can re-apply it instead of leaving
+    # the restored tree on the backup's stale, pre-build migrations (OMN-13364).
+    local deploy_target="$1"
+    local src_tree="${deploy_target}/${MIGRATION_TREE_REL_PATH}"
+
+    if [[ ! -d "${src_tree}" ]]; then
+        # No vendored migration tree to protect (e.g. a deployment layout that
+        # does not bind-mount forward migrations). Nothing to snapshot.
+        log_warn "No vendored migration tree at ${src_tree}; skipping snapshot."
+        return 0
+    fi
+
+    local snapshot_dir="${deploy_target}.migrations.snapshot"
+    rm -rf "${snapshot_dir}" 2>/dev/null || true
+    mkdir -p "${snapshot_dir}"
+    # Mirror the tree exactly so re-apply is a faithful copy of the build source.
+    rsync -a --delete "${src_tree}/" "${snapshot_dir}/"
+    MIGRATION_TREE_SNAPSHOT_DIR="${snapshot_dir}"
+    log_info "Snapshotted vendored migration tree for restore safety: ${snapshot_dir}"
+}
+
+restore_migration_tree_after_revert() {
+    # Re-apply the freshly-synced vendored migration tree onto a restored
+    # deployment tree so a backup-restore never silently regresses migrations to
+    # the backup's pre-build snapshot (OMN-13364).
+    local restored_dir="$1"
+
+    if [[ -z "${MIGRATION_TREE_SNAPSHOT_DIR}" || ! -d "${MIGRATION_TREE_SNAPSHOT_DIR}" ]]; then
+        # The failure happened before sync_files snapshotted the tree (e.g. an
+        # rsync/sanity failure). In that case nothing newer than the backup was
+        # produced, so the backup's migration tree is already the correct one.
+        log_warn "No migration-tree snapshot to re-apply; restored tree keeps the backup migrations."
+        return 0
+    fi
+
+    local dst_tree="${restored_dir}/${MIGRATION_TREE_REL_PATH}"
+    log_warn "Re-applying freshly-built vendored migration tree onto restored deployment:"
+    log_warn "  ${MIGRATION_TREE_SNAPSHOT_DIR}/ -> ${dst_tree}/"
+    mkdir -p "${dst_tree}"
+    if rsync -a --delete "${MIGRATION_TREE_SNAPSHOT_DIR}/" "${dst_tree}/"; then
+        log_warn "Migration tree re-applied: deployed migrations match the build source, not the backup."
+    else
+        log_error "================================================================="
+        log_error "CRITICAL: Failed to re-apply the vendored migration tree after restore!"
+        log_error "The restored deployment may carry STALE migrations (silent loss risk)."
+        log_error "Manual recovery: rsync -a --delete '${MIGRATION_TREE_SNAPSHOT_DIR}/' '${dst_tree}/'"
+        log_error "================================================================="
+    fi
 }
 
 # =============================================================================
@@ -1291,6 +1624,18 @@ if spec and spec.origin:
         "${repo_root}/workspace/sibling-pin-comparison.json" \
         "${deploy_target}/workspace/sibling-pin-comparison.json"
 
+    # Carry the per-repo VCS provenance file Dockerfile.runtime COPYs
+    # (workspace/sibling-vcs-provenance.json, OMN-13030). Same rationale as the
+    # pin-comparison file above: the sibling-repos/ rsync only covers the
+    # subdirectory, so without this the deployed build context lacks the file and
+    # `docker build` fails on the COPY. Release mode ships the committed
+    # placeholder; workspace mode ships the real per-repo {vcs_ref, vcs_dirty,
+    # vcs_branch} stage_workspace.sh wrote into the repo root.
+    log_cmd "rsync -a workspace/sibling-vcs-provenance.json -> deployed"
+    rsync -a \
+        "${repo_root}/workspace/sibling-vcs-provenance.json" \
+        "${deploy_target}/workspace/sibling-vcs-provenance.json"
+
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml)
     log_info "Syncing migration scripts..."
     mkdir -p "${deploy_target}/scripts"
@@ -1423,17 +1768,18 @@ sanity_check() {
     # Validate that docker compose config resolves cleanly from the deployed directory.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Post-Sync Sanity Check"
 
     log_info "Validating compose configuration from deployed directory..."
-    log_cmd "docker compose -p ${compose_project} -f ${compose_file} config --quiet"
+    log_cmd "docker compose -p ${compose_project} ${compose_args[*]} config --quiet"
 
     local config_output
     if ! config_output="$(docker compose \
         -p "${compose_project}" \
-        -f "${compose_file}" \
+        "${compose_args[@]}" \
         config --quiet 2>&1)"; then
         log_error "Compose configuration validation failed."
         if [[ -n "${config_output}" ]]; then
@@ -1518,7 +1864,8 @@ build_images() {
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Build Images"
 
@@ -1534,6 +1881,13 @@ build_images() {
     build_source="$(resolve_build_source)"
     local expected_build_source
     expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    # OMN-13669: stamp OCI provenance labels so the prod-promotion gate and
+    # lineage guard can refuse workspace images for prod. Computed from
+    # build_source: workspace => stability-candidate/true; release => clean-main/false.
+    local promotion_class
+    promotion_class="$(resolve_promotion_class "${build_source}")"
+    local non_main_lineage
+    non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
     local occ_ref="main"
@@ -1551,7 +1905,7 @@ build_images() {
     local cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
@@ -1563,6 +1917,8 @@ build_images() {
         --build-arg "COMPOSE_PROJECT=${compose_project}"
         --build-arg "BUILD_SOURCE=${build_source}"
         --build-arg "EXPECTED_BUILD_SOURCE=${expected_build_source}"
+        --build-arg "PROMOTION_CLASS=${promotion_class}"
+        --build-arg "NON_MAIN_LINEAGE=${non_main_lineage}"
         --build-arg "OMNI_HOME=${omni_home}"
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
@@ -1570,7 +1926,7 @@ build_images() {
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
-    log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} OMNI_HOME=${omni_home}"
+    log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
@@ -1591,11 +1947,189 @@ build_images() {
 # Restart -- bring up runtime services only
 # =============================================================================
 
+resolve_broker_container() {
+    # Resolve the running broker container id/name for the given compose project.
+    #
+    # OMN-13364: the broker's fixed container_name (e.g. omnibase-infra-redpanda)
+    # is NOT a reliable handle — when it collides with another project's broker,
+    # Docker prefixes it with a random hash (3ed1fdb8d50b_omnibase-infra-redpanda).
+    # The compose service label (com.docker.compose.service=redpanda) survives
+    # the prefix, so resolve by compose project + service label instead of by an
+    # exact container-name string match.
+    local compose_project="$1"
+    docker ps -q \
+        --filter "label=com.docker.compose.project=${compose_project}" \
+        --filter "label=com.docker.compose.service=${BROKER_READINESS_SERVICE}" \
+        2>/dev/null \
+        | head -1
+}
+
+assert_broker_reachable() {
+    # Return 0 when the broker is actually reachable on the lane network.
+    #
+    # Keys readiness off `rpk cluster health` executed INSIDE the broker
+    # container (talking to the broker on TCP/9092 over the lane network), not
+    # off an exact container-name match or the compose-wait exit status. This is
+    # what lets the warmup tolerate a Docker-prefixed broker name and an
+    # already-present healthy broker without false-failing (OMN-13364).
+    local compose_project="$1"
+    local attempts="${BROKER_REACHABLE_RETRIES:-15}"
+    local interval="${BROKER_REACHABLE_INTERVAL:-4}"
+
+    local broker_container
+    broker_container="$(resolve_broker_container "${compose_project}")"
+    if [[ -z "${broker_container}" ]]; then
+        log_error "No running broker container found for project '${compose_project}'"
+        log_error "  (label com.docker.compose.service=${BROKER_READINESS_SERVICE})."
+        return 1
+    fi
+    log_info "Resolved broker container: ${broker_container} (probing reachability)"
+
+    local attempt=0
+    while (( attempt < attempts )); do
+        attempt=$((attempt + 1))
+        # rpk talks to the broker on the internal listener (redpanda:9092 / TCP).
+        # `cluster health` succeeding means the broker is reachable AND serving;
+        # that is the readiness signal the partition-cap rpk calls below need.
+        if docker exec "${broker_container}" \
+            rpk cluster health -X brokers=redpanda:9092 >/dev/null 2>&1; then
+            log_info "Broker reachable: rpk cluster health OK (attempt ${attempt})."
+            return 0
+        fi
+        log_info "  Broker not ready yet (attempt ${attempt}/${attempts}) -- waiting ${interval}s..."
+        sleep "${interval}"
+    done
+
+    log_error "Broker ${broker_container} did not become reachable after ${attempts} attempts."
+    return 1
+}
+
+ensure_core_infra_ready() {
+    # Bring up + wait for the core data-plane infra (postgres, valkey) BEFORE the
+    # migration preflight + runtime restart (OMN-13594).
+    #
+    # The `--restart` path runs warm_broker_topic_provisioning ->
+    # run_runtime_migration_preflight -> restart_services, and every one of those
+    # uses `up -d --no-deps`, which bypasses the compose `depends_on` chain. On a
+    # WARM lane that is fine (postgres/valkey are already up). On a fully COLD
+    # lane (no prior containers) NOTHING starts postgres/valkey first, so
+    # forward-migration (`--no-deps`) has no database to connect to: its 30x2s
+    # readiness probe exhausts -> exit 1 -> the deploy auto-rolls back. This is
+    # the exact cold-start defect OMN-13594 filed against this script.
+    #
+    # Bring the core infra up explicitly here and BLOCK on its healthchecks via
+    # `--wait`. On a warm lane this is an idempotent no-op (up -d on a healthy
+    # service does nothing, --wait returns immediately). On a cold lane it
+    # creates + warms postgres/valkey so the preflight's forward-migration sees a
+    # live database on its first attempt.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+
+    log_step "Core Infra Readiness (cold-start guard, OMN-13594)"
+
+    local core_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --wait
+        "${CORE_INFRA_SERVICES[@]}"
+    )
+    log_info "Ensuring core infra healthy before preflight: ${CORE_INFRA_SERVICES[*]}"
+    log_cmd "${core_up_cmd[*]}"
+    if ! "${core_up_cmd[@]}"; then
+        log_error "Core infra (${CORE_INFRA_SERVICES[*]}) did not become healthy."
+        log_error "Migration preflight needs a live Postgres; aborting before it"
+        log_error "wastes the 30x2s readiness budget and triggers a rollback (OMN-13594)."
+        return 1
+    fi
+    log_info "Core infra healthy: ${CORE_INFRA_SERVICES[*]}."
+}
+
+warm_broker_topic_provisioning() {
+    # Bring the broker + partition cap to readiness before the --no-deps runtime
+    # restart so the cold-start topic-provisioning burst does not crash-loop the
+    # kernel (OMN-13220). The runtime restart bypasses depends_on, so the
+    # compose-declared redpanda-partition-cap gate never fires on a restart-only
+    # deploy — apply it here, explicitly, before the kernel boots.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+
+    log_step "Broker Topic-Provisioning Warmup"
+
+    # 1. Ensure the broker itself is up and healthy. `up -d` is a no-op when it
+    # is already running; the --wait flag blocks until the healthcheck passes so
+    # the partition-cap rpk calls below do not race a still-starting broker.
+    #
+    # OMN-13364: the compose `up --wait` is best-effort, not the source of truth
+    # for broker readiness. When the broker container_name collides with another
+    # project's broker, Docker assigns a random prefix (e.g.
+    # 3ed1fdb8d50b_omnibase-infra-redpanda) and/or leaves the recreate in
+    # 'Created'; `up -d --wait` then errors or never reaches healthy even though
+    # a healthy broker is already reachable on the lane network. Do NOT treat
+    # that as a deploy failure (it would trigger the backup-restore path, which
+    # reverts the freshly-built vendored migration tree). Key broker readiness
+    # off ACTUAL reachability (`rpk cluster health` on TCP/9092 inside the lane)
+    # via assert_broker_reachable below, not off the compose-wait exit status.
+    local broker_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --wait
+        "${BROKER_READINESS_SERVICE}"
+    )
+    log_info "Ensuring broker is healthy: ${BROKER_READINESS_SERVICE}"
+    log_cmd "${broker_up_cmd[*]}"
+    if ! "${broker_up_cmd[@]}"; then
+        log_warn "Broker compose up --wait did not report healthy (possible"
+        log_warn "name-prefix collision or already-present broker). Falling back"
+        log_warn "to a direct broker-reachability probe before deciding."
+    fi
+
+    # Source of truth: probe the broker directly. Tolerates a Docker-prefixed
+    # container name and an already-present healthy broker (OMN-13364).
+    if ! assert_broker_reachable "${compose_project}"; then
+        log_error "Broker is not reachable on the lane network after warmup."
+        log_error "Cold-start topic provisioning cannot proceed; aborting."
+        return 1
+    fi
+
+    # 2. Apply the partition cap (run-to-completion). force-recreate re-runs the
+    # one-shot even if a prior run left an exited container behind.
+    local cap_up_cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d --no-deps --force-recreate
+        "${BROKER_PARTITION_CAP_SERVICE}"
+    )
+    log_info "Applying broker partition cap: ${BROKER_PARTITION_CAP_SERVICE}"
+    log_cmd "${cap_up_cmd[*]}"
+    "${cap_up_cmd[@]}"
+
+    local cap_container="${compose_project}-${BROKER_PARTITION_CAP_SERVICE}"
+    local cap_wait_cmd=(docker wait "${cap_container}")
+    log_cmd "${cap_wait_cmd[*]}"
+    if [[ "$("${cap_wait_cmd[@]}")" != "0" ]]; then
+        log_error "${BROKER_PARTITION_CAP_SERVICE} did not complete successfully."
+        log_error "Broker partition cap not applied; cold-start topic provisioning may crash-loop the runtime."
+        return 1
+    fi
+    log_info "Broker partition cap applied."
+}
+
 run_runtime_migration_preflight() {
     # Run bounded migration services before --no-deps runtime restarts.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Runtime Migration Preflight"
 
@@ -1603,7 +2137,7 @@ run_runtime_migration_preflight() {
         local cmd=(
             docker compose
             -p "${compose_project}"
-            -f "${compose_file}"
+            "${compose_args[@]}"
             --profile "${COMPOSE_PROFILE}"
             up -d --no-deps --force-recreate
             "${service}"
@@ -1611,18 +2145,29 @@ run_runtime_migration_preflight() {
         log_info "Refreshing migration service: ${service}"
         log_cmd "${cmd[*]}"
         "${cmd[@]}"
-        if [[ "${service}" == "forward-migration" ]]; then
-            # Derive the container name from the compose project so the wait
-            # targets the lane being deployed, not a fixed name. The base
-            # compose names it <compose-project>-forward-migration and each
-            # lane overlay follows the same form (OMN-12987), so this resolves
-            # to omnibase-infra-forward-migration for dev and
-            # omnibase-infra-stability-test-forward-migration for stability.
-            local forward_migration_container="${compose_project}-forward-migration"
-            local wait_cmd=(docker wait "${forward_migration_container}")
+        # One-shot migrations (forward-migration, intelligence-migration) run to
+        # completion and must exit 0 before the dependent schema/runtime work
+        # proceeds. migration-gate is a long-running healthcheck keepalive, NOT a
+        # one-shot, so it is deliberately excluded from the wait set
+        # (OMN-13220). Deriving the container name from the compose project keeps
+        # the wait pointed at the lane being deployed (OMN-12987): the base
+        # compose names it <compose-project>-<service> and each lane overlay
+        # follows the same form (e.g. omnibase-infra-intelligence-migration for
+        # dev, omnibase-infra-stability-test-intelligence-migration for stability).
+        local is_oneshot=false
+        local oneshot
+        for oneshot in "${RUNTIME_MIGRATION_ONESHOTS[@]}"; do
+            if [[ "${service}" == "${oneshot}" ]]; then
+                is_oneshot=true
+                break
+            fi
+        done
+        if [[ "${is_oneshot}" == true ]]; then
+            local migration_container="${compose_project}-${service}"
+            local wait_cmd=(docker wait "${migration_container}")
             log_cmd "${wait_cmd[*]}"
             if [[ "$("${wait_cmd[@]}")" != "0" ]]; then
-                log_error "forward-migration did not complete successfully."
+                log_error "${service} did not complete successfully."
                 return 1
             fi
         fi
@@ -1652,18 +2197,62 @@ run_runtime_migration_preflight() {
     done
 }
 
+bringup_full_stack() {
+    # Cold-lane FULL bring-up: bring the WHOLE --profile runtime project up
+    # (OMN-13414).
+    #
+    # The warm --restart path recreates only the RUNTIME_SERVICES subset with
+    # `up -d --no-deps`; on a cold/GC-reclaimed lane every other service in the
+    # runtime profile (the projection/consumer fleet, autoheal, etc.) stays down.
+    # This brings the entire project up. Two gotchas it encodes:
+    #
+    #   1. `--profile "${COMPOSE_PROFILE}"` (runtime) is MANDATORY. Runtime
+    #      services are gated behind the compose runtime profile; a bare
+    #      `docker compose up -d` matches NO profiled service and starts nothing.
+    #   2. NO `--no-deps`. Unlike restart_services, the full up honors the compose
+    #      depends_on chain (postgres/valkey -> redpanda + partition-cap ->
+    #      forward/intelligence migration one-shots -> runtime + consumers), so
+    #      the whole stack starts in dependency order. The explicit preflight in
+    #      main() (ensure_core_infra_ready / warm_broker_topic_provisioning /
+    #      run_runtime_migration_preflight) has already warmed deps + the
+    #      one-shots, so this is the idempotent full fan-out over the rest of the
+    #      profile.
+    local deploy_target="$1"
+    local compose_project="$2"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+
+    log_step "Cold-Lane Full Bring-Up (OMN-13414)"
+
+    local cmd=(
+        docker compose
+        -p "${compose_project}"
+        "${compose_args[@]}"
+        --profile "${COMPOSE_PROFILE}"
+        up -d
+    )
+
+    log_info "Bringing the FULL ${COMPOSE_PROFILE}-profile project up: ${compose_project}"
+    log_cmd "${cmd[*]}"
+
+    "${cmd[@]}"
+
+    log_info "Full project up."
+}
+
 restart_services() {
     # Restart runtime containers via docker compose up --force-recreate.
     local deploy_target="$1"
     local compose_project="$2"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Restart Runtime Services"
 
     local cmd=(
         docker compose
         -p "${compose_project}"
-        -f "${compose_file}"
+        "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${RUNTIME_SERVICES[@]}"
@@ -1783,12 +2372,24 @@ print_compose_commands() {
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
-    local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
+    # OMN-13581: print the SAME `-f` token sequence the script executes, including
+    # the lane overlay for non-dev projects, so copy-pasted operator commands do
+    # not silently run on the bare infra.yml config (which displaces the broker).
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    local compose_f="${compose_args[*]}"
     local omni_home="${OMNI_HOME:-}"
     local build_source
     build_source="$(resolve_build_source)"
     local expected_build_source
     expected_build_source="$(resolve_expected_build_source "${build_source}")"
+    # OMN-13669: stamp OCI provenance labels so the prod-promotion gate can refuse
+    # workspace images for prod. Computed from build_source (workspace =>
+    # stability-candidate/true; release => clean-main/false).
+    local promotion_class
+    promotion_class="$(resolve_promotion_class "${build_source}")"
+    local non_main_lineage
+    non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
     local compat_ref="main"
     local omnimarket_ref="dev"
     local occ_ref="main"
@@ -1806,7 +2407,7 @@ print_compose_commands() {
     log_info "Build:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
@@ -1815,6 +2416,8 @@ print_compose_commands() {
     log_info "    --build-arg COMPOSE_PROJECT=${compose_project} \\"
     log_info "    --build-arg BUILD_SOURCE=${build_source} \\"
     log_info "    --build-arg EXPECTED_BUILD_SOURCE=${expected_build_source} \\"
+    log_info "    --build-arg PROMOTION_CLASS=${promotion_class} \\"
+    log_info "    --build-arg NON_MAIN_LINEAGE=${non_main_lineage} \\"
     log_info "    --build-arg OMNI_HOME=${omni_home} \\"
     log_info "    --build-arg OMNIBASE_COMPAT_REF=${compat_ref} \\"
     log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref} \\"
@@ -1823,7 +2426,7 @@ print_compose_commands() {
     log_info "Restart runtime services:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
     log_info "    ${RUNTIME_SERVICES[*]}"
@@ -1831,28 +2434,28 @@ print_compose_commands() {
     log_info "Full stack up (infra + runtime):"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d"
     log_info ""
     log_info "Stop all:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    down"
     log_info ""
     log_info "Logs:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    logs -f"
     log_info ""
     log_info "Status:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
-    log_info "    -f ${compose_file} \\"
+    log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    ps"
 }
@@ -1867,6 +2470,11 @@ show_summary() {
     local version="$2"
     local git_sha="$3"
     local compose_project="$4"
+    # OMN-13581: surface the lane-overlay-aware `-f` sequence in operator
+    # next-step commands too, so a copy-paste does not run the lane on infra.yml.
+    local -a compose_args
+    resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
+    local compose_f="${compose_args[*]}"
 
     log_step "Deployment Summary"
 
@@ -1879,18 +2487,18 @@ show_summary() {
     log_info ""
     log_info "Next steps (source ~/.omnibase/.env before running):"
 
-    if [[ "${RESTART}" == false ]]; then
+    if [[ "${RESTART}" == false && "${COLD_FULL_BRINGUP}" == false ]]; then
         log_info "  To start containers, run:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
-        log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
+        log_info "      ${compose_f} \\"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      up -d"
     else
         log_info "  Containers are running. Check status:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
-        log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
+        log_info "      ${compose_f} \\"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      ps"
     fi
@@ -2012,6 +2620,19 @@ main() {
     # Phase 6: Sync
     sync_files "${repo_root}" "${deploy_target}"
 
+    # OMN-13415: assert the freshly-synced deployed (bind-mounted) forward-migration
+    # tree is byte-identical to the canonical clone @ the target SHA BEFORE the
+    # forward-migration phase. The stability-promotion footgun was a stale
+    # bind-mounted tree (old 0016, no 0018/0019) that made the lane look "deployed"
+    # while running the wrong migration SQL — caught only by an out-of-band rsync.
+    # This gate makes that drift fail the deploy instead of silently mis-migrating.
+    assert_deployed_migration_tree_synced "${deploy_target}" "${repo_root}" "${git_sha}"
+
+    # OMN-13364: snapshot the freshly-synced vendored migration tree so a later
+    # backup-restore (cleanup_on_exit) re-applies it instead of reverting the
+    # deployed migrations to the backup's stale, pre-build snapshot.
+    snapshot_migration_tree "${deploy_target}"
+
     # Mark deployment directory for cleanup on failure. If registry write or
     # build fails after rsync, cleanup_on_exit() will remove this orphaned
     # directory (unless registry.json already points to it).
@@ -2032,14 +2653,54 @@ main() {
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
 
-    # Phase 11: Restart (optional)
-    if [[ "${RESTART}" == true ]]; then
+    # Phase 11: Bring runtime up (optional).
+    #   --cold    -> cold-lane FULL bring-up: deps + migration one-shots + the
+    #               WHOLE --profile runtime project (OMN-13414).
+    #   --restart -> WARM path: deps + migration one-shots + recreate only the
+    #               RUNTIME_SERVICES subset (--no-deps).
+    # Both share the cold-start preflight (core infra readiness, broker partition
+    # cap, migration one-shots, raised Kafka consumer-start budget); they differ
+    # only in the final `up` (full-profile fan-out vs RUNTIME_SERVICES recreate).
+    if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
+        # Raise the per-consumer Kafka consumer-start budget for the restart-driven
+        # cold boot (OMN-13220). x-runtime-env reads KAFKA_TIMEOUT_SECONDS from the
+        # shell environment (default 30s when unset); exporting it here propagates
+        # the raised cold-start value to every runtime container compose recreates.
+        # Validate + clamp to ModelKafkaEventBusConfig.timeout_seconds bounds
+        # (ge=1, le=300) so an operator override cannot produce a config the
+        # kernel rejects at boot.
+        local cold_start_timeout="${COLD_START_KAFKA_TIMEOUT_SECONDS}"
+        if [[ ! "${cold_start_timeout}" =~ ^[0-9]+$ ]]; then
+            log_error "COLD_START_KAFKA_TIMEOUT_SECONDS must be a positive integer (got: '${cold_start_timeout}')."
+            return 1
+        fi
+        if (( cold_start_timeout < 1 )); then
+            cold_start_timeout=1
+        elif (( cold_start_timeout > 300 )); then
+            log_warn "COLD_START_KAFKA_TIMEOUT_SECONDS=${cold_start_timeout} exceeds the config max (300); clamping to 300."
+            cold_start_timeout=300
+        fi
+        export KAFKA_TIMEOUT_SECONDS="${cold_start_timeout}"
+        log_info "Cold-start Kafka consumer-start budget: KAFKA_TIMEOUT_SECONDS=${KAFKA_TIMEOUT_SECONDS}s"
+        # OMN-13594: bring up + wait for postgres/valkey BEFORE the migration
+        # preflight. On a cold lane the preflight's forward-migration runs
+        # `--no-deps` and would otherwise hit a non-existent Postgres, exhaust its
+        # readiness budget, and trigger an auto-rollback. Idempotent no-op on a
+        # warm lane.
+        ensure_core_infra_ready "${deploy_target}" "${compose_project}"
+        warm_broker_topic_provisioning "${deploy_target}" "${compose_project}"
         run_runtime_migration_preflight "${deploy_target}" "${compose_project}"
-        restart_services "${deploy_target}" "${compose_project}"
+        if [[ "${COLD_FULL_BRINGUP}" == true ]]; then
+            # Cold lane: fan out across the WHOLE runtime profile (OMN-13414).
+            bringup_full_stack "${deploy_target}" "${compose_project}"
+        else
+            # Warm lane: recreate only the RUNTIME_SERVICES subset (--no-deps).
+            restart_services "${deploy_target}" "${compose_project}"
+        fi
     fi
 
-    # Phase 12: Verify (only with --restart)
-    if [[ "${RESTART}" == true ]]; then
+    # Phase 12: Verify (after a cold bring-up or a warm --restart)
+    if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
         verify_deployment "${git_sha}" "${compose_project}"
     fi
 

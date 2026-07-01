@@ -1,0 +1,38 @@
+# OMN-13554 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-13554"
+title: "fix(OMN-13554): subscription probe discovers live per-topic split-groups instead of stale monolithic group name"
+summary: >-
+  The contract-sweep subscription probe derived the legacy monolithic consumer-group name (local.runtime_config.registration-orchestrator.consume.1.0.0) from a stale runtime_config.yaml identity, which no longer exists on the broker. The live runtime subscribes via per-topic split-groups under a different base name (local.omnibase_infra.node_registration_orchestrator.consume.1.1.1.__i.<instance>.__t.<topic>), so the probe reported a recurring false "7/7 missing subscriptions" FAIL for node_registration_orchestrator. The fix makes probe_subscription discover the runtime's actual per-topic split-groups by contract name and parse each topic directly from the live group name (resilient to instance/version/service-name drift), then falls through to that discovery when the derived base group does not exist on the broker.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit tests assert the per-topic split-group naming is matched and the stale-base-group scenario falls through to contract-name discovery."
+    command: "uv run pytest tests/unit/verification/test_subscription_probe.py -v"
+  - kind: "ci"
+    description: "Central OCC evidence for OMN-13554 is carried by the onex_change_control receipt PR."
+    command: "grep -c '^ticket_id: \"OMN-13554\"$' contracts/OMN-13554.yaml"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: >-
+      The subscription probe discovers the runtime's actual per-topic split-group names (...__i.<instance>.__t.<topic>) rather than the legacy monolithic local.runtime_config.registration-orchestrator.consume.1.0.0. A probe unit test asserts the per-topic split-group naming is matched so a future convention change fails the test rather than silently re-emitting a false FAIL. The full verification unit suite stays green; ruff + mypy --strict clean.
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/verification/test_subscription_probe.py -v"
+  - id: "dod-live"
+    description: >-
+      Live proof against the dev-lane broker (192.168.86.201, project omnibase-infra): the new discovery resolves all 7 contract-declared subscribe_topics from the real per-topic split-groups (479 live consumer groups on the broker; zero declared topics missing), and check_subscriptions returns 7/7 PASS even with the stale runtime_config EXACT identity that previously produced the false 7/7-missing FAIL.
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-redpanda rpk group list | grep -c node_registration_orchestrator"

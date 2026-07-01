@@ -1,4 +1,4 @@
-# Diagnosis: OMN-10865 / PR #1569 — delegation removal blocked by incomplete migration
+# Diagnosis: PR #1569 — delegation removal blocked by incomplete migration
 
 ## What is known
 
@@ -11,13 +11,13 @@ The PR-fix work done so far (commits on branch `jonah/omn-10865-remove-delegatio
 - `0040f7ebd` — repin omnimarket source branch → main; remove stale arch-handler-contract-compliance-allowlist
   entries + stale `_RUNTIME_UTILITY_EXCLUSIONS` / `_INV4_WIRING_EXEMPTIONS` entries for deleted files
 - `50457e5a4` — merge `origin/main` (resolved 3 modify/delete conflicts on node_delegation_orchestrator/*,
-  removed main's newly-added node_delegation_routing_reducer/dispatchers/ from OMN-10868, reverted
+  removed main's newly-added node_delegation_routing_reducer/dispatchers/ (from a concurrent routing-reducer PR), reverted
   INFRA_MAX_UNIONS 154→152, kept all non-delegation main changes, removed obsolete
   TestDelegationContractDeclaresPluginManaged from test_plugin_managed_subscription.py)
 - `a369dca91` — moved `PluginDelegation` import into the guarded bootstrap() registration block (CodeRabbit
   finding; also fixes a module-load circular import)
 - `fb25443e0`, `cb4b951a3` — empty commits to refresh cached PR_EVENT_BODY for receipt/deploy gates after
-  the PR body was updated (added `Evidence-Ticket: OMN-10865` + `Evidence-Source: OCC#965`)
+  the PR body was updated (added `Evidence-Ticket` + `Evidence-Source: OCC#965`)
 
 CI state on HEAD `cb4b951a3` after multiple reruns:
 - PASS: `gate / CodeRabbit Thread Check`, `deploy-gate / deploy-gate`, `Handler Contract Compliance`,
@@ -50,7 +50,7 @@ omnimarket's own delegation orchestrator package.
 
 **(B) `routing_tiers.yaml` deletion is over-broad — it is used by a non-delegation feature.**
 `tests/unit/nodes/node_llm_inference_effect/handlers/test_handler_llm_cli_subprocess_claude_opencode.py`
-(added to main by OMN-10137 #1429, AFTER #1569 branched) reads
+(added to main by PR #1429, AFTER #1569 branched) reads
 `src/omnibase_infra/configs/routing_tiers.yaml` to verify claude-cli / opencode-cli tier registration —
 nothing to do with delegation. #1569 deletes that file. → 3 failures in split 7. The file must be retained
 (or this test is also obsolete and should be deleted — needs a call on whether claude-cli/opencode-cli tier

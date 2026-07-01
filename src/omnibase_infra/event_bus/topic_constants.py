@@ -92,22 +92,6 @@ DLQ_COMMAND_TOPIC_SUFFIX: Final[str] = (
 """DLQ topic suffix for permanently failed commands: 'dlq.omnibase-infra.commands.v1'"""
 
 # ==============================================================================
-# DLQ Quarantine Topic (OMN-12619)
-# ==============================================================================
-# Quarantine is the terminal landing topic for DLQ messages that the replay node
-# determined are NOT replayable (max-retry-exceeded, non-retryable error type,
-# or out-of-filter). It exists to END SILENT MESSAGE LOSS: the previous
-# skip-and-drop path discarded these messages (and, with tracking off, did not
-# even record them). Quarantine durably retains them for human/automated
-# reclassification. Ownership and re-entry semantics are authored in the DLQ
-# replay node contract and docs/operations/DLQ_QUARANTINE_OWNERSHIP.md.
-
-TOPIC_DLQ_QUARANTINE: Final[str] = (
-    f"{_DLQ_PREFIX}.{DLQ_DOMAIN}.{DLQ_PRODUCER}.quarantine.{DLQ_TOPIC_VERSION}"
-)
-"""Fully-qualified DLQ quarantine topic: 'onex.dlq.omnibase-infra.quarantine.v1'."""
-
-# ==============================================================================
 # Category-to-Suffix Mapping
 # ==============================================================================
 
@@ -455,122 +439,28 @@ def derive_dlq_topic_for_event_type(
 
 
 # ---------------------------------------------------------------------------
-# Session Coordination Topics (OMN-6854)
+# Session Coordination + Delegation Pipeline Topics — all literals removed
 # ---------------------------------------------------------------------------
-
-TOPIC_SESSION_COORDINATION_SIGNAL: Final[str] = (
-    "onex.evt.omniclaude.session-coordination-signal.v1"
-)
-"""Topic for session coordination signals between concurrent sessions."""
-
-TOPIC_SESSION_STATUS_CHANGED: Final[str] = (
-    "onex.evt.omniclaude.session-status-changed.v1"
-)
-"""Topic for session status change notifications."""
-
-# ---------------------------------------------------------------------------
-# Eval Pipeline Topics (OMN-6798)
-# ---------------------------------------------------------------------------
-
-TOPIC_EVAL_COMPLETED: Final[str] = "onex.evt.omnibase-infra.eval-completed.v1"
-"""Evaluation pipeline completed event.
-
-Published by ServiceAutoEvalRunner after each eval task completes.
-Carries eval_id, model_id, pass/fail counts, and overall verdict.
-
-Producer: ServiceAutoEvalRunner (OMN-6796)
-Consumer: omnidash eval dashboard, observability
-Ticket: OMN-6798
-"""
-
-
-# ---------------------------------------------------------------------------
-# Delegation Pipeline Topics (OMN-7040)
-# ---------------------------------------------------------------------------
-
-TOPIC_DELEGATION_REQUEST: Final[str] = "onex.cmd.omnibase-infra.delegation-request.v1"
-"""Command topic for delegation requests from /delegate skill."""
-
-TOPIC_DELEGATION_ROUTING_DECISION: Final[str] = (
-    "onex.evt.omnibase-infra.routing-decision.v1"
-)
-"""Event topic for routing decisions from the delegation routing reducer."""
-
-TOPIC_DELEGATION_COMPLETED: Final[str] = (
-    "onex.evt.omnibase-infra.delegation-completed.v1"
-)
-"""Event topic for successful delegation completions."""
-
-TOPIC_DELEGATION_FAILED: Final[str] = "onex.evt.omnibase-infra.delegation-failed.v1"
-"""Event topic for failed delegation attempts."""
-
-TOPIC_DELEGATION_QUALITY_GATE_RESULT: Final[str] = (
-    "onex.evt.omnibase-infra.quality-gate-result.v1"
-)
-"""Event topic for quality gate evaluation results."""
-
-TOPIC_DELEGATION_ROUTING_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
-)
-"""Command topic for routing reducer invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INVOCATION_COMMAND: Final[str] = (
-    "onex.cmd.omnibase-infra.invocation.v1"
-)
-"""Command topic for typed invocation commands from the delegation orchestrator."""
-
-TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE: Final[str] = (
-    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
-)
-"""Event topic for remote agent task lifecycle updates."""
-
-TOPIC_DELEGATION_QUALITY_GATE_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
-)
-"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INFERENCE_REQUEST: Final[str] = (
-    "onex.cmd.omnibase-infra.delegation-inference-request.v1"
-)
-"""Command topic for LLM inference invocation from the delegation orchestrator."""
-
-TOPIC_DELEGATION_INFERENCE_RESPONSE: Final[str] = (
-    "onex.evt.omnibase-infra.inference-response.v1"
-)
-"""Event topic for LLM inference responses in the delegation pipeline."""
-
-TOPIC_DELEGATION_TASK_DELEGATED: Final[str] = "onex.evt.omniclaude.task-delegated.v1"
-"""Backward-compatible event topic for omnidash delegation projection."""
-
-TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
-    "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
-)
-"""Command topic for baseline comparison compute from the delegation orchestrator."""
-
-TOPIC_DELEGATE_SKILL_COMPLETED: Final[str] = (
-    "onex.evt.omnimarket.delegate-skill-completed.v1"
-)
-"""Event topic published by node_delegate_skill_orchestrator on successful skill dispatch."""
-
-TOPIC_DELEGATE_SKILL_FAILED: Final[str] = "onex.evt.omnimarket.delegate-skill-failed.v1"
-"""Event topic published by node_delegate_skill_orchestrator on skill dispatch failure."""
+#
+# All module-level ``TOPIC_*`` literals have been removed from this module:
+#   - 13 orphaned ``TOPIC_DELEGATION_*`` pipeline constants — removed in OMN-13195
+#     after their consumers migrated to contract-sourced resolution (OMN-13191
+#     infra applier → ``ServiceTopicRegistry``; OMN-13193 omnimarket
+#     ``node_delegation_orchestrator`` → its own ``contract.yaml``).
+#   - ``TOPIC_SESSION_COORDINATION_SIGNAL`` + the two ``TOPIC_DELEGATE_SKILL_*``
+#     constants — removed in OMN-13202. These were the AST source for
+#     ``generate_topic_enums.py`` (``EnumOmniclaudeTopic.EVT_SESSION_COORDINATION_SIGNAL_V1``
+#     and ``EnumOmnimarketTopic.EVT_DELEGATE_SKILL_*_V1``, the latter consumed at
+#     bootstrap by ``runtime/service_kernel.py``, OMN-11996). The codegen now reads
+#     these strings from the contract-declarative ``runtime/topics.yaml`` manifest
+#     (which mirrors the owning omnimarket ``node_delegate_skill_orchestrator`` /
+#     ``node_emit_daemon`` contracts), so the literals are no longer needed here.
+#
+# Resolve topic strings via ``ServiceTopicRegistry`` / ``topic_keys`` (infra) or
+# the owning ``contract.yaml`` (omnimarket), never by re-adding a literal here.
+# Only the DLQ builders/format helpers above remain in this module.
 
 __all__ = [
-    "TOPIC_DELEGATE_SKILL_COMPLETED",
-    "TOPIC_DELEGATE_SKILL_FAILED",
-    "TOPIC_DELEGATION_COMPLETED",
-    "TOPIC_DELEGATION_FAILED",
-    "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
-    "TOPIC_DELEGATION_INFERENCE_REQUEST",
-    "TOPIC_DELEGATION_INFERENCE_RESPONSE",
-    "TOPIC_DELEGATION_INVOCATION_COMMAND",
-    "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
-    "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
-    "TOPIC_DELEGATION_REQUEST",
-    "TOPIC_DELEGATION_ROUTING_DECISION",
-    "TOPIC_DELEGATE_SKILL_COMPLETED",
-    "TOPIC_DELEGATE_SKILL_FAILED",
-    "TOPIC_EVAL_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",

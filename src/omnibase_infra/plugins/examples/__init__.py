@@ -1,31 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Example compute plugins demonstrating deterministic computation patterns.
+"""Example compute plugins package.
 
-Reference implementations that demonstrate best practices
-for compute plugin development.
-
-Available Examples:
-    - PluginJsonNormalizer - Deterministic JSON key sorting for comparison
-
-Usage:
-    ```python
-    from omnibase_infra.plugins.examples import PluginJsonNormalizer
-
-    plugin = PluginJsonNormalizer()
-    result = plugin.execute(
-        input_data={"json": {"z": 3, "a": 1}},
-        context={"correlation_id": "123"}
-    )
-    # result["normalized"] == {"a": 1, "z": 3}
-    ```
+All example PluginComputeBase subclasses have been removed as migration debt
+per OMN-13689. Canonical compute logic belongs in NodeCompute archetypes
+(contract.yaml + handler) in omnimarket, not Plugin* base classes.
 """
 
-from omnibase_infra.plugins.examples.plugin_json_normalizer import (
-    PluginJsonNormalizer,
-)
-
-__all__ = [
-    "PluginJsonNormalizer",
-]
+__all__: list[str] = []

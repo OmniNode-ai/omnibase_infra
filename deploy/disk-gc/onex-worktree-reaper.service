@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-worktree-reaper.service — .201 event-sourced reap-on-merge worktree GC
+# (OMN-13228, T4 of OMN-13008).
+#
+# A systemd USER unit (NOT a lane container), sibling to onex-disk-gc.service.
+# Where onex-disk-gc is the hourly *backstop* sweep, this unit is the *event-first*
+# path: it reads the onex.evt.github.pr-merged.v1 projection (materialized by the T3
+# node) over HTTP from the local :3002 projection API and, for each newly-merged PR
+# since a persisted cursor, drives the canonical prune-worktrees.sh against
+# /data/omninode/omni_worktrees. It re-runs frequently (see the timer) so a merge is
+# reaped within ~1 interval. Safety lives entirely in prune-worktrees.sh.
+#
+# This is a oneshot driven by onex-worktree-reaper.timer (the .201 host has rpk + a
+# local projection API; the resident KeepAlive-daemon model is Mac-specific because
+# launchd periodic jobs do not fire reliably there — see omniclaude's LaunchAgent).
+#
+# Install (on .201, as the runtime user — NO sudo, user scope):
+#   bash deploy/disk-gc/install-worktree-reaper.sh
+#
+# Check:
+#   systemctl --user status onex-worktree-reaper.timer
+#   journalctl --user -u onex-worktree-reaper.service -f
+
+[Unit]
+Description=ONEX .201 event-sourced worktree reaper (reap-on-merge via pr-merged projection)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+
+[Service]
+Type=oneshot
+
+# Resolve OMNI_HOME for the runtime user on .201.
+Environment="OMNI_HOME=%h/Code/omni_home"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# The projection API base URL is sourced from the operator env file (NOT hardcoded
+# here). On .201 the operator sets ONEX_PROJECTION_URL=http://localhost:3002 in
+# ~/.omnibase/.env. If the file or the var is absent the reaper exits 2 and logs
+# the missing config (fail-fast, never a silent localhost default).
+EnvironmentFile=-%h/.omnibase/.env
+
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex
+
+# Event-first reap: read the pr-merged projection and drive prune-worktrees.sh
+# against the .201 worktrees root on /data. --execute really prunes + advances the
+# cursor; prune-worktrees.sh keeps all the safety (MERGED+clean+pushed only).
+ExecStart=/usr/bin/env python3 %h/Code/omni_home/omnibase_infra/scripts/worktree_reaper.py --execute --root /data/omninode/omni_worktrees
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-worktree-reaper
+
+[Install]
+WantedBy=default.target

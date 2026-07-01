@@ -80,7 +80,17 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
             for v in manifest.volumes:
                 # Extract named volume (before :)
                 vol_name = v.split(":")[0]
-                if not vol_name.startswith(".") and not vol_name.startswith("/"):
+                # Skip bind-mount sources: relative paths (`.`), absolute paths
+                # (`/`), and operator-supplied host paths expressed as a shell
+                # variable expansion (`${VAR:-/default}`). Only a bare token is a
+                # Docker named volume that must be declared in the top-level
+                # `volumes:` block. (OMN-13248: the coding-agent cred bind-mounts
+                # use `${CODING_AGENT_*_CREDS_HOST_DIR:-/dev/null}` sources.)
+                if (
+                    not vol_name.startswith(".")
+                    and not vol_name.startswith("/")
+                    and not vol_name.startswith("${")
+                ):
                     all_volumes.add(vol_name)
 
         # Tmpfs mounts

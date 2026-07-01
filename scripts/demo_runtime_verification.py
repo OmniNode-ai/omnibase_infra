@@ -354,7 +354,7 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
         node_kind=EnumNodeKind.ORCHESTRATOR,
     )
 
-    from omnibase_infra.models.dispatch.model_dispatch_route import (
+    from omnibase_core.models.dispatch.model_dispatch_route import (
         ModelDispatchRoute,
     )
 
@@ -362,7 +362,7 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
         route_id="demo-introspection-route",
         topic_pattern="onex.evt.platform.node-introspection.v1",
         message_category=EnumMessageCategory.EVENT,
-        dispatcher_id="demo-introspection-dispatcher",
+        handler_id="demo-introspection-dispatcher",
     )
     engine.register_route(route)
 

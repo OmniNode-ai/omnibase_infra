@@ -17,6 +17,11 @@ healthcheck:
   start_period_s: 30
 volumes:
   - redpanda_data:/var/lib/redpanda/data
+  # OMN-13469: bootstrap.yaml is the volume-reset-proof primary mechanism for
+  # setting the cluster partition cap. Applied on first cluster formation before
+  # any topics are created. Belt #1 (reset-proof); --set flag = belt #2;
+  # redpanda-partition-cap init service = belt #3.
+  - ./redpanda/.bootstrap.yaml:/etc/redpanda/.bootstrap.yaml:ro
 depends_on: []
 restart: unless-stopped
 resources: null

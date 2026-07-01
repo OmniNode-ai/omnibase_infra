@@ -9,12 +9,14 @@ emits a JSON plan; the shell only executes that plan. Keeping the decision logic
 here (not in bash) makes the safety guarantees unit-testable without docker.
 
 Inputs:
-  KEEP_LIST  (env)   path to keep-list.yaml (small — env is fine)
-  stdin      (JSON)  {"images_ndjson": "...", "ps_ndjson": "...", "inuse": "..."}
-                     where each value is the raw multi-line output of the matching
-                     `docker ... --format '{{json .}}'` command. Inventory is passed
-                     on stdin (NOT env) because a host with many images blows past
-                     ARG_MAX when the blobs are env vars (`Argument list too long`).
+  KEEP_LIST       (env)   path to keep-list.yaml (small — env is fine)
+  GITHUB_TOKEN    (env)   optional; enables PR-state lookup for disposable CI tags
+  GITHUB_REPO     (env)   optional; "owner/repo" for the PR-state lookup
+  stdin           (JSON)  {"images_ndjson": "...", "ps_ndjson": "...", "inuse": "..."}
+                          where each value is the raw multi-line output of the matching
+                          `docker ... --format '{{json .}}'` command. Inventory is passed
+                          on stdin (NOT env) because a host with many images blows past
+                          ARG_MAX when the blobs are env vars (`Argument list too long`).
 
 Output: a single JSON object on stdout:
   {
@@ -30,6 +32,15 @@ Safety invariants (enforced + tested in tests/unit/scripts/test_disk_gc_plan.py)
   - never remove an image referenced by any container when protect_running is true
   - never remove anything younger than min_age_days
   - retain the newest superseded_image_keep_generations of each kept repo
+
+PR-state reaping invariants (OMN-13225, tested in test_disk_gc_pr_state.py):
+  - ghcr CI tags pr-<N> / sha-* are DISPOSABLE and bypassed the age/generation window
+    ONLY when their associated PR is merged or closed (via pr_state_lookup)
+  - protect_running, keep_image_tags, and keep_image_repos always take precedence —
+    a running-lane image is NEVER removed even if its PR is merged
+  - when pr_state_lookup is None (no GitHub token), the PR-state stage is skipped
+    entirely (safe default: keep all disposable tags, fall through to age/generation logic)
+  - any lookup error for a tag → SKIP_AMBIGUITY (keep the image; default safe)
 """
 
 from __future__ import annotations
@@ -38,13 +49,27 @@ import json
 import os
 import re
 import sys
-from datetime import UTC, datetime, timezone
+import urllib.request
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import yaml
 
 # docker prints CreatedAt like: "2026-05-29 14:03:11 -0400 EDT"
 _CREATED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([+-]\d{4})")
+
+# Tags that indicate a disposable CI artifact (pr-<N> or sha-<hex>).
+# These are CI build artifacts, NOT rollback targets. They are eligible for
+# PR-state reaping independent of age / generation retention.
+_PR_TAG_RE = re.compile(r"^pr-(\d+)$")
+_SHA_TAG_RE = re.compile(r"^sha-[0-9a-f]{6,40}$")
+
+# Sentinel values returned by pr_state_lookup
+PR_STATE_MERGED = "merged"
+PR_STATE_CLOSED = "closed"
+PR_STATE_OPEN = "open"
+PR_STATE_UNKNOWN = "unknown"  # lookup error or PR number not found → keep
 
 
 def _parse_created_at(value: str, now: datetime) -> float:
@@ -75,14 +100,81 @@ def _repo_protected(repo: str, keep_repos: list[str]) -> bool:
     return any(sub in repo for sub in keep_repos)
 
 
+def _is_disposable_ci_tag(tag: str) -> bool:
+    """Return True if the tag looks like a disposable CI artifact (pr-N or sha-*)."""
+    return bool(_PR_TAG_RE.match(tag) or _SHA_TAG_RE.match(tag))
+
+
+def _pr_number_from_tag(tag: str) -> int | None:
+    """Extract the PR number from a pr-<N> tag, or None if not a pr-tag."""
+    m = _PR_TAG_RE.match(tag)
+    return int(m.group(1)) if m else None
+
+
+def make_github_pr_state_lookup(
+    github_token: str, github_repo: str
+) -> Callable[[int], str]:
+    """Return a PR-state lookup function backed by the GitHub REST API.
+
+    The returned callable accepts a PR number and returns one of:
+      PR_STATE_MERGED, PR_STATE_CLOSED, PR_STATE_OPEN, PR_STATE_UNKNOWN.
+
+    Any network/HTTP error → PR_STATE_UNKNOWN (safe: keep the image).
+    This function is NOT called in unit tests; tests inject a mock lookup.
+    """
+
+    def _lookup(pr_number: int) -> str:
+        url = f"https://api.github.com/repos/{github_repo}/pulls/{pr_number}"
+        req = urllib.request.Request(  # noqa: S310 — URL is always https://api.github.com
+            url,
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+                data = json.loads(resp.read())
+        except Exception:  # noqa: BLE001 — any network/auth/parse error → safe keep
+            return PR_STATE_UNKNOWN
+
+        state = data.get("state", "")
+        merged = data.get("merged", False)
+        if merged:
+            return PR_STATE_MERGED
+        if state == "closed":
+            return PR_STATE_CLOSED
+        if state == "open":
+            return PR_STATE_OPEN
+        return PR_STATE_UNKNOWN
+
+    return _lookup
+
+
 def build_plan(
     keep_list: dict[str, Any],
     images: list[dict[str, Any]],
     containers: list[dict[str, Any]],
     inuse_refs: set[str],
     now: datetime | None = None,
+    pr_state_lookup: Callable[[int], str] | None = None,
 ) -> dict[str, Any]:
-    """Pure planner. See module docstring for invariants."""
+    """Pure planner. See module docstring for invariants.
+
+    Args:
+        keep_list:       Parsed keep-list.yaml dict.
+        images:          List of docker image dicts from `docker image ls --format json`.
+        containers:      List of docker container dicts from `docker ps --format json`.
+        inuse_refs:      Set of repo:tag or image-id strings currently referenced by
+                         any container (running or stopped). Used for protect_running.
+        now:             Reference time for age calculations. Defaults to UTC now.
+        pr_state_lookup: Optional callable(pr_number: int) -> str. When provided,
+                         disposable CI tags (pr-<N> / sha-*) whose PR is merged or
+                         closed are marked REMOVABLE regardless of age/generation.
+                         When None, the PR-state stage is skipped entirely (safe default).
+                         Lookup errors return PR_STATE_UNKNOWN → image is KEPT.
+    """
     now = now or datetime.now(UTC)
 
     keep_repos: list[str] = keep_list.get("keep_image_repos", []) or []
@@ -105,16 +197,46 @@ def build_plan(
         age = _parse_created_at(created, now)
         ref = f"{repo}:{tag}" if repo and tag and repo != "<none>" else image_id
 
-        if age < min_age_days:
-            kept_reasons[image_id] = (
-                f"younger than min_age_days ({age:.1f}<{min_age_days})"
-            )
-            continue
+        # --- Hard safety guards (always win, regardless of PR state) ---
+
         if tag in keep_tags and tag and tag != "<none>":
             kept_reasons[image_id] = f"tag '{tag}' in keep_image_tags"
             continue
         if protect_running and (ref in inuse_refs or image_id in inuse_refs):
             kept_reasons[image_id] = "referenced by a container (protect_running)"
+            continue
+
+        # --- PR-state fast-path for disposable CI tags (OMN-13225) ---
+        # Check this BEFORE the age gate: these tags bypass age/generation logic
+        # when their PR is merged/closed. The hard safety guards above already ran.
+
+        if (
+            pr_state_lookup is not None
+            and _is_disposable_ci_tag(tag)
+            and repo
+            and repo != "<none>"
+        ):
+            pr_number = _pr_number_from_tag(tag)
+            if pr_number is not None:
+                # pr-<N> tag: look up the PR state directly.
+                state = pr_state_lookup(pr_number)
+                if state in (PR_STATE_MERGED, PR_STATE_CLOSED):
+                    remove_image_ids.append(image_id)
+                    continue
+                # open or unknown → keep; fall through to age/generation path
+                kept_reasons[image_id] = (
+                    f"disposable CI tag pr-{pr_number} state={state} (not merged/closed)"
+                )
+                continue
+            # sha-* tag: no PR number to look up; age-based path only.
+            # Fall through to normal age/generation logic below.
+
+        # --- Age gate (applies to all remaining images) ---
+
+        if age < min_age_days:
+            kept_reasons[image_id] = (
+                f"younger than min_age_days ({age:.1f}<{min_age_days})"
+            )
             continue
 
         is_dangling = repo == "<none>" or repo == "" or tag == "<none>"
@@ -200,7 +322,18 @@ def main() -> int:
         line.strip() for line in payload.get("inuse", "").splitlines() if line.strip()
     }
 
-    plan = build_plan(keep_list, images, containers, inuse)
+    # PR-state lookup: enabled only when both GITHUB_TOKEN and GITHUB_REPO are set.
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    github_repo = os.environ.get("GITHUB_REPO", "")
+    pr_state_lookup = (
+        make_github_pr_state_lookup(github_token, github_repo)
+        if github_token and github_repo
+        else None
+    )
+
+    plan = build_plan(
+        keep_list, images, containers, inuse, pr_state_lookup=pr_state_lookup
+    )
     json.dump(plan, sys.stdout)
     sys.stdout.write("\n")
     return 0

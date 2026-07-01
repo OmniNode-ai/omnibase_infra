@@ -57,15 +57,11 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
 )
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_DELEGATION_BASELINE_COMPARISON,
-    TOPIC_DELEGATION_INFERENCE_REQUEST,
-    TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
-    TOPIC_DELEGATION_ROUTING_REQUEST,
-)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -81,12 +77,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Delegation intent topics are resolved from the contract-sourced topic registry
+# (ServiceTopicRegistry, OMN-5839) rather than importing the legacy TOPIC_*
+# string constants from event_bus/topic_constants.py. Each resolved string equals
+# the topic declared in the owning node contract.yaml (OMN-12803 / OMN-13191).
+_TOPIC_REGISTRY = ServiceTopicRegistry.from_defaults()
+
 _DELEGATION_INTENT_TOPIC_BY_CLASS: dict[str, str] = {
-    "ModelBaselineIntent": TOPIC_DELEGATION_BASELINE_COMPARISON,
-    "ModelInferenceIntent": TOPIC_DELEGATION_INFERENCE_REQUEST,
+    "ModelBaselineIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_BASELINE_COMPARISON
+    ),
+    "ModelInferenceIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_INFERENCE_REQUEST
+    ),
     "ModelInvocationCommand": EnumOmnibaseInfraTopic.CMD_REMOTE_AGENT_INVOKE_V1.value,
-    "ModelQualityGateIntent": TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
-    "ModelRoutingIntent": TOPIC_DELEGATION_ROUTING_REQUEST,
+    "ModelQualityGateIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_QUALITY_GATE_REQUEST
+    ),
+    "ModelRoutingIntent": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_ROUTING_REQUEST
+    ),
 }
 
 
@@ -243,8 +253,20 @@ class DispatchResultApplier:
         ``payload`` is the actual event payload. The runtime uses the outer model
         to resolve the topic, but Kafka consumers and projections expect the
         inner payload as ``ModelEventEnvelope.payload``.
+
+        ORCHESTRATOR and EFFECT handlers express each emit as a
+        ``ModelEventEnvelope`` carried in ``ModelHandlerOutput.events`` — the outer
+        envelope is a transport/routing carrier (its ``event_type`` names the
+        destination topic) and the inner ``payload`` is the actual command/event
+        the bus and downstream consumers expect. Publishing the carrier verbatim
+        would double-nest it (``ModelEventEnvelope(payload=ModelEventEnvelope(...))``),
+        so a ``ModelEventEnvelope`` output event is always unwrapped to its inner
+        payload — mirroring the ``ModelDelegationEventEnvelope`` unwrap (OMN-13247).
         """
-        if type(event).__name__ == "ModelDelegationEventEnvelope":
+        if type(event).__name__ in (
+            "ModelEventEnvelope",
+            "ModelDelegationEventEnvelope",
+        ):
             inner_payload = getattr(event, "payload", None)
             if isinstance(inner_payload, BaseModel):
                 return inner_payload
@@ -270,8 +292,33 @@ class DispatchResultApplier:
         return self._resolve_mapped_output_topic(event)
 
     def _resolve_embedded_output_topic(self, event: BaseModel) -> str | None:
-        """Return a declared topic carried by the event payload, if present."""
+        """Return a declared topic the event itself names, if present.
+
+        Two carriers name a topic directly on the event:
+
+        * a typed domain payload may declare its own ``topic`` field (the most
+          specific contract boundary); and
+        * a canonical multi-step ORCHESTRATOR (e.g. ``node_redeploy_orchestrator``,
+          ``node_coding_agent_orchestrator``) sequences a workflow by emitting, per
+          ``ModelHandlerOutput.events`` entry, a ``ModelEventEnvelope`` whose
+          ``event_type`` is the FULL destination topic of that emit (validate ->
+          validate topic, invoke -> invoke topic, ...). The emitted envelope
+          carries no ``topic`` field and its Python class is always
+          ``ModelEventEnvelope``, so the legacy ``topic``-field / class-name
+          routing fell through to the single ``output_topic`` fallback (the
+          contract terminal_event) and EVERY emit was misrouted to the terminal
+          topic (OMN-13247).
+
+        Either way the named topic is honored only when it is a contract-declared
+        (allowed) publish topic; otherwise this falls through so the class-name
+        ``topic_router`` / ``output_topic_map`` / ``output_topic`` paths decide.
+        """
         embedded_topic = getattr(event, "topic", None)
+        if not (isinstance(embedded_topic, str) and embedded_topic.strip()):
+            if type(event).__name__ == "ModelEventEnvelope":
+                envelope_event_type = getattr(event, "event_type", None)
+                if isinstance(envelope_event_type, str) and envelope_event_type.strip():
+                    embedded_topic = envelope_event_type
         if isinstance(embedded_topic, str) and embedded_topic.strip():
             candidate_topic = embedded_topic.strip()
             if candidate_topic in self._allowed_output_topics():
@@ -633,6 +680,12 @@ class DispatchResultApplier:
                             str(effective_correlation_id),
                         )
 
+                    # Precedence: a topic the event itself names — a typed
+                    # payload's own ``topic`` field, or an ORCHESTRATOR-emitted
+                    # ``ModelEventEnvelope``'s ``event_type`` (the destination
+                    # topic each sequenced emit targets, OMN-13247) — wins; then
+                    # the per-class ``topic_router`` / ``output_topic_map``; finally
+                    # the single ``output_topic`` fallback.
                     embedded_topic = self._resolve_embedded_output_topic(output_event)
                     resolved_topic = (
                         embedded_topic

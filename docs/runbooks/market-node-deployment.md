@@ -2,8 +2,7 @@
 
 **Status:** documents current ad-hoc path as of 2026-04-25; gaps identified for closure
 **Source plan:** docs/plans/2026-04-25-platform-hardening-and-correctness.md (Track F/F2)
-**Source matrix:** docs/tracking/2026-04-25-market-node-health-matrix.md (OMN-9718)
-**Linear ticket:** OMN-9727
+**Source matrix:** docs/tracking/2026-04-25-market-node-health-matrix.md
 
 ---
 
@@ -34,7 +33,7 @@ branch protection.
 - `ci.yml` — pytest, ruff, mypy
 - `contract-validation.yml` — validates `contract.yaml` files
 - `omni-standards-compliance.yml` — runs compliance sweep
-- `deploy-gate.yml` — receipt-gate: requires OMN-XXXX ticket citation + dod_evidence
+- `deploy-gate.yml` — receipt-gate: requires ticket citation + dod_evidence
 - `cr-thread-gate-caller.yml` — blocks merge if CodeRabbit threads unresolved
 
 **Gap:** None at this phase. Merge is gated.
@@ -72,29 +71,29 @@ publishing. The deploy-agent verifies the signature on receipt.
 **Deploy-agent Kafka control bus:** The trigger script publishes to
 `KAFKA_BOOTSTRAP_SERVERS`, and the deploy-agent now requires the same explicit
 Kafka config for command consumption, completion publishing, and rejection
-publishing. There is intentionally no localhost fallback. OMN-9713 fixed the
+publishing. There is intentionally no localhost fallback. A prior fix eliminated the
 code-level split-brain path where the deploy-agent could silently consume or
 publish on a different bus from the trigger publisher. Post-merge validation must
-still verify the `.201` user service environment contains the intended
+still verify the runtime host user service environment contains the intended
 `KAFKA_BOOTSTRAP_SERVERS` value before relying on automated rebuilds.
 
 ---
 
-### Phase 3 — Image deploy to .201
+### Phase 3 — Image deploy to the runtime host
 
-**What happens:** The deploy-agent on `.201` receives the `rebuild-requested` event,
+**What happens:** The deploy-agent on the runtime host receives the `rebuild-requested` event,
 runs `git pull` on `/data/omninode/omnibase_infra`, regenerates the compose file,
 builds the Docker image, and brings runtime containers up.
 
 **Trigger owner:** deploy-agent — a Python service running as a systemd user service
-on `.201` (`scripts/deploy-agent/deploy/deploy-agent.service`).
+on the runtime host (`scripts/deploy-agent/deploy/deploy-agent.service`).
 
 **Code location:**
 - Service definition: `omnibase_infra/scripts/deploy-agent/deploy/deploy-agent.service`
 - Consumer: `scripts/deploy-agent/deploy_agent/consumer.py` — polls
   `onex.cmd.deploy.rebuild-requested.v1`, verifies HMAC, validates schema, deduplicates
 - Executor: `scripts/deploy-agent/deploy_agent/executor.py`
-- Hardcoded repo path on .201: `REPO_DIR = "/data/omninode/omnibase_infra"` (executor.py:33)
+- Hardcoded repo path on the runtime host: `REPO_DIR = "/data/omninode/omnibase_infra"` (executor.py:33)
 
 **Executor rebuild phases** (Scope.RUNTIME path):
 1. **Self-update:** pulls latest deploy-agent source from git; re-execs itself if behind
@@ -221,7 +220,7 @@ successful deploy. The E1a baseline check (Track E) proposes reading from an
 `expected_consumer_groups.yaml` file, but this file does not exist yet. Without
 it, there is no automated way to diff `rpk group list` output against expectations.
 The only current verification is `rpk group list | grep local.omnimarket` — which
-requires SSH to .201 and manual inspection.
+requires SSH to the runtime host and manual inspection.
 
 **GAP — topic pattern match triggers trigger but not deploy:**
 The trigger script matches `src/omnimarket/*` (single-level glob). A node added
@@ -251,9 +250,9 @@ None of these checks send a synthetic event and await a node-specific response.
 **GAP — no per-node smoke test:**
 There is no mechanism (CI, launchd, or deploy-agent) that sends a synthetic event
 tagged `synthetic=true` to each node's subscribe topic and waits for the expected
-publish event. This is the core gap that allowed OMN-9695 (15 broken nodes) to go
-undetected for 6+ days after merges. F4 (Track F, Wave 3) proposes a 30m canary,
-but it is not yet implemented.
+publish event. This is the core gap that allowed 15 broken nodes to go undetected
+for 6+ days after merges. F4 (Track F, Wave 3) proposes a 30m canary, but it is
+not yet implemented.
 
 ---
 
@@ -261,9 +260,9 @@ but it is not yet implemented.
 
 | # | Gap | Severity | Evidence | Recommended fix |
 |---|-----|----------|----------|-----------------|
-| 1 | Deploy-agent consuming from wrong Kafka bus (localhost vs cloud) | CODE FIXED | OMN-9713 removes localhost fallback and routes consume/completion/rejection through one explicit Kafka config | Deploy deploy-agent after merge and verify `.201` user service env uses the trigger publisher bus |
-| 2 | No per-node round-trip verification after deploy | HIGH | executor.py verify() checks only count>0 and wrong ports; OMN-9695 undetected 6 days | Implement F4 canary: synthetic event → expected response per node |
-| 3 | Deploy-agent health check probes wrong ports (8000/8001/8002 vs 8085/8086) | DONE | OMN-9728 updates `executor.py::verify()` to probe 8085/8086 and require `details.config_prefetch_status=ok` | Keep regression tests in `scripts/deploy-agent/tests/unit/test_executor_runtime_health_verify.py` green |
+| 1 | Deploy-agent consuming from wrong Kafka bus (localhost vs cloud) | CODE FIXED | The localhost fallback was removed; consume/completion/rejection now route through one explicit Kafka config | Deploy deploy-agent after merge and verify runtime host user service env uses the trigger publisher bus |
+| 2 | No per-node round-trip verification after deploy | HIGH | executor.py verify() checks only count>0 and wrong ports; 15 broken nodes went undetected for 6 days | Implement F4 canary: synthetic event → expected response per node |
+| 3 | Deploy-agent health check probes wrong ports (8000/8001/8002 vs 8085/8086) | DONE | An earlier fix updated `executor.py::verify()` to probe 8085/8086 and require `details.config_prefetch_status=ok` | Keep regression tests in `scripts/deploy-agent/tests/unit/test_executor_runtime_health_verify.py` green |
 | 4 | No expected consumer group registry | HIGH | No `expected_consumer_groups.yaml` exists; rpk group list diff is manual | Create registry from F0 matrix; wire into E1a baseline check |
 | 5 | No feedback loop from deploy-agent to PR/CI | MED | trigger_rebuild_on_merge.py exits after publish; no status returned | Publish `rebuild-completed` event back; add GHA job that polls for completion |
 | 6 | handler_registry count check is not node-specific | MED | executor.py verify() only checks count>0; a single registered node passes | Query expected set from contract.yaml discovery; diff against actual registry |
@@ -273,10 +272,10 @@ but it is not yet implemented.
 
 ## Highest-leverage gap (proposed for immediate closure)
 
-**Gap #3 — Deploy-agent health check probes wrong ports** is closed by OMN-9728.
-The deploy-agent's `verify()` phase now tests the real runtime health surface
-instead of the LLM inference ports and fails when either runtime endpoint is not
-healthy, not running, or reports `config_prefetch_status` other than `ok`.
+**Gap #3 — Deploy-agent health check probes wrong ports** has been closed. The
+deploy-agent's `verify()` phase now tests the real runtime health surface instead
+of the LLM inference ports and fails when either runtime endpoint is not healthy,
+not running, or reports `config_prefetch_status` other than `ok`.
 
 **Regression scope:**
 - `scripts/deploy-agent/deploy_agent/executor.py`: probes
@@ -285,22 +284,21 @@ healthy, not running, or reports `config_prefetch_status` other than `ok`.
   the verifier avoids LLM ports and distinguishes `config_prefetch_status=ok`
   from `config_prefetch_status=degraded_error`
 
-**Gap #1 (bus mismatch):** OMN-9713 fixes the code path by requiring explicit
-Kafka config and using it for both consume and publish surfaces. The remaining
-work is post-merge deployment validation on `.201`; this runbook intentionally
+**Gap #1 (bus mismatch):** The bus-mismatch code path was fixed by requiring
+explicit Kafka config and using it for both consume and publish surfaces. The remaining
+work is post-merge deployment validation on the runtime host; this runbook intentionally
 does not imply a PR can mutate the live user service environment.
 
-**Why not Gap #2 (no round-trip canary)?** Gap #2 (F4 canary) is Wave 3 work
-gated on Track B completion. It is the right long-term fix but is not immediately
-actionable from a static code-only PR.
+**Why not Gap #2 (no round-trip canary)?** The F4 canary is Wave 3 work gated on
+Track B completion. It is the right long-term fix but is not immediately actionable
+from a static code-only PR.
 
 ---
 
 ## Manual deployment path (current fallback)
 
-When the deploy-agent is unreachable (for example, before OMN-9713 is deployed
-and validated on `.201`), the current
-manual path on `.201` is (requires `INFRA_HOST` and `INFRA_USER` from `~/.omnibase/.env`):
+When the deploy-agent is unreachable, the current
+manual path on the runtime host is (requires `INFRA_HOST` and `INFRA_USER` from `~/.omnibase/.env`):
 
 ```bash
 # 1. SSH to the infra host

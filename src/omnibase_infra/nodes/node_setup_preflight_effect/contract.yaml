@@ -27,6 +27,10 @@ io_operations:
     output_fields: ["passed", "checks", "correlation_id", "duration_ms"]
 handler_routing:
   routing_strategy: "operation_match"
+  # default_handler (module:Class) lets RuntimeLocal resolve the handler on the
+  # compute execution path. Without it the runtime fails closed with
+  # "missing 'terminal_event' topic and no handler spec found".
+  default_handler: "omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check:HandlerPreflightCheck"
   handlers:
     - operation: "run_preflight"
       handler:

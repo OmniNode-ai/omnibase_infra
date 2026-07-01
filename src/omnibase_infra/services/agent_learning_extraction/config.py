@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import os
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.topics.platform_topic_suffixes import (
@@ -33,8 +31,12 @@ class ModelAgentLearningExtractionConfig(BaseModel):
         description="Kafka consumer group ID",
     )
     llm_summary_url: str = Field(
-        default_factory=lambda: os.environ["LLM_CODER_FAST_URL"],
-        description="LLM endpoint for generating resolution summaries",
+        ...,
+        description=(
+            "LLM endpoint for generating resolution summaries. "
+            "Must be injected from the node's routing contract authority via the DI "
+            "container — never read from an environment variable directly."
+        ),
     )
     llm_summary_timeout_seconds: float = Field(
         default=30.0,

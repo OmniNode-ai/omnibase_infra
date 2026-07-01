@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    ProjectionDispatchSinks,
     _make_projection_dispatch_callback,
 )
 
@@ -54,8 +55,10 @@ def test_terminal_event_emitted_after_successful_projection() -> None:
         FakeDelegationHandler(),
         DB_TABLES,
         SUBSCRIBE_TOPICS,
-        event_bus=FakeEventBus(),
-        terminal_event=TERMINAL_TOPIC,
+        sinks=ProjectionDispatchSinks(
+            event_bus=FakeEventBus(),
+            terminal_event=TERMINAL_TOPIC,
+        ),
     )
 
     envelope = MagicMock()
@@ -99,8 +102,10 @@ def test_terminal_event_not_emitted_when_projection_fails() -> None:
         FailingHandler(),
         DB_TABLES,
         SUBSCRIBE_TOPICS,
-        event_bus=FakeEventBus(),
-        terminal_event=TERMINAL_TOPIC,
+        sinks=ProjectionDispatchSinks(
+            event_bus=FakeEventBus(),
+            terminal_event=TERMINAL_TOPIC,
+        ),
     )
 
     envelope = MagicMock()
@@ -139,8 +144,10 @@ def test_no_terminal_event_without_event_bus() -> None:
         FakeDelegationHandler(),
         DB_TABLES,
         SUBSCRIBE_TOPICS,
-        event_bus=None,
-        terminal_event=TERMINAL_TOPIC,
+        sinks=ProjectionDispatchSinks(
+            event_bus=None,
+            terminal_event=TERMINAL_TOPIC,
+        ),
     )
 
     envelope = MagicMock()

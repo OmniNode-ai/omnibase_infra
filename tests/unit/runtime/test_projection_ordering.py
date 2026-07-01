@@ -42,6 +42,7 @@ from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models.model_projection_result_local import (
     ModelProjectionResultLocal,
 )
@@ -164,7 +165,7 @@ class TestProjectionOrdering:
                 call_order.append("projection.execute")
                 return ModelProjectionResultLocal.success_result()
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
 
         async def _track_publish(**kwargs: object) -> None:
             call_order.append("kafka.publish")
@@ -221,7 +222,7 @@ class TestProjectionOrdering:
             payload=_StubPayload(),
         )
         proj_intent = _make_projection_intent()
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
 
         result = _make_result(
             projection_intents=(proj_intent,),
@@ -252,7 +253,7 @@ class TestProjectionFailureBlocksKafka:
     @pytest.mark.asyncio
     async def test_projection_raise_blocks_kafka(self) -> None:
         """When projection raises, publish_envelope must never be called."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         effect = _StubProjectionEffect(should_fail=True)
         proj_intent = _make_projection_intent()
         result = _make_result(projection_intents=(proj_intent,))
@@ -271,7 +272,7 @@ class TestProjectionFailureBlocksKafka:
     @pytest.mark.asyncio
     async def test_projection_raise_blocks_intent_execution(self) -> None:
         """When projection raises, IntentExecutor must NOT be called."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         effect = _StubProjectionEffect(should_fail=True)
         proj_intent = _make_projection_intent()
@@ -292,7 +293,7 @@ class TestProjectionFailureBlocksKafka:
     @pytest.mark.asyncio
     async def test_projection_success_false_blocks_kafka(self) -> None:
         """When projection returns success=False, publish must be blocked."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         effect = _StubProjectionEffect(return_success_false=True)
         proj_intent = _make_projection_intent()
 
@@ -318,7 +319,7 @@ class TestProjectionFailureBlocksKafka:
     @pytest.mark.asyncio
     async def test_projection_error_contains_projection_type(self) -> None:
         """ProjectionError must include projector_key for operator diagnostics."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         effect = _StubProjectionEffect(should_fail=True)
         proj_intent = _make_projection_intent(
             projector_key="node_registration_projector",
@@ -349,7 +350,7 @@ class TestNoProjectionEffectConfigured:
     @pytest.mark.asyncio
     async def test_no_projection_effect_with_intents_raises(self) -> None:
         """When projection_intents present but no effect configured, raise RuntimeHostError."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         proj_intent = _make_projection_intent()
         result = _make_result(projection_intents=(proj_intent,))
 
@@ -371,7 +372,7 @@ class TestNoProjectionEffectConfigured:
         class _FakeEvent(BaseModel):
             value: str = "x"
 
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         result = _make_result(output_events=[_FakeEvent()])
 
         applier = DispatchResultApplier(
@@ -397,7 +398,7 @@ class TestMultipleProjectionIntents:
     async def test_multiple_intents_execute_sequentially(self) -> None:
         """All projection intents must execute in order before Kafka publish."""
         effect = _StubProjectionEffect()
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
 
         intent_a = _make_projection_intent(projector_key="type_a_projector")
         intent_b = _make_projection_intent(projector_key="type_b_projector")
@@ -420,7 +421,7 @@ class TestMultipleProjectionIntents:
         effect = _StubProjectionEffect(
             side_effects=[RuntimeError("first fails"), None],
         )
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
 
         intent_a = _make_projection_intent(projector_key="type_a_projector")
         intent_b = _make_projection_intent(projector_key="type_b_projector")
@@ -460,7 +461,7 @@ class TestSlowProjection:
                 time.sleep(0.05)
                 return ModelProjectionResultLocal.success_result()
 
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
 
         class _FakeEvent(BaseModel):
             value: str = "x"
@@ -508,7 +509,7 @@ class TestFullPipelineHappyPath:
 
         executor.execute_all = AsyncMock(side_effect=_track_intents)
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
 
         async def _track_publish(**kwargs: object) -> None:
             call_order.append("kafka")

@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from aiokafka import AIOKafkaConsumer
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.services.session import (
@@ -246,7 +247,7 @@ class TestCircuitBreaker:
     ) -> None:
         """Pausing consumer should set _consumer_paused flag."""
         # Mock the consumer with assignment
-        mock_kafka_consumer = MagicMock()
+        mock_kafka_consumer = MagicMock(spec=AIOKafkaConsumer)
         mock_kafka_consumer.assignment.return_value = [MagicMock()]
         mock_kafka_consumer.pause = MagicMock()
         consumer._consumer = mock_kafka_consumer
@@ -261,7 +262,7 @@ class TestCircuitBreaker:
     ) -> None:
         """Resuming consumer should clear _consumer_paused flag."""
         # Mock the consumer with assignment
-        mock_kafka_consumer = MagicMock()
+        mock_kafka_consumer = MagicMock(spec=AIOKafkaConsumer)
         mock_kafka_consumer.assignment.return_value = [MagicMock()]
         mock_kafka_consumer.resume = MagicMock()
         consumer._consumer = mock_kafka_consumer
@@ -276,7 +277,7 @@ class TestCircuitBreaker:
         self, consumer: SessionEventConsumer
     ) -> None:
         """Pausing already paused consumer should be a no-op."""
-        mock_kafka_consumer = MagicMock()
+        mock_kafka_consumer = MagicMock(spec=AIOKafkaConsumer)
         mock_kafka_consumer.assignment.return_value = [MagicMock()]
         mock_kafka_consumer.pause = MagicMock()
         consumer._consumer = mock_kafka_consumer
@@ -290,7 +291,7 @@ class TestCircuitBreaker:
         self, consumer: SessionEventConsumer
     ) -> None:
         """Resuming non-paused consumer should be a no-op."""
-        mock_kafka_consumer = MagicMock()
+        mock_kafka_consumer = MagicMock(spec=AIOKafkaConsumer)
         mock_kafka_consumer.assignment.return_value = [MagicMock()]
         mock_kafka_consumer.resume = MagicMock()
         consumer._consumer = mock_kafka_consumer

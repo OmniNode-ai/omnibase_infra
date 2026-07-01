@@ -59,7 +59,7 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@b4a423efb853fdfdfb821ae6af5c7a694a585e36
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@35fce1b6ae16a8fefec8996e26c1d66a3fb693c2
     with:
       python-version: "3.12"
 
@@ -85,7 +85,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -113,8 +113,34 @@ jobs:
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
-      - name: Check Plugin* lifecycle class guard (OMN-10123)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.no_plugin_daemon_classes src/omnibase_infra
+      - name: Single-canonical in-memory event bus (OMN-13419)
+        run: bash scripts/validation/check_no_infra_inmemory_import.sh
+
+      - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
+        run: uv run pre-commit run no-plugin-daemon-classes --all-files
+
+      # OMN-13030: Deployed-SHA claims in handoff/OCC/evidence docs must carry an
+      # adjacent `docker exec <container> cat /app/build-provenance.json` probe.
+      # Enforcement, not detection: this runs the same gate as the pre-commit hook
+      # over the docs tree so a bypassed local hook fails the PR.
+      - name: Evidence provenance-probe gate (OMN-13030)
+        run: |
+          shopt -s globstar nullglob
+          docs_files=(docs/**/*.md)
+          if [ ${#docs_files[@]} -gt 0 ]; then
+            for f in "${docs_files[@]}"; do
+              uv run python scripts/check_evidence_provenance_probe.py --file "$f"
+            done
+          fi
+
+      # OMN-13530: every operation_match (or absent-strategy) handler_routing
+      # entry must declare a non-empty 'operation' field. A missing operation
+      # makes the contract fail closed at RuntimeLocal startup ('handlers[i].
+      # operation is missing' / result=failed) — the 0.46.0 regression that
+      # took down the headless automation fleet. SYNC with pre-commit hook
+      # 'operation-match-requires-operation'.
+      - name: operation_match operation-field gate (OMN-13530)
+        run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
@@ -133,7 +159,7 @@ jobs:
       # Clone omnibase_core HEAD so the validator is available before the
       # OMN-13026 omnibase_core pin bump lands in the lockfile.
       - name: Checkout omnibase_core validator source
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
           ref: dev
@@ -165,7 +191,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -192,6 +218,37 @@ jobs:
           echo "I/O Purity Audit (OMN-325)"
           echo "================================================================"
           uv run pytest tests/audit/test_io_violations.py::TestCIGateIOPurity -v --tb=short
+
+      # ARCH-004 imperative-orchestrator ratchet (OMN-13472).
+      # Full report over the repo: surfaces every contract-declared-but-unbound
+      # orchestrator FSM driven imperatively by a handler (the delegation-shaped
+      # anti-pattern ARCH-003 misses). Non-blocking INITIALLY (continue-on-error)
+      # while the baseline is above threshold — the changed-node ratchet
+      # (pre-commit, blocking) stops regressions. Promote to a required gate once
+      # the baseline is below the agreed threshold; this rides OMN-12550
+      # (validator gating) / OMN-13325 (ratchet enforcement), not a fresh hook.
+      - name: Run imperative-orchestrator ratchet report (ARCH-004)
+        continue-on-error: true
+        run: |
+          echo "================================================================"
+          echo "Imperative-Orchestrator Ratchet Report (ARCH-004, OMN-13472)"
+          echo "================================================================"
+          uv run python scripts/validate.py imperative_orchestrators --verbose
+
+      # ARCH-004 Signal B orchestration-monolith ratchet (OMN-13486).
+      # Full report over the repo: surfaces every Class-B orchestration monolith
+      # (oversized + complex + not executor-bound), independent of FSM
+      # decorativeness — a DISTINCT signal from Signal A. Non-blocking INITIALLY
+      # (continue-on-error) while the baseline is above threshold; the
+      # changed-node ratchet (pre-commit, blocking) stops regressions. Rides
+      # OMN-12550 / OMN-13325 — same path as Signal A, not a fresh hook.
+      - name: Run orchestration-monolith ratchet report (ARCH-004 Signal B)
+        continue-on-error: true
+        run: |
+          echo "================================================================"
+          echo "Orchestration-Monolith Ratchet Report (ARCH-004 Signal B, OMN-13486)"
+          echo "================================================================"
+          uv run python scripts/validate.py orchestration_monoliths --verbose
 
       - name: Run markdown link validation
         run: |
@@ -242,7 +299,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Reject unallowlisted infra node handlers
         run: bash scripts/ci/reject-node-implementations.sh --all
@@ -263,7 +320,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -295,7 +352,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -332,7 +389,7 @@ jobs:
     steps:
       - name: Checkout code
         timeout-minutes: 10
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 2
           fetch-tags: false
@@ -356,7 +413,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -389,7 +446,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -435,26 +492,26 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: omnibase_infra
 
       - name: Checkout omniintelligence (sibling contracts)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnimemory (sibling contracts)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omniclaude (sibling contracts)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
           path: omniclaude
@@ -503,27 +560,27 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: omnibase_infra
 
       - name: Checkout omniintelligence (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnimemory (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
           path: omnibase_compat
@@ -615,7 +672,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -647,7 +704,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -679,7 +736,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -708,7 +765,7 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Verify all referenced contract paths exist
         run: |
@@ -755,7 +812,7 @@ jobs:
       }}
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install gh CLI
         run: |
@@ -801,7 +858,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -884,7 +941,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -930,16 +987,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.split }}
+          name: test-results-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
+          overwrite: true
           retention-days: 7
 
       - name: Upload test durations (for split rebalancing)
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-durations-split-${{ matrix.split }}
+          name: test-durations-attempt-${{ github.run_attempt }}-${{ matrix.split }}
           path: .test_durations
+          overwrite: true
           retention-days: 7
 
   # ---------------------------------------------------------------------------
@@ -962,10 +1021,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Checkout onex_change_control standards
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         continue-on-error: true
         with:
           repository: OmniNode-ai/onex_change_control
@@ -1031,7 +1090,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -1141,9 +1200,9 @@ jobs:
     timeout-minutes: 20
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Checkout onex_change_control
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/onex_change_control
           path: onex_change_control
@@ -1185,6 +1244,139 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   # ============================================================================
+  # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
+  #
+  # After the test matrix finishes, download all JUnit XML shards, merge them,
+  # and compare against the dev-branch baseline.  Any failure cluster NOT in the
+  # baseline causes this job to fail, blocking the PR.
+  #
+  # The baseline is updated nightly by the dev-baseline-publisher workflow.
+  # Expired entries (> 7 days old) also fail the gate to force renewal.
+  # Required status check name: "test-failure-ratchet / Test-Failure Ratchet Gate"
+  # ============================================================================
+  test-failure-ratchet:
+    name: Test-Failure Ratchet Gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    needs: [test-parallel, detect-changes]
+    # Run on PRs and merge_group events whenever there were actual test runs.
+    # Also run when docs-only so we detect ratchet-baseline staleness.
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code (dev branch baseline)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: dev
+          sparse-checkout: |
+            config/validation/test-failure-baseline.yaml
+            scripts/check_test_failure_ratchet.py
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout PR HEAD (for scripts)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          clean: false
+          path: pr-head
+          sparse-checkout: |
+            scripts/check_test_failure_ratchet.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install PyYAML (minimal dep for ratchet script)
+        run: python3 -m pip install --quiet --user pyyaml
+
+      - name: Download all JUnit XML shards
+        if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Merge JUnit shards into single XML
+        if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          shards_dir = Path("junit-shards")
+          if not shards_dir.exists():
+              print("No JUnit shard directory found — writing empty XML")
+              root = ET.Element("testsuite", tests="0")
+              ET.ElementTree(root).write("merged-junit.xml")
+              exit(0)
+
+          merged_root = ET.Element("testsuite", name="merged", tests="0")
+          total = 0
+          for shard_dir in sorted(shards_dir.iterdir()):
+              xml_files = list(shard_dir.glob("*.xml"))
+              for xml_file in xml_files:
+                  try:
+                      tree = ET.parse(xml_file)
+                      shard_root = tree.getroot()
+                      suites = shard_root.findall(".//testsuite") or [shard_root]
+                      for suite in suites:
+                          for tc in suite.findall("testcase"):
+                              merged_root.append(tc)
+                              if tc.find("failure") is not None or tc.find("error") is not None:
+                                  total += 1
+                  except ET.ParseError as e:
+                      print(f"Warning: could not parse {xml_file}: {e}")
+
+          merged_root.set("tests", str(total))
+          ET.ElementTree(merged_root).write("merged-junit.xml")
+          print(f"Merged {total} failed test cases into merged-junit.xml")
+          PYEOF
+
+      - name: Write empty JUnit if test-parallel was skipped
+        if: needs.test-parallel.result == 'skipped'
+        run: |
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          root = ET.Element('testsuite', tests='0')
+          ET.ElementTree(root).write('merged-junit.xml')
+          print('Test matrix was skipped (docs-only diff) — empty JUnit written.')
+          "
+
+      - name: Run test-failure ratchet check
+        run: |
+          python3 pr-head/scripts/check_test_failure_ratchet.py \
+            --junit-xml merged-junit.xml \
+            --baseline config/validation/test-failure-baseline.yaml
+
+      - name: Post ratchet summary
+        if: always()
+        run: |
+          echo "## Test-Failure Ratchet Gate (OMN-13027)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Baseline: \`config/validation/test-failure-baseline.yaml\` (from dev branch)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f config/validation/test-failure-baseline.yaml ]; then
+            CLUSTER_COUNT=$(python3 -c "
+          import yaml
+          with open('config/validation/test-failure-baseline.yaml') as f:
+              d = yaml.safe_load(f) or {}
+          print(len(d.get('clusters', {})))
+          " 2>/dev/null || echo "?")
+            echo "Baseline clusters: **${CLUSTER_COUNT}**" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  # ============================================================================
   # Runtime Boot Smoke Test (OMN-9120)
   # Calls the reusable reusable-runtime-boot.yml workflow in compose mode.
   # Runs after the full test suite passes so a boot regression doesn't compete
@@ -1214,13 +1406,14 @@ jobs:
     # failure does not block CI Summary. A follow-up ticket promotes it to a hard
     # gate once compose-mode boot is consistently green on main. See CLAUDE.md
     # "Strict-mode invariants land AFTER all downstream consumers are compliant".
-    needs: [zone-filter, tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
+    needs: [zone-filter, tests-gate, test-failure-ratchet, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
       - name: Check test results
         run: |
           gate="${{ needs.tests-gate.result }}"
+          ratchet="${{ needs.test-failure-ratchet.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
           infrahnd="${{ needs.infra-node-handler-ownership.result }}"
@@ -1238,6 +1431,7 @@ jobs:
           contractsync="${{ needs.contract-sync-gate.result }}"
 
           if [[ "$gate" == "success" ]] && \
+             [[ "$ratchet" == "success" || "$ratchet" == "skipped" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$infrahnd" == "success" ]] && \
@@ -1255,6 +1449,7 @@ jobs:
              [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
+            echo "Test-Failure Ratchet Gate: $ratchet"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Infra Node Handler Ownership: Passed"
@@ -1275,6 +1470,7 @@ jobs:
           else
             echo "Checks failed"
             echo "CI Tests Gate: $gate"
+            echo "Test-Failure Ratchet Gate: $ratchet"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
             echo "Infra Node Handler Ownership: $infrahnd"
@@ -1313,26 +1509,26 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: omnibase_infra
 
       - name: Checkout omniintelligence (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnimemory (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
           path: omnibase_compat
@@ -1413,7 +1609,7 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -1458,7 +1654,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -1610,7 +1806,7 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup Python and uv

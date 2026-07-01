@@ -67,12 +67,12 @@ The two nodes are structurally independent ONEX Effect nodes with their own cont
 
 | Endpoint Env Var | Server | Port | Model | Context | Best For |
 |------------------|--------|------|-------|---------|----------|
-| `LLM_CODER_URL` | 192.168.86.201 (RTX 5090) | 8000 | Qwen3-Coder-30B-A3B AWQ-4bit | 64K tokens | Long-context code analysis, repo-level tasks |
-| `LLM_CODER_FAST_URL` | 192.168.86.201 (RTX 4090) | 8001 | Qwen3-14B-AWQ | 40K tokens | Mid-tier inference, routing classification |
-| `LLM_EMBEDDING_URL` | 192.168.86.201 (RTX 4090) | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | — | Embeddings for RAG and semantic search |
-| `LLM_DEEPSEEK_R1_URL` | 192.168.86.200 (M2 Ultra) | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | — | Async reasoning, code review, analysis |
+| `LLM_CODER_URL` | `<onex-host>` (RTX 5090) | 8000 | Qwen3-Coder-30B-A3B AWQ-4bit | 64K tokens | Long-context code analysis, repo-level tasks |
+| `LLM_CODER_FAST_URL` | `<onex-host>` (RTX 4090) | 8001 | Qwen3-14B-AWQ | 40K tokens | Mid-tier inference, routing classification |
+| `LLM_EMBEDDING_URL` | `<onex-host>` (RTX 4090) | 8100 | Alibaba-NLP/gte-Qwen2-1.5B-instruct | — | Embeddings for RAG and semantic search |
+| `LLM_DEEPSEEK_R1_URL` | `<onex-host>` (M2 Ultra) | 8101 | DeepSeek-R1-Distill-Qwen-32B-bf16 | — | Async reasoning, code review, analysis |
 
-All endpoints are on the `192.168.86.0/24` subnet (the default CIDR allowlist). Requests to any IP outside this range are rejected before an HTTP call is made.
+All endpoints are on the local-network subnet configured via `LLM_ENDPOINT_CIDR_ALLOWLIST` (default CIDR allowlist). Requests to any IP outside this range are rejected before an HTTP call is made.
 
 ---
 
@@ -104,7 +104,7 @@ Custom circuit breaker settings can be applied by calling `_init_circuit_breaker
 
 ```python
 result: dict[str, JsonType] = await self._execute_llm_http_call(
-    url="http://192.168.86.201:8000/v1/chat/completions",
+    url="http://<onex-host>:8000/v1/chat/completions",
     payload={"model": "qwen3-coder", "messages": [...]},
     correlation_id=correlation_id,
     max_retries=3,          # total attempts = 1 + max_retries = 4
@@ -146,7 +146,7 @@ Both security checks run before the retry loop and before any HTTP call. They ar
 ### CIDR Allowlist
 
 ```
-LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24   # default; comma-separate for multiple
+LLM_ENDPOINT_CIDR_ALLOWLIST=<your-lan-cidr>   # default; comma-separate for multiple
 ```
 
 The allowlist is parsed once at **module import time** and stored as `MixinLlmHttpTransport.LOCAL_LLM_CIDRS`. This is intentional: network topology changes require a process restart, which is expected for infrastructure changes.
@@ -194,7 +194,7 @@ handler = HandlerLlmOpenaiCompatible(transport=transport)
 
 response: ModelLlmInferenceResponse = await handler.handle(
     request=ModelLlmInferenceRequest(
-        base_url="http://192.168.86.201:8000",
+        base_url="http://<onex-host>:8000",
         model="qwen3-coder-30b",
         operation_type=EnumLlmOperationType.CHAT_COMPLETION,
         messages=[{"role": "user", "content": "Explain this code"}],
@@ -258,7 +258,7 @@ handler = HandlerEmbeddingOpenaiCompatible(target_name="qwen3-embedding")
 
 response: ModelLlmEmbeddingResponse = await handler.execute(
     ModelLlmEmbeddingRequest(
-        base_url="http://192.168.86.201:8100",
+        base_url="http://<onex-host>:8100",
         model="qwen3-embedding-8b",
         texts=("text to embed", "another text"),
         dimensions=1024,           # optional
@@ -385,23 +385,23 @@ All LLM endpoints are configured via environment variables sourced from `.env`. 
 
 ```bash
 # Inference endpoints
-LLM_CODER_URL=http://192.168.86.201:8000        # Qwen3-Coder-30B (64K context)
-LLM_CODER_FAST_URL=http://192.168.86.201:8001   # Qwen3-14B (40K context)
-LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101  # DeepSeek-R1 (reasoning)
+LLM_CODER_URL=http://<onex-host>:8000        # Qwen3-Coder-30B (64K context)
+LLM_CODER_FAST_URL=http://<onex-host>:8001   # Qwen3-14B (40K context)
+LLM_DEEPSEEK_R1_URL=http://<onex-host>:8101  # DeepSeek-R1 (reasoning)
 
 # Embedding endpoint
-LLM_EMBEDDING_URL=http://192.168.86.201:8100    # gte-Qwen2-1.5B embeddings
+LLM_EMBEDDING_URL=http://<onex-host>:8100    # gte-Qwen2-1.5B embeddings
 
 # Security
 LOCAL_LLM_SHARED_SECRET=<rotate-regularly>       # HMAC signing key
-LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24      # comma-separated CIDRs
+LLM_ENDPOINT_CIDR_ALLOWLIST=<your-lan-cidr>      # comma-separated CIDRs
 ```
 
 ### CIDR allowlist configuration details
 
 - Parsed once at module import time
-- Multiple CIDRs: comma-separated (`192.168.86.0/24,10.0.0.0/8`)
-- Malformed entries are logged and skipped; if all are malformed, falls back to `192.168.86.0/24`
+- Multiple CIDRs: comma-separated (e.g. `10.0.0.0/8,172.16.0.0/12`)
+- Malformed entries are logged and skipped; if all are malformed, the allowlist falls back to the configured default CIDR
 - To change at runtime without restarting: set env var, then call `MixinLlmHttpTransport._reload_cidr_allowlist()`
 
 ---
@@ -412,7 +412,7 @@ To add a new inference target (e.g., a fine-tuned model on a different port):
 
 1. Set the URL in `.env`:
    ```bash
-   LLM_MYMODEL_URL=http://192.168.86.201:8100
+   LLM_MYMODEL_URL=http://<onex-host>:8100
    ```
 
 2. Ensure the target IP is within `LLM_ENDPOINT_CIDR_ALLOWLIST`.

@@ -149,16 +149,17 @@ class HandlerLlmOpenaiCompatible:
 
     Protocol Conformance Note:
         This handler intentionally does NOT implement ``ProtocolHandler``
-        or ``ProtocolMessageHandler``. Those protocols operate on
-        ``ModelOnexEnvelope`` and ``ModelEventEnvelope`` respectively,
-        which are envelope-based dispatch interfaces for the node runtime.
-        This handler operates at the infrastructure layer with a typed
-        request model (``ModelLlmInferenceRequest``) and returns a typed
-        response model (``ModelLlmInferenceResponse``), bypassing
-        envelope-based dispatch entirely. LLM inference calls are direct
-        infrastructure effects, not routed events. The ``handler_type``
-        and ``handler_category`` properties are still provided for
-        introspection and classification consistency.
+        or ``ProtocolMessageHandler``. ``ProtocolHandler.execute`` takes a
+        ``ModelProtocolRequest`` and returns a ``ModelProtocolResponse``;
+        ``ProtocolMessageHandler.handle`` takes a ``ModelEventEnvelope`` and
+        returns a ``ModelHandlerOutput`` (the envelope-based dispatch interface
+        for the node runtime). This handler instead operates at the
+        infrastructure layer with a typed request model
+        (``ModelLlmInferenceRequest``) and returns a typed response model
+        (``ModelLlmInferenceResponse``), bypassing both protocols entirely.
+        LLM inference calls are direct infrastructure effects, not routed
+        events. The ``handler_type`` and ``handler_category`` properties are
+        still provided for introspection and classification consistency.
 
     Auth Strategy:
         When a request includes ``api_key``, the handler creates a

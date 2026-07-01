@@ -39,6 +39,7 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.service_runtime_health_monitor import (
     ServiceRuntimeHealthMonitor,
 )
@@ -74,7 +75,7 @@ class TestBootGraceSuppressesEmit:
 
     @pytest.mark.asyncio
     async def test_emit_suppressed_when_inside_grace_window(self) -> None:
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
 
         monitor = ServiceRuntimeHealthMonitor(
@@ -89,7 +90,7 @@ class TestBootGraceSuppressesEmit:
 
     @pytest.mark.asyncio
     async def test_emit_proceeds_after_grace_window_expires(self) -> None:
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
 
         monitor = ServiceRuntimeHealthMonitor(

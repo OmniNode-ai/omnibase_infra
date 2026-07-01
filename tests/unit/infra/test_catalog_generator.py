@@ -73,6 +73,38 @@ def test_generated_compose_preserves_redpanda_ulimits() -> None:
 
 
 @pytest.mark.unit
+def test_intelligence_migration_uses_lane_namespaced_container_name() -> None:
+    """OMN-13201: intelligence-migration must carry the lane prefix.
+
+    Regression for the DEV effects crash-loop's migration gap: the base
+    (DEV-lane) intelligence-migration one-shot used the fixed, non-lane-prefixed
+    container_name ``omnibase-intelligence-migration`` while every other lane and
+    every sibling migration service uses the ``omnibase-infra-`` prefix
+    (``omnibase-infra-forward-migration``, ``omnibase-infra-migration-gate``).
+    The mismatched name meant the DEV one-shot never ran, so
+    ``015_create_db_metadata.sql`` was never applied to the DEV omniintelligence
+    database and the runtime entrypoint logged "relation public.db_metadata does
+    not exist" on every effects boot. The name must match its siblings.
+    """
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    services = compose["services"]
+    assert (
+        services["intelligence-migration"]["container_name"]
+        == "omnibase-infra-intelligence-migration"
+    )
+    # Sibling migration one-shots define the shared lane-prefix convention.
+    assert (
+        services["forward-migration"]["container_name"]
+        == "omnibase-infra-forward-migration"
+    )
+    assert (
+        services["migration-gate"]["container_name"] == "omnibase-infra-migration-gate"
+    )
+
+
+@pytest.mark.unit
 def test_generated_compose_preserves_one_shot_semantics() -> None:
     resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
     resolved = resolver.resolve(bundles=["runtime"])

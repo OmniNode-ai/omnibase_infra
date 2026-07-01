@@ -909,29 +909,20 @@ class TestContractIntegrationPerformance:
         assert metrics2 is not None
         assert metrics2.cache_hit is True
 
-        # Cache hit performance assertion:
-        # A cache hit should be faster than a cache miss because it skips the
-        # expensive reflection operations (inspect.getmembers, signature analysis).
+        # Cache-hit metrics assertion (OMN-13549):
+        # Previously this asserted a cache-hit-vs-miss *wall-clock* comparison.
+        # At the resolution involved (sub-millisecond — e.g. miss 0.243ms vs
+        # hit 1.335ms) the comparison measured scheduler/JIT/GC noise, not the
+        # cache effect, so it flaked intermittently in CI and blocked the
+        # required merge-queue gate.
         #
-        # However, in CI environments with variable load, timing can be noisy.
-        # We use a robust comparison that passes if EITHER:
-        # 1. Cache hit is faster than cache miss (expected behavior), OR
-        # 2. Both are very fast (< 1ms), meaning timing noise dominates
-        #
-        # This avoids flakiness while still catching regressions where cache
-        # hits become slower than cache misses (which would indicate a bug).
-        cache_hit_faster = (
-            metrics2.total_introspection_ms <= metrics1.total_introspection_ms
-        )
-        both_very_fast = (
-            metrics1.total_introspection_ms < 1.0
-            and metrics2.total_introspection_ms < 1.0
-        )
-        assert cache_hit_faster or both_very_fast, (
-            f"Cache hit should be faster than cache miss. "
-            f"Cache miss: {metrics1.total_introspection_ms:.3f}ms, "
-            f"Cache hit: {metrics2.total_introspection_ms:.3f}ms"
-        )
+        # The cache-hit behavior is already proven deterministically by the
+        # `cache_hit is True` flag above (the cached path returns without
+        # re-introspecting). Here we assert only that timing metrics are
+        # *present and recorded* — a non-negative float — never a sub-ms
+        # relative wall-clock comparison.
+        assert isinstance(metrics2.total_introspection_ms, float)
+        assert metrics2.total_introspection_ms >= 0.0
 
 
 # =============================================================================

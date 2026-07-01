@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
+
 
 def _write_contract(path: Path, name: str, *, plugin_managed: bool = False) -> None:
     pm_line = f"  plugin_managed: {'true' if plugin_managed else 'false'}\n"
@@ -54,7 +56,7 @@ class TestRuntimeHostProcessPluginManagedGate:
             contract_path, "node_delegation_orchestrator", plugin_managed=True
         )
 
-        mock_event_bus = MagicMock()
+        mock_event_bus = MagicMock(spec=ProtocolEventBusLike)
         mock_event_bus.subscribe = AsyncMock(return_value=MagicMock())
         mock_dispatch = MagicMock()
 
@@ -99,7 +101,7 @@ class TestRuntimeHostProcessPluginManagedGate:
         contract_path = tmp_path / "contract.yaml"
         _write_contract(contract_path, "node_normal_worker", plugin_managed=False)
 
-        mock_event_bus = MagicMock()
+        mock_event_bus = MagicMock(spec=ProtocolEventBusLike)
         mock_dispatch = MagicMock()
 
         from omnibase_infra.runtime.runtime_host_process import (

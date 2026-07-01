@@ -74,7 +74,7 @@ shared:
     # Canonical LLM endpoint keys (defined in CLAUDE.md LLM topology):
     #   LLM_CODER_URL        — Qwen3-Coder-30B-A3B AWQ-4bit (RTX 5090, 64K ctx, port 8000)
     #   LLM_CODER_FAST_URL   — Qwen3-14B-AWQ (RTX 4090, 40K ctx, port 8001)
-    #   LLM_EMBEDDING_URL    — Qwen3-Embedding-8B-4bit (M2 Ultra, port 8100)
+    #   LLM_EMBEDDING_URL    — text-embedding-qwen3 / qwen3-embedding-0.6b (M2 Ultra, port 8002, OMN-13664)
     #   LLM_DEEPSEEK_R1_URL  — DeepSeek-R1-14B AWQ (RTX 4090, .201, port 8001) — .200:8101 down
     #   LLM_GLM_URL          — Z.AI/GLM cloud-tier OpenAI-compatible endpoint
     #   LLM_GLM_MODEL_NAME   — default GLM served model for escalation
@@ -131,6 +131,10 @@ shared:
   "/shared/env/":
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
+    # OMN-13726: Default morning-report delivery Slack channel ID.
+    # Seeded per-lane (machine-class overlay → Infisical). VALUE must be set by operator.
+    # Intentionally registered here so seed-infisical.py can provision the /shared/env/ path.
+    - SLACK_MORNING_CHANNEL
     # Linear API key — used by omniclaude, omnimarket, and CI scripts to query/update tickets.
     # Previously seeded at /shared/env/ (OMN-3898); now formally registered. (OMN-8778)
     - LINEAR_API_KEY

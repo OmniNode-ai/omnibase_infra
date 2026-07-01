@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -101,7 +101,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Pre-flight: verify Docker daemon is accessible (catches socket permission issues early)
       - name: Verify Docker socket access
@@ -193,6 +193,17 @@ jobs:
             ${{ steps.build.outputs.imageid }} \
             python -c "from omnibase_infra.runtime.kernel import bootstrap, main, load_runtime_config; print('Import successful')"
 
+      # OMN-12658: delegation-path import smoke. The Dockerfile RUN step already
+      # fails the build on a skewed wheel; this step re-asserts the same import
+      # on the loaded image so the failure mode is a clearly labeled required
+      # status check on the PR (foundation packages + canonical delegation node).
+      - name: Delegation import smoke (OMN-12658)
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Asserting foundation + delegation node imports on the built image..."
+          docker run --rm ${{ steps.build.outputs.imageid }} \
+            python -c "import omnibase_compat; import omnibase_core; from omnimarket.nodes.node_llm_delegation_call_effect import HandlerLlmDelegationCall; print(f'delegation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}, {HandlerLlmDelegationCall.__name__}')"
+
       - name: Verify torch is CPU-only
         if: github.ref != 'refs/heads/main'
         run: |
@@ -228,7 +239,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Verify Docker socket access
         run: |
@@ -322,7 +333,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set lowercase repository owner
         id: repo

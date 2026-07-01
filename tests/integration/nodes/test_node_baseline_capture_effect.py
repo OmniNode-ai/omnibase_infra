@@ -31,6 +31,7 @@ from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_co
 from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_output import (
     ModelBaselineCaptureOutput,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 POSTGRES_AVAILABLE = os.getenv("POSTGRES_INTEGRATION_TESTS") == "1"
 
@@ -75,7 +76,7 @@ class TestHandlerBaselineCaptureContract:
     @pytest.mark.anyio
     async def test_d3_no_snapshot_when_no_measurements(self) -> None:
         """D3: snapshot_emitted must be False when measurements_captured == 0."""
-        publisher = AsyncMock(return_value=True)
+        publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
         pool = _make_mock_pool(total_count=0)
         handler = HandlerBaselineCapture(pool=pool, publisher=publisher)
         cmd = ModelBaselineCaptureCommand(correlation_id=uuid4())
@@ -106,7 +107,7 @@ class TestHandlerBaselineCaptureContract:
                 "updated_at": now,
             }
         ]
-        publisher = AsyncMock(return_value=True)
+        publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
         pool = _make_mock_pool(total_count=5, agent_rows=agent_rows)
         handler = HandlerBaselineCapture(pool=pool, publisher=publisher)
         cmd = ModelBaselineCaptureCommand(correlation_id=uuid4())

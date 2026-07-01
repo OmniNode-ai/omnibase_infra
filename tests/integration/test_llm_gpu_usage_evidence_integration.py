@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
     ServiceLlmMetricsPublisher,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 pytestmark = [pytest.mark.integration]
 
@@ -69,7 +70,7 @@ def _make_request(**overrides: Any) -> ModelLlmInferenceRequest:
 @pytest.mark.asyncio
 async def test_gpu_usage_evidence_reaches_both_metric_events() -> None:
     """Measured GPU evidence is preserved from handler metrics into both events."""
-    publisher = AsyncMock(return_value=True)
+    publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
     handler = HandlerLlmOpenaiCompatible(_make_transport())
     service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 

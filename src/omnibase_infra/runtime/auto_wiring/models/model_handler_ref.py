@@ -1,16 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Handler class reference model for contract handler_routing (OMN-7654)."""
+"""Handler class reference model — canonical definition lives in omnibase_core.
 
-from __future__ import annotations
+Re-exported from omnibase_core.models.dispatch for backwards-compatible infra imports.
+Do NOT define ModelHandlerRef here; the single source of truth is
+omnibase_core.models.dispatch.model_handler_ref.ModelHandlerRef (OMN-12546 S-1b).
+"""
 
-from pydantic import BaseModel, ConfigDict, Field
+from omnibase_core.models.dispatch.model_handler_ref import ModelHandlerRef
 
-
-class ModelHandlerRef(BaseModel):
-    """Reference to a handler class in a contract's handler_routing section."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
-
-    name: str = Field(..., description="Handler class name")
-    module: str = Field(..., description="Fully qualified module path")
+__all__ = ["ModelHandlerRef"]

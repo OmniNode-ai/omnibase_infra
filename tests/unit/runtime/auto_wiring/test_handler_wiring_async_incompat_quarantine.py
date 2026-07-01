@@ -43,6 +43,7 @@ from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
 from omnibase_infra.enums import EnumMessageCategory
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -111,7 +112,7 @@ def _make_dispatch_engine() -> MagicMock:
 
 
 def _make_event_bus() -> MagicMock:
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.subscribe = AsyncMock()
     return bus
 

@@ -40,6 +40,7 @@ from omnibase_infra.event_bus.models.model_event_message import ModelEventMessag
 from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.contract_registration_event_router import (
     TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
     TOPIC_SUFFIX_CONTRACT_REGISTERED,
@@ -55,7 +56,7 @@ class TestContractRegistrationEventRouterInit:
         """Should initialize successfully with valid parameters."""
         container = MagicMock(spec=ModelONEXContainer)
         reducer = MagicMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         output_topic = "test.output.topic"
 
         router = ContractRegistrationEventRouter(
@@ -75,7 +76,7 @@ class TestContractRegistrationEventRouterInit:
         """Should raise ValueError when output_topic is empty."""
         container = MagicMock(spec=ModelONEXContainer)
         reducer = MagicMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
 
         with pytest.raises(ValueError, match="output_topic cannot be empty"):
             ContractRegistrationEventRouter(
@@ -89,7 +90,7 @@ class TestContractRegistrationEventRouterInit:
         """Should raise ValueError when output_topic is only whitespace."""
         container = MagicMock(spec=ModelONEXContainer)
         reducer = MagicMock()
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
 
         # Empty string after stripping is still falsy
         with pytest.raises(ValueError, match="output_topic cannot be empty"):
@@ -110,7 +111,7 @@ class TestExtractCorrelationIdFromMessage:
         return ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.output.topic",
         )
 
@@ -228,7 +229,7 @@ class TestDetermineEventType:
         return ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.output.topic",
         )
 
@@ -305,7 +306,7 @@ class TestHandleMessage:
         return ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=mock_reducer,
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.output.topic",
         )
 
@@ -468,7 +469,7 @@ class TestContractRegistrationEventRouterProperties:
         router = ContractRegistrationEventRouter(
             container=container,
             reducer=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.topic",
         )
 
@@ -479,7 +480,7 @@ class TestContractRegistrationEventRouterProperties:
         router = ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="expected.output.topic",
         )
 
@@ -491,7 +492,7 @@ class TestContractRegistrationEventRouterProperties:
         router = ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=reducer,
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.topic",
         )
 
@@ -499,7 +500,7 @@ class TestContractRegistrationEventRouterProperties:
 
     def test_event_bus_property_returns_event_bus(self) -> None:
         """Should return the event bus passed during initialization."""
-        event_bus = MagicMock()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
         router = ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=MagicMock(),
@@ -514,7 +515,7 @@ class TestContractRegistrationEventRouterProperties:
         router = ContractRegistrationEventRouter(
             container=MagicMock(spec=ModelONEXContainer),
             reducer=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="test.topic",
         )
 

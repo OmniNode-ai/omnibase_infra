@@ -17,6 +17,7 @@ from omnibase_infra.idempotency import (
     ModelIdempotencyGuardConfig,
     StoreIdempotencyInmemory,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
@@ -24,7 +25,7 @@ from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handler
 @pytest.fixture
 def mock_event_bus() -> MagicMock:
     """Create a mock event bus for testing."""
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.start = AsyncMock()
     bus.close = AsyncMock()
     bus.subscribe = AsyncMock(return_value=AsyncMock())

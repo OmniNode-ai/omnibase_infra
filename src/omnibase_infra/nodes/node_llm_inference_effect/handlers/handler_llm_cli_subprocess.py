@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""CLI subprocess handler for LLM inference via Gemini CLI and Codex CLI.
+"""CLI subprocess handler for LLM inference via Gemini / Claude / opencode CLI.
 
 Generalizes the proven subprocess dispatch pattern from the hostile reviewer
 aggregator (aggregate_reviews.py) into an ONEX handler that accepts
@@ -18,6 +18,8 @@ CLI subprocess handlers distinguish these failure classes:
 Related:
     - OMN-7106: Add Gemini CLI and Codex CLI as subprocess LLM handlers
     - OMN-7103: Node-Based LLM Delegation Workflow
+    - OMN-13215: codex-cli REMOVED — the delegation ceiling executes over the
+      canonical HTTP inference path; no codex subprocess config remains here.
 """
 
 from __future__ import annotations
@@ -57,10 +59,29 @@ class EnumCliBackendStatus(str, Enum):
     EMPTY_RESPONSE = "empty_response"
 
 
+# OMN-13215: the ``codex-cli`` model config was REMOVED. The delegation ceiling
+# executes over the canonical HTTP inference path — no codex shell-out remains.
+_CLI_CONFIG_BY_MODEL: dict[str, tuple[str, list[str]]] = {
+    "gemini-cli": ("gemini", ["-p"]),
+    "claude-cli": (
+        "claude",
+        [
+            "-p",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "dontAsk",
+            "--no-session-persistence",
+        ],
+    ),
+    "opencode-cli": ("opencode", ["run", "--format", "json", "--pure"]),
+}
+
+
 class HandlerLlmCliSubprocess:
     """Dispatch LLM inference to a CLI tool (gemini, codex) via subprocess.
 
-    This handler spawns the CLI in headless/non-interactive mode (-p flag),
+    This handler spawns the CLI in headless/non-interactive mode,
     passes the user prompt, captures stdout as the response, and wraps it
     in a ModelLlmInferenceResponse.
 
@@ -113,18 +134,25 @@ class HandlerLlmCliSubprocess:
             ModelLlmInferenceResponse,
         )
 
-        if self._cli is None:
+        cli = self._cli
+        cli_args = self._cli_args
+        if cli is None:
+            resolved = _CLI_CONFIG_BY_MODEL.get(request.model)
+            if resolved is not None:
+                cli, cli_args = resolved
+
+        if cli is None:
             return (
                 None,
                 EnumCliBackendStatus.UNAVAILABLE,
                 "cli not configured (no CLI binary specified)",
             )
 
-        if not shutil.which(self._cli):
+        if not shutil.which(cli):
             return (
                 None,
                 EnumCliBackendStatus.UNAVAILABLE,
-                f"{self._cli} not found on PATH",
+                f"{cli} not found on PATH",
             )
 
         # Extract last user message as prompt
@@ -144,7 +172,7 @@ class HandlerLlmCliSubprocess:
         try:
             start = time.monotonic()
             result = subprocess.run(
-                [self._cli, *self._cli_args, prompt],
+                [cli, *cli_args, prompt],
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
@@ -154,9 +182,7 @@ class HandlerLlmCliSubprocess:
 
             if result.returncode != 0:
                 stderr_preview = result.stderr[:200] if result.stderr else "(no stderr)"
-                logger.debug(
-                    "%s exited %d: %s", self._cli, result.returncode, stderr_preview
-                )
+                logger.debug("%s exited %d: %s", cli, result.returncode, stderr_preview)
                 return (
                     None,
                     EnumCliBackendStatus.SUBPROCESS_ERROR,
@@ -189,7 +215,7 @@ class HandlerLlmCliSubprocess:
             response = ModelLlmInferenceResponse(
                 status="success",
                 generated_text=content,
-                model_used=f"{self._cli}-cli",
+                model_used=f"{cli}-cli",
                 operation_type=EnumLlmOperationType.CHAT_COMPLETION,
                 finish_reason=EnumLlmFinishReason.STOP,
                 usage=ModelLlmUsage(
@@ -206,7 +232,7 @@ class HandlerLlmCliSubprocess:
 
             logger.info(
                 "%s-cli: completed in %.0fms (~%d tokens)",
-                self._cli,
+                cli,
                 latency_ms,
                 completion_tokens,
             )
@@ -217,7 +243,7 @@ class HandlerLlmCliSubprocess:
             return (
                 None,
                 EnumCliBackendStatus.TIMEOUT,
-                f"{self._cli} exceeded {self._timeout}s deadline",
+                f"{cli} exceeded {self._timeout}s deadline",
             )
 
 

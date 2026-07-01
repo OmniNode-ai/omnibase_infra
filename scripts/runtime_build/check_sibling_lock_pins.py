@@ -21,9 +21,19 @@ This module makes the consuming repo's ``uv.lock`` the pin authority:
     expected-vs-actual comparison so deploy verifiers and build-provenance.json
     can assert on it.
 
-There are NO silent fallbacks: a requested package missing from the lock, an
-unparseable source, or any version / SHA drift is a hard error. Run BEFORE the
-docker build (preflight) and again inside the build to enrich provenance.
+There are NO silent fallbacks: a requested package missing from the lock or an
+unparseable source is a hard error. SHA drift is FATAL by default, with ONE
+narrow exception (OMN-13403): a sibling whose clone version EXACTLY equals the
+locked version and whose clone HEAD is a git DESCENDANT of the locked SHA -- i.e.
+the clone is strictly AHEAD of the lock -- is recorded as a non-fatal
+``clone_ahead`` note rather than aborting the build. This is the unavoidable
+steady state for a real runtime sibling like ``onex_change_control`` whose dev
+branch advances on every receipt PR (including the receipt PRs that pin-bump PRs
+themselves require), so an exact lock pin can never durably converge. The
+2026-06-11 crash this guard prevents was the OPPOSITE direction -- a STALE clone
+that was BEHIND the lock with a MISMATCHED version -- which stays FATAL. Run
+BEFORE the docker build (preflight) and again inside the build to enrich
+provenance.
 
 Usage:
     uv run python scripts/runtime_build/check_sibling_lock_pins.py \\
@@ -116,6 +126,18 @@ class ModelPinComparison(BaseModel):
             "(non-comparable versions)"
         ),
     )
+    clone_ahead: bool = Field(
+        default=False,
+        description=(
+            "True (OMN-13403) when the version matches exactly but the clone HEAD "
+            "is a strict git DESCENDANT of the locked SHA. This is a non-fatal "
+            "note, not drift: ``matches`` stays True and the build proceeds."
+        ),
+    )
+    note: str = Field(
+        default="",
+        description="Non-fatal advisory (e.g. the clone-ahead descendant note)",
+    )
     mismatch_reason: str = Field(default="", description="Empty when matches is True")
 
 
@@ -133,6 +155,55 @@ def _classify_drift(expected_version: str, actual_version: str) -> str:
     if act > exp:
         return "forward"
     return "unknown"
+
+
+def _is_clone_strictly_ahead(
+    locked_sha: str, clone_head_sha: str, repo_root: Path
+) -> bool:
+    """Return True iff the clone HEAD is a strict git DESCENDANT of the locked SHA.
+
+    "Strictly ahead" (OMN-13403) means: the locked SHA is reachable from the
+    clone HEAD AND the two are not the same commit. Implemented with
+    ``git merge-base --is-ancestor <locked_sha> <clone_head>`` evaluated against
+    the ACTUAL clone repo (not the lock or any other tree).
+
+    Returns False -- the conservative answer that keeps the comparison FATAL --
+    in every non-ahead case:
+      * the locked SHA is not present in the clone (unrelated history / not
+        fetched): ``git`` errors with a non-zero, non-1 exit code;
+      * the clone is BEHIND the lock (clone HEAD is an ancestor of the locked
+        SHA, or unrelated): ``--is-ancestor`` returns exit code 1;
+      * identical SHAs (handled by the caller as a plain match, never here).
+    """
+    locked = locked_sha.strip().lower()
+    head = clone_head_sha.strip().lower()
+    if not locked or not head:
+        return False
+    # Identical commits are an exact match, not "ahead". Guard prefix-equality
+    # too: uv records the full rev while a short SHA may appear elsewhere.
+    if head.startswith(locked) or locked.startswith(head):
+        return False
+
+    # The locked SHA must be a real object in this clone; an unknown rev means we
+    # cannot prove ancestry and must stay fatal.
+    cat = subprocess.run(
+        ["git", "-C", str(repo_root), "cat-file", "-e", f"{locked}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if cat.returncode != 0:
+        return False
+
+    # exit 0 => locked is an ancestor of head (clone ahead); exit 1 => it is not
+    # (clone behind / unrelated). Any other exit code is an error -> not ahead.
+    ancestry = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", locked, head],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return ancestry.returncode == 0
 
 
 def parse_lock_pins(lock_text: str, packages: list[str]) -> dict[str, ModelLockPin]:
@@ -210,30 +281,64 @@ def resolve_actual_pin(package: str, repo_root: Path) -> ModelActualPin:
     return ModelActualPin(package=package, version=version, git_sha=head_sha)
 
 
-def compare_pins(expected: ModelLockPin, actual: ModelActualPin) -> ModelPinComparison:
+def compare_pins(
+    expected: ModelLockPin,
+    actual: ModelActualPin,
+    repo_root: Path | None = None,
+) -> ModelPinComparison:
     """Compare an expected lock pin against the actual clone pin.
 
-    Version must always match. When the lock pin is a git source, the resolved
-    rev must be a prefix of the clone HEAD (or vice-versa) -- uv records the full
-    rev while a short SHA may appear elsewhere, so prefix-equality covers both.
-    Registry pins (git_rev is None) are version-only.
+    Version must ALWAYS match -- a version mismatch in any direction is fatal and
+    is never softened (that was the 2026-06-11 stale-sibling crash).
+
+    When the lock pin is a git source, the resolved rev must be a prefix of the
+    clone HEAD (or vice-versa) -- uv records the full rev while a short SHA may
+    appear elsewhere, so prefix-equality covers both. Registry pins (git_rev is
+    None) are version-only.
+
+    OMN-13403 clone-ahead exception: when the version matches EXACTLY and the
+    clone HEAD is a strict git DESCENDANT of the locked SHA (clone strictly
+    AHEAD), the SHA difference is recorded as a non-fatal ``clone_ahead`` note --
+    ``matches`` stays True, the build proceeds. This requires ``repo_root`` so
+    ancestry can be checked against the actual clone; without it, or when the
+    locked SHA is absent / the clone is behind / histories are unrelated, the SHA
+    difference stays FATAL.
     """
     reasons: list[str] = []
 
-    if expected.version != actual.version:
+    version_matches = expected.version == actual.version
+    if not version_matches:
         reasons.append(
             f"version drift: lock pins {expected.version!r} but clone is "
             f"{actual.version!r}"
         )
 
+    clone_ahead = False
+    note = ""
+
     if expected.git_rev is not None:
         exp = expected.git_rev.lower()
         act = actual.git_sha.lower()
-        if not (act.startswith(exp) or exp.startswith(act)):
-            reasons.append(
-                f"git SHA drift: lock pins {expected.git_rev} but clone HEAD is "
-                f"{actual.git_sha}"
-            )
+        sha_matches = act.startswith(exp) or exp.startswith(act)
+        if not sha_matches:
+            # The clone-ahead exception ONLY applies when the version is an exact
+            # match -- a version mismatch is fatal regardless of SHA ancestry.
+            if (
+                version_matches
+                and repo_root is not None
+                and _is_clone_strictly_ahead(exp, act, repo_root)
+            ):
+                clone_ahead = True
+                note = (
+                    f"clone-ahead (OMN-13403): version {actual.version} matches the "
+                    f"lock; clone HEAD {actual.git_sha} is a descendant of locked "
+                    f"{expected.git_rev}. Recorded, non-fatal."
+                )
+            else:
+                reasons.append(
+                    f"git SHA drift: lock pins {expected.git_rev} but clone HEAD is "
+                    f"{actual.git_sha}"
+                )
 
     matches = not reasons
     return ModelPinComparison(
@@ -244,6 +349,8 @@ def compare_pins(expected: ModelLockPin, actual: ModelActualPin) -> ModelPinComp
         actual_git_sha=actual.git_sha,
         matches=matches,
         drift_direction=_classify_drift(expected.version, actual.version),
+        clone_ahead=clone_ahead,
+        note=note,
         mismatch_reason="; ".join(reasons),
     )
 
@@ -285,9 +392,12 @@ def check_pins(
                 f"ERROR: cannot resolve clone pin for {package}: {exc}", file=sys.stderr
             )
             return 2
-        comparisons.append(compare_pins(expected_pins[package], actual))
+        comparisons.append(
+            compare_pins(expected_pins[package], actual, repo_root=repo_root)
+        )
 
     drifted = [c for c in comparisons if not c.matches]
+    clone_ahead = [c for c in comparisons if c.clone_ahead]
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,6 +407,7 @@ def check_pins(
                     "lock_source": str(lock_path),
                     "allow_drift": allow_drift,
                     "drift_count": len(drifted),
+                    "clone_ahead_count": len(clone_ahead),
                     "comparisons": [c.model_dump() for c in comparisons],
                 },
                 indent=2,
@@ -306,11 +417,26 @@ def check_pins(
         print(f"sibling-pin comparison written to {output_path}")
 
     for c in comparisons:
-        status = "OK" if c.matches else f"DRIFT/{c.drift_direction}"
+        if not c.matches:
+            status = f"DRIFT/{c.drift_direction}"
+        elif c.clone_ahead:
+            status = "AHEAD"
+        else:
+            status = "OK"
         line = f"  [{status}] {c.package}: lock={c.expected_version} clone={c.actual_version}"
+        if not c.matches:
+            print(f"{line}  -- {c.mismatch_reason}", file=sys.stderr)
+        elif c.clone_ahead:
+            print(f"{line}  -- {c.note}")
+        else:
+            print(line)
+
+    if clone_ahead:
         print(
-            line if c.matches else f"{line}  -- {c.mismatch_reason}",
-            file=sys.stderr if not c.matches else sys.stdout,
+            f"\nNOTE: {len(clone_ahead)} sibling pin(s) are clone-AHEAD of "
+            f"{lock_path.name} (same version, clone HEAD descends from the locked "
+            "SHA); non-fatal, recorded in provenance (OMN-13403).",
+            file=sys.stderr,
         )
 
     if drifted:

@@ -27,6 +27,7 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -201,6 +202,20 @@ def test_e2e_redpanda_internal_listener_advertises_generated_container_name() ->
         "--advertise-kafka-addr internal://${OMNIBASE_INFRA_REDPANDA_CONTAINER:-redpanda}:9092"
         in compose_text
     )
+
+
+def test_e2e_redpanda_uses_epoll_reactor_backend() -> None:
+    """Compose smoke Redpanda must not depend on scarce host libaio slots."""
+    compose_text = (
+        Path(__file__).resolve().parents[2] / "docker" / "docker-compose.e2e.yml"
+    ).read_text(encoding="utf-8")
+
+    redpanda_block = re.search(
+        r"(?ms)^  redpanda:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+        compose_text,
+    )
+    assert redpanda_block is not None
+    assert "--reactor-backend=epoll" in redpanda_block.group(1)
 
 
 def test_real_ssh_user_input_has_empty_default(workflow: Workflow) -> None:

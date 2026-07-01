@@ -51,6 +51,8 @@ from omnibase_infra.runtime.emit_daemon.event_registry import (
     ModelEventRegistration,
 )
 from omnibase_infra.runtime.emit_daemon.models import (
+    ModelEmitDaemonRuntimeInput,
+    ModelEmitDaemonRuntimeOutput,
     ModelNotificationBlocked,
     ModelNotificationCompleted,
 )
@@ -66,6 +68,8 @@ from omnibase_infra.runtime.emit_daemon.topics import (
 
 __all__: list[str] = [
     "EventRegistry",
+    "ModelEmitDaemonRuntimeInput",
+    "ModelEmitDaemonRuntimeOutput",
     "ModelEventRegistration",
     "ModelNotificationBlocked",
     "ModelNotificationCompleted",

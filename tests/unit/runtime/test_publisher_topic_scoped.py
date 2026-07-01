@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 
 # =============================================================================
@@ -32,7 +33,7 @@ from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Create mock event bus with publish method."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock()
     return bus
 

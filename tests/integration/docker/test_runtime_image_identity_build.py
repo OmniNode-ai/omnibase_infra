@@ -96,7 +96,12 @@ def _inspect_label(tag: str, label: str) -> str:
 def test_workspace_build_with_identity_args_populates_labels(
     skip_if_no_docker: None, tmp_path: Path
 ) -> None:
-    """Workspace build + identity quad → populated version + revision labels."""
+    """Workspace build + identity quad + candidate stamp → populated labels.
+
+    OMN-13656: a workspace build MUST also stamp PROMOTION_CLASS=stability-candidate
+    + NON_MAIN_LINEAGE=true (the prod-promotion gate refuses it for prod). Assert
+    those OCI labels are populated alongside the identity quad.
+    """
     dockerfile = _write_proof_dockerfile(tmp_path)
     tag = f"omn12965-good-{uuid.uuid4().hex[:8]}"
     try:
@@ -111,6 +116,8 @@ def test_workspace_build_with_identity_args_populates_labels(
                 "RUNTIME_VERSION": "0.38.3",
                 "VCS_REF": "abc123def456",
                 "BUILD_DATE": "2026-06-11T00:00:00Z",
+                "PROMOTION_CLASS": "stability-candidate",
+                "NON_MAIN_LINEAGE": "true",
             },
         )
         assert result.returncode == 0, f"build failed: {result.stderr}"
@@ -122,6 +129,45 @@ def test_workspace_build_with_identity_args_populates_labels(
             r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
             _inspect_label(tag, "org.opencontainers.image.created"),
         )
+        # OMN-13656: candidate lineage labels populated.
+        assert (
+            _inspect_label(tag, "com.omninode.promotion_class") == "stability-candidate"
+        )
+        assert _inspect_label(tag, "com.omninode.non_main_lineage") == "true"
+    finally:
+        subprocess.run(["docker", "rmi", "-f", tag], capture_output=True, check=False)
+
+
+@pytest.mark.integration
+def test_workspace_build_without_candidate_stamp_fails_guard(
+    skip_if_no_docker: None, tmp_path: Path
+) -> None:
+    """OMN-13656: a workspace build with the identity quad but WITHOUT the
+    stability-candidate stamp fails the guard — it can never be built as a
+    clean-main image."""
+    dockerfile = _write_proof_dockerfile(tmp_path)
+    tag = f"omn13656-nostamp-{uuid.uuid4().hex[:8]}"
+    try:
+        result = _build(
+            dockerfile,
+            tmp_path,
+            tag,
+            {
+                "BUILD_SOURCE": "workspace",
+                "EXPECTED_BUILD_SOURCE": "workspace",
+                "OMNI_HOME": "/x",
+                "RUNTIME_VERSION": "0.38.3",
+                "VCS_REF": "abc123def456",
+                "BUILD_DATE": "2026-06-11T00:00:00Z",
+                # PROMOTION_CLASS / NON_MAIN_LINEAGE deliberately omitted (defaults
+                # clean-main / false).
+            },
+        )
+        assert result.returncode != 0, (
+            "workspace build without the candidate stamp must fail the guard "
+            "(OMN-13656)"
+        )
+        assert "OMN-13656" in (result.stderr + result.stdout)
     finally:
         subprocess.run(["docker", "rmi", "-f", tag], capture_output=True, check=False)
 

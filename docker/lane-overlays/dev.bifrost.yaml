@@ -31,8 +31,8 @@ lane: dev
 coder_endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
 # Reasoner: Qwen3.6-27B-MTP-IQ4_XS on .201 port 8001 (RTX 4090)
 reasoner_endpoint_url: "http://192.168.86.201:8001/v1/chat/completions"
-# Embedding: local embedding server on .201 port 8100 (M2 Ultra)
-embedding_endpoint_url: "http://192.168.86.201:8100/v1/chat/completions"
+# Embedding: vllm-embeddings (text-embedding-qwen3 / qwen3-embedding-0.6b) on .201 port 8002 (OMN-13664)
+embedding_endpoint_url: "http://192.168.86.201:8002/v1/chat/completions"
 # DS-V4-Flash: DeepSeek V4 Flash 284B MoE on .200 port 8101 (OMN-12492)
 # onex-allow-internal-ip OMN-12492 reason="DS-V4-Flash (.200) endpoint in committed lane overlay"
 ds4_flash_endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"

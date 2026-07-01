@@ -1,0 +1,43 @@
+# OMN-13581 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+schema_version: "1.0.0"
+ticket_id: "OMN-13581"
+title: "fix(OMN-13581): deploy-runtime.sh layers the lane overlay on all compose invocations"
+summary: >-
+  deploy-runtime.sh invoked every docker compose call with only -f docker-compose.infra.yml, never layering the lane overlay (docker-compose.<lane>.yml). The base infra compose hardcodes container_name omnibase-infra-redpanda (the DEV name) and the dev network, so warm_broker_topic_provisioning's 'up redpanda' step recreated redpanda as the DEV-named container on any non-dev lane, collided with the live dev broker, got a Docker hash prefix, and landed in 'created' -- destroying the lane's own correctly-named broker (the ~3-day stability outage). The fix adds resolve_lane_overlay_filename()/resolve_compose_file_args() which derive the lane from the compose project suffix and layer the matching overlay onto infra.yml for stability-test/prod/judge projects; unknown non-dev projects fail closed. All compose call sites route through the resolver.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Lane-overlay layering tests pass (dev no overlay; stability/prod/judge layer their overlay; unknown lane fails closed; no bare-infra call site)."
+    command: "uv run pytest tests/scripts/test_deploy_runtime_lane_overlay.py -v"
+  - kind: "tests"
+    description: "Full deploy-runtime.sh script test suite remains green."
+    command: "uv run pytest tests/scripts/ -q"
+  - kind: "ci"
+    description: "Central OCC evidence for OMN-13581 is carried by the onex_change_control OCC PR."
+    command: "gh pr view <occ-pr> --repo OmniNode-ai/onex_change_control --json state"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-lane-overlay-tests"
+    description: "Lane-overlay layering tests pass: dev gets infra.yml only; stability-test/prod/judge layer their overlay; an unknown non-dev project fails closed."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/test_deploy_runtime_lane_overlay.py -v"
+  - id: "dod-script-suite"
+    description: "The full deploy-runtime.sh script test suite passes (no regression)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/ -q"
+  - id: "dod-shellcheck"
+    description: "shellcheck reports no findings on the modified deploy-runtime.sh."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "shellcheck scripts/deploy-runtime.sh"

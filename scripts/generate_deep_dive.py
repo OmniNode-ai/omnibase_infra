@@ -11,36 +11,64 @@ Design goals:
 - Stale dirty working trees (no commits today) are excluded by default to reduce noise.
 
 Usage:
-  python3 scripts/generate_deep_dive.py
-  python3 scripts/generate_deep_dive.py --date 2025-12-20
-  python3 scripts/generate_deep_dive.py --root /Volumes/PRO-G40/Code/omni_home --out /tmp/DECEMBER_20_2025_DEEP_DIVE.md
-  python3 scripts/generate_deep_dive.py --include-dirty  # Also include repos with only dirty files (no commits)
+  uv run python scripts/generate_deep_dive.py
+  uv run python scripts/generate_deep_dive.py --date 2025-12-20
+  uv run python scripts/generate_deep_dive.py --root $OMNI_HOME --out /tmp/DECEMBER_20_2025_DEEP_DIVE.md
+  uv run python scripts/generate_deep_dive.py --include-dirty
+
+Pure functions (PR categorisation, scoring, dedup, etc.) live in
+``omnibase_infra.deep_dive`` and are importable by other packages (e.g.
+``omnimarket.nodes.node_deep_dive_report_effect``).  This script owns
+all git/``gh`` I/O and the CLI entry-point only; it imports from the
+shared module rather than duplicating logic (OMN-13725).
 """
 
 from __future__ import annotations
+
+# Allow standalone execution without `uv run` (adds src/ to path when the
+# package is not yet installed in the active env).
+import sys
+from pathlib import Path as _Path
+
+_REPO_SRC = _Path(__file__).resolve().parent.parent / "src"
+if str(_REPO_SRC) not in sys.path and _REPO_SRC.is_dir():
+    sys.path.insert(0, str(_REPO_SRC))
 
 import argparse
 import datetime as dt
 import json
 import os
-import re
-import subprocess
-from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-from zoneinfo import ZoneInfo
 
-
-def _run(cmd: list[str], cwd: Path, *, allow_fail: bool = False) -> str:
-    try:
-        return subprocess.check_output(
-            cmd, cwd=str(cwd), text=True, stderr=subprocess.DEVNULL
-        )
-    except Exception:
-        if allow_fail:
-            return ""
-        raise
+# ---------------------------------------------------------------------------
+# Shared pure models and processing functions (one source of truth)
+# ---------------------------------------------------------------------------
+from omnibase_infra.deep_dive import (
+    CATEGORY_WEIGHTS,
+    ActiveWorktree,
+    GitHubMergedPR,
+    RepoDay,
+    base_week_monday,
+    collect_all_ticket_ids,
+    compute_drift,
+    deep_dive_filename,
+    effectiveness_score_v2,
+    extract_pr_numbers,
+    family_key,
+    find_git_repos_direct_children,
+    get_active_worktrees,
+    get_branch,
+    get_commit_entries,
+    get_dirty,
+    get_github_merged_prs,
+    get_merge_entries,
+    is_primary_onex_repo,
+    repo_commit_sums,
+    sectionize_highlights,
+    unique_commit_entries,
+    validate_deep_dive_ingest,
+    velocity_score_v2,
+)
 
 
 def _today_local() -> dt.date:
@@ -54,827 +82,9 @@ def _day_window(date: dt.date) -> tuple[str, str]:
     return (start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S"))
 
 
-PR_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\(#(?P<num>\d+)\)"),
-    re.compile(r"\bPR\s*#(?P<num>\d+)\b", re.IGNORECASE),
-    re.compile(r"\b#(?P<num>\d+)\b"),  # fallback; can overmatch, but helps in practice
-    re.compile(r"Merge pull request #(?P<num>\d+)", re.IGNORECASE),
-]
-
-
-def extract_pr_numbers(subject: str) -> list[int]:
-    prs: set[int] = set()
-    for pat in PR_PATTERNS:
-        for m in pat.finditer(subject):
-            try:
-                prs.add(int(m.group("num")))
-            except Exception:  # noqa: BLE001 — boundary: returns degraded response
-                # Defensive: don't let parsing crash the run.
-                continue
-    return sorted(prs)
-
-
-TICKET_RE = re.compile(r"\b(OMN-\d+)\b")
-
-
-def extract_ticket_ids(subject: str) -> list[str]:
-    return sorted(set(TICKET_RE.findall(subject)))
-
-
-def collect_all_ticket_ids(repo_days: list[RepoDay]) -> list[str]:
-    """Extract all unique ticket IDs (matching the TICKET_RE pattern) from commit messages."""
-    ids: set[str] = set()
-    for rd in repo_days:
-        for c in rd.commits:
-            ids.update(extract_ticket_ids(c.subject))
-        for m in rd.merges:
-            ids.update(extract_ticket_ids(m.subject))
-    return sorted(ids, key=lambda x: int(x.split("-")[1]))
-
-
-@dataclass(frozen=True)
-class CommitEntry:
-    full: str
-    short: str
-    ai: str
-    author: str
-    subject: str
-    files: int
-    ins: int
-    dele: int
-
-
-@dataclass(frozen=True)
-class MergeEntry:
-    full: str
-    short: str
-    ai: str
-    author: str
-    subject: str
-
-
-@dataclass(frozen=True)
-class GitHubMergedPR:
-    number: int
-    title: str
-    merged_at: str
-    is_workflow_pr: bool  # True if it's an auto-generated workflow PR
-    category: str  # 'capability', 'correctness', 'governance', 'observability', 'docs', 'churn'
-    is_exempt: bool = False  # True if dep bump or release (exempt from ticket linkage)
-    additions: int = 0
-    deletions: int = 0
-
-
-@dataclass(frozen=True)
-class RepoDay:
-    name: str
-    path: Path
-    branch: str
-    commits: list[CommitEntry]
-    merges: list[MergeEntry]
-    dirty: list[str]
-    github_merged_prs: list[GitHubMergedPR]
-
-
-def get_branch(repo: Path) -> str:
-    b = _run(["git", "branch", "--show-current"], repo, allow_fail=True).strip()
-    return b or "(detached)"
-
-
-def get_dirty(repo: Path) -> list[str]:
-    raw = _run(["git", "status", "--porcelain=v1"], repo, allow_fail=True)
-    return [line for line in raw.splitlines() if line.strip()]
-
-
-def get_commit_entries(repo: Path, start_s: str, end_s: str) -> list[CommitEntry]:
-    # We intentionally include merge commits in the main log; merge list is separate for convenience.
-    raw = _run(
-        [
-            "git",
-            "log",
-            f"--since={start_s}",
-            f"--until={end_s}",
-            "--pretty=format:%H|%h|%ai|%an|%s",
-            "--shortstat",
-        ],
-        repo,
-        allow_fail=True,
-    )
-    lines = raw.splitlines()
-    entries: list[CommitEntry] = []
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        i += 1
-        if not line:
-            continue
-        if "|" not in line:
-            continue
-        full, short, ai, an, subj = line.split("|", 4)
-        files = ins = dele = 0
-        while i < len(lines) and lines[i].strip() and "|" not in lines[i]:
-            st = lines[i]
-            i += 1
-            m = re.search(r"(\d+) files? changed", st)
-            if m:
-                files += int(m.group(1))
-            m = re.search(r"(\d+) insertions?\(\+\)", st)
-            if m:
-                ins += int(m.group(1))
-            m = re.search(r"(\d+) deletions?\(-\)", st)
-            if m:
-                dele += int(m.group(1))
-        entries.append(
-            CommitEntry(
-                full=full,
-                short=short,
-                ai=ai,
-                author=an,
-                subject=subj,
-                files=files,
-                ins=ins,
-                dele=dele,
-            )
-        )
-    return entries
-
-
-def get_merge_entries(repo: Path, start_s: str, end_s: str) -> list[MergeEntry]:
-    raw = _run(
-        [
-            "git",
-            "log",
-            f"--since={start_s}",
-            f"--until={end_s}",
-            "--pretty=format:%H|%h|%ai|%an|%s",
-            "--merges",
-        ],
-        repo,
-        allow_fail=True,
-    )
-    merges: list[MergeEntry] = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        full, short, ai, an, subj = line.split("|", 4)
-        merges.append(
-            MergeEntry(full=full, short=short, ai=ai, author=an, subject=subj)
-        )
-    return merges
-
-
-WORKFLOW_PR_PATTERNS = [
-    "Add Claude Code GitHub Workflow",
-    "Update Claude Code Review workflow",
-    "Update Claude PR Assistant workflow",
-]
-
-
-def is_workflow_pr(title: str) -> bool:
-    """Check if a PR is an auto-generated workflow PR (low value for reporting)."""
-    return any(pattern.lower() in title.lower() for pattern in WORKFLOW_PR_PATTERNS)
-
-
-# Exempt PR patterns — dep bumps and releases that don't need ticket linkage
-# SYNC: exempt prefixes must match the lists in:
-#   - onex_change_control/.github/workflows/pr-title-check-reusable.yml
-#   - omniclaude/src/omniclaude/nodes/node_git_effect/models/model_git_request.py
-_EXEMPT_PREFIXES = (
-    "chore(deps",  # chore(deps):, chore(deps-dev):, chore(deps)(deps):
-    "build(deps",  # build(deps):
-    "bump ",  # Bump hashicorp/aws...
-    "chore: release",  # chore: release omnibase_core v0.34.0
-    "chore(release)",  # chore(release): v0.12.0
-    "release:",  # release: omnibase_infra v0.29.0
-)
-
-
-def is_exempt_pr(title: str) -> bool:
-    """Return True if the PR title is a dep bump or release (exempt from ticket linkage)."""
-    return title.lower().startswith(_EXEMPT_PREFIXES)
-
-
-def classify_pr(title: str) -> str:
-    """
-    Classify a PR into exactly one of six categories using deterministic
-    title-based heuristics with override rules.
-
-    Categories: capability, correctness, governance, observability, docs, churn
-    """
-    t = title.lower()
-
-    # Override rules (checked first -- these override prefix-based classification)
-    if any(
-        kw in t
-        for kw in [
-            "correct report",
-            "report accuracy",
-            "revert",
-            "follow-up fix",
-            "followup fix",
-        ]
-    ):
-        return "churn"
-    if any(
-        kw in t
-        for kw in [
-            "handshake",
-            "freeze",
-            "enforcement",
-            "policy gate",
-            "migration_freeze",
-        ]
-    ):
-        return "governance"
-    if any(
-        kw in t
-        for kw in [
-            "diagnostics",
-            "telemetry",
-            "metrics",
-            "sink",
-            "query reader",
-            "projection",
-            "ledger",
-            "bus audit",
-            "bus health",
-        ]
-    ):
-        return "observability"
-
-    # Prefix-based classification (conventional commits)
-    if t.startswith(("docs", "doc(", "doc:")):
-        return "docs"
-    if t.startswith(("ci", "chore(ci)")) or "ci:" in t:
-        return "governance"
-    if t.startswith(("fix", "refactor", "perf", "test")):
-        return "correctness"
-    if t.startswith("feat"):
-        return "capability"
-    if t.startswith("chore"):
-        return "correctness"
-
-    # Default
-    return "correctness"
-
-
-def get_github_merged_prs(repo: Path, date: dt.date) -> list[GitHubMergedPR]:
-    """
-    Fetch PRs merged on the given date from GitHub using the gh CLI.
-
-    Timestamps are converted from UTC to EST (America/New_York) before filtering,
-    so PRs merged in the evening EST show up in the correct day's report.
-
-    Returns an empty list if:
-    - gh CLI is not available
-    - The repo is not a GitHub repo
-    - Any error occurs (network, auth, etc.)
-    """
-    date_str = date.isoformat()
-    est_tz = ZoneInfo("America/New_York")
-
-    raw = _run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--state",
-            "merged",
-            "--search",
-            f"merged:>={date_str}",
-            "--json",
-            "number,title,mergedAt,additions,deletions",
-            "--limit",
-            "100",
-        ],
-        repo,
-        allow_fail=True,
-    )
-    if not raw.strip():
-        return []
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return []
-
-    prs: list[GitHubMergedPR] = []
-    for item in data:
-        merged_at_str = item.get("mergedAt", "")
-        title = item.get("title", "")
-
-        if not merged_at_str:
-            continue
-
-        # Parse UTC timestamp and convert to EST
-        try:
-            # GitHub format: 2026-01-23T00:19:09Z
-            merged_at_utc = dt.datetime.fromisoformat(
-                merged_at_str.replace("Z", "+00:00")
-            )
-            merged_at_est = merged_at_utc.astimezone(est_tz)
-            merged_date_est = merged_at_est.date()
-
-            # Filter to only PRs merged on the target date (in EST)
-            if merged_date_est == date:
-                # Format display time in EST (table adds timezone label)
-                display_time = merged_at_est.strftime("%H:%M")
-                prs.append(
-                    GitHubMergedPR(
-                        number=item.get("number", 0),
-                        title=title,
-                        merged_at=display_time,
-                        is_workflow_pr=is_workflow_pr(title),
-                        category=classify_pr(title),
-                        is_exempt=is_exempt_pr(title),
-                        additions=item.get("additions", 0),
-                        deletions=item.get("deletions", 0),
-                    )
-                )
-        except (ValueError, TypeError):
-            # If parsing fails, fall back to string prefix matching
-            if merged_at_str.startswith(date_str):
-                prs.append(
-                    GitHubMergedPR(
-                        number=item.get("number", 0),
-                        title=title,
-                        merged_at=merged_at_str,
-                        is_workflow_pr=is_workflow_pr(title),
-                        category=classify_pr(title),
-                        is_exempt=is_exempt_pr(title),
-                        additions=item.get("additions", 0),
-                        deletions=item.get("deletions", 0),
-                    )
-                )
-
-    # Sort by merge time
-    return sorted(prs, key=lambda p: p.merged_at)
-
-
-def find_git_repos_direct_children(root: Path) -> list[Path]:
-    repos: list[Path] = []
-    for p in sorted(root.iterdir(), key=lambda x: x.name.lower()):
-        if not p.is_dir():
-            continue
-        if (p / ".git").exists():
-            repos.append(p)
-    return repos
-
-
-_FAMILY_RE = re.compile(r"^(omni\w+?)(\d+)$")
-
-
-def family_key(repo_name: str) -> str | None:
-    """
-    Map repo clones to their canonical family name for deduplication.
-
-    Uses regex to strip trailing digits: omnibase_core2 -> omnibase_core, omnidash4 -> omnidash.
-    Returns None for repos without trailing digits (they are already canonical).
-    """
-    m = _FAMILY_RE.match(repo_name)
-    if m:
-        return m.group(1)
-    # Check if it's already a known omni-family base name
-    if repo_name.startswith("omni"):
-        return repo_name
-    return None
-
-
-@dataclass(frozen=True)
-class DriftReport:
-    level: str  # "green", "yellow", "red"
-    main_dirty: int  # clones on main with uncommitted changes (real risk)
-    stale_branches: int  # feature branches with last commit >72h ago
-    diverged_branches: int  # feature branches diverged from origin/main >48h
-    risks: list[tuple[str, str]]  # (repo_name, reason)
-    penalty: int  # 0, -2, or -5
-    # Informational (not scored)
-    active_worktrees: int  # total dirty worktrees (parallelism, not risk)
-    unlinked_pr_count: int = 0  # PRs without OMN-XXXX and not exempt
-    total_pr_count: int = 0  # total PRs for the day
-
-
-def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftReport:
-    """
-    Compute drift score based on actual risk signals, not parallelism.
-
-    Only scans repos with activity today (commits or merged PRs).  Legacy
-    repos with no today-activity are ignored — they're not part of the
-    current work surface.
-
-    Dirty worktrees on feature branches are NORMAL — they represent active
-    parallel work sessions. Drift is measured by:
-    1. Dirty files on main/master (uncommitted changes on integration branch)
-    2. Stale feature branches (no commits in >72h — forgotten work)
-    3. Diverged branches (feature branch behind origin/main by >48h)
-    """
-    main_dirty = 0
-    stale_branches = 0
-    diverged_branches = 0
-    active_worktrees = 0
-    risks: list[tuple[str, str]] = []
-
-    now = dt.datetime.combine(date, dt.time(23, 59, 59)).astimezone()
-
-    # Only consider repos with actual activity (commits or merged PRs), not
-    # repos included solely because of --include-dirty.  Legacy repos with
-    # dirty files but no today-activity are not part of the work surface.
-    active_repo_days = [rd for rd in repo_days if rd.commits or rd.github_merged_prs]
-
-    for rd in active_repo_days:
-        name = rd.name
-        repo_path = rd.path
-        branch = rd.branch
-        dirty = rd.dirty
-
-        if dirty:
-            active_worktrees += 1
-
-        # Risk 1: Dirty files on main/master (real risk — uncommitted on integration branch)
-        if dirty and branch in ("main", "master"):
-            main_dirty += 1
-            risks.append((name, f"{len(dirty)} dirty files on {branch}"))
-
-        # Risk 2 & 3: Feature branch staleness and divergence
-        if branch not in ("main", "master", "(detached)"):
-            try:
-                # Check last commit age on this branch
-                last_commit_date = _run(
-                    ["git", "log", "-1", "--format=%ai", branch],
-                    repo_path,
-                    allow_fail=True,
-                ).strip()
-                if last_commit_date:
-                    try:
-                        lc_dt = dt.datetime.fromisoformat(last_commit_date.strip())
-                        age = now - lc_dt.astimezone()
-                        if age.total_seconds() > 72 * 3600:
-                            stale_branches += 1
-                            days = int(age.total_seconds() / 86400)
-                            risks.append(
-                                (name, f"branch `{branch}` stale ({days}d, no commits)")
-                            )
-                    except (ValueError, TypeError):
-                        pass
-
-                # Check if branch has diverged from origin/main
-                merge_base_date = _run(
-                    ["git", "log", "-1", "--format=%ai", f"origin/main..{branch}"],
-                    repo_path,
-                    allow_fail=True,
-                ).strip()
-                if merge_base_date:
-                    try:
-                        mb_dt = dt.datetime.fromisoformat(merge_base_date.strip())
-                        age = now - mb_dt.astimezone()
-                        if age.total_seconds() > 48 * 3600:
-                            diverged_branches += 1
-                    except (ValueError, TypeError):
-                        pass
-            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
-                pass
-
-    # Scoring: only real risk signals count
-    # main_dirty is the strongest signal (uncommitted on integration branch)
-    # stale_branches is moderate (forgotten work that will conflict)
-    # diverged_branches is informational (will need rebase, but that's normal)
-    risk_score = main_dirty * 3 + stale_branches * 2 + max(0, diverged_branches - 2)
-
-    if risk_score >= 5:
-        level = "red"
-        penalty = -5
-    elif risk_score >= 2:
-        level = "yellow"
-        penalty = -2
-    else:
-        level = "green"
-        penalty = 0
-
-    # Sort risks by severity (main dirty first, then stale, then other)
-    risks.sort(
-        key=lambda r: (
-            0 if "dirty files on main" in r[1] else 1 if "stale" in r[1] else 2
-        )
-    )
-
-    # Count unlinked PRs (no OMN-XXXX and not exempt/workflow)
-    import re as _re
-
-    _ticket_re = _re.compile(r"OMN-\d+")
-    all_prs = [pr for rd in active_repo_days for pr in rd.github_merged_prs]
-    unlinked = [
-        pr
-        for pr in all_prs
-        if not pr.is_exempt
-        and not pr.is_workflow_pr
-        and not _ticket_re.search(pr.title)
-    ]
-
-    return DriftReport(
-        level=level,
-        main_dirty=main_dirty,
-        stale_branches=stale_branches,
-        diverged_branches=diverged_branches,
-        risks=risks[:5],
-        penalty=penalty,
-        active_worktrees=active_worktrees,
-        unlinked_pr_count=len(unlinked),
-        total_pr_count=len(all_prs),
-    )
-
-
-_CATEGORY_WEIGHTS: dict[str, float] = {
-    "capability": 2.0,
-    "correctness": 1.5,
-    "governance": 1.5,
-    "observability": 1.2,
-    "docs": 0.7,
-    "churn": 0.2,
-}
-
-
-def effectiveness_score_v2(
-    category_counts: dict[str, int],
-    drift_penalty: int,
-) -> tuple[int, str]:
-    """
-    Compute effectiveness score based on weighted PR categories.
-
-    Returns (score, explanation_string).
-    """
-    base = 60
-    pr_points = 0.0
-    total_prs = sum(category_counts.values())
-
-    for cat, count in category_counts.items():
-        pr_points += _CATEGORY_WEIGHTS.get(cat, 0.5) * count
-
-    pr_points = min(pr_points, 50.0)
-
-    penalty = 0
-    churn_count = category_counts.get("churn", 0)
-    churn_ratio = churn_count / max(total_prs, 1)
-    if churn_ratio > 0.20:
-        penalty += 3
-
-    penalty += abs(drift_penalty)
-
-    score = round(base + pr_points - penalty)
-    score = max(0, min(100, score))
-
-    parts = []
-    for cat, count in sorted(category_counts.items()):
-        if count > 0:
-            w = _CATEGORY_WEIGHTS.get(cat, 0.5)
-            parts.append(f"{cat}: {count} x {w}")
-    explanation = (
-        f"base {base} + PR points {pr_points:.1f} (capped at 50) - penalties {penalty}"
-    )
-    if parts:
-        explanation += f" | Breakdown: {', '.join(parts)}"
-
-    return score, explanation
-
-
-def velocity_score_v2(
-    merged_prs: list[tuple[str, GitHubMergedPR]],
-    unique_repos_with_merges: int,
-    drift_penalty: int,
-) -> tuple[int, str]:
-    """
-    Compute velocity score based on PR throughput, complexity, and repo breadth.
-
-    Returns (score, explanation_string).
-    """
-    base = 55
-    points = 0.0
-
-    for _repo, pr in merged_prs:
-        points += 2.0
-
-        # Complexity bonus based on net lines changed
-        net = pr.additions + pr.deletions
-        if 201 <= net <= 800:
-            points += 0.5
-        elif 801 <= net <= 2000:
-            points += 1.0
-        elif 2001 <= net <= 6000:
-            points += 1.5
-        elif net > 6000:
-            points += 2.0
-
-    # Repo breadth bonus
-    points += min(unique_repos_with_merges, 8) * 1.0
-
-    penalty = abs(drift_penalty)
-
-    score = round(base + min(points, 45.0) - penalty)
-    score = max(0, min(100, score))
-
-    explanation = (
-        f"base {base} + PR throughput/complexity ({len(merged_prs)} PRs)"
-        f" + repo breadth ({min(unique_repos_with_merges, 8)} repos)"
-        f" - drift penalty {abs(drift_penalty)}"
-    )
-
-    return score, explanation
-
-
-def base_week_monday(date: dt.date) -> dt.date:
-    # Monday is 0
-    return date - dt.timedelta(days=date.weekday())
-
-
-def month_name(date: dt.date) -> str:
-    return date.strftime("%B").upper()
-
-
-def deep_dive_filename(date: dt.date) -> str:
-    return f"{month_name(date)}_{date.day}_{date.year}_DEEP_DIVE.md"
-
-
-def sectionize_highlights(commits: Iterable[CommitEntry]) -> dict[str, list[str]]:
-    # Lightweight classifier for "Major Components & Work Completed"
-    buckets: dict[str, list[str]] = {
-        "Runtime / Dispatch": [],
-        "Models / Contracts": [],
-        "Validation / CI Gates": [],
-        "Idempotency / Time / Traceability": [],
-        "Documentation / Planning": [],
-        "Other": [],
-    }
-    for c in commits:
-        s = c.subject.lower()
-        item = f"{c.subject}"
-        if any(
-            k in s
-            for k in [
-                "dispatch",
-                "dispatcher",
-                "runtime",
-                "kernel",
-                "registry",
-                "scheduler",
-            ]
-        ):
-            buckets["Runtime / Dispatch"].append(item)
-        elif any(k in s for k in ["model", "models", "contract", "schema", "envelope"]):
-            buckets["Models / Contracts"].append(item)
-        elif any(
-            k in s
-            for k in ["validator", "validation", "ci", "gate", "strict validation"]
-        ):
-            buckets["Validation / CI Gates"].append(item)
-        elif any(
-            k in s
-            for k in [
-                "idempot",
-                "correlation",
-                "causation",
-                "trace",
-                "time injection",
-                "timeout",
-            ]
-        ):
-            buckets["Idempotency / Time / Traceability"].append(item)
-        elif any(
-            k in s for k in ["docs", "document", "plan", "handoff", "adr", "readme"]
-        ):
-            buckets["Documentation / Planning"].append(item)
-        else:
-            buckets["Other"].append(item)
-
-    # prune empty buckets
-    return {k: v for k, v in buckets.items() if v}
-
-
-@dataclass(frozen=True)
-class ActiveWorktree:
-    repo_name: str
-    worktree_path: str
-    branch: str
-    head: str  # short commit hash or "(bare)"
-
-
-def get_active_worktrees(repo: Path, repo_name: str) -> list[ActiveWorktree]:
-    """
-    Return non-main worktrees for a repo via `git worktree list --porcelain`.
-
-    The main worktree (the bare clone or the primary checkout) is excluded
-    since it already appears in the repo-day commit log.  Only feature-branch
-    worktrees are returned — these represent in-progress work that may not
-    have any commits today and would otherwise be invisible in the report.
-
-    Returns an empty list on any error (allow_fail semantics).
-    """
-    raw = _run(["git", "worktree", "list", "--porcelain"], repo, allow_fail=True)
-    if not raw.strip():
-        return []
-
-    worktrees: list[ActiveWorktree] = []
-    current: dict[str, str] = {}
-
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            # End of a worktree block
-            if current:
-                path = current.get("worktree", "")
-                branch_ref = current.get("branch", "")
-                head = current.get("HEAD", "")[:8] or "(unknown)"
-                is_bare = "bare" in current
-
-                # Derive a friendly branch name from the ref
-                if is_bare:
-                    branch = "(bare)"
-                elif branch_ref.startswith("refs/heads/"):
-                    branch = branch_ref[len("refs/heads/") :]
-                else:
-                    branch = branch_ref or "(detached)"
-
-                # Skip main/master and bare entries — they're in the commit log already
-                if branch not in ("main", "master", "(bare)") and path:
-                    worktrees.append(
-                        ActiveWorktree(
-                            repo_name=repo_name,
-                            worktree_path=path,
-                            branch=branch,
-                            head=head,
-                        )
-                    )
-                current = {}
-        elif ":" in line:
-            key, _, val = line.partition(" ")
-            current[key] = val.strip()
-        else:
-            # Lines like "bare" or "detached" are flags
-            current[line] = line
-
-    # Handle final block if no trailing blank line
-    if current:
-        path = current.get("worktree", "")
-        branch_ref = current.get("branch", "")
-        head = current.get("HEAD", "")[:8] or "(unknown)"
-        is_bare = "bare" in current
-        if is_bare:
-            branch = "(bare)"
-        elif branch_ref.startswith("refs/heads/"):
-            branch = branch_ref[len("refs/heads/") :]
-        else:
-            branch = branch_ref or "(detached)"
-        if branch not in ("main", "master", "(bare)") and path:
-            worktrees.append(
-                ActiveWorktree(
-                    repo_name=repo_name,
-                    worktree_path=path,
-                    branch=branch,
-                    head=head,
-                )
-            )
-
-    return worktrees
-
-
-def is_primary_onex_repo(repo_name: str) -> bool:
-    if repo_name.startswith("omnibase_core"):
-        return True
-    if repo_name.startswith("omnibase_infra"):
-        return True
-    if repo_name in {"omnibase_spi", "onex_change_control", "omninode_infra"}:
-        return True
-    return False
-
-
-def repo_commit_sums(rd: RepoDay) -> tuple[int, int, int, int]:
-    # commits, files, insertions, deletions
-    files = ins = dele = 0
-    for c in rd.commits:
-        files += c.files
-        ins += c.ins
-        dele += c.dele
-    return len(rd.commits), files, ins, dele
-
-
-def unique_commit_entries(repo_days: list[RepoDay]) -> list[CommitEntry]:
-    """
-    Dedupe commit entries across parallel working copies.
-
-    Key policy:
-    - For omnibase_core* clones: dedupe by ('omnibase_core', full_hash)
-    - For omnibase_infra* clones: dedupe by ('omnibase_infra', full_hash)
-    - For all other repos: dedupe by (repo_name, full_hash)
-    """
-    seen: set[tuple[str, str]] = set()
-    uniq: list[CommitEntry] = []
-    for rd in sorted(repo_days, key=lambda x: x.name.lower()):
-        fk = family_key(rd.name) or rd.name
-        for c in rd.commits:
-            k = (fk, c.full)
-            if k in seen:
-                continue
-            seen.add(k)
-            uniq.append(c)
-    return uniq
+def _now_utc_iso_minutes() -> str:
+    """Return current UTC time as YYYY-MM-DDTHH:MMZ (minute precision)."""
+    return dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%MZ")
 
 
 def main() -> int:
@@ -907,7 +117,49 @@ def main() -> int:
         default=False,
         help="Include repos that only have dirty working trees (no commits today). Default: False.",
     )
+    ap.add_argument(
+        "--validate-ingest",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Validate an existing deep-dive for corpus ingestion. "
+            "Exits 0 if the '## Runtime State — as of' section is not stale "
+            "relative to --handoff-time, non-zero otherwise."
+        ),
+    )
+    ap.add_argument(
+        "--handoff-time",
+        type=str,
+        default=None,
+        metavar="ISO-TIMESTAMP",
+        help=(
+            "UTC probe time of the corresponding final handoff, "
+            "e.g. '2026-06-28T14:30Z'. Required when --validate-ingest is used."
+        ),
+    )
     args = ap.parse_args()
+
+    # Validation mode: check an existing deep-dive for staleness and exit.
+    if args.validate_ingest is not None:
+        if not args.handoff_time:
+            print(
+                "error: --handoff-time is required with --validate-ingest", flush=True
+            )
+            return 2
+        try:
+            cutoff = dt.datetime.fromisoformat(args.handoff_time.replace("Z", "+00:00"))
+        except ValueError:
+            print(
+                f"error: --handoff-time '{args.handoff_time}' is not a valid ISO-8601 timestamp",
+                flush=True,
+            )
+            return 2
+        ok, msg = validate_deep_dive_ingest(
+            Path(args.validate_ingest).expanduser().resolve(), cutoff
+        )
+        print(msg, flush=True)
+        return 0 if ok else 1
 
     date = _today_local() if not args.date else dt.date.fromisoformat(args.date)
     start_s, end_s = _day_window(date)
@@ -1450,9 +702,56 @@ def main() -> int:
         "churn",
     ]:
         count = category_counts.get(cat, 0)
-        weight = _CATEGORY_WEIGHTS.get(cat, 0.5)
+        weight = CATEGORY_WEIGHTS.get(cat, 0.5)
         points = count * weight
         lines.append(f"| {cat} | {count} | {weight} | {points:.1f} |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # -----------------------------------------------------------------------
+    # Typed sections: Durable Findings vs Runtime State (OMN-13043 / C-3)
+    #
+    # Durable Findings: structural observations from commit and PR history.
+    # These remain valid until the referenced code is changed.
+    #
+    # Runtime State: ephemeral observations captured at generation time.
+    # The '## Runtime State — as of' header carries a machine-readable
+    # UTC timestamp used by --validate-ingest to gate corpus ingestion.
+    # -----------------------------------------------------------------------
+    lines.append("## Durable Findings")
+    lines.append("")
+    lines.append(
+        "*Structural findings derived from commit and PR history in this report.*"
+    )
+    lines.append("*These remain valid until the referenced code is changed.*")
+    lines.append("")
+    lines.append(
+        "<!-- Operator: promote session retrospective findings here. "
+        "Each entry must cite a commit SHA or PR number as evidence. -->"
+    )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    _state_ts = _now_utc_iso_minutes()
+    lines.append(f"## Runtime State — as of {_state_ts}")
+    lines.append("")
+    lines.append("*Ephemeral runtime observations captured at generation time.*")
+    lines.append("*This section has a bounded lifetime — it becomes stale once the*")
+    lines.append("*runtime state changes.  Use*")
+    lines.append(
+        "*`generate_deep_dive.py --validate-ingest <path> --handoff-time <ISO>`*"
+    )
+    lines.append("*to check freshness before corpus ingestion.*")
+    lines.append("")
+    drift_emoji2 = {"green": "green", "yellow": "yellow", "red": "red"}.get(
+        drift.level, drift.level
+    )
+    lines.append(f"- **Drift level at generation**: {drift_emoji2}")
+    lines.append(f"- **Main-dirty repos**: {drift.main_dirty}")
+    lines.append(f"- **Stale feature branches (>72h)**: {drift.stale_branches}")
+    lines.append(f"- **Active worktrees**: {drift.active_worktrees}")
     lines.append("")
     lines.append("---")
     lines.append("")

@@ -137,6 +137,7 @@ omnimarket-projections:
   services:
     - omnimarket-projection-session-outcome
     - omnimarket-projection-llm-cost
+    - omnimarket-projection-cost-by-repo
     - omnimarket-projection-savings
     - omnimarket-projection-delegation
     - omnimarket-projection-baselines

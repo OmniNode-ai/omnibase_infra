@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_emit_daemon_runtime"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Runtime emit daemon topic contract. The producer lives in omniclaude hooks, but omnibase_infra consumes these topics and provisions them during runtime startup until producer-side omniclaude contracts own them directly.
+
+input_model:
+  name: "ModelEmitDaemonRuntimeInput"
+  module: "omnibase_infra.runtime.emit_daemon"
+  description: "Runtime emit daemon topic-consumption contract input marker."
+output_model:
+  name: "ModelEmitDaemonRuntimeOutput"
+  module: "omnibase_infra.runtime.emit_daemon"
+  description: "Runtime emit daemon topic-consumption contract output marker."
+event_bus:
+  subscribe_topics:
+    - "onex.evt.omniclaude.phase-metrics.v1"
+    - "onex.evt.omniclaude.notification-blocked.v1"
+    - "onex.evt.omniclaude.notification-completed.v1"
+  publish_topics: []
+consumed_events:
+  - topic: "onex.evt.omniclaude.phase-metrics.v1"
+    event_type: "PhaseMetricsEvent"
+    message_category: "EVENT"
+    description: "Phase metrics events emitted by omniclaude hooks."
+  - topic: "onex.evt.omniclaude.notification-blocked.v1"
+    event_type: "NotificationBlockedEvent"
+    message_category: "EVENT"
+    description: "Blocked notification events emitted by omniclaude hooks."
+  - topic: "onex.evt.omniclaude.notification-completed.v1"
+    event_type: "NotificationCompletedEvent"
+    message_category: "EVENT"
+    description: "Completed notification events emitted by omniclaude hooks."
+metadata:
+  owner: "omnibase_infra"
+  ticket: "OMN-13700"
+  description: >
+    Consumes emit-daemon lifecycle topics produced by omniclaude hooks so omnibase_infra can provision and monitor the runtime topic surface.
+
+  tags:
+    - runtime
+    - emit-daemon
+    - omniclaude

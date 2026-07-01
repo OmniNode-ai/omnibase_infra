@@ -1,6 +1,6 @@
 # Contract-Store Durability Audit — Cold-Runtime Census Reconstruction
 
-**Ticket:** OMN-12962 (P1.5)
+**Priority:** P1.5
 **Date:** 2026-06-11
 **Scope:** Prove that a COLD runtime can reconstruct the full registered
 contract census WITHOUT relying on retained registration events on
@@ -36,7 +36,7 @@ CONTRACT modes the boot census never consults Kafka.
 
 ### 2. Live runtime confirms filesystem provenance
 
-Read-only probe of stability-test (`192.168.86.201:18085`):
+Read-only probe of stability-test (`<onex-host>:18085`):
 
 ```
 GET /v1/introspection/manifest
@@ -52,7 +52,7 @@ runtime image — durable, version-pinned, and unaffected by any topic purge.
 
 `node-registration.v1` (`SUFFIX_NODE_REGISTRATION`) is consumed by
 `_start_dynamic_contract_listener()` /
-`_on_dynamic_contract_event()` (OMN-11247). These run AFTER the dispatch engine
+`_on_dynamic_contract_event()`. These run AFTER the dispatch engine
 is frozen and only ADD handlers on top of the already-resolved filesystem
 census via `KafkaContractSource.on_contract_registered()` +
 `materialize_cached_contract()`.

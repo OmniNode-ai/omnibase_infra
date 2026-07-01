@@ -60,6 +60,7 @@ from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services import (
     ModelTimeoutEmissionConfig,
     ModelTimeoutEmissionResult,
@@ -148,7 +149,7 @@ def mock_timeout_query() -> AsyncMock:
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Create a mock event bus."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish_envelope = AsyncMock()
     return bus
 

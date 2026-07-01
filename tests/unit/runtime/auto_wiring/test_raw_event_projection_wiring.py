@@ -17,6 +17,7 @@ from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection import (
     HandlerBuildLoopProjection,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
     subscribe_wired_contract_topics,
@@ -207,7 +208,7 @@ async def test_explicit_result_applier_contract_subscribes_before_generic_backlo
     engine = MessageDispatchEngine()
     applier = CapturingApplier()
     unsubscribe = AsyncMock()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock(return_value=unsubscribe)
 
     with patch(

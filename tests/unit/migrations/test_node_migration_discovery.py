@@ -67,6 +67,11 @@ EVIDENCE_DASHBOARD_CREATE = (
     / "node_evidence_dashboard_reducer"
     / "0001_create_evidence_dashboard_projection_tables.sql"
 )
+PR_LIFECYCLE_LEDGER_CREATE = (
+    NODES_DIR
+    / "node_pr_lifecycle_state_reducer"
+    / "0001_create_pr_lifecycle_ledger_entries.sql"
+)
 
 pytestmark = pytest.mark.unit
 
@@ -112,6 +117,120 @@ class TestVendoredViewMigrations:
         assert "0010_create_delegation_dashboard_projection_views.sql" in files
         assert "0012_generation_output_columns.sql" in files
         assert "0013_generation_proof_fields.sql" in files
+
+    def test_premium_counterfactual_migration_vendored(self) -> None:
+        """OMN-13355: the pinned premium-counterfactual column migration is vendored.
+
+        The auditable saving (counterfactual - actual) is persisted as a JSONB
+        column on delegation_events. The node-owned migration must be vendored so
+        a clean clone materializes the column under the forward-migration runner.
+        """
+        migration = (
+            NODES_DIR / "node_projection_delegation" / "0017_premium_counterfactual.sql"
+        )
+        assert migration.is_file(), (
+            "0017_premium_counterfactual.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert (
+            "ALTER TABLE delegation_events" in sql
+            and "ADD COLUMN IF NOT EXISTS premium_counterfactual JSONB" in sql
+        )
+
+    def test_cost_measurements_migration_vendored(self) -> None:
+        """OMN-13401/OMN-13234: the per-tier actual-cost measurement migration is vendored.
+
+        0018 records HOW cost_usd was measured (cost_tier_type, cost_tier_name,
+        cost_measurement_source, budget_headroom_consumed_usd) so honest savings
+        (counterfactual - actual) is auditable from the projection. The node-owned
+        migration must be vendored so a clean clone materializes the columns under
+        the forward-migration runner.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0018_delegation_cost_measurements.sql"
+        )
+        assert migration.is_file(), (
+            "0018_delegation_cost_measurements.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert "ALTER TABLE delegation_events" in sql
+        for column in (
+            "cost_tier_type",
+            "cost_tier_name",
+            "cost_measurement_source",
+            "budget_headroom_consumed_usd",
+        ):
+            assert f"ADD COLUMN IF NOT EXISTS {column}" in sql
+
+    def test_budget_state_migration_vendored(self) -> None:
+        """OMN-13401/OMN-13235: the per-tenant ceiling budget-state table is vendored.
+
+        0019 creates the durable, event-sourced delegation_budget_state surface
+        (cap + consumption + headroom) so the dashboard/API can show how much of a
+        tenant's monthly ceiling budget is consumed. The node-owned migration must
+        be vendored so a clean clone materializes the table under the
+        forward-migration runner.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0019_delegation_budget_state.sql"
+        )
+        assert migration.is_file(), (
+            "0019_delegation_budget_state.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS delegation_budget_state" in sql
+        assert (
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_delegation_budget_state_identity"
+            in sql
+        )
+
+    def test_context_pack_hash_migration_vendored(self) -> None:
+        """OMN-13593/OMN-13407: the delegation_events.context_pack_hash column migration is vendored.
+
+        0020 adds ``context_pack_hash`` to the canonical ``delegation_events``
+        table so context ON/OFF ROI is measurable from the correlation-trace
+        surface. The projection query for the 4 delegation projection topics
+        (delegation, projection-delegation-events, delegation.decisions,
+        delegation.correlation-trace) reads this column; without the vendored
+        migration a fresh deploy materializes ``delegation_events`` WITHOUT the
+        column, and ``HandlerProjectionDelegation`` DLQ-routes every event with
+        ``column "context_pack_hash" of relation "delegation_events" does not
+        exist`` while the projection API returns HTTP 503 degraded.
+
+        This guard pins the migration so the column ALWAYS materializes under
+        the forward-migration runner on a fresh clone — closing the schema-drift
+        that produced the stability-lane 503 in OMN-13593.
+        """
+        migration = (
+            NODES_DIR
+            / "node_projection_delegation"
+            / "0020_delegation_context_pack_hash.sql"
+        )
+        assert migration.is_file(), (
+            "0020_delegation_context_pack_hash.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_projection_delegation/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = migration.read_text(encoding="utf-8")
+        # Idempotent column add so warm volumes reconcile without error.
+        assert (
+            "ADD COLUMN IF NOT EXISTS context_pack_hash TEXT NOT NULL DEFAULT ''" in sql
+        )
+        assert "ALTER TABLE delegation_events" in sql
+        # Index supports context ON/OFF ROI grouping on the correlation-trace surface.
+        assert (
+            "CREATE INDEX IF NOT EXISTS idx_delegation_events_context_pack_hash" in sql
+        )
 
     def test_delegation_base_migration_repairs_warm_table_shape(self) -> None:
         """Base migration must be safe when delegation_events already exists."""
@@ -181,6 +300,55 @@ class TestVendoredViewMigrations:
         assert (
             "CREATE TABLE IF NOT EXISTS evidence_readiness_aggregate_projection" in sql
         )
+
+    def test_pr_lifecycle_ledger_migration_vendored(self) -> None:
+        """OMN-13321 / F5: the per-iteration PR-ledger projection migration is vendored.
+
+        ``node_pr_lifecycle_state_reducer`` (omnimarket #1440) declares
+        ``projection_api`` over ``pr_lifecycle_ledger_entries`` (topic
+        ``onex.snapshot.projection.pr-lifecycle-ledger.v1``) and UPSERTs one
+        user-readable ledger row per PR EVERY sweep iteration. The node-owned
+        migration that creates ``pr_lifecycle_ledger_entries`` in
+        ``omnidash_analytics`` was merged in the omnimarket source tree but was
+        NEVER vendored into omnibase_infra's tracked forward-migration tree, so
+        the forward-migration runner had no SQL to apply and the table was
+        missing on dev — the OMN-13415 migration-sync guard correctly aborted.
+
+        This guard pins the vendored migration so a clean clone materializes the
+        table under ``run-forward-migrations.sh`` (namespaced id
+        ``node:node_pr_lifecycle_state_reducer:0001_create_pr_lifecycle_ledger_entries.sql``).
+        This is the OMN-13636 migration-gap class made concrete.
+        """
+        assert PR_LIFECYCLE_LEDGER_CREATE.is_file(), (
+            "0001_create_pr_lifecycle_ledger_entries.sql must be vendored under "
+            "docker/migrations/forward/nodes/node_pr_lifecycle_state_reducer/ "
+            "(run scripts/sync-node-migrations.sh)"
+        )
+        sql = PR_LIFECYCLE_LEDGER_CREATE.read_text(encoding="utf-8")
+        # Idempotent create so warm volumes and fresh omnidash_analytics both
+        # reconcile without error.
+        assert "CREATE TABLE IF NOT EXISTS public.pr_lifecycle_ledger_entries" in sql
+        # The conflict key (sweep_id, repo, pr_number, iteration) guarantees one
+        # row per PR per iteration so two consecutive iterations both persist.
+        # The named constraint is added after CREATE TABLE so warm pre-existing
+        # tables also receive the ON CONFLICT target.
+        assert "uq_pr_lifecycle_ledger_sweep_repo_pr_iter" in sql
+        assert "ADD CONSTRAINT uq_pr_lifecycle_ledger_sweep_repo_pr_iter" in sql
+        assert "UNIQUE (sweep_id, repo, pr_number, iteration)" in sql
+        # The ticket-required user-readable ledger fields must all be present.
+        for column in (
+            "sweep_id",
+            "iteration",
+            "found_at",
+            "repo",
+            "pr_number",
+            "initial_state",
+            "action_taken",
+            "evidence",
+            "final_state",
+            "next_check_at",
+        ):
+            assert column in sql, f"ledger column {column!r} missing from migration"
 
 
 class TestNamespacedDiscoveryWiring:

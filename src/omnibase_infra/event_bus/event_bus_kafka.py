@@ -517,6 +517,38 @@ class EventBusKafka(
         return cls(config=config)
 
     @classmethod
+    def from_bootstrap(cls, bootstrap: str) -> EventBusKafka:
+        """Create EventBusKafka from a bootstrap server override string.
+
+        This is the provider factory that ``RuntimeLocal`` (omnibase_core)
+        invokes through the ``onex.backends:event_bus_kafka`` entry point when a
+        ``--backend kafka_bootstrap=host:port`` override is supplied. The core
+        runtime resolves this class by name and calls ``from_bootstrap`` so the
+        bootstrap override is applied without a process-wide environment
+        mutation (OMN-13445).
+
+        The default configuration (with environment overrides applied) is used
+        as the base, then ``bootstrap_servers`` is set to the explicit override
+        so the caller-supplied value wins over ``KAFKA_BOOTSTRAP_SERVERS``.
+
+        Args:
+            bootstrap: Kafka bootstrap servers string (``host:port`` format)
+
+        Returns:
+            EventBusKafka instance bound to the supplied bootstrap servers
+
+        Example:
+            ```python
+            bus = EventBusKafka.from_bootstrap("localhost:19092")
+            await bus.start()
+            ```
+        """
+        config = ModelKafkaEventBusConfig.default().model_copy(
+            update={"bootstrap_servers": bootstrap}
+        )
+        return cls(config=config)
+
+    @classmethod
     def from_yaml(cls, path: Path) -> EventBusKafka:
         """Create EventBusKafka from a YAML configuration file.
 

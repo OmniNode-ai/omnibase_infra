@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# topic_placeholder_denylist.txt — forbidden placeholder topic name patterns (OMN-4805)
+# topic_placeholder_denylist.txt — forbidden placeholder topic name patterns
 #
 # One pattern per line. Lines beginning with '#' are comments and are ignored.
 # Patterns are matched as literal substrings against topic strings found in

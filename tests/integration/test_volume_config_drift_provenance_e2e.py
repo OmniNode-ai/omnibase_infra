@@ -44,7 +44,7 @@ _SOURCE_CONTRACT: dict[str, object] = {
             "backend_id": "local-primary",
             "model_name": "qwen3-coder",
             "endpoint_url": "",
-            "base_url_env": "OMN_INT_DRIFT_PRIMARY_URL",
+            "endpoint_url_env": "OMN_INT_DRIFT_PRIMARY_URL",
             "required": True,
         }
     ],

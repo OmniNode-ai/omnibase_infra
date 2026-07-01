@@ -3,6 +3,9 @@
 #
 # lane-manifest.yaml — Versioned DESIRED-STATE census for the .201 runtime lanes (OMN-13011).
 #
+# verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
+# (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
+#
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
 # actual lane state:
 #   - volume config drift (OMN-12945 family)

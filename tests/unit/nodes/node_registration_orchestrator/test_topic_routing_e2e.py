@@ -24,6 +24,7 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.models.registration.events.model_node_registration_accepted import (
     ModelNodeRegistrationAccepted,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.contract_topic_router import (
     build_topic_router_from_contract,
 )
@@ -54,7 +55,7 @@ def _make_accepted_event() -> ModelNodeRegistrationAccepted:
 @pytest.mark.unit
 async def test_registration_accepted_event_routes_to_declared_topic() -> None:
     """ModelNodeRegistrationAccepted must never be published to the fallback topic."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     router = build_topic_router_from_contract(_CONTRACT_DATA)
     applier = DispatchResultApplier(
         event_bus=bus,

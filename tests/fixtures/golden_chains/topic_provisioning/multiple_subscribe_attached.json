@@ -1,0 +1,18 @@
+{
+  "chain_id": "multiple_subscribe_attached",
+  "description": "OMN-13237 W6 (b): multiple subscribe topics -> attached.",
+  "expected_terminal_state": "attached",
+  "expected_runtime_state": "ready",
+  "events": [
+    {"sequence": 0, "event_type": "boot_start", "contract": "node_a"},
+    {"sequence": 1, "event_type": "wired_contract_selected", "contract": "node_a"},
+    {"sequence": 2, "event_type": "topics_extracted", "contract": "node_a", "topics": ["topic.alpha.v1", "topic.beta.v1"]},
+    {"sequence": 3, "event_type": "topic_provisioned", "contract": "node_a", "topic": "topic.alpha.v1"},
+    {"sequence": 4, "event_type": "topic_provisioned", "contract": "node_a", "topic": "topic.beta.v1"},
+    {"sequence": 5, "event_type": "metadata_confirmed_ready", "contract": "node_a", "topic": "topic.alpha.v1"},
+    {"sequence": 6, "event_type": "metadata_confirmed_ready", "contract": "node_a", "topic": "topic.beta.v1"},
+    {"sequence": 7, "event_type": "consumer_attached", "contract": "node_a", "topic": "topic.alpha.v1"},
+    {"sequence": 8, "event_type": "consumer_attached", "contract": "node_a", "topic": "topic.beta.v1"},
+    {"sequence": 9, "event_type": "contract_marked_attached", "contract": "node_a"}
+  ]
+}

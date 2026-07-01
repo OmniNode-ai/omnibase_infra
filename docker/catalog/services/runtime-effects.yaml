@@ -34,6 +34,24 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-runtime-effects
   RUNTIME_PROFILE: effects
+  # OMN-13247 (Phase B dev-verify fix): credential HOME for the spawned
+  # claude/codex subprocess (node_coding_agent_invoke_effect). The dev runtime
+  # container runs as root (HOME=/root) while the OAuth creds are bind-mounted at
+  # /home/omniinfra/.codex and /home/omniinfra/.claude (volumes below). claude and
+  # codex read AMBIENT auth from $HOME, so the effect overrides the child env with
+  # HOME=$CODING_AGENT_CRED_HOME (and CODEX_HOME=$CODING_AGENT_CRED_HOME/.codex)
+  # rather than letting them look in /root and fail auth. Container-internal path
+  # that must match the credential bind-mount target -> hardcoded_env, not a secret.
+  CODING_AGENT_CRED_HOME: /home/omniinfra
+  # OMN-13247 (epic OMN-13245): the coding-agent ORCHESTRATOR resolves its
+  # contract descriptor.allowed_workspace_roots from
+  # ${env.ONEX_CODING_AGENT_WORKSPACE_ROOT} and FAILS CLOSED if it resolves empty
+  # (no unscoped workspace is ever permitted). The agent EFFECT confines every
+  # workspace_path under this root. Container-internal path that must match the
+  # agent-workspaces dir the runtime writes into -> hardcoded_env, not a secret.
+  # Patched live on dev for the e2e proof; committed here so the lane is
+  # reproducible from the catalog.
+  ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
   ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres
@@ -60,6 +78,36 @@ volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
   - ../contracts:/app/contracts:ro
+  # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
+  # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
+  # AMBIENT OAuth from ~/.codex and ~/.claude — no ANTHROPIC_API_KEY / *_MODEL /
+  # endpoint env. The credential VALUES are NEVER baked into the image and NEVER
+  # committed; they are operator-supplied host directories bound read-only.
+  #
+  # DEV credential source (Phase 0, OMN-13246 / omni_home PR #182): a fresh
+  # Linux login inside the .201 container produced portable on-disk creds at
+  # /home/omniinfra/.codex (auth.json, ChatGPT OAuth + refresh token) and
+  # /home/omniinfra/.claude (.credentials.json, claude.ai OAuth + refresh token).
+  # Claude Code 2.x on macOS stores its credential in the Keychain, so there is
+  # NO ~/.claude/auth.json on the Mac to copy — the Linux container login is the
+  # source of truth. The operator copies those two dirs to a stable host path
+  # (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude} on .201) and points
+  # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR at them.
+  #
+  # Default /dev/null keeps lanes without configured creds startable (the CLIs
+  # simply have no ambient auth and fail closed on invocation, never at boot).
+  #
+  # codex: mount the credential FILE (auth.json) read-only, NOT the whole
+  # ~/.codex dir. codex 0.141.0 writes app-server / session state into CODEX_HOME
+  # (~/.codex) at runtime, so a fully read-only dir mount makes `codex exec` fail
+  # with "Read-only file system" even though the creds are valid (verified
+  # in-container 2026-06-18). Binding only auth.json :ro keeps the credential
+  # VALUE read-only while leaving the rest of ~/.codex on the writable layer.
+  - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+  # claude: the whole ~/.claude dir read-only works (claude reads
+  # .credentials.json for ambient OAuth; `claude -p` needs no write to that dir;
+  # verified in-container 2026-06-18).
+  - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
 depends_on:
   - service: omninode-runtime
     condition: service_healthy

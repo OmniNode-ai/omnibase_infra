@@ -30,6 +30,7 @@ from omnibase_infra.nodes.node_baseline_capture.handlers.handler_baseline_captur
 from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_command import (
     ModelBaselineCaptureCommand,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -106,7 +107,7 @@ def mock_publisher() -> AsyncMock:
 async def test_no_emit_when_zero_rows() -> None:
     """D3: publisher must NOT be called when agent_actions has zero rows."""
     pool = _make_pool(total_count=0, agent_rows=[])
-    publisher = AsyncMock(return_value=True)
+    publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
     handler = HandlerBaselineCapture(pool=pool, publisher=publisher)
 
     cmd = ModelBaselineCaptureCommand(correlation_id=uuid4())
@@ -172,7 +173,9 @@ async def test_publisher_failure_is_non_fatal() -> None:
         total_count=5,
         agent_rows=[{"agent_name": "agent-gamma", "sample_count": 5}],
     )
-    failing_publisher = AsyncMock(side_effect=RuntimeError("kafka unavailable"))
+    failing_publisher = AsyncMock(
+        spec=ProtocolEventBusLike, side_effect=RuntimeError("kafka unavailable")
+    )
     handler = HandlerBaselineCapture(pool=pool, publisher=failing_publisher)
 
     cmd = ModelBaselineCaptureCommand(correlation_id=uuid4())
@@ -187,7 +190,7 @@ async def test_publisher_failure_is_non_fatal() -> None:
 async def test_lookback_capped_at_168_hours() -> None:
     """lookback_hours > 168 is capped; query still executes normally."""
     pool = _make_pool(total_count=0, agent_rows=[])
-    publisher = AsyncMock(return_value=True)
+    publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
     handler = HandlerBaselineCapture(pool=pool, publisher=publisher)
 
     # 999 hours should be silently capped to 168
@@ -207,7 +210,7 @@ async def test_db_read_failure_recorded_in_errors() -> None:
     ctx.__aexit__ = AsyncMock(return_value=False)
     pool.acquire = MagicMock(return_value=ctx)
 
-    publisher = AsyncMock(return_value=True)
+    publisher = AsyncMock(spec=ProtocolEventBusLike, return_value=True)
     handler = HandlerBaselineCapture(pool=pool, publisher=publisher)
 
     cmd = ModelBaselineCaptureCommand(correlation_id=uuid4())

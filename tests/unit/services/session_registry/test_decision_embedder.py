@@ -10,9 +10,12 @@ Part of OMN-6850, Task 12/13.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from omnibase_infra.services.session_registry.decision_embedder import (
+    EmbeddingClient,
     ModelDecisionRecord,
     build_embedding_text,
     decision_point_id,
@@ -109,3 +112,30 @@ class TestDecisionPointId:
         id1 = decision_point_id("OMN-1234", "Use Postgres")
         id2 = decision_point_id("OMN-5678", "Use Postgres")
         assert id1 != id2
+
+
+@pytest.mark.unit
+class TestEmbeddingClientUrlInjection:
+    """EmbeddingClient requires base_url to be injected; no env-var fallback."""
+
+    def test_url_stored_from_constructor(self) -> None:
+        """base_url passed at construction is stored directly."""
+        client = EmbeddingClient(base_url="http://injected-embed:8100")
+        assert client._base_url == "http://injected-embed:8100"
+
+    def test_different_urls_produce_different_clients(self) -> None:
+        """Two clients with different URLs are independent."""
+        c1 = EmbeddingClient(base_url="http://host-a:8100")
+        c2 = EmbeddingClient(base_url="http://host-b:9000")
+        assert c1._base_url != c2._base_url
+
+    def test_no_env_var_fallback(self) -> None:
+        """EmbeddingClient never reads LLM_EMBEDDING_URL from env."""
+        with patch("os.getenv", side_effect=AssertionError("env read")):
+            client = EmbeddingClient(base_url="http://explicit-host:8100")
+        assert client._base_url == "http://explicit-host:8100"
+
+    def test_rejects_empty_url(self) -> None:
+        """EmbeddingClient fails fast on missing injected base_url."""
+        with pytest.raises(ValueError, match=r"EmbeddingClient\.base_url is empty"):
+            EmbeddingClient(base_url="   ")

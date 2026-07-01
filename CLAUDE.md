@@ -397,7 +397,7 @@ nodes/<node_name>/
 
 | Protocol | Purpose | Input/Output |
 |----------|---------|--------------|
-| `ProtocolHandler` | Envelope-based (runtime) | `ModelOnexEnvelope` → `ModelOnexEnvelope` |
+| `ProtocolHandler` | Request/response I/O (HTTP, DB, Kafka) | `ModelProtocolRequest` → `ModelProtocolResponse` |
 | `ProtocolMessageHandler` | Category-based (dispatch) | `ModelEventEnvelope` → `ModelHandlerOutput` |
 
 ### Handler Routing Strategies

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
@@ -67,7 +68,7 @@ def _make_container_with_applier(
         MagicMock container with service_registry configured.
     """
     applier = DispatchResultApplier(
-        event_bus=MagicMock(),
+        event_bus=MagicMock(spec=ProtocolEventBusLike),
         output_topic="fallback.topic",
         output_topic_map=output_topic_map,
     )
@@ -192,7 +193,7 @@ class TestHealthCheckPublishedEventsMapWiring:
             "ModelNodeBecameActive": "onex.evt.platform.node-became-active.v1",
         }
         applier = DispatchResultApplier(
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="fallback.topic",
             output_topic_map=topic_map,
         )
@@ -202,7 +203,7 @@ class TestHealthCheckPublishedEventsMapWiring:
     async def test_dispatch_result_applier_empty_map_by_default(self) -> None:
         """DispatchResultApplier.published_events_map returns empty dict by default."""
         applier = DispatchResultApplier(
-            event_bus=MagicMock(),
+            event_bus=MagicMock(spec=ProtocolEventBusLike),
             output_topic="fallback.topic",
         )
         assert applier.published_events_map == {}

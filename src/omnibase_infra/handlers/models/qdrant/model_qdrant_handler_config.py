@@ -4,16 +4,20 @@
 
 from __future__ import annotations
 
-import os
-
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.nodes.node_vector_store_effect.contract_descriptor import (
+    contract_qdrant_url,
+)
 
 
 class ModelQdrantHandlerConfig(BaseModel):
     """Configuration for Qdrant handler initialization.
 
     Attributes:
-        url: Qdrant server URL (e.g., http://localhost:6333)
+        url: Qdrant server URL (resolved via the vector-store node's
+            overlay-declared ``descriptor.qdrant_url``; fails closed on unset
+            ``QDRANT_URL`` rather than silently defaulting to localhost)
         api_key: Optional API key for authentication
         timeout_seconds: Request timeout in seconds
         prefer_grpc: Use gRPC instead of HTTP for better performance
@@ -22,8 +26,8 @@ class ModelQdrantHandlerConfig(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
     url: str = Field(
-        default_factory=lambda: os.environ["QDRANT_URL"],
-        description="Qdrant server URL",
+        default_factory=contract_qdrant_url,
+        description="Qdrant server URL (overlay-resolved via descriptor.qdrant_url)",
     )
     api_key: str | None = Field(
         default=None,

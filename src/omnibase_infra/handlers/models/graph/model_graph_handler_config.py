@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Configuration model for HandlerGraph."""
 
-import os
-
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.handlers.models.graph.contract_descriptor import (
+    contract_graph_bolt_uri,
+)
 
 
 class ModelGraphHandlerConfig(BaseModel):
@@ -24,8 +26,11 @@ class ModelGraphHandlerConfig(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
     uri: str = Field(
-        default_factory=lambda: os.environ["GRAPH_BOLT_URI"],
-        description="Bolt URI for graph database",
+        default_factory=contract_graph_bolt_uri,
+        description=(
+            "Bolt URI for graph database (contract ${env.GRAPH_BOLT_URI}, "
+            "resolved via the overlay seam — fails closed when unset)"
+        ),
     )
     username: str = Field(
         default="",

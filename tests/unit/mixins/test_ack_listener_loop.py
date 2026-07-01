@@ -26,6 +26,7 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 
 # Deterministic test UUIDs
@@ -122,7 +123,7 @@ class TestOnRegistrationAcceptedEmitsAck:
     @pytest.mark.asyncio
     async def test_emits_ack_for_matching_entity_id(self) -> None:
         """Matching entity_id -> publishes ModelNodeRegistrationAcked command."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -156,7 +157,7 @@ class TestOnRegistrationAcceptedEmitsAck:
     @pytest.mark.asyncio
     async def test_emits_ack_for_matching_node_id_field(self) -> None:
         """Matching node_id (fallback field) -> publishes ACK command."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -173,7 +174,7 @@ class TestOnRegistrationAcceptedEmitsAck:
     @pytest.mark.asyncio
     async def test_envelope_contains_correct_correlation_id(self) -> None:
         """Published envelope carries the same correlation_id from the accepted event."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -192,7 +193,7 @@ class TestOnRegistrationAcceptedEmitsAck:
     @pytest.mark.asyncio
     async def test_generates_correlation_id_when_missing(self) -> None:
         """Missing correlation_id in event -> generates a new UUID for ACK."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -217,7 +218,7 @@ class TestOnRegistrationAcceptedFiltering:
     @pytest.mark.asyncio
     async def test_ignores_different_entity_id(self) -> None:
         """Different entity_id -> does NOT publish ACK."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -233,7 +234,7 @@ class TestOnRegistrationAcceptedFiltering:
     @pytest.mark.asyncio
     async def test_ignores_different_node_id(self) -> None:
         """Different node_id -> does NOT publish ACK."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -249,7 +250,7 @@ class TestOnRegistrationAcceptedFiltering:
     @pytest.mark.asyncio
     async def test_ignores_message_without_entity_or_node_id(self) -> None:
         """Message with no entity_id or node_id -> does NOT publish ACK."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -264,7 +265,7 @@ class TestOnRegistrationAcceptedFiltering:
     @pytest.mark.asyncio
     async def test_ignores_message_with_no_value(self) -> None:
         """Message with value=None -> does NOT publish ACK (skips gracefully)."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -295,7 +296,7 @@ class TestOnRegistrationAcceptedEdgeCases:
     @pytest.mark.asyncio
     async def test_invalid_json_does_not_raise(self) -> None:
         """Malformed JSON value -> logs warning but does not raise."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -310,7 +311,7 @@ class TestOnRegistrationAcceptedEdgeCases:
     @pytest.mark.asyncio
     async def test_publish_envelope_failure_does_not_raise(self) -> None:
         """publish_envelope raises -> exception is caught, does not propagate."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock(side_effect=RuntimeError("Kafka down"))
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -325,7 +326,7 @@ class TestOnRegistrationAcceptedEdgeCases:
     @pytest.mark.asyncio
     async def test_invalid_correlation_id_generates_new_uuid(self) -> None:
         """Invalid correlation_id string -> generates a fresh UUID instead."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         node = StubAckNode(node_id=TEST_NODE_ID, event_bus=event_bus)
 
@@ -350,7 +351,7 @@ class TestOnRegistrationAcceptedEdgeCases:
     @pytest.mark.asyncio
     async def test_fallback_to_publish_when_no_publish_envelope(self) -> None:
         """Event bus without publish_envelope -> falls back to publish()."""
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         # Remove publish_envelope so hasattr check fails
         del event_bus.publish_envelope
         event_bus.publish = AsyncMock()

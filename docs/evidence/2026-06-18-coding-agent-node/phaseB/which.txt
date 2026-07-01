@@ -1,0 +1,5 @@
+CONTAINER=4650ff5f9467 USER=omniinfra
+/usr/bin/claude
+/usr/bin/codex
+codex-cli 0.141.0
+2.1.181 (Claude Code)

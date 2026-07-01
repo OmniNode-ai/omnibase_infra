@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import re
 import signal
@@ -63,10 +64,15 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import yaml
+
+if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_topic_readiness_config import (
+        ModelTopicReadinessConfig,
+    )
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
@@ -347,6 +353,65 @@ def _get_contracts_dir() -> Path:
         return Path(onex_value)
 
     return Path(DEFAULT_CONTRACTS_DIR)
+
+
+def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
+    """Resolve the per-contract boot-interleave readiness knobs (OMN-13237).
+
+    The kernel is the approved overlay-resolution boundary, so operator
+    overrides for the bounded readiness poll (§3.7) and bounded contract-attach
+    parallelism (§3.9) are read here and validated into a pure config model.
+    Invalid values fall back to the conservative defaults so a malformed
+    override never wedges boot.
+    """
+    from omnibase_infra.event_bus.model_topic_readiness_config import (
+        DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+        DEFAULT_READINESS_MAX_ATTEMPTS,
+        DEFAULT_READINESS_POLL_INTERVAL_MS,
+        DEFAULT_READINESS_TIMEOUT_SECONDS,
+        ModelTopicReadinessConfig,
+    )
+
+    def _float_env(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            value = float(raw)
+        except ValueError:
+            return default
+        if value <= 0.0 or math.isnan(value) or math.isinf(value):
+            return default
+        return value
+
+    def _int_env(name: str, default: int) -> int:
+        raw = os.environ.get(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return value if value >= 1 else default
+
+    return ModelTopicReadinessConfig(
+        readiness_timeout_seconds=_float_env(
+            "ONEX_TOPIC_READINESS_TIMEOUT_SECONDS",
+            DEFAULT_READINESS_TIMEOUT_SECONDS,
+        ),
+        readiness_poll_interval_ms=_int_env(
+            "ONEX_TOPIC_READINESS_POLL_INTERVAL_MS",
+            DEFAULT_READINESS_POLL_INTERVAL_MS,
+        ),
+        max_attempts=_int_env(
+            "ONEX_TOPIC_READINESS_MAX_ATTEMPTS",
+            DEFAULT_READINESS_MAX_ATTEMPTS,
+        ),
+        max_concurrent_contract_attach=_int_env(
+            "ONEX_MAX_CONCURRENT_CONTRACT_ATTACH",
+            DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+        ),
+    )
 
 
 def _build_runtime_handler_dependencies(
@@ -849,6 +914,58 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # 1d. Load overlay config for feature gating (OMN-12634).
+        # Resolves the operator's overlay YAML into a flat key-value dict that is
+        # passed to domain plugins via ModelDomainPluginConfig.overlay_config.
+        # Plugins (e.g. PluginDlq) read their activation flags from this dict
+        # instead of env vars.  Gracefully absent: if the overlay file is not
+        # present the kernel continues without it and plugins that require an
+        # overlay will skip activation silently.
+        _boot_overlay_config: dict[str, str] | None = None
+        try:
+            from pathlib import Path as _Path
+
+            from omnibase_infra.runtime.overlay.boot_overlay import (
+                load_overlay_config as _load_overlay_config,
+            )
+            from omnibase_infra.runtime.overlay.errors import (
+                OverlayNotFoundError as _OverlayNotFoundError,
+            )
+
+            _overlay_path = _Path.home() / ".omnibase" / "overlay.yaml"
+            _overlay_result = _load_overlay_config(
+                overlay_path=_overlay_path,
+                contracts_dir=contracts_dir,
+                require_overlay=False,
+            )
+            if _overlay_result is not None:
+                _boot_overlay_config = dict(_overlay_result.resolved)
+                logger.info(
+                    "Overlay config loaded from %s (%d keys) (correlation_id=%s)",
+                    _overlay_path,
+                    len(_boot_overlay_config),
+                    correlation_id,
+                )
+            else:
+                logger.debug(
+                    "Overlay file absent — running without overlay config "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
+        except _OverlayNotFoundError:
+            logger.debug(
+                "Overlay file not found — running without overlay config "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — graceful degradation; overlay is optional
+            logger.warning(
+                "Failed to load overlay config, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # 2. Load runtime configuration (may raise ProtocolConfigurationError)
         # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
@@ -1105,7 +1222,15 @@ async def bootstrap() -> int:
             },
         )
 
-        # 3.5. Provision platform topics (best-effort, never blocks startup)
+        # 3.5. Provision platform topics.
+        # OMN-13237: the universe pass below is DEMOTED to a best-effort warm of
+        # cross-producer topics — it is no longer load-bearing for THIS runtime's
+        # consumers. The per-contract confirm in Phase B (provision -> ready ->
+        # attach) is the authority that gates consumer attach. The universe warm
+        # can be disabled (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the
+        # per-contract confirm carries all owned consumers (W2 evidence). The
+        # provisioner instance is reused by the Phase B interleave.
+        topic_provisioner: object | None = None
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -1148,27 +1273,41 @@ async def bootstrap() -> int:
                     skill_manifests_root=_skill_manifests_root,
                     skill_manifests_roots=_extra_manifest_roots,
                 )
-                provisioning_result = (
-                    await topic_provisioner.ensure_provisioned_topics_exist(
-                        correlation_id=correlation_id,
+                # OMN-13237: universe warm is best-effort and demoted; the
+                # per-contract confirm (Phase B) gates consumer attach.
+                _universe_warm_enabled = (
+                    os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
+                )
+                if not _universe_warm_enabled:
+                    logger.info(
+                        "Topic provisioning: universe warm DISABLED "
+                        "(ONEX_BOOT_UNIVERSE_PROVISION=0); per-contract confirm "
+                        "is the sole authority (OMN-13237) (correlation_id=%s)",
+                        correlation_id,
                     )
-                )
-                log_level = (
-                    logging.WARNING
-                    if provisioning_result["status"] != "success"
-                    else logging.INFO
-                )
-                logger.log(
-                    log_level,
-                    "Topic provisioning: status=%s created=%d existing=%d failed=%d "
-                    "failed_topics=%s (correlation_id=%s)",
-                    provisioning_result["status"],
-                    len(provisioning_result["created"]),
-                    len(provisioning_result["existing"]),
-                    len(provisioning_result["failed"]),
-                    provisioning_result["failed"] or "none",
-                    correlation_id,
-                )
+                else:
+                    provisioning_result = (
+                        await topic_provisioner.ensure_provisioned_topics_exist(
+                            correlation_id=correlation_id,
+                        )
+                    )
+                    log_level = (
+                        logging.WARNING
+                        if provisioning_result["status"] != "success"
+                        else logging.INFO
+                    )
+                    logger.log(
+                        log_level,
+                        "Topic provisioning (best-effort warm): status=%s "
+                        "created=%d existing=%d failed=%d failed_topics=%s "
+                        "(correlation_id=%s)",
+                        provisioning_result["status"],
+                        len(provisioning_result["created"]),
+                        len(provisioning_result["existing"]),
+                        len(provisioning_result["failed"]),
+                        provisioning_result["failed"] or "none",
+                        correlation_id,
+                    )
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic provisioning failed (best-effort, non-blocking) "
@@ -1487,28 +1626,14 @@ async def bootstrap() -> int:
                     ServiceSavingsEstimator,
                     decode_event_message,
                 )
-                from omnibase_infra.topics import topic_keys
-                from omnibase_infra.topics.service_topic_registry import (
-                    ServiceTopicRegistry,
-                )
 
                 _savings_config = ConfigSavingsEstimation()
                 _savings_estimator = ServiceSavingsEstimator(
                     config=_savings_config,
                 )
-                _savings_topic = ServiceTopicRegistry.from_defaults().resolve(
-                    topic_keys.SAVINGS_ESTIMATED
-                )
+                _savings_topic = _savings_config.produce_topic
 
-                # Subscribe to input topics (resolved via topic registry)
-                _savings_registry = ServiceTopicRegistry.from_defaults()
-                _savings_input_topics = [
-                    _savings_registry.resolve(topic_keys.LLM_CALL_COMPLETED),
-                    _savings_registry.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
-                    _savings_registry.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
-                    _savings_registry.resolve(topic_keys.VALIDATOR_CATCH),
-                    _savings_registry.resolve(topic_keys.PATTERN_ENFORCEMENT),
-                ]
+                _savings_input_topics = list(_savings_config.consumed_topics)
 
                 async def _savings_consumer_loop() -> None:
                     """Consume input events and produce savings estimates."""
@@ -1771,26 +1896,45 @@ async def bootstrap() -> int:
         # takes ~12 minutes. If Intelligence goes first, later plugins never
         # get their consumers started before the runtime is restarted or killed.
 
-        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
-        # Imported lazily here (not at module scope) so a missing/unavailable
-        # omnimarket dependency degrades gracefully instead of crashing kernel
-        # startup, and to avoid a module-load circular import.
-        try:
-            from omnimarket.nodes.node_delegation_orchestrator.plugin import (
-                PluginDelegation,
-            )
+        # Try to load and register PluginDelegation via entry-point discovery
+        # (graceful degradation - OMN-13690). omnimarket is optional and can be
+        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
+        # Discovery via "onex.domain_plugins" avoids a direct infra-to-omnimarket
+        # import which violates the compat→core→spi→infra layering rule.
+        if is_runtime_package_active("omnimarket"):
+            try:
+                from importlib.metadata import entry_points
 
-            plugin_registry.register(PluginDelegation())
+                delegation_eps = [
+                    e
+                    for e in entry_points(group="onex.domain_plugins")
+                    if e.name == "delegation"
+                ]
+                if delegation_eps:
+                    PluginDelegation = delegation_eps[0].load()
+                    plugin_registry.register(PluginDelegation())
+                    logger.info(
+                        "PluginDelegation registered (correlation_id=%s)",
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "omnimarket not installed, delegation plugin not available "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "PluginDelegation failed to initialize, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+        else:
             logger.info(
-                "PluginDelegation registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDelegation failed to initialize, continuing without it "
+                "PluginDelegation skipped by active runtime package filter "
                 "(correlation_id=%s)",
                 correlation_id,
-                exc_info=True,
             )
 
         # Try to register PluginLlm (OMN-6600: LLM domain plugin).
@@ -1990,6 +2134,7 @@ async def bootstrap() -> int:
             node_identity=plugin_node_identity,
             kafka_bootstrap_servers=kafka_bootstrap_servers,
             runtime_profile=kernel_profile.name,
+            overlay_config=_boot_overlay_config,
         )
 
         # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)
@@ -2462,6 +2607,63 @@ async def bootstrap() -> int:
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
 
+                # OMN-12409: Wire result appliers for all manifest contracts that
+                # declare published_events but are not yet in auto_wiring_result_appliers.
+                #
+                # ORCHESTRATOR contracts were already registered above (build_loop,
+                # delegate_skill, registration).  EFFECT/REDUCER/COMPUTE contracts that
+                # return a model destined for a declared topic would have their handler
+                # output silently dropped without an applier.  Scan every contract in the
+                # filtered manifest; for each one with a non-empty published_events map
+                # that has not been explicitly registered, build a DispatchResultApplier
+                # from the contract's own discovered contract_path — this resolves the
+                # actual package-installed YAML, not a guessed path.
+                if event_bus is not None:
+                    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                        _contract_declares_db_io,
+                    )
+                    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                        load_published_events_map,
+                    )
+                    from omnibase_infra.runtime.service_dispatch_result_applier import (
+                        DispatchResultApplier,
+                    )
+
+                    for _contract in filtered_manifest.contracts:
+                        if _contract.name in auto_wiring_result_appliers:
+                            # Explicit registration takes precedence.
+                            continue
+                        if (
+                            _contract.event_bus is None
+                            or not _contract.event_bus.publish_topics
+                        ):
+                            continue
+                        if _contract_declares_db_io(_contract):
+                            continue
+                        _pe_map = load_published_events_map(
+                            Path(_contract.contract_path),
+                            logger,
+                        )
+                        if not _pe_map:
+                            continue
+                        _topics = tuple(_contract.event_bus.publish_topics)
+                        auto_wiring_result_appliers[_contract.name] = (
+                            DispatchResultApplier(
+                                event_bus=event_bus,
+                                output_topic=_topics[0],
+                                output_topic_map=_pe_map,
+                                allowed_output_topics=_topics,
+                            )
+                        )
+                        logger.info(
+                            "Auto-wiring result applier registered from published_events "
+                            "(contract=%s, node_type=%s, topics=%s, correlation_id=%s)",
+                            _contract.name,
+                            _contract.node_type,
+                            _topics,
+                            correlation_id,
+                        )
+
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
@@ -2586,6 +2788,23 @@ async def bootstrap() -> int:
             auto_wiring_report is not None
             and auto_wiring_manifest_for_subscriptions is not None
         ):
+            # OMN-13237: interleave provision -> confirm-ready -> attach per
+            # wired contract by passing the runtime provisioner. A not-ready
+            # contract is recorded and SKIPPED for attach; it never recycles the
+            # process. The aggregate tri-state is logged for operator visibility.
+            from typing import cast as _cast
+
+            from omnibase_infra.event_bus.model_contract_attach_result import (
+                ModelContractAttachResult,
+            )
+            from omnibase_infra.event_bus.model_runtime_attach_readiness import (
+                ModelRuntimeAttachReadiness,
+            )
+            from omnibase_infra.protocols.protocol_topic_provisioner import (
+                ProtocolTopicProvisioner,
+            )
+
+            _attach_results: list[ModelContractAttachResult] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -2593,6 +2812,20 @@ async def bootstrap() -> int:
                 event_bus=event_bus,
                 environment=environment,
                 result_appliers_by_contract=auto_wiring_result_appliers,
+                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
+                readiness_config=resolve_topic_readiness_config(),
+                attach_results_out=_attach_results,
+            )
+            _attach_readiness = ModelRuntimeAttachReadiness.from_results(
+                tuple(_attach_results)
+            )
+            logger.info(
+                "Per-contract boot interleave: state=%s attached=%d/%d "
+                "(OMN-13237) (correlation_id=%s)",
+                _attach_readiness.state.value,
+                _attach_readiness.attached_contracts,
+                _attach_readiness.required_contracts,
+                correlation_id,
             )
             for contract_name, topics in auto_wired_subscriptions.items():
                 for topic in topics:

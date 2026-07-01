@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -124,7 +125,7 @@ async def test_asyncio_run_message_quarantines_handler() -> None:
     container.get_service = MagicMock(side_effect=RuntimeError(_ASYNCIO_RUN_MSG))
     container.get_service_async = AsyncMock(side_effect=RuntimeError(_ASYNCIO_RUN_MSG))
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
     dispatch_engine = _make_dispatch_engine()
 
@@ -174,7 +175,7 @@ async def test_runner_run_message_quarantines_handler() -> None:
     container.get_service = MagicMock(side_effect=RuntimeError(_RUNNER_RUN_MSG))
     container.get_service_async = AsyncMock(side_effect=RuntimeError(_RUNNER_RUN_MSG))
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
     dispatch_engine = _make_dispatch_engine()
 
@@ -239,7 +240,7 @@ async def test_mixed_contract_wires_good_quarantines_bad() -> None:
     container.get_service = MagicMock(side_effect=_get_service)
     container.get_service_async = AsyncMock(side_effect=_get_service_async)
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
     dispatch_engine = _make_dispatch_engine()
 
@@ -313,7 +314,7 @@ async def test_all_quarantined_contract_reports_skipped() -> None:
     container.get_service = MagicMock(side_effect=RuntimeError(_ASYNCIO_RUN_MSG))
     container.get_service_async = AsyncMock(side_effect=_get_service_async)
 
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock()
     dispatch_engine = _make_dispatch_engine()
 

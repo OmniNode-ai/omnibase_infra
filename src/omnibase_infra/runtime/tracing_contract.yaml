@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Runtime observability (OTEL tracing) endpoint descriptor.
+#
+# OMN-13558 Wave-1 endpoint→overlay migration. The OTLP exporter endpoint the
+# ONEX kernel ships spans to is contract-declared here via the ${env.VAR}
+# overlay convention rather than read directly from os.environ in
+# runtime/tracing.py. An operator overlay / the per-lane `tracing` bundle env
+# supplies the real endpoint per lane (e.g. http://phoenix:6006). Resolution
+# goes through the overlay package's expand_contract_env_refs — the one
+# sanctioned env-reading boundary.
+#
+# Tracing is opt-in by design (OMN-3811): an unset endpoint resolves to the
+# empty string and the kernel skips tracing entirely. The descriptor therefore
+# uses an empty inline default (`${env.OTEL_EXPORTER_OTLP_ENDPOINT:}`) and does
+# NOT fail closed on absence — absence is a valid "tracing disabled" state, not
+# a misconfigured deploy.
+name: runtime_observability_tracing
+descriptor:
+  # OTLP HTTP endpoint the kernel exports spans to. Empty => tracing disabled.
+  otel_exporter_otlp_endpoint: "${env.OTEL_EXPORTER_OTLP_ENDPOINT:}"

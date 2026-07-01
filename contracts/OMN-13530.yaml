@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13530"
+title: "Add 'operation' to operation_match handler contracts + wire enforcement gate"
+summary: >
+  omnibase_core 0.46.0 hardened RuntimeLocal._validate_routing to require a non-empty 'operation' field on every handler_routing entry whose routing_strategy is operation_match (or absent, which defaults into the same branch). Contracts missing it fail closed at startup with 'handlers[i].operation is missing' / result=failed. This adds the field to the affected omnibase_infra node contracts and wires the canonical omnibase_core validator (operation_match_requires_operation) as a pre-commit hook and a required CI step against src/omnibase_infra. Operation values are the canonical dotted forms each handler entry already declares in supported_operations (the value producers emit on envelope.operation and the handler accepts) — not arbitrary snake_case; node_auth_gate_compute's handler hard-checks operation == 'auth_gate.evaluate'. Re-pins ombase_core to the validator-bearing branch SHA. No migration, schema, endpoint, or env-for-model change.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-gate-green"
+    description: >
+      The operation_match operation-field validator passes against src/omnibase_infra: every operation_match (and absent-strategy) handler entry declares a non-empty operation. Exit 0 means no contract can fail closed at RuntimeLocal startup with 'handlers[i].operation is missing'.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra"
+  - id: "dod-operation-matches-supported"
+    description: >
+      Every fixed handler entry's operation equals its declared supported_operations[0] (the canonical dotted op routed on and accepted by the handler). Verified for node_rrh_emit_effect (rrh.collect.*), node_rrh_storage_effect (rrh.storage.write), node_rrh_validate_compute (rrh.validate), node_build_loop_projection_compute (build_loop.project), node_ledger_projection_compute (ledger.project), node_validation_ledger_projection_compute (validation_ledger.project), node_auth_gate_compute (auth_gate.evaluate == EXPECTED_OPERATION).
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra"
+  - id: "dod-tests"
+    description: >
+      Targeted node tests for every touched node pass (auth_gate, rrh_*, ledger_projection, build_loop_projection, validation_ledger, registration_storage, architecture_validator): 721 passed, 0 failed.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/ -q -m 'not kafka and not consul and not postgres' -k 'auth_gate or rrh or ledger_projection or build_loop_projection or validation_ledger or registration_storage or architecture_validator'"
+  - id: "dod-deploy"
+    description: >
+      Deploy-gate evidence: static contract + gate change. Adds the 'operation' field to node contracts and wires a pre-commit + CI validator; re-pins omnibase_core. No live deploy, runtime process, broker topic, or schema migration required before merge. The runtime picks up the corrected operation routing on the next gated dev-lane redeploy. No prod/stability/judge mutation.
+
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "printf 'deploy gate: static contract + validator gate; no prod mutation; routing corrected on next gated dev redeploy'"

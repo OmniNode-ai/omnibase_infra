@@ -67,7 +67,8 @@ output_model:
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
-    - handler_type: "validation_ledger_projection"
+    - operation: validation_ledger.project
+      handler_type: "validation_ledger_projection"
       handler:
         name: "HandlerValidationLedgerProjection"
         module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"

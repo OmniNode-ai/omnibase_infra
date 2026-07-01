@@ -31,12 +31,12 @@ def _routing_entry(operation: str) -> ModelHandlerRoutingEntry:
 def test_operation_keyed_wiring_keeps_shared_handler_routes_distinct() -> None:
     topic = "onex.cmd.omnimarket.model-route.v1"
     gemini_key = _derive_handler_entry_key(_routing_entry("inference.gemini-cli"))
-    codex_key = _derive_handler_entry_key(_routing_entry("inference.codex-cli"))
+    opencode_key = _derive_handler_entry_key(_routing_entry("inference.opencode-cli"))
 
-    assert gemini_key != codex_key
+    assert gemini_key != opencode_key
     assert _derive_dispatcher_id("node_model_router", gemini_key) != (
-        _derive_dispatcher_id("node_model_router", codex_key)
+        _derive_dispatcher_id("node_model_router", opencode_key)
     )
     assert _derive_route_id("node_model_router", gemini_key, topic) != (
-        _derive_route_id("node_model_router", codex_key, topic)
+        _derive_route_id("node_model_router", opencode_key, topic)
     )

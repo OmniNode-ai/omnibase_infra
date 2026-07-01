@@ -21,6 +21,7 @@ from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.models.resilience.model_circuit_breaker_state_event import (
     ModelCircuitBreakerStateEvent,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.service_circuit_breaker_event_publisher import (
     CircuitBreakerEventPublisher,
 )
@@ -32,7 +33,7 @@ class TestCircuitBreakerEventPublisher:
     """Tests for CircuitBreakerEventPublisher."""
 
     def _make_publisher(self) -> tuple[CircuitBreakerEventPublisher, AsyncMock]:
-        mock_bus = MagicMock()
+        mock_bus = MagicMock(spec=ProtocolEventBusLike)
         mock_bus.publish_envelope = AsyncMock()
         publisher = CircuitBreakerEventPublisher(event_bus=mock_bus)
         return publisher, mock_bus.publish_envelope
@@ -94,7 +95,7 @@ class TestCircuitBreakerEventPublisher:
     @pytest.mark.asyncio
     async def test_bus_error_is_swallowed(self) -> None:
         """A publish error must not propagate — circuit breaker must remain functional."""
-        mock_bus = MagicMock()
+        mock_bus = MagicMock(spec=ProtocolEventBusLike)
         mock_bus.publish_envelope = AsyncMock(side_effect=RuntimeError("bus down"))
         publisher = CircuitBreakerEventPublisher(event_bus=mock_bus)
 

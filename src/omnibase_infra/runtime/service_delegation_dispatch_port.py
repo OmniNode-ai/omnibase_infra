@@ -12,6 +12,7 @@ from uuid import UUID
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
@@ -54,11 +55,23 @@ def _has_delegation_terminal_interface(route: ModelRuntimeLocalIngressRoute) -> 
 def _select_delegation_route(
     routes: Mapping[str, ModelRuntimeLocalIngressRoute],
 ) -> ModelSelectedDelegationRoute:
-    """Select the single route with the delegation terminal interface."""
+    """Resolve the omnimarket-backed delegation route, fail-closed otherwise.
+
+    Delegation has exactly one real engine: the omnimarket
+    ``node_delegation_orchestrator`` (routing -> inference -> quality-gate ->
+    escalation FSM). The empty omnibase_infra shell was deleted in OMN-13547
+    (OMN-12525 — no duplicate orchestrators; nodes live in omnimarket), so this
+    resolver MUST bind the omnimarket package only. If no omnimarket route is
+    present the runtime fails closed with a typed ``InfraUnavailableError`` —
+    there is NO silent fallback to a local/infra route, because resolving a
+    non-omnimarket "delegation" surface would route to a dead handler.
+    """
 
     candidates: dict[str, tuple[str, ModelRuntimeLocalIngressRoute]] = {}
     for alias, route in routes.items():
         if route.contract_name != _DELEGATION_CONTRACT_NAME:
+            continue
+        if route.package_name != _PREFERRED_DELEGATION_PACKAGE:
             continue
         if alias != _DELEGATION_OPERATION_ALIAS and not alias.endswith(
             f".{_DELEGATION_CONTRACT_NAME}.{_DELEGATION_OPERATION_ALIAS}"
@@ -72,29 +85,20 @@ def _select_delegation_route(
         alias, route = next(iter(candidates.values()))
         return ModelSelectedDelegationRoute(alias=alias, route=route)
 
-    preferred = [
-        candidate
-        for candidate in candidates.values()
-        if candidate[1].package_name == _PREFERRED_DELEGATION_PACKAGE
-    ]
-    if len(preferred) == 1:
-        alias, route = preferred[0]
-        return ModelSelectedDelegationRoute(alias=alias, route=route)
-
-    fallback_route = routes.get(_DELEGATION_OPERATION_ALIAS)
-    if (
-        not candidates
-        and fallback_route is not None
-        and _has_delegation_terminal_interface(fallback_route)
-    ):
-        return ModelSelectedDelegationRoute(
-            alias=_DELEGATION_OPERATION_ALIAS,
-            route=fallback_route,
+    if len(candidates) > 1:
+        raise InfraUnavailableError(
+            "Ambiguous delegation dispatch: multiple omnimarket "
+            f"'{_DELEGATION_CONTRACT_NAME}' routes expose the "
+            f"'{_DELEGATION_OPERATION_ALIAS}' interface "
+            f"({sorted(candidates)})"
         )
 
-    raise RuntimeError(
-        "Unable to resolve a single delegation dispatch route with success and "
-        "failure terminal events"
+    raise InfraUnavailableError(
+        "No omnimarket delegation engine resolved: the "
+        f"'{_PREFERRED_DELEGATION_PACKAGE}.{_DELEGATION_CONTRACT_NAME}' route "
+        f"with the '{_DELEGATION_OPERATION_ALIAS}' interface is not installed. "
+        "Delegation fails closed — there is no infra-local fallback engine "
+        "(OMN-13547 / OMN-12525)."
     )
 
 

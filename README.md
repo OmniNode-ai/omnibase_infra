@@ -62,8 +62,8 @@ CI support, and requires a clone.
 
 ### Local infrastructure lifecycle
 
-The repo ships a top-level `Makefile` with user-facing infra entrypoints
-(OMN-10377). All Docker/Compose/Keycloak orchestration lives here, never in
+The repo ships a top-level `Makefile` with user-facing infra entrypoints.
+All Docker/Compose/Keycloak orchestration lives here, never in
 the public `omnibase` shell.
 
 ```bash

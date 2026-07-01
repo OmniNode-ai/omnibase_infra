@@ -43,6 +43,7 @@ _SKIP_REASON = (
     "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
     "Upgrade to omnibase_core >= 0.6.3 to run these tests."
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.service_kernel import (
     DEFAULT_GROUP_ID,
@@ -742,7 +743,7 @@ class TestBootstrap:
         # Clear any CI override that forces inmemory event bus
         monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
 
-        mock_bus_instance = MagicMock()
+        mock_bus_instance = MagicMock(spec=ProtocolEventBusLike)
         mock_bus_instance.start = AsyncMock()
         mock_bus_instance.close = AsyncMock()
         mock_bus_instance.subscribe = AsyncMock(return_value=AsyncMock())

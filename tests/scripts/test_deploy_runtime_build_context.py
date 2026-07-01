@@ -284,4 +284,8 @@ def test_stage_workspace_emits_build_sha_marker() -> None:
         DEPLOY_SCRIPT.parent / "runtime_build" / "stage_workspace.sh"
     ).read_text(encoding="utf-8")
 
-    assert 'git -C "${src}" rev-parse HEAD > "${dst}/.build-sha"' in stage_script
+    # OMN-13030 refactored the SHA capture to a variable (reused for the
+    # per-repo VCS provenance manifest), so assert the marker is still written
+    # from the resolved HEAD SHA.
+    assert 'git -C "${src}" rev-parse HEAD' in stage_script
+    assert 'echo "${vcs_ref}" > "${dst}/.build-sha"' in stage_script

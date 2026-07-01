@@ -323,7 +323,7 @@ class TestErrorSeverityBlocksStartup:
             config=make_runtime_config(),
         )
 
-        event_bus_start = AsyncMock()
+        event_bus_start = AsyncMock()  # transport-mock-ok: event_bus_start is a BootStep callable (Callable[[], Awaitable[None]]), not an event bus surface
         process._event_bus.start = event_bus_start
 
         with patch.object(process, "_get_handler_registry") as mock_get_registry:

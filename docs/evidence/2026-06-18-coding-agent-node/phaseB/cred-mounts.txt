@@ -1,0 +1,3 @@
+bind /data/omninode/omniclaude/plugins/onex/skills -> /app/skills mode=ro rw=false
+bind /home/jonah/.onex-agent-creds/codex-auth.json -> /home/omniinfra/.codex/auth.json mode=ro rw=false
+bind /home/jonah/.onex-agent-creds/.claude -> /home/omniinfra/.claude mode=ro rw=false

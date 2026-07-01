@@ -13,6 +13,14 @@ descriptor:
   node_archetype: effect
   purity: side_effecting
   idempotent: false
+  # Bolt endpoint URL for the graph handler (Memgraph/Neo4j) — OMN-13558 Wave-1
+  # endpoint→overlay migration. Declared with the ${env.VAR} overlay convention so
+  # an operator overlay / the per-lane service env supplies the real endpoint per
+  # lane; the handler resolves it via expand_contract_env_refs (the one sanctioned
+  # env boundary) and fails closed when GRAPH_BOLT_URI is unset — never a hardcoded
+  # bolt://localhost:7687 in source. Explicit connection_uri/bolt_uri config-dict
+  # keys still override this descriptor when supplied.
+  graph_bolt_uri: "${env.GRAPH_BOLT_URI}"
   timeout_ms: 30000
   retry_policy:
     enabled: true

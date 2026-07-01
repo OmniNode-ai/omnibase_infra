@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -28,6 +32,26 @@ class HandlerForwardOutbound:
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
+
+    async def handle(
+        self,
+        envelope: object,
+    ) -> ModelHandlerOutput[ModelGatewayEnvelope]:
+        """Dispatch entrypoint: extract gateway envelope, apply outbound transform, return compute output.
+
+        ``envelope`` is typed ``object`` because the runtime dispatcher delivers
+        either a ``ModelEventEnvelope`` instance or its serialized ``dict`` form
+        (OMN-13580); ``_coerce_dispatch_input`` normalizes both to the typed
+        envelope before reading ``.payload``.
+        """
+        gateway_envelope, envelope_id, correlation_id = _coerce_dispatch_input(envelope)
+        transformed = self.forward_outbound(gateway_envelope)
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=envelope_id,
+            correlation_id=correlation_id,
+            handler_id=type(self).__name__,
+            result=transformed,
+        )
 
     def forward_outbound(self, envelope: ModelGatewayEnvelope) -> ModelGatewayEnvelope:
         """Return an outbound envelope with a validated tenant wire topic."""
@@ -57,3 +81,29 @@ class HandlerForwardOutbound:
                 "HandlerForwardOutbound requires ModelGatewayForwarderConfig"
             )
         return self._config
+
+
+def _coerce_dispatch_input(
+    envelope: object,
+) -> tuple[ModelGatewayEnvelope, UUID, UUID]:
+    # OMN-13580: the runtime dispatcher delivers the OUTER envelope as a raw
+    # dict, not a ModelEventEnvelope instance. Deserialize to the typed envelope
+    # BEFORE reading ``.payload`` (matching the OMN-12001/12940 dict-vs-typed
+    # coercion pattern) so the handler does not crash with
+    # ``AttributeError: 'dict' object has no attribute 'payload'``.
+    typed_envelope = (
+        envelope
+        if isinstance(envelope, ModelEventEnvelope)
+        else ModelEventEnvelope[object].model_validate(envelope)
+    )
+    payload = typed_envelope.payload
+    gateway_envelope = (
+        payload
+        if isinstance(payload, ModelGatewayEnvelope)
+        else ModelGatewayEnvelope.model_validate(payload)
+    )
+    return (
+        gateway_envelope,
+        typed_envelope.envelope_id,
+        typed_envelope.correlation_id or gateway_envelope.correlation_id,
+    )

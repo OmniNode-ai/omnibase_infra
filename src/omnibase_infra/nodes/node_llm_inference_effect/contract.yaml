@@ -5,6 +5,17 @@
 # OMN-12816: additive extra_body passthrough — provider-specific request-body
 #   fields (e.g. chat_template_kwargs.enable_thinking) merged in _build_payload
 #   without overriding declared fields (2026-06-07)
+# OMN-13158: HandlerLlmCliSubprocess resolves OAuth/subscription CLI backends
+#   from request.model (claude-cli, gemini-cli, opencode-cli).
+# OMN-13215: the codex-cli shell-execution path was REMOVED. The delegation
+#   ceiling executes over the canonical HTTP inference path; no codex subprocess
+#   operation or backend remains.
+# OMN-13204: HandlerLlmOpenaiCompatible Protocol Conformance Note corrected to
+#   the real protocol I/O types — ProtocolHandler.execute(ModelProtocolRequest)
+#   -> ModelProtocolResponse and ProtocolMessageHandler.handle(ModelEventEnvelope)
+#   -> ModelHandlerOutput — replacing the deleted ModelOnexEnvelope reference
+#   (B5 residual of OMN-13196; deploy-gate runtime-path docstring edit, behavior
+#   unchanged). (2026-06-17)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -20,7 +31,7 @@ node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
   minor: 4
-  patch: 1
+  patch: 2
 node_version:
   major: 0
   minor: 1
@@ -76,12 +87,9 @@ handler_routing:
         name: "HandlerLlmCliSubprocess"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
       description: "Execute LLM inference via Gemini CLI subprocess (gemini -p)"
-    # Codex CLI Subprocess Handler
-    - operation: "inference.codex_cli"
-      handler:
-        name: "HandlerLlmCliSubprocess"
-        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
-      description: "Execute LLM inference via Codex CLI subprocess (codex exec)"
+    # OMN-13215: the Codex CLI subprocess operation (inference.codex_cli) was
+    # REMOVED. The delegation ceiling executes over the canonical HTTP inference
+    # path (HandlerLlmOpenaiCompatible) — no codex shell-out remains.
     # Claude CLI Subprocess Handler (OMN-10137)
     - operation: "inference.claude_cli"
       handler:
@@ -153,12 +161,27 @@ published_events:
   - topic: "onex.evt.omnibase-infra.inference-response.v1"
     event_type: "LlmInferenceResponse"
     description: "Content-bearing successful LLM inference response emitted directly from the effect node"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
   - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
     event_type: "LlmCallCompletedEvent"
     description: "Per-call metrics emitted after each inference call; may include gpu_seconds, gpu_type, gpu_count, and EnumUsageSource-backed compute_usage_source when the request declares GPU configuration"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
   - topic: "onex.evt.omnibase-infra.llm-call-completed.v1"
     event_type: "LlmCallCompletedInfraEvent"
     description: "Lightweight per-call metrics for infra-owned consumers; mirrors optional GPU usage evidence fields for infra projections"
+    topic_config:
+      partitions: 3
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
 # Dependencies
 dependencies:
   - name: "protocol_llm_http_transport"

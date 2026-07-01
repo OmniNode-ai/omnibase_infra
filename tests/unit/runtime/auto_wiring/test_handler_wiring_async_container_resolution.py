@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _async_resolve_from_container,
     wire_from_manifest,
@@ -106,7 +107,7 @@ def _make_dispatch_engine() -> MagicMock:
 
 
 def _make_event_bus() -> MagicMock:
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.subscribe = AsyncMock()
     return bus
 

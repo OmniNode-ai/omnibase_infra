@@ -1484,7 +1484,7 @@ class TestOrchestratorBusAccessVerification:
         # Create mock dependencies
         mock_container = MagicMock(spec=ModelONEXContainer)
         mock_query = MagicMock()
-        mock_bus = MagicMock()
+        mock_bus = MagicMock(spec=ProtocolEventBusLike)
         mock_projector = MagicMock()
 
         # Create emitter with container and event_bus

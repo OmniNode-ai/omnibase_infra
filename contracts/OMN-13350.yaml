@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-13350"
+title: "Vendor generation_events corpus migration + JSON-adapt unsuffixed JSONB list columns"
+summary: >
+  Infra half of the OMN-13350 SEA generation-completed projection data-loss fix. Vendors the omnimarket node migration 0015_generation_corpus_acceptance.sql into the forward-migration tree so a clean redeploy recreates the corpus columns, and widens the sync psycopg2 projection adapter (_build_sync_db_adapter) to JSON-adapt any list/dict bound to a JSONB column — not only _json/_jsonb-suffixed keys. corpus_errors is a JSONB list column whose name lacks that suffix; the prior adapter sent it to Postgres as a text ARRAY literal, the INSERT failed, and the projection consumer committed the offset anyway (silent drop).
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-tests"
+    description: "Adapter JSONB-adaptation + node migration discovery tests pass."
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py tests/unit/migrations/test_node_migration_discovery.py -q"
+  - id: "dod-vendor-sync"
+    description: "Vendored node migration tree matches the omnimarket source (drift --check passes)."
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
+  - id: "dod-deploy"
+    description: >
+      Migration vendored only; live apply to stability-test/prod is user-gated and performed by the forward-migration runner on the next deploy. No docker exec or rpk topic produce performed in this PR.
+
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: "printf '%s\\n' 'deploy gate: generation_events corpus migration vendored; live apply is user-gated forward-migration run'"

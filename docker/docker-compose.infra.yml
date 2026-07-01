@@ -55,7 +55,7 @@
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
 #     - Redpanda: 19092 (internal 9092) [always-on]
-#     - Infisical: 8880 (internal 8080) [secrets profile]
+#     - Infisical: 8881 (internal 8080) [secrets profile] (OMN-13417: dev-lane port; stability lane uses 8880)
 #     - Keycloak: 28080 (internal 8080) [default — OMN-10089]
 #   Runtime:
 #     - omninode-runtime: 8085 [runtime profile]
@@ -141,6 +141,15 @@ x-runtime-env: &runtime-env
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
+  # OMN-13220: per-consumer Kafka consumer-start budget. On a fully-cold lane the
+  # kernel joins a consumer group per subscribed topic; with 1300+ topics on a
+  # freshly-provisioned broker the default 30s blew on the slow group-coordinator
+  # tail and the kernel recycled before reaching healthy. deploy-runtime.sh
+  # exports a raised COLD_START_KAFKA_TIMEOUT_SECONDS before the restart; the
+  # :-30 default preserves the prior steady-state value when the var is unset
+  # (e.g. a plain `docker compose up` outside the deploy script). Mapped to
+  # ModelKafkaEventBusConfig.timeout_seconds (le=300) via apply_environment_overrides.
+  KAFKA_TIMEOUT_SECONDS: ${KAFKA_TIMEOUT_SECONDS:-30}
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_STATE_ROOT: /app/data/.onex_state
@@ -359,6 +368,11 @@ services:
       # OMN-7302: raise partition cap from default 1000 to 7000 to prevent
       # "Not enough resources" failures when topic count × partitions exceeds
       # the per-shard limit.
+      # NOTE: --set is a node-startup flag that may not persist to cluster config
+      # on a fresh volume. The primary reset-proof mechanism is .bootstrap.yaml
+      # (mounted below). The redpanda-partition-cap init service also applies the
+      # value via rpk cluster config set post-startup. All three layers agree on
+      # 7000. (OMN-13469)
       - --set topic_partitions_per_shard=7000
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
@@ -370,6 +384,12 @@ services:
       - "${REDPANDA_ADMIN_PORT:-9644}:9644"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
+      # OMN-13469: .bootstrap.yaml is the volume-reset-proof primary mechanism.
+      # Redpanda reads this file on first cluster formation (fresh volume) and
+      # applies the config before any topics are created. This is belt #1;
+      # the --set flag above is belt #2; the redpanda-partition-cap init service
+      # is belt #3. Do NOT apply to prod/stability/judge (follow-up: OMN-13469).
+      - ./redpanda/.bootstrap.yaml:/etc/redpanda/.bootstrap.yaml:ro
     networks:
       - omnibase-infra-network
     healthcheck:
@@ -520,10 +540,15 @@ services:
       # Development defaults are provided in docker/.env.example.
       ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY must be set in .env}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET must be set in .env}
-      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8881}
       TELEMETRY_ENABLED: "false"
     ports:
-      - "${INFISICAL_EXTERNAL_PORT:-8880}:8080"
+      # OMN-13417: dev lane infisical defaults to host port 8881 so a cold dev
+      # `docker compose up` no longer collides with the stability-test lane
+      # infisical (omnibase-infra-infisical-stability), which binds host 8880.
+      # The two lanes are separate compose projects on the same host; sharing the
+      # 8880 default made dev `up` exit rc=1 once stability was already running.
+      - "${INFISICAL_EXTERNAL_PORT:-8881}:8080"
     networks:
       - omnibase-infra-network
     healthcheck:
@@ -817,6 +842,21 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       KAFKA_INSTANCE_ID: runtime-effects
+      # OMN-13247 (epic OMN-13245): coding-agent runtime env. These are
+      # effects-only (the four coding-agent nodes run in runtime_profiles:
+      # [effects]) so they live on this service, not the shared x-runtime-env
+      # anchor. Both are container-internal paths (never secrets); they were
+      # patched live on dev for the e2e proof and are committed here so the lane
+      # is reproducible.
+      #   - CODING_AGENT_CRED_HOME: claude/codex read AMBIENT OAuth from $HOME, but
+      #     the runtime container runs as root (HOME=/root) while the creds are
+      #     bind-mounted under /home/omniinfra; the invoke EFFECT overrides the
+      #     child env with HOME=$CODING_AGENT_CRED_HOME (CODEX_HOME=$.../.codex).
+      #   - ONEX_CODING_AGENT_WORKSPACE_ROOT: the orchestrator resolves its
+      #     contract descriptor.allowed_workspace_roots from ${env.…} and FAILS
+      #     CLOSED if unset (no unscoped workspace is ever permitted).
+      CODING_AGENT_CRED_HOME: /home/omniinfra
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
@@ -838,6 +878,37 @@ services:
       # runtime that makes the outbound provider call). Operator-supplied host
       # token file bound read-only; token VALUE never in committed config.
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
+      # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
+      # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
+      # AMBIENT OAuth from ~/.codex and ~/.claude — no ANTHROPIC_API_KEY / *_MODEL /
+      # endpoint env. Credential VALUES are NEVER baked into the image and NEVER
+      # committed; operator-supplied host directories bound read-only.
+      #
+      # DEV credential source (Phase 0, OMN-13246 / omni_home PR #182): a fresh
+      # Linux login INSIDE the .201 container produced portable on-disk creds —
+      # /home/omniinfra/.codex (auth.json, ChatGPT OAuth + refresh token) and
+      # /home/omniinfra/.claude (.credentials.json, claude.ai OAuth + refresh
+      # token). Claude Code 2.x on macOS stores its credential in the Keychain,
+      # so there is NO ~/.claude/auth.json on the Mac to copy — the Linux login
+      # is the source. The operator copies both dirs to a stable host path on
+      # .201 (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude}) and sets
+      # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR.
+      #
+      # Default /dev/null keeps lanes without creds configured startable (the
+      # CLIs have no ambient auth and fail closed on invocation, never at boot).
+      #
+      # codex: mount the credential FILE (auth.json) read-only, NOT the whole
+      # ~/.codex dir. codex 0.141.0 writes app-server / session state into
+      # CODEX_HOME (~/.codex) at runtime, so a fully read-only dir mount makes
+      # `codex exec` fail with "Read-only file system" even though the creds are
+      # valid (verified in-container 2026-06-18). Binding only auth.json :ro keeps
+      # the credential VALUE read-only (cannot be overwritten/exfiltrated) while
+      # leaving the rest of ~/.codex on the container's writable layer.
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+      # claude: the whole ~/.claude dir read-only works (claude reads
+      # .credentials.json for ambient OAuth and does not require write access to
+      # that dir for `claude -p`; verified in-container 2026-06-18).
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -1119,7 +1190,7 @@ services:
   # service_completed_successfully so it will not start if migration fails.
   intelligence-migration:
     image: postgres:16-alpine
-    container_name: omnibase-intelligence-migration
+    container_name: omnibase-infra-intelligence-migration
     profiles: ["runtime", "full"]
     depends_on:
       postgres:

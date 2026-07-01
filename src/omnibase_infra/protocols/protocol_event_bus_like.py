@@ -129,5 +129,9 @@ class ProtocolEventBusLike(Protocol):
         """
         ...
 
+    def get_consumer_groups(self) -> dict[tuple[str, str], str]:
+        """Return active topic/group keys mapped to effective consumer group IDs."""
+        ...
+
 
 __all__: list[str] = ["ProtocolEventBusLike"]

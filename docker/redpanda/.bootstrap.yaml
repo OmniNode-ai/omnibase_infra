@@ -1,0 +1,14 @@
+# OMN-13469: Redpanda cluster bootstrap configuration.
+# Mounted read-only into the redpanda container at /etc/redpanda/.bootstrap.yaml.
+# Redpanda reads this file on FIRST cluster formation (fresh volume) and applies
+# these values before any topics are created — making the partition cap
+# volume-reset-proof.
+#
+# Belt-and-suspenders:
+#   Primary (reset-proof):  this file (applied on fresh volume / first boot)
+#   Secondary (warm restart): --set flag in compose command
+#   Tertiary (post-start):   redpanda-partition-cap init service (rpk cluster config set)
+#
+# All three layers must agree. Edit all three if the target value changes.
+topic_partitions_per_shard: 7000
+topic_memory_per_partition: 1048576

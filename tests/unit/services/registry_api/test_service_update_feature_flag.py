@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from aiokafka import AIOKafkaProducer
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -96,7 +97,7 @@ class TestUpdateFeatureFlag:
     async def test_toggle_returns_persisted_and_emitted(self) -> None:
         """Mock Infisical success + Kafka success -> persisted_and_emitted."""
         service = _make_service_with_flag()
-        kafka_producer = AsyncMock()
+        kafka_producer = AsyncMock(spec=AIOKafkaProducer)
         kafka_producer.send = AsyncMock()
 
         with patch.dict(
@@ -143,7 +144,7 @@ class TestUpdateFeatureFlag:
     async def test_toggle_kafka_failure_returns_persisted_emit_failed(self) -> None:
         """Infisical configured + Kafka send fails -> persisted_emit_failed."""
         service = _make_service_with_flag()
-        kafka_producer = AsyncMock()
+        kafka_producer = AsyncMock(spec=AIOKafkaProducer)
         kafka_producer.send = AsyncMock(side_effect=RuntimeError("Kafka down"))
 
         with patch.dict(

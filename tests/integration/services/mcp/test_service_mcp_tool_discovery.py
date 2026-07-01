@@ -362,3 +362,49 @@ class TestProjectionToTool:
 
         assert tool is not None
         assert "ONEX orchestrator" in tool.description
+
+
+@pytest.mark.integration
+class TestMCPWrapperOrchestratorSatisfiesGate:
+    """OMN-12841: the generated COMPUTE wrapper orchestrator satisfies the gate.
+
+    Option B (contract-native) wraps a generated COMPUTE node behind a thin
+    declarative ORCHESTRATOR surface. The orchestrator-only discovery gate
+    (``service_mcp_tool_discovery.py:197-212``) is NOT relaxed; instead the
+    wrapper-shaped projection is an ORCHESTRATOR (``node_type`` starts with
+    ``orchestrator``) carrying ``mcp.expose=True`` + a ``tool_name``, so it
+    passes the unchanged gate. A bare COMPUTE projection still returns ``None``,
+    proving the rule is preserved (Option A -- relaxing the gate -- was rejected).
+    """
+
+    def test_wrapper_orchestrator_projection_converts_to_tool(self) -> None:
+        """A wrapper-shaped orchestrator projection yields a tool definition."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="node_sentiment_classifier",
+            description="Classify customer review sentiment.",
+        )
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
+
+        tool = svc._projection_to_tool(proj, uuid4())
+
+        assert tool is not None
+        assert tool.name == "node_sentiment_classifier"
+        assert tool.description == "Classify customer review sentiment."
+
+    def test_bare_compute_projection_returns_none(self) -> None:
+        """A bare COMPUTE projection is NOT exposed (gate unchanged)."""
+        proj = _make_projection(
+            node_type="compute_generic",
+            mcp_expose=True,
+            tool_name="node_sentiment_classifier",
+            description="Classify customer review sentiment.",
+        )
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
+
+        tool = svc._projection_to_tool(proj, uuid4())
+
+        assert tool is None

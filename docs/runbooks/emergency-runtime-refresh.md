@@ -9,7 +9,7 @@ runtime containers need a surgical rebuild that **must not touch core infra**
 
 Use this procedure when any of the following is true:
 
-- The deploy-agent on `.201` is unavailable or wedged.
+- The deploy-agent on the runtime host is unavailable or wedged.
 - The runtime containers must be rebuilt urgently and there is no
   corresponding change to core infra.
 - A prior runtime rebuild took core infra offline and the
@@ -32,7 +32,7 @@ where the deploy-agent is not in the loop.
 
 ## Procedure
 
-Run on the host owning the compose project (currently `.201`):
+Run on the host owning the compose project (the runtime host):
 
 ```bash
 cd /data/omninode/omnibase_infra

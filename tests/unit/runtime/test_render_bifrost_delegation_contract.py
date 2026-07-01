@@ -30,14 +30,14 @@ def _base_http_url(authority: str) -> str:
 def _backend(
     *,
     backend_id: str,
-    base_url_env: str,
+    endpoint_url_env: str,
     model_name: str,
     capabilities: list[str],
     required: bool = False,
 ) -> dict[str, object]:
     return {
         "backend_id": backend_id,
-        "base_url_env": base_url_env,
+        "endpoint_url_env": endpoint_url_env,
         "required": required,
         "endpoint_url": "",
         "model_name": model_name,
@@ -99,7 +99,7 @@ def _source_contract(path: Path, *, required: bool = False) -> Path:
             [
                 _backend(
                     backend_id="local-qwen-coder-30b",
-                    base_url_env="LLM_CODER_URL",
+                    endpoint_url_env="LLM_CODER_URL",
                     required=required,
                     model_name="qwen-test",
                     capabilities=["code_generation"],
@@ -116,14 +116,14 @@ def _source_contract_with_optional_backend(path: Path) -> Path:
             [
                 _backend(
                     backend_id="local-qwen-coder-30b",
-                    base_url_env="LLM_CODER_URL",
+                    endpoint_url_env="LLM_CODER_URL",
                     required=True,
                     model_name="qwen-test",
                     capabilities=["code_generation"],
                 ),
                 _backend(
                     backend_id="local-deepseek-r1-14b",
-                    base_url_env="LLM_DEEPSEEK_R1_URL",
+                    endpoint_url_env="LLM_DEEPSEEK_R1_URL",
                     model_name="deepseek-test",
                     capabilities=["research"],
                 ),
@@ -218,7 +218,7 @@ def test_existing_cloud_populated_target_rerenders_declared_local_env_backends(
 ) -> None:
     source_backend = _backend(
         backend_id="local-qwen-coder-30b",
-        base_url_env="LLM_CODER_URL",
+        endpoint_url_env="LLM_CODER_URL",
         required=False,
         model_name="qwen-test",
         capabilities=["code_generation"],
@@ -256,7 +256,7 @@ def test_existing_cloud_populated_target_rerenders_declared_local_env_backends(
     )
     assert local_backend["endpoint_url"] == _http_url("fresh.local:8000")
     assert local_backend["model_name"] == "qwen-test"
-    assert "base_url_env" not in local_backend
+    assert "endpoint_url_env" not in local_backend
     assert "required" not in local_backend
 
 

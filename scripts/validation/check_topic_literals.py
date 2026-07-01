@@ -14,9 +14,12 @@
 # Exclusions:
 #   - tests/, fixtures/, docs/            (not production code)
 #   - generated/                          (auto-generated enum files)
-#   - topics.py, topic_constants.py       (canonical topic definition files)
+#   - topics.py                           (canonical topic definition file)
 #   - platform_topic_suffixes.py          (canonical platform topic registry)
 #   - contract.yaml                       (contract definitions, not Python)
+#   NOTE: topic_constants.py is fully scanned (OMN-13195/A4 narrowed the exemption;
+#   OMN-13202 deleted its last literals; OMN-13199/A5 finished the un-allowlisting).
+#   It holds DLQ builders only; the gate fails closed on any reintroduced literal.
 #
 # Pre-existing violations that were present before OMN-3343 are suppressed
 # via `scripts/validation/topic_literal_baseline.txt`. New violations added
@@ -48,11 +51,22 @@ from pathlib import Path
 # Only match strings that START with the ONEX prefix (no env prefix like dev./prod.)
 _TOPIC_PATTERN = re.compile(r"^onex\.(evt|cmd)\.[a-z][a-z0-9._-]*$")
 
-# Files that ARE canonical topic definitions — raw literals are legitimate here
+# Files that ARE canonical topic definitions — raw literals are legitimate here.
+#
+# OMN-13195 (phase A4) narrowed this list: ``topic_constants.py`` is no longer a
+# whole-file exemption. OMN-13202 then deleted the last 3 topic literals from that
+# file (TOPIC_SESSION_COORDINATION_SIGNAL + the two TOPIC_DELEGATE_SKILL_*
+# codegen-AST sources) after migrating the enum codegen to read the
+# contract-declarative ``runtime/topics.yaml`` manifest, and removed their per-line
+# entries from ``topic_literal_baseline.txt``. OMN-13199 (phase A5) completed the
+# un-allowlisting: ``topic_constants.py`` is fully scanned by this gate (it is not
+# in ``_EXCLUDED_FILENAMES`` below), holds zero raw topic literals (DLQ builders
+# only), and the gate fails closed on any reintroduced literal — proven by
+# ``tests/unit/scripts/validation/test_check_topic_literals_fail_closed.py``.
+# No ``.pre-commit-config.yaml`` exemption for this file remains.
 _EXCLUDED_FILENAMES: frozenset[str] = frozenset(
     {
         "topics.py",
-        "topic_constants.py",
         "service_topic_registry.py",
         "platform_topic_suffixes.py",
         "contract.yaml",

@@ -57,10 +57,18 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # omniclaude publishes these via hook scripts, not contract.yaml
     "onex.evt.omniclaude.session-started.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.session-ended.v1": "Published by omniclaude SessionEnd hook, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.session-outcome.v1": "Published by omniclaude SessionEnd hook outcome processing, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.hook-context-injected.v1": "Published by omniclaude hook context injection, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.validator-catch.v1": "Published by omniclaude validator hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.pattern-enforcement.v1": "Published by omniclaude pattern enforcement hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.phase-metrics.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.notification-blocked.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.notification-completed.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omniintelligence.claude-hook-event.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omniintelligence.tool-content.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1": "Published by omniintelligence dispatch evaluation, not an omnibase_infra node contract | owner: jonah | expiry: 2026-12-01",
     # GitHub webhooks are external triggers
     "onex.evt.github.pr-webhook.v1": "Published by GitHub webhook relay, not a node | owner: jonah | expiry: 2026-12-01",
     "onex.evt.github.push-webhook.v1": "Published by GitHub webhook relay | owner: jonah | expiry: 2026-12-01",
@@ -94,6 +102,9 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # fmt: off
 _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
+    # Coding-agent workflow external entrypoint — published by workflow clients
+    # (the coding-agent CLI thin-publisher), not a contract-declared node (OMN-13247).
+    "onex.cmd.omnibase-infra.coding-agent-invoke.v1": "Published by coding-agent workflow clients as the external entrypoint | owner: jonah | expiry: 2026-12-01",
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-start.v1": "Triggered by cron-buildloop.sh via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-09-01",

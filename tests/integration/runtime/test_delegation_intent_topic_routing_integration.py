@@ -38,18 +38,31 @@ from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
     EnumOmnibaseInfraTopic,
 )
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_DELEGATION_BASELINE_COMPARISON,
-    TOPIC_DELEGATION_INFERENCE_REQUEST,
-    TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
-    TOPIC_DELEGATION_ROUTING_REQUEST,
-)
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 pytestmark = pytest.mark.integration
+
+# The applier resolves these delegation topics from ``ServiceTopicRegistry``
+# (contract-sourced, OMN-13191). The legacy ``TOPIC_DELEGATION_*`` constants were
+# deleted in OMN-13195 — assert against the same registry path the applier uses.
+_REGISTRY = ServiceTopicRegistry.from_defaults()
+TOPIC_DELEGATION_ROUTING_REQUEST = _REGISTRY.resolve(
+    topic_keys.DELEGATION_ROUTING_REQUEST
+)
+TOPIC_DELEGATION_INFERENCE_REQUEST = _REGISTRY.resolve(
+    topic_keys.DELEGATION_INFERENCE_REQUEST
+)
+TOPIC_DELEGATION_QUALITY_GATE_REQUEST = _REGISTRY.resolve(
+    topic_keys.DELEGATION_QUALITY_GATE_REQUEST
+)
+TOPIC_DELEGATION_BASELINE_COMPARISON = _REGISTRY.resolve(
+    topic_keys.DELEGATION_BASELINE_COMPARISON
+)
 
 
 # ---------------------------------------------------------------------------

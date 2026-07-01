@@ -14,8 +14,8 @@
 #   redeploy and the golden-chain pattern_learning chain only passed via a live
 #   hot-fix (golden-chain sweep run12 Finding). This gate is the enforcement
 #   layer: every infra PR (and merge_group) re-runs the vendor --check against
-#   the matching omnimarket release lineage, so an un-vendored or drifted node
-#   migration fails CI before merge.
+#   the current omnimarket dev tip, so an un-vendored or drifted node migration
+#   fails CI before merge.
 
 name: node-migration-sync
 
@@ -28,15 +28,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  OMNIMARKET_MIGRATION_REF: >-
-    ${{
-      ((github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main') ||
-       (github.event_name == 'push' && github.ref_name == 'main'))
-      && 'main'
-      || 'dev'
-    }}
 
 jobs:
   node-migration-sync:
@@ -52,15 +43,15 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Checkout omnimarket (sibling — node migration source of truth)
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ env.OMNIMARKET_MIGRATION_REF }}
+          ref: dev
           path: omnimarket-src
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           # Sparse checkout: only the node tree carrying migrations/*.sql.
@@ -73,15 +64,15 @@ jobs:
         env:
           # The script's resolution order prefers OMNIMARKET_SRC (a repo root that
           # contains src/omnimarket/nodes). Point it at the sibling checkout so the
-          # gate compares the vendored tree against the matching omnimarket lineage
-          # and never silently passes on an unresolvable source.
+          # gate compares the vendored tree against the omnimarket dev tip and never
+          # silently passes on an unresolvable source.
           OMNIMARKET_SRC: ${{ github.workspace }}/omnimarket-src
         run: |
           set -euo pipefail
           echo "::group::node migration vendor sync --check"
           if bash scripts/sync-node-migrations.sh --check; then
             echo "::endgroup::"
-            echo "::notice::node migration vendor tree is in sync with omnimarket ${OMNIMARKET_MIGRATION_REF} tip."
+            echo "::notice::node migration vendor tree is in sync with omnimarket dev tip."
           else
             rc=$?
             echo "::endgroup::"
@@ -92,3 +83,35 @@ jobs:
             fi
             exit "${rc}"
           fi
+
+  # OMN-13415: logic-regression gate for the deployed-migration-tree sync check.
+  # The PRIMARY enforcement is at deploy time — deploy-runtime.sh calls
+  # check_deployed_migration_tree_sync.py after sync_files and BEFORE the
+  # forward-migration phase, aborting if the bind-mounted deployed tree drifted
+  # from the canonical clone @ the target SHA (the stability-promotion footgun:
+  # stale 0016, missing 0018/0019, lane looked "deployed" but mis-migrated). The
+  # live deploy-time compare cannot run on a hosted CI runner (no deployed tree),
+  # so the enforcement this required gate provides is the comparison LOGIC itself:
+  # if the byte-equality / missing / stale / extra-leftover detection regresses,
+  # its test suite fails and blocks merge.
+  deployed-migration-tree-sync-logic:
+    name: deployed-migration-tree-sync-logic
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-enabled: "false"
+      - name: Deployed-migration-tree sync — logic regression gate
+        run: |
+          uv run --frozen pytest tests/scripts/test_check_deployed_migration_tree_sync.py -q -p no:cacheprovider

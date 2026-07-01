@@ -151,7 +151,7 @@ class TestDispatchEngineRoutesIntrospection:
         )
 
         # Register a route for the topic
-        from omnibase_infra.models.dispatch.model_dispatch_route import (
+        from omnibase_core.models.dispatch.model_dispatch_route import (
             ModelDispatchRoute,
         )
 

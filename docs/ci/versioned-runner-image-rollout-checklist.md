@@ -1,14 +1,14 @@
-# Versioned Runner Image Rollout Checklist (OMN-12568)
+# Versioned Runner Image Rollout Checklist
 
 This is the per-repo migration checklist for moving a repository onto the
-OMN-12567 **versioned runner image contract** — the runner image whose "version"
+**versioned runner image contract** — the runner image whose "version"
 is a *binding* (base image digest + dependency manifest + Python version + uv
 version + shared-env version + image version folded into one reproducible
 `identity_digest`), not a human label.
 
-OMN-12567 builds and binds the image; **OMN-12568 is the acceptance**: prove the
-contract survives a *fresh runner recreation* on one repo, then roll the rest of
-the fleet repo-by-repo using this checklist. Do **not** migrate all repos at
+The image build and bind work established the contract; this checklist covers
+acceptance: prove the contract survives a *fresh runner recreation* on one repo,
+then roll the rest of the fleet repo-by-repo. Do **not** migrate all repos at
 once — each repo's dependency graph is validated independently.
 
 ## Source of truth
@@ -16,12 +16,12 @@ once — each repo's dependency graph is validated independently.
 | Artifact | Path |
 |----------|------|
 | Bound identity lock | `omnibase_infra:docker/runners/runner-image.lock.json` |
-| Identity generator / verifier | `omnibase_infra:scripts/ci/runner_image_identity.py` (OMN-12567) |
-| Image build script | `omnibase_infra:scripts/ci/build_runner_image.sh` (OMN-12567) |
-| Per-job identity emitter | `omnibase_infra:.github/actions/emit-runner-identity/action.yml` (OMN-12567) |
-| **Runner validation script** | `omnibase_infra:scripts/ci/validate_runner_image.py` (OMN-12568) |
-| **Runner validation wrapper** | `omnibase_infra:scripts/ci/validate_runner_image.sh` (OMN-12568) |
-| Canary contract | `omnibase_infra:docs/ci/versioned-ci-env-canary.md` (OMN-12564) |
+| Identity generator / verifier | `omnibase_infra:scripts/ci/runner_image_identity.py` |
+| Image build script | `omnibase_infra:scripts/ci/build_runner_image.sh` |
+| Per-job identity emitter | `omnibase_infra:.github/actions/emit-runner-identity/action.yml` |
+| **Runner validation script** | `omnibase_infra:scripts/ci/validate_runner_image.py` |
+| **Runner validation wrapper** | `omnibase_infra:scripts/ci/validate_runner_image.sh` |
+| Canary contract | `omnibase_infra:docs/ci/versioned-ci-env-canary.md` |
 
 ## Pre-rollout gate (do this once, on `omnibase_infra`)
 
@@ -37,12 +37,12 @@ contract must be proven on a **freshly recreated** runner.
 - [ ] Run the validation script on the freshly recreated runner and confirm
       `RESULT: GREEN`:
       `scripts/ci/validate_runner_image.sh --json`.
-- [ ] **node24 capability canary (OMN-12585) — REQUIRED before fleet rollout.**
+- [ ] **node24 capability canary — REQUIRED before fleet rollout.**
       Dispatch a job onto the *recreated* runner that uses `actions/checkout@v6`
       (a `using: node24` action) and confirm "Set up job" + "Checkout code" pass.
       A build-only smoke is **insufficient**: PR CI runs on the OLD fleet, so it
       never exercises the NEW image's runner version against a node24 action. This
-      is the exact gap that let OMN-12567 ship a `2.323.0` runner that broke
+      is the exact gap that allowed a `2.323.0` runner to ship and break
       org-wide CI with `'using: node24' is not supported`. The baked runner must
       bundle `externals/node24` (present only at runner `>= 2.327.0`); the
       build-smoke workflow asserts this statically, but the deployed-runner
@@ -83,7 +83,7 @@ run green on a freshly recreated runner using the versioned image.
 - [ ] **Record the migration** in the rollout log with: repo, image version `v<N>`,
       recorded `identity_digest`, and the green CI run URL.
 
-## Mutating-job opt-outs (carried from OMN-12567)
+## Mutating-job opt-outs
 
 These jobs intentionally mutate the Python environment and **must** opt out of
 the shared prebuilt env. Adding a new mutating job means adding its opt-out and a
@@ -136,7 +136,7 @@ exits non-zero on any required failure:
 It is a **read-only** assertion — it never recreates, restarts, or registers a
 runner. Recreation is a separate, operator-run live runtime step.
 
-## RUNNER_VERSION floor gate (OMN-12585)
+## RUNNER_VERSION floor gate
 
 Independent of the runner-side validation above, two static invariants on the
 baked `RUNNER_VERSION` are enforced as a **unit gate on every PR**
@@ -151,13 +151,13 @@ build-smoke workflow:
 The Dockerfile `ARG`, the SHA256 comment, and the lock `runner_version` must all
 agree, so a partial bump (version updated, checksum or lock stale) also fails the
 gate. This is "enforcement, not detection": the regression that let a `2.323.0`
-runner reach the fleet had no gate — now it cannot merge green.
+runner reach the fleet lacked a gate — now it cannot merge green.
 
-## Acceptance (OMN-12568)
+## Acceptance
 
 - One repo (`omnibase_infra`) runs green on the versioned image **after fresh
   runner recreation** — proven by `validate_runner_image.sh` returning
   `RESULT: GREEN` on the recreated runner plus a green CI run.
 - A `actions/checkout@v6` (node24) job runs green on the recreated runner before
-  fleet rollout (OMN-12585).
+  fleet rollout.
 - This rollout checklist exists with explicit opt-outs noted (this document).

@@ -12,6 +12,7 @@ Related:
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -19,8 +20,10 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
 )
@@ -124,7 +127,7 @@ class TestResolveOutputTopic:
 
     def test_returns_fallback_when_map_empty(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
         )
         event = ModelNodeBecameActive()
@@ -132,7 +135,7 @@ class TestResolveOutputTopic:
 
     def test_resolves_via_short_name(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "NodeBecameActive": "onex.evt.platform.node-became-active.v1",
@@ -146,7 +149,7 @@ class TestResolveOutputTopic:
 
     def test_resolves_via_full_class_name(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "ModelNodeBecameActive": "onex.evt.platform.node-became-active.v1",
@@ -160,7 +163,7 @@ class TestResolveOutputTopic:
 
     def test_short_name_takes_precedence_over_full(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "NodeBecameActive": "short-topic",
@@ -172,7 +175,7 @@ class TestResolveOutputTopic:
 
     def test_falls_back_to_output_topic_when_not_in_map(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "SomeOtherEvent": "other-topic",
@@ -184,7 +187,7 @@ class TestResolveOutputTopic:
     def test_non_model_prefixed_class_uses_full_name(self) -> None:
         """Classes without Model prefix: short_name == class_name."""
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "UnmappedEvent": "mapped-topic",
@@ -195,7 +198,7 @@ class TestResolveOutputTopic:
 
     def test_embedded_topic_takes_precedence(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "mapped-topic",
@@ -207,7 +210,7 @@ class TestResolveOutputTopic:
 
     def test_embedded_topic_can_use_publish_topic_allowlist(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "onex.evt.example.completed.v1",
@@ -222,7 +225,7 @@ class TestResolveOutputTopic:
 
     def test_undeclared_embedded_topic_falls_back_to_contract_topic(self) -> None:
         applier = DispatchResultApplier(
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
             output_topic="fallback-topic",
             output_topic_map={
                 "TopicCarryingEvent": "mapped-topic",
@@ -242,7 +245,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_publish_uses_output_topic_map(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -261,7 +264,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_publish_falls_back_to_output_topic(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -281,7 +284,7 @@ class TestPublishPathTopicRouting:
     @pytest.mark.asyncio
     async def test_topic_router_takes_precedence_over_output_topic_map(self) -> None:
         """topic_router (OMN-4881) takes priority over output_topic_map (OMN-5132)."""
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -303,7 +306,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_embedded_topic_takes_precedence_over_topic_router(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -329,7 +332,7 @@ class TestPublishPathTopicRouting:
 
     @pytest.mark.asyncio
     async def test_multiple_events_route_independently(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",
@@ -351,6 +354,101 @@ class TestPublishPathTopicRouting:
         assert topics == ["active-topic", "accepted-topic"]
 
 
+class TestOrchestratorEmittedEnvelopeRouting:
+    """OMN-13247: a multi-step ORCHESTRATOR sequences a workflow by emitting one
+    ``ModelEventEnvelope`` per next-command whose ``event_type`` is the FULL
+    destination topic of that emit. The emitted envelope carries no ``topic``
+    field and its class is always ``ModelEventEnvelope``, so the legacy routing
+    fell through to the single ``output_topic`` fallback (the terminal_event) and
+    EVERY emit was misrouted to the terminal topic. The applier must route by the
+    envelope's ``event_type`` when it is a declared (allowed) topic, and publish
+    the INNER payload (not a double-nested envelope)."""
+
+    _VALIDATE = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    _INVOKE = "onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1"
+    _TERMINAL = "onex.evt.omnibase-infra.coding-agent-completed.v1"
+
+    def _emitted(self, event_type: str | None) -> ModelEventEnvelope[BaseModel]:
+        return ModelEventEnvelope(
+            payload=UnmappedEvent(value="cmd"),
+            correlation_id=uuid4(),
+            event_type=event_type,
+        )
+
+    @pytest.mark.asyncio
+    async def test_emit_routes_to_event_type_topic_not_terminal(self) -> None:
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,  # production fallback IS the terminal topic
+            allowed_output_topics={self._VALIDATE, self._INVOKE, self._TERMINAL},
+        )
+        result = _make_result(output_events=[self._emitted(self._VALIDATE)])
+        await applier.apply(result)
+
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == self._VALIDATE, (
+            "the orchestrator-emitted envelope must route by its event_type, not "
+            "fall back to the terminal topic (the OMN-13247 misroute)"
+        )
+        # The inner payload is published, not a double-nested ModelEventEnvelope.
+        assert isinstance(call_kwargs["envelope"].payload, UnmappedEvent)
+
+    @pytest.mark.asyncio
+    async def test_sequential_emits_route_to_distinct_topics(self) -> None:
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._VALIDATE, self._INVOKE, self._TERMINAL},
+        )
+        result = _make_result(
+            output_events=[
+                self._emitted(self._VALIDATE),
+                self._emitted(self._INVOKE),
+            ],
+        )
+        await applier.apply(result)
+
+        topics = [c.kwargs["topic"] for c in mock_bus.publish_envelope.call_args_list]
+        assert topics == [self._VALIDATE, self._INVOKE]
+        assert self._TERMINAL not in topics
+
+    @pytest.mark.asyncio
+    async def test_undeclared_event_type_falls_back_to_output_topic(self) -> None:
+        """An ``event_type`` that is not a contract-declared publish topic is not
+        a routing destination — fall back rather than publish to an undeclared
+        topic."""
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._VALIDATE, self._TERMINAL},
+        )
+        result = _make_result(
+            output_events=[self._emitted("onex.cmd.example.not-declared.v1")],
+        )
+        await applier.apply(result)
+        assert mock_bus.publish_envelope.call_args.kwargs["topic"] == self._TERMINAL
+
+    @pytest.mark.asyncio
+    async def test_envelope_without_event_type_unwraps_to_inner_payload(self) -> None:
+        """An EFFECT emits a ``ModelEventEnvelope`` with no event_type, relying on
+        the fallback topic; the inner payload must still be published (no
+        double-nesting)."""
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=self._TERMINAL,
+            allowed_output_topics={self._TERMINAL},
+        )
+        result = _make_result(output_events=[self._emitted(None)])
+        await applier.apply(result)
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == self._TERMINAL
+        assert isinstance(call_kwargs["envelope"].payload, UnmappedEvent)
+
+
 class TestDelegationIntentTopicRouting:
     """Regression coverage for OMN-11095 delegation terminal contamination."""
 
@@ -358,7 +456,7 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_intermediate_intents_do_not_fall_back_to_completed_topic(
         self,
     ) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -388,7 +486,7 @@ class TestDelegationIntentTopicRouting:
 
     @pytest.mark.asyncio
     async def test_delegation_terminal_topic_keeps_terminal_payload_only(self) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -407,7 +505,7 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_topic_envelope_publishes_inner_terminal_payload(
         self,
     ) -> None:
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
             event_bus=mock_bus,
@@ -429,6 +527,133 @@ class TestDelegationIntentTopicRouting:
         call_kwargs = mock_bus.publish_envelope.call_args.kwargs
         assert call_kwargs["topic"] == completed_topic
         assert call_kwargs["envelope"].payload == terminal_payload
+
+
+class TestDelegationTopicRegistryNoDrift:
+    """OMN-13191: the applier resolves delegation topics from ServiceTopicRegistry
+    (contract-sourced) instead of importing TOPIC_* string constants.
+
+    Proves the two-way equality the migration depends on:
+    registry-resolved string == contract-declared string.
+    A mismatch on either leg means a topic drifted and the migration is unsafe.
+
+    OMN-13195 (phase A4): the legacy ``TOPIC_DELEGATION_*`` Python constants were
+    deleted once their last production consumers moved to contract-sourced
+    resolution. The expected strings below are the canonical contract-declared
+    values that those constants used to mirror; ``test_applier_resolved_topics_
+    match_owning_contract`` additionally anchors the applier subset to the real
+    ``contract.yaml`` on disk.
+    """
+
+    # Logical key -> canonical contract-declared topic string (the 4 topics the
+    # applier resolves plus the wider delegation family added to the registry for
+    # completeness). Formerly mirrored by the deleted ``TOPIC_DELEGATION_*``
+    # constants; now asserted directly against the contract-sourced registry.
+    _KEY_TO_EXPECTED_TOPIC: dict[str, str] = {
+        "DELEGATION_REQUEST": "onex.cmd.omnibase-infra.delegation-request.v1",
+        "DELEGATION_ROUTING_DECISION": "onex.evt.omnibase-infra.routing-decision.v1",
+        "DELEGATION_COMPLETED": "onex.evt.omnibase-infra.delegation-completed.v1",
+        "DELEGATION_FAILED": "onex.evt.omnibase-infra.delegation-failed.v1",
+        "DELEGATION_QUALITY_GATE_RESULT": (
+            "onex.evt.omnibase-infra.quality-gate-result.v1"
+        ),
+        "DELEGATION_ROUTING_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+        ),
+        "DELEGATION_INVOCATION_COMMAND": "onex.cmd.omnibase-infra.invocation.v1",
+        "DELEGATION_AGENT_TASK_LIFECYCLE": (
+            "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+        ),
+        "DELEGATION_QUALITY_GATE_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+        ),
+        "DELEGATION_INFERENCE_REQUEST": (
+            "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+        ),
+        "DELEGATION_INFERENCE_RESPONSE": (
+            "onex.evt.omnibase-infra.inference-response.v1"
+        ),
+        "DELEGATION_TASK_DELEGATED": "onex.evt.omniclaude.task-delegated.v1",
+        "DELEGATION_BASELINE_COMPARISON": (
+            "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+        ),
+    }
+
+    # The 4 topics the infra applier actually resolves, mapped to the owning
+    # publisher contract that declares them.
+    _APPLIER_KEYS: tuple[str, ...] = (
+        "DELEGATION_BASELINE_COMPARISON",
+        "DELEGATION_INFERENCE_REQUEST",
+        "DELEGATION_QUALITY_GATE_REQUEST",
+        "DELEGATION_ROUTING_REQUEST",
+    )
+
+    def test_registry_resolution_equals_expected_contract_topic(self) -> None:
+        """Every delegation key resolves to its canonical contract-declared string."""
+        from omnibase_infra.topics import topic_keys
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        registry = ServiceTopicRegistry.from_defaults()
+        for key_name, expected in self._KEY_TO_EXPECTED_TOPIC.items():
+            key = getattr(topic_keys, key_name)
+            resolved = registry.resolve(key)
+            assert resolved == expected, (
+                f"drift: registry.resolve({key_name})={resolved!r} != "
+                f"expected contract string {expected!r}"
+            )
+
+    def test_applier_resolved_topics_match_owning_contract(self) -> None:
+        """The 4 applier topics equal the strings declared in the publisher contract.
+
+        The delegation orchestrator (omnimarket node_delegation_orchestrator) is the
+        publisher that declares all four command topics in its contract.yaml. This
+        anchors the registry value to a contract source, not just a Python constant.
+        """
+        from pathlib import Path
+
+        from omnibase_infra.topics import topic_keys
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        # The omnimarket sibling may live next to this repo (canonical layout) or,
+        # in a per-ticket worktree, only in the canonical omni_home clone. Try the
+        # in-tree sibling first, then fall back to $OMNI_HOME/omnimarket.
+        rel = Path(
+            "omnimarket/src/omnimarket/nodes/node_delegation_orchestrator/contract.yaml"
+        )
+        repo_root = Path(__file__).resolve().parents[3]
+        candidates = [repo_root.parent / rel]
+        omni_home = os.environ.get("OMNI_HOME")  # ONEX_EXCLUDE: env
+        if omni_home:
+            candidates.append(Path(omni_home) / rel)
+        contract_path = next((p for p in candidates if p.exists()), None)
+        if contract_path is None:
+            pytest.skip(
+                "omnimarket node_delegation_orchestrator/contract.yaml not found in "
+                f"any of: {[str(c) for c in candidates]}"
+            )
+
+        contract_text = contract_path.read_text(encoding="utf-8")
+        registry = ServiceTopicRegistry.from_defaults()
+        for key_name in self._APPLIER_KEYS:
+            resolved = registry.resolve(getattr(topic_keys, key_name))
+            assert resolved in contract_text, (
+                f"applier topic {resolved!r} (key {key_name}) is not declared in "
+                f"the owning publisher contract {contract_path}"
+            )
+
+    def test_applier_imports_no_topic_constants(self) -> None:
+        """Regression guard: the applier module must not import TOPIC_* constants."""
+        from pathlib import Path
+
+        applier_src = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "runtime"
+            / "service_dispatch_result_applier.py"
+        ).read_text(encoding="utf-8")
+        assert "from omnibase_infra.event_bus.topic_constants import" not in applier_src
+        assert "TOPIC_DELEGATION_" not in applier_src
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +729,7 @@ class TestRealContractIntegration:
         )
         topic_map = load_published_events_map(contract_path)
 
-        mock_bus = AsyncMock()
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=mock_bus,
             output_topic="fallback-topic",

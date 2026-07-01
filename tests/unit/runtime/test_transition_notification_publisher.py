@@ -33,6 +33,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.models.notifications import ModelStateTransitionNotification
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 # =============================================================================
 # TDD Skip Helper - Check if TransitionNotificationPublisher is implemented
@@ -64,7 +65,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Create mock event bus with publish_envelope method."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish_envelope = AsyncMock(return_value=None)
     bus.publish = AsyncMock(return_value=None)
     return bus
@@ -73,7 +74,7 @@ def mock_event_bus() -> AsyncMock:
 @pytest.fixture
 def failing_event_bus() -> AsyncMock:
     """Create mock event bus that raises on publish."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish_envelope = AsyncMock(side_effect=ConnectionError("Connection refused"))
     bus.publish = AsyncMock(side_effect=ConnectionError("Connection refused"))
     return bus
@@ -86,7 +87,7 @@ def slow_event_bus() -> AsyncMock:
     async def slow_publish(*args: object, **kwargs: object) -> None:
         await asyncio.sleep(10.0)
 
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish_envelope = AsyncMock(side_effect=slow_publish)
     bus.publish = AsyncMock(side_effect=slow_publish)
     return bus

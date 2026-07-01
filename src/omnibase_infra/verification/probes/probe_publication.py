@@ -24,6 +24,7 @@ from omnibase_infra.verification.contract_parser import (
 from omnibase_infra.verification.models.model_contract_check_result import (
     ModelContractCheckResult,
 )
+from omnibase_infra.verification.probes.util_rpk_env import rpk_env
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ def _rpk_watermark_fallback(topic: str) -> tuple[int, int]:
             text=True,
             timeout=10,
             check=False,
+            env=rpk_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc

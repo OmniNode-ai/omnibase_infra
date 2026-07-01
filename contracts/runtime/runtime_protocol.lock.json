@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.0",
+  "package_version": "0.38.4",
   "protocol_count": 23,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
@@ -273,7 +273,7 @@
       "methods": {
         "describe": {
           "parameters": [],
-          "return_annotation": "ModelHandlerDescriptor"
+          "return_annotation": "<class 'omnibase_core.models.handlers.model_handler_descriptor.ModelHandlerDescriptor'>"
         },
         "execute": {
           "parameters": [
@@ -312,7 +312,7 @@
             {
               "name": "timeout_seconds",
               "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "float",
+              "annotation": "<class 'float'>",
               "default": "30.0"
             }
           ],
@@ -391,8 +391,12 @@
     },
     "ProtocolEventBusLike": {
       "runtime_checkable": true,
-      "method_count": 2,
+      "method_count": 3,
       "methods": {
+        "get_consumer_groups": {
+          "parameters": [],
+          "return_annotation": "dict[tuple[str, str], str]"
+        },
         "publish": {
           "parameters": [
             {

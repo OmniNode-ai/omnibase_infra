@@ -277,15 +277,44 @@ COPY scripts/runtime_build/resolve_workspace_pins.py /workspace/resolve_workspac
 # expected-vs-actual pin proof into build-provenance.json for deploy verifiers.
 COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.json
 
-# workspace mode installs omnibase_compat, onex_change_control, omnimarket from
-# the staged local trees.  release mode installs from pinned remote sources.
+# Copy the per-repo VCS provenance emitted by stage_workspace.sh (OMN-13030). A
+# committed placeholder makes this COPY always valid; workspace mode overwrites
+# it with the real per-repo {vcs_ref, vcs_dirty, vcs_branch} so
+# compute_workspace_provenance.py can fold it into build-provenance.json for
+# deploy verifiers. Release mode ignores it.
+COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.json
+
+# workspace mode installs omnibase_core, omnibase_compat, onex_change_control,
+# omnimarket from the staged local trees.  release mode installs from pinned
+# remote sources (core stays from omnibase_infra/uv.lock — correct for a release).
+#
+# OMN-13405: workspace mode reinstalls omnibase_core FIRST from the staged dev-HEAD
+# clone. `uv sync` above already installed omnibase-core from omnibase_infra/uv.lock,
+# but that lock pins a released 0.45.0 wheel at a commit PREDATING dev enum modules
+# (enum_correction_failure_axis, OMN-13234/12846) that omnimarket dev imports at
+# module-import time. Reinstalling core from the staged dev tree overrides the
+# enum-less lock wheel so the runtime kernel + projection-api import cleanly.
+# Forcing the local-path core install is non-trivial because omnibase_infra's
+# pyproject.toml [tool.uv.sources] pins omnibase-core to a git rev (the enum-less
+# 0.45.0). With WORKDIR=/app (the infra project) every `uv pip install` discovers
+# that project upward and re-resolves `omnibase-core` to the git source — even with
+# a `@ file://` reference — so the staged dev tree never wins. The install is
+# therefore run from `/` (a subshell `cd /`) so NO project pyproject/uv.lock is in
+# scope, with `--python /app/.venv/bin/python` (explicit target venv), `--no-sources`
+# (ignore [tool.uv.sources]), an explicit PEP 508 direct reference
+# (`omnibase-core @ file:///workspace/sibling-repos/omnibase_core`), `--no-cache`
+# (bypass the cached git wheel from the BuildKit uv cache mount), and
+# `--reinstall-package omnibase-core`. Together these pin the install source to the
+# staged dev tree, record a file:// direct_url, and the build-provenance
+# local-install proof (compute_workspace_provenance.py WORKSPACE_PACKAGES) asserts
+# it. release mode is unchanged: core comes from the lock via [tool.uv.sources].
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="4d887307aae34d9d40d389ba91070cb411ce3df5"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/4d887307aae34d9d40d389ba91070cb411ce3df5.tar.gz"
-# onex_change_control tracks the moving `main` branch.
-ARG ONEX_CHANGE_CONTROL_REF=main
+ARG OMNIBASE_COMPAT_REF="v0.5.4"
+ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.4.tar.gz"
+# Pin to the onex_change_control v0.5.3 release tag.
+ARG ONEX_CHANGE_CONTROL_REF=v0.5.3
 # OMN-12195: default branch is dev, not main — use dev to avoid stale SHA from
 # Docker's git cache resolving @main to an older commit.
 ARG OMNIMARKET_REF=dev
@@ -306,12 +335,16 @@ ARG OMNIMARKET_REF=dev
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        for repo in omnibase_compat onex_change_control omnimarket; do \
+        for repo in omnibase_core omnibase_compat onex_change_control omnimarket; do \
             p="/workspace/sibling-repos/${repo}"; \
             if [ ! -d "${p}" ]; then \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
             fi; \
         done; \
+        uv-with-retry pip uninstall omnibase-core; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
+            "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/onex_change_control; \
         uv-with-retry pip install --no-deps /workspace/sibling-repos/omnimarket; \
@@ -330,7 +363,7 @@ RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
     else \
-        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "vcs_ref": "%s",\n  "proofs": [],\n  "lock_pin_comparison": []\n}\n' \
+        printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "infra_vcs_ref": "%s",\n  "proofs": [],\n  "per_repo_vcs_provenance": {"siblings": {}},\n  "lock_pin_comparison": []\n}\n' \
             "${BUILD_DATE:-unknown}" "${VCS_REF:-unknown}" > /app/build-provenance.json; \
     fi
 
@@ -408,6 +441,19 @@ import importlib; \
 [importlib.import_module(m) for m in ('cachetools', 'omnimemory')]; \
 print('generation-path transitive deps verified: cachetools, omnimemory')"
 
+# OMN-12658: build-time import smoke guard for the delegation runtime path.
+# After ALL wheels are installed, import the foundation packages plus the
+# canonical delegation node handler. A skewed omnibase_compat / omnibase_core
+# wheel (or a delegation-node import break) fails the docker build non-zero
+# here — at build time — instead of degrading silently as a runtime
+# entry-point load failure. The docker-build CI job loads this image, so a
+# failing import fails the required status check on the PR.
+RUN /app/.venv/bin/python -c "\
+import omnibase_compat; \
+import omnibase_core; \
+from omnimarket.nodes.node_llm_delegation_call_effect import HandlerLlmDelegationCall; \
+print(f'delegation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}, {HandlerLlmDelegationCall.__name__}')"
+
 # Cleanup: remove __pycache__ and .pyc files from venv
 # Note: does NOT touch /root/.cache/uv (that's a cache mount, not persisted in layer)
 RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
@@ -435,6 +481,14 @@ ARG RUNTIME_SOURCE_HASH=unknown
 # Docker Compose project name used for this deployment.
 # Lets operators confirm the container belongs to the expected compose stack.
 ARG COMPOSE_PROJECT=unknown
+# OMN-13656: promotion-class provenance. A workspace build (staged dev-HEAD
+# siblings) is a non-main-lineage stability-candidate and must be STAMPED as such
+# on the image so the prod-promotion gate (omnimarket node_prod_promotion_gate_
+# compute) and the lineage guard (OMN-12626) can refuse it for prod. Release
+# builds default to clean-main. The CI workspace path passes
+# PROMOTION_CLASS=stability-candidate explicitly.
+ARG PROMOTION_CLASS=clean-main
+ARG NON_MAIN_LINEAGE=false
 
 RUN set -eu; \
     case "${BUILD_SOURCE}" in \
@@ -467,6 +521,10 @@ RUN set -eu; \
         echo "workspace build requires RUNTIME_VERSION from pyproject (not placeholder 0.1.0) for org.opencontainers.image.version (OMN-12965)" >&2; \
         exit 64; \
       fi; \
+      if [ "${PROMOTION_CLASS}" != "stability-candidate" ] || [ "${NON_MAIN_LINEAGE}" != "true" ]; then \
+        echo "workspace build MUST stamp PROMOTION_CLASS=stability-candidate + NON_MAIN_LINEAGE=true so the prod-promotion gate refuses it for prod (OMN-13656); got PROMOTION_CLASS='${PROMOTION_CLASS}' NON_MAIN_LINEAGE='${NON_MAIN_LINEAGE}'" >&2; \
+        exit 64; \
+      fi; \
     fi
 
 # OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
@@ -480,6 +538,8 @@ LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       com.omninode.build_source="${BUILD_SOURCE}" \
+      com.omninode.promotion_class="${PROMOTION_CLASS}" \
+      com.omninode.non_main_lineage="${NON_MAIN_LINEAGE}" \
       com.omninode.workspace_provenance_manifest="/app/build-provenance.json"
 
 # Runtime environment configuration
@@ -539,6 +599,69 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# ============================================================================
+# Coding-agent CLIs: Node.js LTS + pinned codex/claude (OMN-13248, epic OMN-13245)
+# ============================================================================
+# The canonical coding-agent EFFECT node (node_coding_agent_invoke_effect,
+# descriptor.agent_invocation: true) shells out to `codex` / `claude` to run a
+# coding agent inside the workspace. These CLIs are distributed only as npm
+# global packages, so the runtime image needs Node.js. The base image ships no
+# Node (plan §1 #8), so install Node LTS from NodeSource, then the two CLIs at
+# the EXACT versions proven headless-authenticatable in a Linux .201 container
+# in Phase 0 (OMN-13246, omni_home PR #182): codex-cli 0.141.0, claude 2.1.181.
+#
+# Pin discipline: npm global CLI installs are pinned to an exact `@version`
+# (opposite to the PyPI --no-deps range pins) so the runtime image is fully
+# reproducible. scripts/check_dockerfile_pins.py enforces that both packages
+# carry an explicit `@version` pin.
+#
+# These CLIs read AMBIENT OAuth credentials from ~/.codex and ~/.claude (no
+# ANTHROPIC_API_KEY / *_MODEL / endpoint env). The credentials themselves are
+# NOT baked into the image — they are a read-only host bind-mount declared on
+# the effects service (see docker/catalog/services/runtime-effects.yaml and the
+# runtime-effects service in docker-compose.infra.yml).
+#
+# codex write mode note (Phase 0 caveat, decided for Phase B): codex's internal
+# `-s workspace-write` bwrap sandbox cannot create a user namespace inside the
+# cap-dropped effects container. The coding-agent effect runs codex with
+# `-s danger-full-access` (the container itself is the sandbox boundary); we do
+# NOT grant CAP_SYS_ADMIN / userns to the effects container (least-privilege).
+# The argv itself lives in Phase A; this is the supporting image decision.
+ARG NODE_MAJOR=20
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eu; \
+    apt-get update && apt-get install -y --no-install-recommends gnupg; \
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list; \
+    apt-get update && apt-get install -y --no-install-recommends nodejs; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean
+
+# Install the coding-agent CLIs at the exact Phase 0-proven versions.
+# Exact `@version` pins (NOT ranges) — required for a reproducible runtime image
+# and enforced by scripts/check_dockerfile_pins.py.
+RUN set -eu; \
+    npm install -g \
+        @openai/codex@0.141.0 \
+        @openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64 \
+        @anthropic-ai/claude-code@2.1.181 \
+        @anthropic-ai/claude-code-linux-x64@2.1.181; \
+    npm cache clean --force
+
+# Build-time assert that both coding-agent CLIs resolved on PATH (mirrors the
+# torch/import asserts in the builder stage L388-403). A missing binary must
+# fail the build, not degrade silently at runtime.
+RUN set -eu; \
+    which codex; \
+    which claude; \
+    codex --version; \
+    claude --version; \
+    echo "coding-agent CLIs verified: codex + claude present on PATH"
+
 # Runtime session health probes invoke uv-owned commands such as golden-chain
 # checks. Keep uv in the final image as an explicit runtime tool.
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
@@ -555,6 +678,15 @@ COPY --from=builder /app/.venv/lib/python3.12/site-packages/setuptools-*.dist-in
 # UID 1000 is typically the first non-system user, good for volume permissions
 RUN groupadd --gid 1000 omniinfra && \
     useradd --uid 1000 --gid omniinfra --shell /bin/bash --create-home omniinfra
+
+# OMN-13248: pre-create the coding-agent credential dirs owned by omniinfra so a
+# read-only credential FILE bind-mount (e.g. ~/.codex/auth.json) lands inside an
+# omniinfra-owned WRITABLE directory. codex 0.141.0 writes app-server/session
+# state into CODEX_HOME (~/.codex) at runtime; if Docker auto-creates ~/.codex
+# for the file mount it is root-owned and codex fails with "Permission denied".
+# Creating these dirs in the image (omniinfra:omniinfra) fixes that while keeping
+# the mounted auth.json itself read-only. (~/.claude mounts as a whole RO dir.)
+RUN install -d -o omniinfra -g omniinfra /home/omniinfra/.codex /home/omniinfra/.claude
 
 WORKDIR /app
 

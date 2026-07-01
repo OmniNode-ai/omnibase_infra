@@ -79,6 +79,8 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         ".flake8",
         ".pylintrc",
         ".isort.cfg",
+        # shellcheck reads .shellcheckrc only from the project root (OMN-13220).
+        ".shellcheckrc",
         # Markdown link validation
         ".markdown-link-check.json",
         # Standard documentation
@@ -133,9 +135,11 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "tests",
         "docs",
         "scripts",
+        "architecture-handshakes",
         # Common optional directories
         "config",
         "contracts",
+        "drift",
         "docker",
         "examples",
         "benchmarks",

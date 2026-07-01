@@ -31,6 +31,7 @@ from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.models.dispatch import ModelDispatchResult
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
@@ -47,7 +48,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Create mock event bus with subscribe/publish methods."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     # Subscribe returns an unsubscribe callable
     unsubscribe_callable = AsyncMock()
     bus.subscribe = AsyncMock(return_value=unsubscribe_callable)

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -45,7 +46,7 @@ async def test_monitor_uses_live_event_bus_groups_for_runtime_liveness() -> None
     topic = contract.event_bus.subscribe_topics[0]
     live_group = f"runtime.projection.consume.v1.__i.main.__t.{topic}"
     stale_empty_group = f"old.projection.consume.v1.__i.main.__t.{topic}"
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.get_consumer_groups.return_value = {
         (topic, "runtime.projection.consume.v1"): live_group
     }

@@ -87,7 +87,7 @@ class TestEarlyExit:
     @pytest.mark.asyncio
     async def test_skips_non_success_result(self) -> None:
         """HANDLER_ERROR status should not trigger publish or intent execution."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         applier = DispatchResultApplier(
             event_bus=bus,
@@ -104,7 +104,7 @@ class TestEarlyExit:
     @pytest.mark.asyncio
     async def test_skips_no_dispatcher_result(self) -> None:
         """NO_DISPATCHER status should not trigger publish or intent execution."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         applier = DispatchResultApplier(
             event_bus=bus,
@@ -127,7 +127,7 @@ class TestEarlyExit:
         publish any terminal event or execute any intents when it receives None,
         preventing the FSM from being short-circuited before sub-commands fire.
         """
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         applier = DispatchResultApplier(
             event_bus=bus,
@@ -164,7 +164,7 @@ class TestOrderingContract:
         async def _track_publish(*args: object, **kwargs: object) -> None:
             call_order.append("publish_envelope")
 
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         bus.publish_envelope.side_effect = _track_publish
 
         executor = AsyncMock()
@@ -201,7 +201,7 @@ class TestIntentExecution:
     @pytest.mark.asyncio
     async def test_raises_when_intents_but_no_executor(self) -> None:
         """Intents present without an IntentExecutor must raise RuntimeHostError."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         applier = DispatchResultApplier(
             event_bus=bus,
             output_topic="out.topic",
@@ -219,7 +219,7 @@ class TestIntentExecution:
     @pytest.mark.asyncio
     async def test_propagates_intent_execution_failure(self) -> None:
         """If intent_executor.execute_all raises, the error must propagate."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         executor.execute_all.side_effect = RuntimeError("intent boom")
 
@@ -241,7 +241,7 @@ class TestIntentExecution:
     @pytest.mark.asyncio
     async def test_delegates_intents_to_executor(self) -> None:
         """execute_all receives the correct intents and correlation_id."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
 
         cid = uuid4()
@@ -276,7 +276,7 @@ class TestEventPublishing:
     @pytest.mark.asyncio
     async def test_publishes_output_events(self) -> None:
         """Each output event should be published to the configured output topic."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event_a = _StubEvent(value="a")
         event_b = _StubEvent(value="b")
         result = _make_result(output_events=[event_a, event_b])
@@ -294,7 +294,7 @@ class TestEventPublishing:
     @pytest.mark.asyncio
     async def test_deterministic_envelope_id(self) -> None:
         """Envelope IDs must be uuid5(correlation_id, 'ClassName:idx')."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         cid = uuid4()
         event = _StubEvent(value="det")
         result = _make_result(
@@ -315,7 +315,7 @@ class TestEventPublishing:
     @pytest.mark.asyncio
     async def test_no_publish_when_no_events(self) -> None:
         """Empty output_events list should result in zero publish calls."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         result = _make_result(output_events=[])
 
         applier = DispatchResultApplier(
@@ -339,7 +339,7 @@ class TestClockInjection:
     async def test_custom_clock_for_envelope_timestamp(self) -> None:
         """Injected clock should determine the envelope_timestamp value."""
         frozen_time = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event = _StubEvent(value="clock")
         result = _make_result(output_events=[event])
 
@@ -365,7 +365,7 @@ class TestCorrelationId:
     @pytest.mark.asyncio
     async def test_uses_result_correlation_id(self) -> None:
         """When no explicit correlation_id is passed, result.correlation_id is used."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         cid = uuid4()
         event = _StubEvent(value="cid-test")
         result = _make_result(
@@ -415,6 +415,7 @@ from datetime import timedelta
 from omnibase_infra.models.registration.events.model_node_registration_accepted import (
     ModelNodeRegistrationAccepted,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 
 def _make_accepted_event() -> ModelNodeRegistrationAccepted:
@@ -442,7 +443,7 @@ def _make_result_with(events: list) -> ModelDispatchResult:  # type: ignore[type
 @pytest.mark.unit
 async def test_topic_router_routes_known_event_to_declared_topic() -> None:
     """Router overrides output_topic for a known event type."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     router = {
         "ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1"
     }
@@ -461,7 +462,7 @@ async def test_topic_router_routes_known_event_to_declared_topic() -> None:
 @pytest.mark.unit
 async def test_topic_router_falls_back_for_unknown_event_type() -> None:
     """Router falls back to output_topic for event types not in the map."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     applier = DispatchResultApplier(
         event_bus=bus,
         output_topic="responses",
@@ -477,7 +478,7 @@ async def test_topic_router_falls_back_for_unknown_event_type() -> None:
 @pytest.mark.unit
 async def test_no_topic_router_uses_output_topic() -> None:
     """Backward compat: no router → all events go to output_topic."""
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     applier = DispatchResultApplier(
         event_bus=bus,
         output_topic="responses",
@@ -532,7 +533,7 @@ class TestEventTypeDerivedFromTopic:
         must have event_type set to '{producer}.{event-name}' so multi-step FSM
         orchestrators can match it to the dispatcher registration alias.
         """
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event = _StubEvent(value="health-result")
         router = {
             "_StubEvent": "onex.evt.omnimarket.swarm-endpoint-health-completed.v1"
@@ -555,7 +556,7 @@ class TestEventTypeDerivedFromTopic:
     @pytest.mark.asyncio
     async def test_event_type_none_for_non_onex_fallback_topic(self) -> None:
         """When resolved topic is not ONEX format, event_type stays None."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event = _StubEvent(value="generic")
         result = _make_result(output_events=[event])
 
@@ -572,7 +573,7 @@ class TestEventTypeDerivedFromTopic:
     @pytest.mark.asyncio
     async def test_event_type_set_via_output_topic_map(self) -> None:
         """event_type derives from topic resolved via output_topic_map."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event = _StubEvent(value="mapped")
         output_topic_map = {
             "_StubEvent": "onex.evt.omnimarket.swarm-dispatch-completed.v1"
@@ -608,7 +609,7 @@ class TestPartialSuccessApplication:
     @pytest.mark.asyncio
     async def test_handler_error_with_output_events_still_publishes(self) -> None:
         """HANDLER_ERROR aggregate carrying output_events publishes those events."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         event = _StubEvent(value="from-succeeding-handler")
         result = _make_result(
             status=EnumDispatchStatus.HANDLER_ERROR,
@@ -628,7 +629,7 @@ class TestPartialSuccessApplication:
     @pytest.mark.asyncio
     async def test_handler_error_with_intents_still_executes_them(self) -> None:
         """HANDLER_ERROR aggregate carrying intents still delegates them."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         intent = _make_intent()
         result = _make_result(
@@ -652,7 +653,7 @@ class TestPartialSuccessApplication:
         The failure surfaces via the engine's logged HANDLER_ERROR; the applier
         does not invent output to publish.
         """
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         result = _make_result(
             status=EnumDispatchStatus.HANDLER_ERROR,
@@ -672,7 +673,7 @@ class TestPartialSuccessApplication:
     @pytest.mark.asyncio
     async def test_non_handler_error_with_output_is_skipped(self) -> None:
         """Only HANDLER_ERROR can represent a sibling partial-success result."""
-        bus = AsyncMock()
+        bus = AsyncMock(spec=ProtocolEventBusLike)
         executor = AsyncMock()
         event = _StubEvent(value="should-not-publish")
         result = _make_result(

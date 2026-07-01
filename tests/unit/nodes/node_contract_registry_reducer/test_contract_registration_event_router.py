@@ -48,6 +48,7 @@ from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_r
 from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 # Fixed test time for deterministic testing
 TEST_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
@@ -93,7 +94,7 @@ def mock_reducer() -> MagicMock:
 @pytest.fixture
 def mock_event_bus() -> MagicMock:
     """Create mock event bus."""
-    bus = MagicMock()
+    bus = MagicMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock()
     return bus
 

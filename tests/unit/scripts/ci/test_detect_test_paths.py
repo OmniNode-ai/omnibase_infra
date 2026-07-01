@@ -54,16 +54,18 @@ def test_leaf_module_change_expands_to_its_reverse_deps() -> None:
 
 def test_services_module_expands_to_reverse_deps() -> None:
     # services is imported by adapters, dlq, handlers, runtime.
-    # `dlq` is dropped because tests/unit/dlq/ does not exist on disk — passing
-    # a missing path to pytest aborts collection with exit code 5. Only existing
-    # test directories are selected.
+    # All four reverse-dep test dirs exist on disk (tests/unit/dlq/ was added by
+    # the DLQ overlay work, OMN-12634), so every reverse dep is selected. Only
+    # existing test directories are emitted — a missing path would abort pytest
+    # collection with exit code 5.
     changed_files = ["src/omnibase_infra/services/foo.py"]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
     expected = sorted(
-        f"tests/unit/{m}/" for m in ("services", "adapters", "handlers", "runtime")
+        f"tests/unit/{m}/"
+        for m in ("services", "adapters", "dlq", "handlers", "runtime")
     )
     assert paths == expected
-    assert "tests/unit/dlq/" not in paths
+    assert "tests/unit/dlq/" in paths
 
 
 def test_missing_test_directories_are_filtered_out() -> None:

@@ -17,6 +17,17 @@ the CLI entrypoint:
 4. dispatch through the OMN-13094 receipt-mode path
    (:func:`omnibase_infra.cli.receipt_mode.run_receipt_mode`).
 
+Bus target (OMN-13532). By default the CLI runs the orchestrator in-process on
+``EventBusInmemory`` — fully self-contained, no broker required. When a live
+delegation must reach a running runtime, ``--bus kafka --kafka-bootstrap
+host:port`` selects the Kafka event bus so the typed
+``ModelDelegateSkillRequest`` command is published to the delegate-skill
+command topic declared in the contract's ``event_bus.publish_topics``, where the
+deployed ``node_delegate_skill_orchestrator`` consumer picks it up
+(``feedback_bus_is_the_transport`` — the bus is THE transport). The bus
+selection and bootstrap override flow straight through ``backend_overrides`` to
+``RuntimeLocal``; the CLI never hardcodes the broker.
+
 stdout receives exactly ONE
 :class:`~omnibase_core.models.dispatch.model_skill_result.ModelSkillResult`
 JSON whose ``result`` is the FULL
@@ -50,9 +61,11 @@ from omnibase_infra.cli.receipt_mode import (
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
-    "DEFAULT_MAX_TOKENS",
     "DEFAULT_TASK_TYPE",
     "TASK_TYPE_CHOICES",
+    "BUS_CHOICES",
+    "DEFAULT_BUS",
+    "build_backend_overrides",
     "classify_task_type",
     "run_delegate",
 ]
@@ -64,10 +77,6 @@ DELEGATE_NODE_NAME = "node_delegate_skill_orchestrator"
 
 # Registered adapter source for ``ModelDelegateSkillRequest`` (Literal field).
 DELEGATE_SOURCE = "claude-code"
-
-# Default response budget when ``--max-tokens`` is omitted. Matches the
-# historical delegate-shim default; the node enforces its own hard ceiling.
-DEFAULT_MAX_TOKENS = 2048
 
 # Fallback classification when no keyword matches (the prompt.md default).
 DEFAULT_TASK_TYPE = "research"
@@ -85,6 +94,43 @@ TASK_TYPE_CHOICES = (
     "reasoning",
     "review",
 )
+
+# Event-bus targets the CLI can select (OMN-13532). ``inmemory`` runs the
+# orchestrator in-process (default, no broker). ``kafka`` publishes the typed
+# command to the live broker so a deployed runtime consumer dispatches it.
+# These mirror ``RuntimeLocal.SUPPORTED_EVENT_BUS_VALUES`` — the runtime is the
+# source of truth and rejects anything outside that set.
+BUS_CHOICES = ("inmemory", "kafka")
+
+# Default bus when ``--bus`` is omitted: in-process, fully self-contained.
+DEFAULT_BUS = "inmemory"
+
+
+def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[str, str]:
+    """Build the ``backend_overrides`` map for ``run_receipt_mode``/``RuntimeLocal``.
+
+    ``bus`` selects the event-bus backend (``inmemory`` or ``kafka``). For
+    ``kafka``, an optional ``kafka_bootstrap`` (``host:port``) routes through
+    ``EventBusKafka.from_bootstrap`` so the live broker is targeted without
+    process-wide environment mutation; omitting it lets the Kafka bus resolve
+    its bootstrap from ``KAFKA_BOOTSTRAP_SERVERS``. ``kafka_bootstrap`` is only
+    meaningful for ``bus="kafka"`` and is rejected otherwise so a typo (e.g.
+    passing a broker with the default in-memory bus) fails loud rather than
+    silently running in-process.
+    """
+    if bus not in BUS_CHOICES:
+        raise ValueError(
+            f"Unsupported bus {bus!r}. Choose one of: {', '.join(BUS_CHOICES)}."
+        )
+    if bus != "kafka" and kafka_bootstrap is not None:
+        raise ValueError(
+            f"--kafka-bootstrap is only valid with --bus kafka (got --bus {bus})."
+        )
+    overrides: dict[str, str] = {"event_bus": bus}
+    if kafka_bootstrap is not None:
+        overrides["kafka_bootstrap"] = kafka_bootstrap
+    return overrides
+
 
 # Ordered keyword → task_type rules (first match wins). Lifted verbatim from
 # the legacy ``delegate/prompt.md`` classification table so behavior is
@@ -115,7 +161,12 @@ def classify_task_type(prompt: str) -> str:
 
 
 def _write_payload(
-    *, prompt: str, task_type: str, max_tokens: int, state_root: Path, run_id: uuid.UUID
+    *,
+    prompt: str,
+    task_type: str,
+    max_tokens: int | None,
+    state_root: Path,
+    run_id: uuid.UUID,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -123,19 +174,24 @@ def _write_payload(
     ``feedback_no_tmp_use_workspace``). The payload validates against the
     delegate node's input model (``ModelDelegateSkillRequest``); only the
     fields the consumer supplies are set.
+
+    When ``max_tokens`` is ``None`` (no explicit ``--max-tokens`` override) the
+    key is omitted from the payload entirely, so the delegate node resolves the
+    response budget per-backend from its routing contract rather than from a
+    CLI-side default.
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     payload_path = tmp_dir / f"delegate-input-{run_id}.json"
+    payload: dict[str, object] = {
+        "prompt": prompt,
+        "task_type": task_type,
+        "source": DELEGATE_SOURCE,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
     payload_path.write_text(
-        json.dumps(
-            {
-                "prompt": prompt,
-                "task_type": task_type,
-                "source": DELEGATE_SOURCE,
-                "max_tokens": max_tokens,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
     return payload_path
@@ -157,9 +213,35 @@ def _write_payload(
     "--max-tokens",
     "max_tokens",
     type=click.IntRange(min=1),
-    default=DEFAULT_MAX_TOKENS,
+    default=None,
+    help=(
+        "Optional explicit override for the delegated LLM response budget. "
+        "Omit to let the delegate node resolve max_tokens per-backend from its "
+        "routing contract (no CLI-side default)."
+    ),
+)
+@click.option(
+    "--bus",
+    "bus",
+    type=click.Choice(BUS_CHOICES),
+    default=DEFAULT_BUS,
     show_default=True,
-    help="Maximum tokens for the delegated LLM response.",
+    help=(
+        "Event-bus backend. 'inmemory' runs the orchestrator in-process (no "
+        "broker). 'kafka' publishes the typed delegate-skill command to the "
+        "broker so a deployed runtime consumer dispatches it (live path)."
+    ),
+)
+@click.option(
+    "--kafka-bootstrap",
+    "kafka_bootstrap",
+    type=str,
+    default=None,
+    help=(
+        "Kafka bootstrap servers (host:port) for --bus kafka. Omit to resolve "
+        "from KAFKA_BOOTSTRAP_SERVERS, for example from ~/.omnibase/.env. "
+        "Only valid with --bus kafka."
+    ),
 )
 @click.option(
     "--state-root",
@@ -196,7 +278,9 @@ def _write_payload(
 def delegate_command(
     prompt: str,
     task_type: str | None,
-    max_tokens: int,
+    max_tokens: int | None,
+    bus: str,
+    kafka_bootstrap: str | None,
     state_root: Path,
     timeout: int,
     verbose: bool,
@@ -214,25 +298,33 @@ def delegate_command(
         onex delegate "explain what a calendar app needs"
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
+        # Publish through the configured Kafka broker so a deployed runtime dispatches it:
+        onex delegate "document the router" --bus kafka --kafka-bootstrap "$KAFKA_BOOTSTRAP_SERVERS"
     """
-    sys.exit(
-        run_delegate(
+    try:
+        exit_code = run_delegate(
             prompt=prompt,
             task_type=task_type,
             max_tokens=max_tokens,
+            bus=bus,
+            kafka_bootstrap=kafka_bootstrap,
             state_root=state_root,
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
         )
-    )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    sys.exit(exit_code)
 
 
 def run_delegate(
     *,
     prompt: str,
     task_type: str | None,
-    max_tokens: int,
+    max_tokens: int | None,
+    bus: str = DEFAULT_BUS,
+    kafka_bootstrap: str | None = None,
     state_root: Path,
     timeout: int,
     verbose: bool,
@@ -243,8 +335,17 @@ def run_delegate(
     Returns the process exit code. Payload construction, node dispatch, and
     result extraction are all internal — the caller supplies a prompt and
     receives one typed receipt on stdout.
+
+    ``bus`` selects the event-bus backend (``inmemory`` default, ``kafka`` for
+    the live broker path); ``kafka_bootstrap`` optionally overrides the broker
+    when ``bus="kafka"``. Both flow through ``backend_overrides`` to
+    ``RuntimeLocal`` — the runtime is the single source of truth for the bus
+    (``feedback_bus_is_the_transport``).
     """
     resolved_task_type = task_type or classify_task_type(prompt)
+    backend_overrides = build_backend_overrides(
+        bus=bus, kafka_bootstrap=kafka_bootstrap
+    )
     run_id = uuid.uuid4()
     payload_path = _write_payload(
         prompt=prompt,
@@ -259,7 +360,7 @@ def run_delegate(
         contract_path=contract_path,
         input_path=payload_path,
         state_root=state_root,
-        backend_overrides={"event_bus": "inmemory"},
+        backend_overrides=backend_overrides,
         timeout=timeout,
         verbose=verbose,
         emit_socket=emit_socket or default_emit_socket_path(),

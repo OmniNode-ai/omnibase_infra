@@ -26,6 +26,26 @@ Architecture Rules:
         Reducers own state machines; orchestrators are "reaction planners"
         that coordinate work based on reducer outputs.
 
+    - ARCH-004: Contract-Declared Orchestrator Workflow Must Be Bound To An Executor
+        (Signal A.) Cross-file, node-directory rule (OMN-13472). An
+        orchestrator-like node that declares an fsm:/workflow-state set must bind
+        it to a runtime executor; it must not leave the contract table
+        decorative while a handler drives the transitions itself. Catches the
+        delegation-shaped anti-pattern (_transition(...) in a non-"*Orchestrator"
+        handler) that ARCH-003's single-file, class-name-gated AST approach
+        structurally misses. Reducers are exempt.
+
+    - ARCH-004B: Orchestrator Handler Must Not Be A Class-B Monolith
+        (Signal B.) DISTINCT rule from ARCH-004 Signal A (OMN-13486). Catches the
+        orchestration-monolith complexity anti-pattern — a single oversized +
+        complex orchestrator handler (high branch/event density or routing
+        fan-in/out) that is not executor-bound — INDEPENDENT of FSM
+        decorativeness. A node can fail Signal B with no FSM at all (build_loop /
+        session / memory_lifecycle / swarm_dispatch). Owns its own B* finding
+        codes and its own ratchet baseline dimension
+        (architecture-handshakes/orchestration-monolith-baseline.yaml). Reducers
+        are exempt.
+
 Two Interfaces:
     **1. Function-based validators** - Direct file validation, returns detailed results.
 
@@ -79,6 +99,11 @@ Configuration:
 
 from __future__ import annotations
 
+from omnibase_infra.nodes.node_architecture_validator.validators.validator_contract_declared_orchestrator_workflow import (
+    RuleContractDeclaredOrchestratorWorkflow,
+    analyze_node_directory,
+    validate_contract_declared_orchestrator_workflow,
+)
 from omnibase_infra.nodes.node_architecture_validator.validators.validator_no_direct_dispatch import (
     RuleNoDirectDispatch,
     validate_no_direct_dispatch,
@@ -91,14 +116,27 @@ from omnibase_infra.nodes.node_architecture_validator.validators.validator_no_or
     RuleNoOrchestratorFSM,
     validate_no_orchestrator_fsm,
 )
+from omnibase_infra.nodes.node_architecture_validator.validators.validator_orchestration_monolith import (
+    RuleOrchestrationMonolith,
+    analyze_monolith,
+    validate_orchestration_monolith,
+)
 
 __all__: list[str] = [
     # Functions (file-based validators)
     "validate_no_direct_dispatch",
     "validate_no_handler_publishing",
     "validate_no_orchestrator_fsm",
+    # Functions (node-directory cross-file validators)
+    "validate_contract_declared_orchestrator_workflow",
+    "analyze_node_directory",
+    # ARCH-004 Signal B (orchestration-monolith complexity, OMN-13486)
+    "validate_orchestration_monolith",
+    "analyze_monolith",
     # Classes (protocol-compliant rules)
     "RuleNoDirectDispatch",
     "RuleNoHandlerPublishing",
     "RuleNoOrchestratorFSM",
+    "RuleContractDeclaredOrchestratorWorkflow",
+    "RuleOrchestrationMonolith",
 ]

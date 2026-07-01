@@ -5,7 +5,7 @@
 Embeds decision records and stores them in Qdrant for semantic retrieval.
 
 Collection: "session_decisions"
-Vector: 1024-dim from Qwen3-Embedding-8B (LLM_EMBEDDING_URL)
+Vector: 1024-dim from Qwen3-Embedding-8B
 Payload: task_id, session_id, decision_text, context, timestamp
 
 Embedding text format:
@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from uuid import UUID, uuid5
 
 import httpx
@@ -116,11 +115,22 @@ class EmbeddingClient:
     """Async HTTP client for generating embeddings via OpenAI-compatible API.
 
     Calls POST {base_url}/v1/embeddings with the standard request format.
-    Default base_url is read from LLM_EMBEDDING_URL env var.
+    The base_url must be injected by the caller from the node contract or
+    routing authority — no env-var fallback.
+
+    Args:
+        base_url: Full base URL of the embedding service (e.g.
+            ``"http://192.168.86.201:8100"``). Required; must not be empty.
     """
 
-    def __init__(self, base_url: str | None = None) -> None:
-        self._base_url = base_url or os.environ.get("LLM_EMBEDDING_URL", "")
+    def __init__(self, base_url: str) -> None:
+        if not base_url.strip():
+            raise ValueError(
+                "EmbeddingClient.base_url is empty; inject the URL from the node "
+                "contract or routing authority rather than relying on an env-var "
+                "fallback."
+            )
+        self._base_url = base_url.strip()
 
     async def embed(self, text: str) -> list[float]:
         """Generate a 1024-dim embedding vector for the given text.

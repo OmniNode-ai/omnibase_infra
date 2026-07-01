@@ -39,6 +39,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import ModelRuntimeSchedulerConfig
 from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 
@@ -54,7 +55,7 @@ def mock_event_bus() -> AsyncMock:
     Returns:
         AsyncMock configured to simulate EventBusKafka behavior.
     """
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     bus.publish = AsyncMock(return_value=None)
     bus.start = AsyncMock(return_value=None)
     bus.stop = AsyncMock(return_value=None)

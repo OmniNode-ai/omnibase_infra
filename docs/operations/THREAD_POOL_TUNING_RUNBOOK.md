@@ -45,7 +45,7 @@ from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical
 
 adapter = AdapterInfisical()
 await adapter.initialize({
-    "infisical_addr": "http://192.168.86.200:8200",
+    "infisical_addr": "http://<onex-host>:8200",
     "client_id": "...",
     "client_secret": "...",
     "timeout_seconds": 30.0,
@@ -60,7 +60,7 @@ from pydantic import SecretStr
 from omnibase_infra.handlers.models.infisical.model_infisical_handler_config import ModelInfisicalHandlerConfig
 
 config = ModelInfisicalHandlerConfig(
-    infisical_addr="http://192.168.86.200:8200",
+    infisical_addr="http://<onex-host>:8200",
     client_id="...",
     client_secret=SecretStr("..."),
     timeout_seconds=30.0,
@@ -242,7 +242,7 @@ print(f"Failure count: {health.get('circuit_breaker_failure_count')}")
 
 **Resolution** (Infisical - async-native):
 1. Check network latency to Infisical
-2. Verify Infisical server health at `http://192.168.86.200:8200`
+2. Verify Infisical server health at `http://<onex-host>:8200`
 3. Review circuit breaker failure threshold
 4. Increase `timeout_seconds` if Infisical is under load
 
@@ -329,7 +329,7 @@ Thread pools work with the circuit breaker pattern for resilience:
 ```python
 # Coordinated configuration for resilience (Infisical - async-native)
 config = ModelInfisicalHandlerConfig(
-    infisical_addr="http://192.168.86.200:8200",
+    infisical_addr="http://<onex-host>:8200",
     client_id="...",
     client_secret=SecretStr("..."),
     # No thread pool - async-native SDK

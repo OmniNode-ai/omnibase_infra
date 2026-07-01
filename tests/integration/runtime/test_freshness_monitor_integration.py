@@ -25,6 +25,7 @@ from omnibase_infra.models.health.model_projection_recovered_event import (
 from omnibase_infra.models.projection.projection_contract_registry import (
     PROJECTION_CONTRACTS,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.freshness_monitor import ServiceFreshnessMonitor
 
 
@@ -49,7 +50,7 @@ class TestFreshnessMonitorIntegration:
         async def query(table: str, field: str) -> datetime:
             return stale_ts
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
 
         monitor = ServiceFreshnessMonitor(
@@ -80,7 +81,7 @@ class TestFreshnessMonitorIntegration:
             call_count += 1
             return stale_ts if call_count <= 1 else fresh_ts
 
-        bus = MagicMock()
+        bus = MagicMock(spec=ProtocolEventBusLike)
         bus.publish_envelope = AsyncMock()
 
         monitor = ServiceFreshnessMonitor(

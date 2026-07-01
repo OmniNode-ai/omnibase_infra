@@ -4,12 +4,13 @@
 
 # trigger_rebuild_on_merge.py
 #
-# Publishes onex.cmd.omnimarket.redeploy-start.v1 (consumed by node_redeploy)
-# when a merged PR contains runtime changes. Called from the
-# runtime-rebuild-trigger GHA workflow on PR merge to dev or main.
+# Publishes onex.cmd.omnimarket.redeploy-start.v1 (consumed by
+# node_redeploy_orchestrator) when a merged PR contains runtime changes. Called
+# from the runtime-rebuild-trigger GHA workflow on PR merge to dev or main.
 #
-# node_redeploy owns the deployment lifecycle (lane policy, digest pinning,
-# readiness, rollback) and is the SOLE emitter of
+# node_redeploy_orchestrator owns the deployment lifecycle (lane policy via the
+# prod-gate compute, digest pinning, readiness, rollback) and its deploy
+# publish-monitor EFFECT is the SOLE emitter of
 # onex.cmd.deploy.rebuild-requested.v1 to the deploy agent. CI publishes a typed
 # start command only; it never talks to the deploy agent directly.
 #
@@ -21,7 +22,7 @@
 #   - merge to dev  -> runtime_lane=dev,            source_branch=dev
 #   - merge to main -> runtime_lane=stability-test, source_branch=main
 #     (dev->main promotion proves the stability lane; prod deploys the
-#      stability-proven digest later via node_redeploy, not from CI)
+#      stability-proven digest later via node_redeploy_orchestrator, not from CI)
 #
 # Tickets: OMN-8917 (original auto-trigger), OMN-12573 (re-point to node_redeploy)
 #
@@ -52,8 +53,9 @@ from datetime import UTC, datetime
 
 import click
 
-# CI publishes the node_redeploy start command; node_redeploy is the sole
-# emitter of the deploy-agent rebuild command downstream.
+# CI publishes the node_redeploy_orchestrator start command; the orchestrator's
+# deploy publish-monitor effect is the sole emitter of the deploy-agent rebuild
+# command downstream.
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
 _RUNTIME_PATH_PATTERNS = [
@@ -63,10 +65,10 @@ _RUNTIME_PATH_PATTERNS = [
 
 _RUNTIME_LABEL = "runtime_change"
 
-# Maps the merged PR's base branch to a node_redeploy runtime lane. Values match
+# Maps the merged PR's base branch to a runtime lane. Values match
 # deploy_agent.events.EnumRuntimeLane (dev | stability-test | prod). prod is not
 # triggerable from CI: production deploys the stability-proven digest through
-# node_redeploy's promotion gate, never from a merge event.
+# node_redeploy_orchestrator's promotion gate, never from a merge event.
 _BASE_BRANCH_LANES: dict[str, str] = {
     "dev": "dev",
     "main": "stability-test",
@@ -85,7 +87,7 @@ def should_trigger(changed_files: list[str], labels: list[str]) -> bool:
 
 
 def lane_for_base_branch(base_branch: str) -> str:
-    """Map a merged PR's base branch to a node_redeploy runtime lane.
+    """Map a merged PR's base branch to a node_redeploy_orchestrator runtime lane.
 
     Fails closed on unmapped branches: a misconfigured trigger must not silently
     pick a default lane and rebuild the wrong runtime.
@@ -119,7 +121,7 @@ def publish_redeploy_start_event(
     correlation_id: str,
     requested_by: str,
 ) -> None:
-    """Publish a signed redeploy-start command to node_redeploy via SASL_SSL."""
+    """Publish a signed redeploy-start command to node_redeploy_orchestrator via SASL_SSL."""
     from confluent_kafka import Producer
 
     envelope = {
@@ -185,7 +187,7 @@ def publish_redeploy_start_event(
 @click.option(
     "--source-sha",
     required=True,
-    help="Merge commit SHA of the triggering PR (the ref node_redeploy rebuilds)",
+    help="Merge commit SHA of the triggering PR (the ref node_redeploy_orchestrator rebuilds)",
 )
 @click.option(
     "--requested-by",
@@ -212,11 +214,11 @@ def main(
     correlation_id: str,
     dry_run: bool,
 ) -> None:
-    """Publish a node_redeploy start command if a PR contains runtime changes.
+    """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
 
     Triggers when PR had the runtime_change label OR changed files match
     src/omnimarket/** or src/omnibase_infra/nodes/**. The triggering base branch
-    decides the runtime lane; the merge SHA is the ref node_redeploy rebuilds.
+    decides the runtime lane; the merge SHA is the ref node_redeploy_orchestrator rebuilds.
     """
     files: list[str] = (
         [f.strip() for f in changed_files.split(",") if f.strip()]

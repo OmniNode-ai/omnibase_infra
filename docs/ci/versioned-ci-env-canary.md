@@ -1,6 +1,6 @@
 # Versioned CI Environment Canary
 
-OMN-12564 makes `omnibase_infra` the canary for host-local, immutable CI
+`omnibase_infra` serves as the canary for host-local, immutable CI
 dependency environments on the trusted self-hosted runner pool.
 
 ## Problem
@@ -86,9 +86,9 @@ After the infra canary proves stable, replicate the same pattern per repo:
 Repos with incompatible dependency graphs get separate env roots. Shared base
 layers are fine; shared mutable dependency environments are not.
 
-## Versioned Runner Image Contract (OMN-12567)
+## Versioned Runner Image Contract
 
-The canary above proved the host-local prebuilt env. OMN-12567 graduates it from
+The canary above proved the host-local prebuilt env. This work graduated it from
 an infra canary to a versioned **runner image contract**: the repo-specific
 prebuilt `.venv` is baked into the runner image, and the image "version" is a
 **binding, not a human label**.

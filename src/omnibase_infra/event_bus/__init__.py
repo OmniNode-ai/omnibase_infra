@@ -37,15 +37,11 @@ from omnibase_infra.event_bus.enum_topic_validation_status import (
     EnumTopicValidationStatus,
 )
 
-# OMN-7077: EventBusInmemory is migrating to omnibase_core.
-# Try core first; fall back to infra until core Part 1 merges.
-try:
-    from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
-except ImportError:
-    # Why: Runtime compatibility requires assigning through a broader static type.
-    from omnibase_infra.event_bus.event_bus_inmemory import (  # type: ignore[assignment]
-        EventBusInmemory,
-    )
+# OMN-13419: EventBusInmemory is the thin infra adapter over the single
+# canonical core transport (omnibase_core.event_bus.event_bus_inmemory). The
+# infra runtime kernel re-exports it here so consumers get the infra-shaped
+# health_check / consumer-group surface; node packages import core directly.
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
 )

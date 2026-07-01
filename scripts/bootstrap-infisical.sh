@@ -437,13 +437,13 @@ echo ""
 echo "Services:"
 echo "  PostgreSQL:  localhost:${POSTGRES_EXTERNAL_PORT:-5436}"
 echo "  Valkey:      localhost:${VALKEY_EXTERNAL_PORT:-16379}"
-echo "  Infisical:   localhost:${INFISICAL_EXTERNAL_PORT:-8880}"
+echo "  Infisical:   localhost:${INFISICAL_EXTERNAL_PORT:-8881}"
 if [[ "${SKIP_KEYCLOAK}" != "true" ]]; then
 echo "  Keycloak:    localhost:28080"
 fi
 echo "  Runtime:     localhost:${RUNTIME_MAIN_PORT:-8085}"
 echo ""
-echo "Infisical UI:  http://localhost:${INFISICAL_EXTERNAL_PORT:-8880}"
+echo "Infisical UI:  http://localhost:${INFISICAL_EXTERNAL_PORT:-8881}"
 if [[ "${SKIP_KEYCLOAK}" != "true" ]]; then
 echo "Keycloak UI:   http://localhost:28080"
 fi

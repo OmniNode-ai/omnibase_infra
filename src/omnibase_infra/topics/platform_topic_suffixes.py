@@ -726,6 +726,69 @@ Consumer: NodeLlmEmbeddingEffect runtime handler
 """
 
 # =============================================================================
+# OMNIBASE_INFRA DELEGATION PIPELINE TOPIC SUFFIXES (OMN-7040 / OMN-13191)
+# =============================================================================
+# Delegation pipeline topics. Owned by the delegation orchestrator + reducer
+# contracts (omnimarket node_delegation_orchestrator, node_delegation_routing_reducer,
+# node_delegation_quality_gate_reducer, node_llm_delegation_call_effect) and the
+# infra bus-forwarder. Resolved at runtime via ServiceTopicRegistry instead of
+# importing the legacy TOPIC_DELEGATION_* constants from
+# event_bus/topic_constants.py (OMN-12803, OMN-13191).
+
+SUFFIX_DELEGATION_REQUEST: str = "onex.cmd.omnibase-infra.delegation-request.v1"
+"""Command topic for delegation requests from /delegate skill."""
+
+SUFFIX_DELEGATION_ROUTING_DECISION: str = "onex.evt.omnibase-infra.routing-decision.v1"
+"""Event topic for routing decisions from the delegation routing reducer."""
+
+SUFFIX_DELEGATION_COMPLETED: str = "onex.evt.omnibase-infra.delegation-completed.v1"
+"""Event topic for successful delegation completions."""
+
+SUFFIX_DELEGATION_FAILED: str = "onex.evt.omnibase-infra.delegation-failed.v1"
+"""Event topic for failed delegation attempts."""
+
+SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
+    "onex.evt.omnibase-infra.quality-gate-result.v1"
+)
+"""Event topic for quality gate evaluation results."""
+
+SUFFIX_DELEGATION_ROUTING_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+)
+"""Command topic for routing reducer invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INVOCATION_COMMAND: str = "onex.cmd.omnibase-infra.invocation.v1"
+"""Command topic for typed invocation commands from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE: str = (
+    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+)
+"""Event topic for remote agent task lifecycle updates."""
+
+SUFFIX_DELEGATION_QUALITY_GATE_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+)
+"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INFERENCE_REQUEST: str = (
+    "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+)
+"""Command topic for LLM inference invocation from the delegation orchestrator."""
+
+SUFFIX_DELEGATION_INFERENCE_RESPONSE: str = (
+    "onex.evt.omnibase-infra.inference-response.v1"
+)
+"""Event topic for LLM inference responses in the delegation pipeline."""
+
+SUFFIX_DELEGATION_TASK_DELEGATED: str = "onex.evt.omniclaude.task-delegated.v1"
+"""Event topic for omnidash delegation projection."""
+
+SUFFIX_DELEGATION_BASELINE_COMPARISON: str = (
+    "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+)
+"""Command topic for baseline comparison compute from the delegation orchestrator."""
+
+# =============================================================================
 # OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
 # =============================================================================
 
@@ -1202,6 +1265,74 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # Delegation pipeline command topics (1 day retention — short-lived commands,
+    # OMN-7040 / OMN-13191)
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_ROUTING_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INVOCATION_COMMAND,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_QUALITY_GATE_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INFERENCE_REQUEST,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_BASELINE_COMPARISON,
+        partitions=3,
+        kafka_config={"retention.ms": "86400000", "cleanup.policy": "delete"},
+    ),
+    # Delegation pipeline event topics (7 day retention)
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_ROUTING_DECISION,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_COMPLETED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_QUALITY_GATE_RESULT,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_INFERENCE_RESPONSE,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_TASK_DELEGATED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
@@ -1468,6 +1599,32 @@ SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED: str = (
 )
 """Hook context injection event topic emitted by omniclaude hooks."""
 
+SUFFIX_OMNICLAUDE_PHASE_METRICS: str = "onex.evt.omniclaude.phase-metrics.v1"
+"""Phase metrics event topic emitted by omniclaude build-loop / ticket phase hooks.
+
+Producer: omniclaude phase-metrics hooks
+Consumer: omnibase_infra emit daemon (PHASE_METRICS_REGISTRATION,
+TCB_OUTCOME_REGISTRATION) and demo_loop_gate verification.
+"""
+
+SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED: str = (
+    "onex.evt.omniclaude.notification-blocked.v1"
+)
+"""Notification event topic for agent BLOCKED states.
+
+Producer: omniclaude notification hooks
+Consumer: omnibase_infra emit daemon notification consumer (push-notification relay).
+"""
+
+SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED: str = (
+    "onex.evt.omniclaude.notification-completed.v1"
+)
+"""Notification event topic for agent COMPLETED states.
+
+Producer: omniclaude notification hooks
+Consumer: omnibase_infra emit daemon notification consumer (push-notification relay).
+"""
+
 # =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================
@@ -1564,6 +1721,17 @@ _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
 """Agent observability topic suffixes consumed by ServiceAgentActionsConsumer,
 injection effectiveness consumer (OMN-1889, OMN-2942), and agent learning
 extraction consumer (OMN-7242)."""
+
+_OMNICLAUDE_EMIT_DAEMON_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_PHASE_METRICS,
+    SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+    SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
+)
+"""Emit-daemon topic suffixes for omniclaude phase-metrics and notification events.
+
+Produced by omniclaude hooks; consumed by the omnibase_infra emit daemon
+(phase metrics registrations + notification consumer / push-notification relay).
+Provisioned here so the broker topics exist at startup (OMN-13700)."""
 
 # =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
@@ -2114,6 +2282,12 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES
     ),
+    # Emit-daemon phase-metrics + notification topics (3 partitions -- low-throughput
+    # phase/notification events consumed by the omnibase_infra emit daemon, OMN-13700)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_EMIT_DAEMON_TOPIC_SUFFIXES
+    ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
 
@@ -2161,6 +2335,45 @@ def _omnimemory_enabled() -> bool:
     }
 
 
+# =============================================================================
+# TRANSITIONAL REGISTRY (OMN-13238) — pending per-owning-contract migration
+# =============================================================================
+# ``ALL_PROVISIONED_TOPIC_SPECS`` is a TRANSITIONAL per-topic config source, not
+# a standing provisioning authority. As of OMN-13238 the runtime provisioner
+# (``service_topic_manager._build_topic_specs``) sources topic NAMES *and* the
+# per-topic config (partitions / replication_factor / kafka_config) from
+# contract YAML via ``ContractTopicExtractor.extract_all`` — see the new
+# ``published_events[].topic_config`` block. 9 config-bearing topics whose OWNING
+# omnibase_infra contract already declared a ``published_events`` entry have been
+# migrated into those contracts in this PR (parity asserted by
+# tests/ci/test_topic_config_contract_parity.py).
+#
+# The remaining entries below stay here for one of these reasons:
+#   1. Their owning contract lives in another repo (omnimemory / omniintelligence
+#      / omnimarket build-loop + delegation / omninode routing) — migrating needs
+#      a cross-repo PR + (for the event_bus declaration site) an omnibase_core
+#      schema extension; deliberately NOT done here to avoid compounding the
+#      active omnimarket<->core pin-drift (OMN-13224).
+#   2. The topic is emitted directly by the runtime kernel (no owning node
+#      contract, e.g. runtime-error) — needs a runtime-owned contract first.
+#   3. The topic is a cmd/intent topic, or an event the owning contract does not
+#      list under ``published_events`` — attaching config there would either
+#      violate orchestrator/effect event-purity (no commands in published_events)
+#      or require declaring a NEW published event, both out of scope for this
+#      lossless config migration.
+#
+# Follow-up migration tickets are tracked under epic OMN-12651:
+#   - omnibase_core: extend ModelEventBusSubcontract / ModelTopicMeta so
+#     event_bus topic_config is contract-loadable cross-repo (unblocks the
+#     event_bus.publish_topics declaration site for cmd/intent + non-event topics).
+#   - omnimemory: migrate omnimemory-owned topic config into omnimemory contracts.
+#   - omniintelligence: migrate omniintelligence-owned topic config.
+#   - omnimarket: migrate build-loop + delegation owned topic config.
+#   - omnibase_infra: declare runtime-emitted topics (runtime-error, etc.) in a
+#     runtime-owned contract so their config is contract-sourced too.
+#
+# DO NOT add new entries here. Declare per-topic config in the owning contract's
+# ``published_events[].topic_config`` block instead.
 ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ALL_PLATFORM_TOPIC_SPECS
     + (
@@ -2178,11 +2391,17 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     + ALL_OMNINODE_ROUTING_TOPIC_SPECS
     + (ALL_OMNICLAUDE_TOPIC_SPECS if is_runtime_package_active("omniclaude") else ())
 )
-"""All topic specs to be provisioned by TopicProvisioner at startup.
+"""TRANSITIONAL per-topic config registry (OMN-13238) — NOT the runtime authority.
 
-Combines platform-reserved, domain plugin, and OmniClaude skill topic specs
-into a single registry consumed by service_topic_manager.py. This is the single
-source of truth for topic creation.
+The live runtime topic-creation authority is contract YAML extracted by
+``ContractTopicExtractor.extract_all`` and consumed by
+``service_topic_manager._build_topic_specs`` (names AND per-topic config). This
+registry is retained as a transitional warm source for topics whose owning
+contract has not yet been migrated to ``published_events[].topic_config`` (see
+the banner above for the per-repo follow-up tickets). It is consumed today only
+by the ``omni-infra list-topics`` CLI and the topic-parity CI tests — NOT by any
+runtime provisioning path. It must be fully deleted once the follow-up
+migrations land; it must never become a second standing provisioning authority.
 
 OmniMemory topics (ALL_OMNIMEMORY_TOPIC_SPECS) are included only when
 OMNIMEMORY_ENABLED is set to a truthy value ("1", "true", "yes", "on").
@@ -2211,6 +2430,84 @@ ALL_PROVISIONED_SUFFIXES: tuple[str, ...] = tuple(
 Derived from ALL_PROVISIONED_TOPIC_SPECS. Includes both platform-reserved
 and domain plugin topics.
 """
+
+# =============================================================================
+# GENERATED-TOOL TOPIC SUFFIX BUILDERS (OMN-12841)
+# =============================================================================
+#
+# Generated COMPUTE nodes are exposed as MCP tools via a thin declarative
+# ORCHESTRATOR wrapper (Option B). The wrapper subscribes to a per-tool
+# invocation command topic and publishes a per-tool result event topic. These
+# topic names are *generated* (one per tool), so they cannot be pre-registered
+# constants -- they are composed deterministically here, in the one canonical
+# topics module, from the tool name. Keeping the literal "onex.cmd."/"onex.evt."
+# prefixes in this approved file (not in caller modules) preserves the
+# no-hardcoded-topics gate without an allowlist.
+
+# Producer routing domain for generated wrapper surfaces.
+GENERATED_TOOL_PRODUCER = "generated"
+
+
+def _to_kebab_event_name(name: str) -> str:
+    """Convert a snake_case tool/node name to a kebab-case topic event segment.
+
+    Topic producer/event-name segments are kebab-case (see validate_topic_suffix).
+    Generated tool/node names are snake_case (e.g. ``node_sentiment_classifier``),
+    so underscores are converted to hyphens.
+
+    Args:
+        name: Snake_case tool or node name.
+
+    Returns:
+        Kebab-case event-name segment.
+
+    Raises:
+        OnexError: If ``name`` is empty or whitespace-only (fail fast).
+    """
+    if not name or not name.strip():
+        raise OnexError("Generated tool name must be a non-empty string")
+    return name.strip().replace("_", "-")
+
+
+def build_generated_tool_invoke_suffix(tool_name: str) -> str:
+    """Build the validated MCP invocation command suffix for a generated tool.
+
+    Args:
+        tool_name: Generated tool name (snake_case).
+
+    Returns:
+        Validated suffix ``onex.cmd.generated.<tool>-invoke.v1``.
+
+    Raises:
+        OnexError: If the composed suffix fails canonical validation.
+    """
+    event = _to_kebab_event_name(tool_name)
+    suffix = f"onex.cmd.{GENERATED_TOOL_PRODUCER}.{event}-invoke.v1"
+    result = validate_topic_suffix(suffix)
+    if not result.is_valid:
+        raise OnexError(f"Invalid generated invoke suffix '{suffix}': {result.error}")
+    return suffix
+
+
+def build_generated_tool_result_suffix(tool_name: str) -> str:
+    """Build the validated MCP result event suffix for a generated tool.
+
+    Args:
+        tool_name: Generated tool name (snake_case).
+
+    Returns:
+        Validated suffix ``onex.evt.generated.<tool>-result.v1``.
+
+    Raises:
+        OnexError: If the composed suffix fails canonical validation.
+    """
+    event = _to_kebab_event_name(tool_name)
+    suffix = f"onex.evt.{GENERATED_TOOL_PRODUCER}.{event}-result.v1"
+    result = validate_topic_suffix(suffix)
+    if not result.is_valid:
+        raise OnexError(f"Invalid generated result suffix '{suffix}': {result.error}")
+    return suffix
+
 
 # =============================================================================
 # IMPORT-TIME VALIDATION

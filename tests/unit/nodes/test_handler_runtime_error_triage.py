@@ -32,6 +32,7 @@ from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_triage_r
     DEFAULT_TRIAGE_RULES,
     ModelTriageRule,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 
 
 def _make_error_event(
@@ -157,7 +158,7 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             slack_handler=slack_handler,
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -187,7 +188,7 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             slack_handler=slack_handler,
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -216,7 +217,7 @@ class TestHandlerRuntimeErrorTriage:
             db_pool=db_pool,
             rules=rules,
             linear_handler=linear_handler,
-            event_bus=AsyncMock(),
+            event_bus=AsyncMock(spec=ProtocolEventBusLike),
         )
         event = _make_error_event()
 
@@ -245,7 +246,7 @@ class TestHandlerRuntimeErrorTriage:
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
         )
 
         event = _make_error_event(
@@ -270,7 +271,7 @@ class TestHandlerRuntimeErrorTriage:
 
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
         )
 
         event = _make_error_event(
@@ -302,7 +303,7 @@ class TestHandlerRuntimeErrorTriage:
             ModelTriageRule(name="low_priority", priority=100, action="alert"),
         ]
         handler = HandlerRuntimeErrorTriage(
-            db_pool=db_pool, rules=rules, event_bus=AsyncMock()
+            db_pool=db_pool, rules=rules, event_bus=AsyncMock(spec=ProtocolEventBusLike)
         )
         event = _make_error_event(
             logger_family="asyncpg",
@@ -331,7 +332,7 @@ class TestHandlerRuntimeErrorTriage:
             )
         )
 
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
         handler = HandlerRuntimeErrorTriage(
@@ -367,7 +368,7 @@ class TestHandlerRuntimeErrorTriage:
             )
         )
 
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock(
             side_effect=RuntimeError("Kafka unavailable")
         )
@@ -396,7 +397,7 @@ class TestHandlerRuntimeErrorTriage:
             )
         )
 
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         rules = [ModelTriageRule(name="ticket_all", priority=1, action="ticket")]
         handler = HandlerRuntimeErrorTriage(
@@ -427,7 +428,7 @@ class TestHandlerRuntimeErrorTriage:
             )
         )
 
-        event_bus = AsyncMock()
+        event_bus = AsyncMock(spec=ProtocolEventBusLike)
         event_bus.publish_envelope = AsyncMock()
         rules = [ModelTriageRule(name="suppress_all", priority=1, action="suppress")]
         handler = HandlerRuntimeErrorTriage(

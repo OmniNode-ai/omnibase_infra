@@ -19,6 +19,7 @@ import pytest
 from omnibase_core.models.delegation.wire import ModelInferenceResponseData
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_dispatch_callback,
     _make_payload_type_matcher,
@@ -139,7 +140,7 @@ async def test_invalid_inference_intent_error_response_publishes_to_inference_to
     )
     assert result is not None
 
-    bus = AsyncMock()
+    bus = AsyncMock(spec=ProtocolEventBusLike)
     applier = DispatchResultApplier(
         event_bus=bus,
         output_topic="onex.evt.omnibase-infra.delegation-completed.v1",

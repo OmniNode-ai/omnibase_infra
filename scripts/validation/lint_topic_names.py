@@ -65,6 +65,13 @@ _VALID_VERSION_PATTERN = re.compile(r"^v[1-9]\d*$|^v1$")
 
 # Allowlist of known producer segments — must match the emitting repo (OMN-8507).
 # Any structurally-valid producer not in this set is rejected with "unknown producer".
+#
+# "ui" (OMN-13131) is a cross-renderer producer domain, not a repo: the UI
+# renderer effect nodes (ui.effect.web / ui.effect.cli / ui.effect.ios) thin-publish
+# command envelopes onto the bus and are intentionally not owned by any single
+# backend repo. The first such topic is onex.cmd.ui.renderer-capability-declared.v1
+# (consumed by omnimarket node_renderer_capability_projection). Anchored by the
+# OMN-13131 OCC contract, which names this exact topic.
 _KNOWN_PRODUCERS: frozenset[str] = frozenset(
     {
         "omnimarket",
@@ -76,6 +83,7 @@ _KNOWN_PRODUCERS: frozenset[str] = frozenset(
         "omnibase-compat",
         "github",
         "platform",
+        "ui",
     }
 )
 _KNOWN_SNAPSHOT_PRODUCERS: frozenset[str] = frozenset({"platform", "projection"})

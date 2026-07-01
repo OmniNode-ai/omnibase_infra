@@ -23,6 +23,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import importlib
 import inspect
@@ -60,10 +61,28 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.event_bus.enum_contract_attach_status import (
+    EnumContractAttachStatus,
+)
+from omnibase_infra.event_bus.enum_topic_readiness_status import (
+    EnumTopicReadinessStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_result import (
+    ModelContractAttachResult,
+)
+from omnibase_infra.event_bus.model_topic_readiness_config import (
+    ModelTopicReadinessConfig,
+)
+from omnibase_infra.event_bus.model_topic_set_readiness import (
+    ModelTopicSetReadiness,
+)
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.protocols.protocol_topic_provisioner import (
+    ProtocolTopicProvisioner,
+)
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -87,12 +106,12 @@ from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
@@ -337,11 +356,22 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
 
     Raises:
         ImportError: If the module cannot be imported.
-        AttributeError: If the class is not found in the module.
+        TypeError: If the class is not found in the module (OMN-12408 hard-fail).
+            A handler class declared in a contract but absent from its module is a
+            build/contract defect — not a degradable runtime condition. TypeError is
+            used (rather than AttributeError) so the caller's existing TypeError
+            catch-and-reraise path (which bypasses the ONEX_WIRING_STRICT_MODE gate)
+            propagates this failure as a startup crash regardless of strict mode.
     """
     mod = importlib.import_module(module_path)
-    cls = getattr(mod, class_name)
-    return cls
+    if not hasattr(mod, class_name):
+        raise TypeError(
+            f"CLASS_NOT_FOUND (HANDLER_LOADER_011): class '{class_name}' does not "
+            f"exist in module '{module_path}'. "
+            f"A contract that names a handler class that does not exist is a "
+            f"build/contract defect, not a degradable condition (OMN-12408)."
+        )
+    return getattr(mod, class_name)  # type: ignore[no-any-return]
 
 
 def _assert_is_ownership_query(obj: object) -> None:
@@ -440,14 +470,37 @@ def _make_dispatch_callback(
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
+        handler_takes_envelope = _handler_accepts_event_envelope(
+            cast("Callable[..., object]", handle_method)
+        )
         try:
             model_cls = _import_event_model_class(event_model)
-            typed_payload = (
+            typed_payload: object = (
                 payload
                 if isinstance(payload, model_cls)
                 else model_cls.model_validate(payload)
             )
         except Exception as exc:
+            # An envelope-accepting handler (a multi-step ORCHESTRATOR) declares
+            # its ``event_model`` as the workflow ENTRYPOINT, yet it also consumes
+            # the heterogeneous follow-up events on its other subscribe topics
+            # (validated / completed / failed) whose payloads do NOT validate as
+            # the entrypoint model. Such a handler coerces ``envelope.payload``
+            # itself, keyed on ``event_type``. Re-hydrate the typed envelope with
+            # the RAW domain payload (preserving ``event_type``) so the handler's
+            # own polymorphic coercion runs — the entrypoint event still gets the
+            # typed payload via the success path above (OMN-13247). Non-envelope
+            # (typed-payload) handlers keep the strict fail-fast behavior.
+            if handler_takes_envelope:
+                fallback_envelope = _materialize_raw_event_envelope(
+                    envelope, payload, event_model.name
+                )
+                fallback_result = handle_method(fallback_envelope)
+                if asyncio.iscoroutine(fallback_result):
+                    fallback_result = await cast("Awaitable[object]", fallback_result)
+                return _normalize_handler_result(
+                    fallback_result, envelope, event_model.name
+                )
             failure_result = _build_inference_intent_validation_failure_result(
                 event_model=event_model,
                 envelope=envelope,
@@ -457,12 +510,10 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
-        if _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handle_method)
-        ):
+        if handler_takes_envelope:
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
-                typed_payload,
+                cast("BaseModel", typed_payload),
                 event_model.name,
             )
             envelope_result = handle_method(handler_envelope)
@@ -684,6 +735,51 @@ def _extract_dispatch_event_type(envelope: object) -> object | None:
     return getattr(envelope, "event_type", None)
 
 
+def _materialize_raw_event_envelope(
+    envelope: object,
+    raw_payload: object,
+    fallback_event_type: str,
+) -> ModelEventEnvelope[object]:
+    """Re-hydrate a typed envelope carrying the RAW domain payload.
+
+    Used when an envelope-accepting ORCHESTRATOR consumes a follow-up event whose
+    payload does not validate as its declared entrypoint ``event_model`` (the
+    validated / completed / failed events of a multi-step workflow). The handler
+    coerces ``envelope.payload`` itself keyed on ``event_type``, so this preserves
+    the inbound ``event_type`` and hands the handler a typed
+    ``ModelEventEnvelope`` (never a bare dict, which would crash
+    ``envelope.event_type``) without forcing the payload into the entrypoint model
+    (OMN-13247).
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    if isinstance(envelope, ModelEventEnvelope):
+        updates: dict[str, object] = {"payload": raw_payload}
+        if envelope.event_type is None:
+            updates["event_type"] = fallback_event_type
+        return envelope.model_copy(update=updates)
+
+    correlation_id = _coerce_uuid_or_none(
+        _extract_dispatch_correlation_id(envelope, raw_payload)
+    )
+    envelope_timestamp = _coerce_datetime_or_none(
+        _extract_dispatch_envelope_timestamp(envelope)
+    )
+    event_type = _extract_dispatch_event_type(envelope)
+    return ModelEventEnvelope[object](
+        payload=raw_payload,
+        correlation_id=correlation_id if correlation_id is not None else uuid4(),
+        envelope_timestamp=(
+            envelope_timestamp if envelope_timestamp is not None else datetime.now(UTC)
+        ),
+        event_type=str(event_type or fallback_event_type),
+        source_tool="auto-wiring",
+    )
+
+
 def _materialize_typed_event_envelope(
     envelope: object,
     typed_payload: BaseModel,
@@ -863,9 +959,30 @@ def _normalize_handler_result(
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+# OMN-13350: JSONB list columns whose name does NOT end in the _json/_jsonb
+# convention and so must be explicitly JSON-adapted. A Python list bound to a
+# JSONB column must be wrapped in psycopg2.extras.Json or psycopg2 sends a
+# Postgres ARRAY literal, which fails against a JSONB column — and the projection
+# consumer then silently commits the offset and drops the event. This set is the
+# narrow allowlist for JSONB list columns that the suffix rule does not cover; it
+# must NOT include genuine Postgres text[] ARRAY columns (e.g.
+# swarm_runs.models_used / machines_used), which are correctly passed as raw
+# lists.
+_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors"})
+
+# Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
+# URL Contract" — each OmniNode service owns its own PostgreSQL database and a
+# dedicated *_DB_URL env var. This map MUST stay in parity with that table; a
+# missing row makes the DB-injection auto-wiring reject a contract whose
+# db_io.database names a real per-service DB (e.g. F3/OMN-13158:
+# node_dispatch_outcome_bridge_effect -> database omniintelligence).
 _DB_URL_ENV_MAP: dict[str, str] = {
-    "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
     "omnibase_infra": "OMNIBASE_INFRA_DB_URL",
+    "omniintelligence": "OMNIINTELLIGENCE_DB_URL",
+    "omniclaude": "OMNICLAUDE_DB_URL",
+    "omnimemory": "OMNIMEMORY_DB_URL",
+    "omninode_cloud": "OMNINODE_CLOUD_DB_URL",
+    "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
 }
 
 _OPTIONAL_PROJECTION_DATABASES: frozenset[str] = frozenset({"omnidash_analytics"})
@@ -993,6 +1110,35 @@ def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
     return list(db_io.get("db_tables") or [])
 
 
+def _read_dlq_topics(contract_path: Path) -> list[str]:
+    """Read ``event_bus.dlq_topics`` from a contract YAML. Returns [] if absent.
+
+    OMN-13548 (D-03): projection handlers declare the DLQ destination for
+    malformed inbound events under ``event_bus.dlq_topics`` (the same field the
+    omnimarket projection runners read). The typed ``ModelEventBusSubcontract``
+    does not carry this field, so the wiring reads it from the raw contract YAML
+    exactly as ``_read_db_io_tables`` reads ``db_io.db_tables``. The DLQ topic is
+    therefore resolved from the contract — never hardcoded in this module.
+
+    Raises on YAML parse / file I/O failures so a broken contract is surfaced
+    rather than silently degrading to a no-DLQ projection wiring.
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except FileNotFoundError:
+        return []
+    if not isinstance(raw, dict):
+        return []
+    event_bus = raw.get("event_bus") or {}
+    if not isinstance(event_bus, dict):
+        return []
+    return [str(t) for t in (event_bus.get("dlq_topics") or [])]
+
+
 def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_db_io_tables(contract.contract_path))
 
@@ -1052,13 +1198,24 @@ def _build_sync_db_adapter(db_url: str) -> object:
                 f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in conflict_key_set
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
+            # JSONB adaptation: a dict is always JSON-adapted. A list is
+            # JSON-adapted for a JSONB column (suffix _json/_jsonb, or the
+            # _JSONB_LIST_COLUMNS allowlist for unsuffixed JSONB list columns such
+            # as corpus_errors, OMN-13350) and otherwise passed raw so genuine
+            # Postgres text[] ARRAY columns (e.g. swarm_runs.models_used /
+            # machines_used) keep their array semantics. A JSONB list sent as a
+            # Postgres ARRAY literal fails the INSERT — which is what
+            # silently dropped node-generation-completed events before this fix.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
                     if isinstance(value, dict)
                     or (
                         isinstance(value, list)
-                        and str(key).endswith(("_json", "_jsonb"))
+                        and (
+                            str(key).endswith(("_json", "_jsonb"))
+                            or str(key) in _JSONB_LIST_COLUMNS
+                        )
                     )
                     else value
                 )
@@ -1123,22 +1280,179 @@ def _is_projection_runner_handler(handler_instance: object) -> bool:
     )
 
 
+def _extract_rows_upserted(result: object) -> int:
+    """Extract the rows-written count from a projection handler's return value.
+
+    OMN-13360: the projection terminal event must be gated on a real write.
+    Projection handlers return either a ModelProjectionResult-shaped mapping
+    (``{"rows_upserted": N, ...}``) or a runner-shim mapping (``{"projected":
+    bool}``). This narrows both to an integer row count:
+
+    - ``rows_upserted`` present -> coerce to int (the authoritative count).
+    - only ``projected`` present (runner shim) -> 1 when truthy, else 0. The
+      standalone runner returns ``{"projected": bool}`` where True already means
+      a row was committed (its DB execute path raises on failure).
+    - anything else -> 0 (no provable write; terminal must NOT be emitted).
+    """
+    if isinstance(result, dict):
+        if "rows_upserted" in result:
+            try:
+                return int(result["rows_upserted"])
+            except (TypeError, ValueError):
+                return 0
+        if "projected" in result:
+            return 1 if bool(result["projected"]) else 0
+    return 0
+
+
+async def _route_projection_error_to_dlq(
+    event_bus: object | None,
+    dlq_topics: list[str],
+    envelope: object,
+    handler_name: str,
+    failure_reason: str,
+) -> bool:
+    """Publish a malformed/erroring projection event to its contract DLQ topic.
+
+    OMN-13548 (D-03): when a projection handler raises (most commonly a
+    ``ValidationError`` because the inbound event is missing a required field),
+    the wiring previously logged at ERROR and dropped the message — no DLQ row,
+    no durable trace. This routes the offending raw envelope to the
+    contract-declared DLQ topic (``event_bus.dlq_topics[0]``) so the dropped
+    event is recoverable on the bus. The DLQ envelope carries the offending
+    payload, the failure reason, the handler name, and the correlation_id
+    (hoisted to the top level so the failure is recoverable by correlation even
+    when the payload itself is unparseable).
+
+    Generic for ALL projection handlers, not delegation-only. Best-effort:
+    returns ``True`` when the DLQ envelope was published, ``False`` when no DLQ
+    topic is declared, no publishable event bus is available, or the publish
+    itself fails (each logged at ERROR). A DLQ publish failure never propagates,
+    so it cannot wedge the consumer.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    if not dlq_topics:
+        logger.error(
+            "Projection handler %s dropped a malformed/erroring event with NO DLQ "
+            "topic declared in contract.event_bus.dlq_topics: %s",
+            handler_name,
+            failure_reason,
+        )
+        return False
+    if event_bus is None or not hasattr(event_bus, "publish"):
+        logger.error(
+            "Projection handler %s would route malformed/erroring event to DLQ %s "
+            "but no publishable event bus is bound: %s",
+            handler_name,
+            dlq_topics[0],
+            failure_reason,
+        )
+        return False
+
+    dlq_topic = dlq_topics[0]
+    payload = _extract_dispatch_payload(envelope)
+    correlation = _extract_dispatch_correlation_id(envelope, payload)
+    correlation_id = str(correlation) if correlation is not None else ""
+    original_message: object
+    model_dump = getattr(payload, "model_dump", None)
+    if isinstance(payload, Mapping):
+        original_message = dict(payload)
+    elif callable(model_dump):
+        original_message = model_dump(mode="json")
+    else:
+        original_message = {"raw": str(payload)}
+    dlq_envelope = {
+        "original_message": original_message,
+        "failure_reason": failure_reason,
+        "correlation_id": correlation_id,
+        "retry_count": 0,
+        "failed_at": datetime.now(UTC).isoformat(),
+        "handler": handler_name,
+    }
+    raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
+    publish = getattr(event_bus, "publish", None)
+    if not callable(publish):
+        logger.error(
+            "Projection handler %s would route malformed/erroring event to DLQ %s "
+            "but the bound event bus publish attribute is not callable: %s",
+            handler_name,
+            dlq_topic,
+            failure_reason,
+        )
+        return False
+    try:
+        await publish(dlq_topic, None, raw)
+    except Exception as exc:  # noqa: BLE001 — DLQ publish is best-effort; never wedge the consumer
+        logger.error(
+            "Projection handler %s failed to route malformed/erroring event to DLQ %s "
+            "(correlation_id=%s): %s",
+            handler_name,
+            dlq_topic,
+            correlation_id,
+            _sanitize_exc(exc),
+        )
+        return False
+    logger.warning(
+        "Projection handler %s routed malformed/erroring event to DLQ %s "
+        "(correlation_id=%s): %s",
+        handler_name,
+        dlq_topic,
+        correlation_id,
+        failure_reason,
+    )
+    return True
+
+
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: wiring-internal sink bundle; event_bus is a non-serializable publishable object
+class ProjectionDispatchSinks:
+    """Bus-side output sinks for a projection dispatch callback.
+
+    Bundles the optional bus, terminal-event topic, and DLQ topics so the
+    callback factory stays within the parameter-count budget while each sink
+    remains an explicitly named, typed field. A frozen dataclass (not a Pydantic
+    model) keeps this wiring-internal value object out of the model layer:
+    ``event_bus`` is an arbitrary publishable object (in-memory bus, Kafka
+    wiring, or a test double), so no schema validation is wanted here.
+    """
+
+    event_bus: object | None = None
+    terminal_event: str | None = None
+    dlq_topics: tuple[str, ...] = ()
+
+
 def _make_projection_dispatch_callback(
     handler_instance: object,
     db_tables: list[dict[str, str]],
     subscribe_topics: tuple[str, ...],
-    event_bus: object | None = None,
-    terminal_event: str | None = None,
+    sinks: ProjectionDispatchSinks | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
     input_data alongside _event_type derived from the topic name.
 
-    When event_bus and terminal_event are provided, emits a terminal event
-    envelope to terminal_event after each successful projection so downstream
-    Pattern-B consumers and golden-chain tests can observe completion.
+    ``sinks`` carries the bus-side outputs. When ``sinks.event_bus`` and
+    ``sinks.terminal_event`` are set, a terminal event envelope is emitted to
+    that topic after each successful projection so downstream Pattern-B
+    consumers and golden-chain tests can observe completion.
+
+    OMN-13548 (D-03): when ``sinks.dlq_topics`` is supplied (resolved from the
+    contract's ``event_bus.dlq_topics``) and the projection handler raises, the
+    offending raw envelope is routed to the DLQ topic instead of being logged +
+    dropped silently. This is the robust layer for the fail-loud/observability
+    guarantee: a malformed inbound event whose ``ValidationError`` escapes the
+    handler is now durably captured on the bus on the REAL dispatch path, not
+    only when a handler happens to catch it internally.
     """
+    sinks = sinks or ProjectionDispatchSinks()
+    event_bus = sinks.event_bus
+    terminal_event = sinks.terminal_event
+    dlq_topics = list(sinks.dlq_topics)
+    handler_name = type(handler_instance).__name__
     database = (
         db_tables[0].get("database", "omnidash_analytics")
         if db_tables
@@ -1202,28 +1516,72 @@ def _make_projection_dispatch_callback(
             result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
-            projected = True
-            logger.debug(
-                "Projection handler completed: topic=%s event_type=%s result=%s",
-                topic,
-                event_type,
-                result,
-            )
+            # OMN-13360 (deterministic-truth gate): the terminal
+            # `projection-delegation-applied.v1` event asserts that a durable row
+            # landed, so it must be gated on the handler's actual write outcome —
+            # not merely on `handle()` not raising. The projection handler returns
+            # ModelProjectionResult.model_dump() carrying rows_upserted (0 or 1+);
+            # a zero-row / internally-swallowed path returns normally and would
+            # otherwise emit a false-positive `projected:true`. Gate on
+            # rows_upserted >= 1 and log loudly when a no-raise handler wrote zero
+            # rows so the failure surfaces instead of being masked.
+            rows_upserted = _extract_rows_upserted(result)
+            projected = rows_upserted >= 1
+            if projected:
+                logger.debug(
+                    "Projection handler completed: topic=%s event_type=%s "
+                    "rows_upserted=%s result=%s",
+                    topic,
+                    event_type,
+                    rows_upserted,
+                    result,
+                )
+            else:
+                logger.error(
+                    "Projection handler wrote zero rows (no terminal emitted): "
+                    "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
+                    type(handler_instance).__name__,
+                    topic or "unknown",
+                    event_type,
+                    rows_upserted,
+                    result,
+                )
         except TypeError as exc:
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "
                 "handler=%s topic=%s error_type=%s",
-                type(handler_instance).__name__,
+                handler_name,
                 _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
+            )
+            # OMN-13548 (D-03): route the offending event to the contract DLQ
+            # instead of dropping it silently.
+            await _route_projection_error_to_dlq(
+                event_bus,
+                dlq_topics,
+                envelope,
+                handler_name,
+                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
-                type(handler_instance).__name__,
+                handler_name,
                 _extract_projection_topic(envelope) or "unknown",
                 type(exc).__name__,
                 exc,
+            )
+            # OMN-13548 (D-03): a ValidationError (e.g. a malformed delegation
+            # event missing a required field) raised by the projection handler
+            # on the REAL dispatch path lands here. Route the raw envelope to the
+            # contract-declared DLQ topic so the dropped event is durably
+            # recoverable on the bus rather than vanishing after this log line.
+            await _route_projection_error_to_dlq(
+                event_bus,
+                dlq_topics,
+                envelope,
+                handler_name,
+                f"{type(exc).__name__}: {_sanitize_exc(exc)}",
             )
 
         if projected and event_bus is not None and terminal_event is not None:
@@ -1561,7 +1919,24 @@ def _make_sync_event_publisher(
     event_bus: object,
     handler_name: str,
 ) -> Callable[[str, bytes], None]:
-    """Adapt async runtime event-bus publish to legacy sync handler publishers."""
+    """Adapt async runtime event-bus publish to legacy sync handler publishers.
+
+    The publisher is constructed during ``wire_from_manifest`` while the runtime
+    kernel's event loop is running, so that loop is captured here as the owning
+    loop. Legacy sync handlers (e.g. ``HandlerContextRoiRunner``) execute on a
+    ``ThreadPoolExecutor`` worker thread — the dispatch engine offloads blocking
+    sync handlers via ``run_in_executor`` — so a publish issued from inside such
+    a handler runs on a thread that does not own the kernel loop.
+
+    The publish awaitable returned by the event bus binds its internal Futures to
+    the kernel loop. Running that awaitable on a *foreign* loop (the previous
+    behavior: ``asyncio.run`` spun a throwaway loop in the worker thread once
+    ``get_running_loop`` raised ``RuntimeError``) produced the ``got Future
+    attached to a different loop`` warning and 2-3 minute terminal-emission retry
+    delays (OMN-13658). Scheduling the coroutine back onto the owning kernel loop
+    via ``asyncio.run_coroutine_threadsafe`` keeps every Future on its loop, so
+    the publish completes immediately from any thread.
+    """
     publish = getattr(event_bus, "publish", None)
     if not callable(publish):
         raise ModelOnexError(
@@ -1570,21 +1945,25 @@ def _make_sync_event_publisher(
             f"{type(event_bus).__name__!r} has no callable publish()."
         )
 
+    try:
+        kernel_loop = asyncio.get_running_loop()
+    except RuntimeError as exc:
+        raise ModelOnexError(
+            "handler_wiring: the sync event_publisher for handler "
+            f"{handler_name!r} must be constructed on the runtime kernel event "
+            "loop (wire_from_manifest runs on it), but no running loop was found."
+        ) from exc
+
     def _publish(topic: str, payload: bytes) -> None:
         result = publish(topic, None, payload)
         if not inspect.isawaitable(result):
             return
 
         publish_awaitable = cast("Awaitable[object]", result)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_await_event_bus_publish(publish_awaitable))
-            return
 
-        task = loop.create_task(_await_event_bus_publish(publish_awaitable))
-
-        def _log_publish_failure(done: asyncio.Task[None]) -> None:
+        def _log_publish_failure(
+            done: asyncio.Future[None] | concurrent.futures.Future[None],
+        ) -> None:
             try:
                 done.result()
             except Exception as exc:  # noqa: BLE001 — publish boundary logging
@@ -1597,7 +1976,27 @@ def _make_sync_event_publisher(
                     exc,
                 )
 
-        task.add_done_callback(_log_publish_failure)
+        try:
+            running_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is kernel_loop:
+            # Publishing from the kernel loop's own thread (async handler path):
+            # schedule the coroutine directly on it.
+            task = kernel_loop.create_task(_await_event_bus_publish(publish_awaitable))
+            task.add_done_callback(_log_publish_failure)
+            return
+
+        # Publishing from a ThreadPoolExecutor worker thread (or any thread that
+        # does not own the kernel loop): hand the coroutine to the kernel loop in
+        # a thread-safe way so the publish awaitable's Futures stay on their
+        # owning loop. This avoids the "got Future attached to a different loop"
+        # warning and the 2-3 minute retry delay (OMN-13658).
+        future = asyncio.run_coroutine_threadsafe(
+            _await_event_bus_publish(publish_awaitable), kernel_loop
+        )
+        future.add_done_callback(_log_publish_failure)
 
     return _publish
 
@@ -1897,6 +2296,17 @@ def _strict_dispatcher_coverage_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def _wiring_strict_mode_enabled() -> bool:
+    """Return True when ONEX_WIRING_STRICT_MODE is active (OMN-9126).
+
+    In strict mode no failure is demoted: per-handler resolution failures
+    re-raise (preserving the pre-OMN-13203 boot-crash invariant) instead of
+    being quarantined. Mirrors the env check at ``wire_from_manifest`` so a
+    single source defines strict semantics.
+    """
+    return os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true")
 
 
 def _is_orchestrator_contract(contract: ModelDiscoveredContract) -> bool:
@@ -2262,6 +2672,21 @@ async def wire_from_manifest(
     return report
 
 
+def _contract_provision_topics(contract: ModelDiscoveredContract) -> tuple[str, ...]:
+    """Return the topic set this contract owns at boot (OMN-13237, §3.6).
+
+    Subscribe topics (the consumers that attach) UNION the contract's owned
+    publish topics it must guarantee exist. Names come from the contract's
+    ``event_bus`` declarations only — never a Python literal. DLQ topics are
+    handled by the best-effort universe warm (covered across runtimes per §3.6).
+    """
+    if contract.event_bus is None:
+        return ()
+    ordered = list(contract.event_bus.subscribe_topics)
+    ordered.extend(contract.event_bus.publish_topics)
+    return tuple(dict.fromkeys(ordered))
+
+
 async def subscribe_wired_contract_topics(
     manifest: ModelAutoWiringManifest,
     report: ModelAutoWiringReport,
@@ -2270,12 +2695,31 @@ async def subscribe_wired_contract_topics(
     environment: str = "dev",
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    *,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    readiness_config: ModelTopicReadinessConfig | None = None,
+    attach_results_out: list[ModelContractAttachResult] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
     This is the post-freeze companion to ``wire_from_manifest(...,
     subscribe_immediately=False)``. It preserves the kernel invariant that
     consumers only start after the dispatch engine becomes read-only.
+
+    OMN-13237 — when *provisioner* is supplied, the boot interleaves
+    provision -> confirm-ready -> attach PER WIRED CONTRACT (replacing the
+    global create-all-then-subscribe-all big-bang that caused the cold-broker
+    crash-loop). Each contract keeps the provision->ready->attach ORDER
+    invariant (§3.9); bounded parallelism across contracts is allowed via
+    ``readiness_config.max_concurrent_contract_attach``. A contract whose
+    provision/readiness fails is recorded NOT-READY and SKIPPED for attach — it
+    never aborts the kernel or recycles the process (§3.5, §3.8). Per-contract
+    attach outcomes are appended to *attach_results_out* when provided so the
+    caller can build the runtime readiness tri-state.
+
+    Returns the map of attached contract -> attached topics (the contracts that
+    actually subscribed). Backward-compatible: with no *provisioner* the
+    behavior is the original concurrent subscribe (no readiness gate).
     """
     if event_bus is None:
         return {}
@@ -2308,25 +2752,134 @@ async def subscribe_wired_contract_topics(
             continue
         eligible.append((result.contract_name, contract))
 
-    # Subscribe all contracts concurrently.  Within each contract,
-    # _subscribe_contract_topics already parallelises its own topics.
-    # Together this reduces cold-start from O(contracts * topics * t) to O(t).
-    async def _subscribe_contract(
+    knobs = readiness_config or ModelTopicReadinessConfig()
+    # Bounded parallelism across contracts; each contract keeps its own
+    # provision->ready->attach order (§3.9).
+    semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
+
+    async def _provision_ready_attach(
         name: str, contract: ModelDiscoveredContract
-    ) -> tuple[str, tuple[str, ...]]:
+    ) -> ModelContractAttachResult:
+        async with semaphore:
+            return await _interleave_contract(
+                name=name,
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_applier=(result_appliers_by_contract or {}).get(name),
+                provisioner=provisioner,
+                readiness_config=knobs,
+            )
+
+    attach_results = await asyncio.gather(
+        *(_provision_ready_attach(name, contract) for name, contract in eligible)
+    )
+
+    if attach_results_out is not None:
+        attach_results_out.extend(attach_results)
+
+    subscribed: dict[str, tuple[str, ...]] = {}
+    for ar in attach_results:
+        if ar.status is EnumContractAttachStatus.ATTACHED:
+            subscribed[ar.contract_name] = ar.topics_subscribed
+    return subscribed
+
+
+async def _interleave_contract(
+    *,
+    name: str,
+    contract: ModelDiscoveredContract,
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object,
+    environment: str,
+    result_applier: ProtocolDispatchResultApplier | None,
+    provisioner: ProtocolTopicProvisioner | None,
+    readiness_config: ModelTopicReadinessConfig,
+) -> ModelContractAttachResult:
+    """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
+
+    The order invariant is enforced here: every ``ensure_topic_exists`` for the
+    contract precedes its readiness confirm, which precedes consumer attach.
+    """
+    provision_topics = _contract_provision_topics(contract)
+
+    readiness: ModelTopicSetReadiness | None = None
+    if provisioner is not None and provision_topics:
+        # (1) Provision the contract's topics (idempotent), in declared order.
+        for topic in provision_topics:
+            try:
+                await provisioner.ensure_topic_exists(topic_name=topic)
+            except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
+                logger.warning(
+                    "Topic provisioning failed for contract '%s' topic '%s' "
+                    "(non-fatal, contract will be NOT-READY)",
+                    name,
+                    topic,
+                    exc_info=True,
+                )
+        # (2) Confirm broker metadata converged before attaching the consumer.
+        try:
+            readiness = await provisioner.confirm_topics_ready(
+                provision_topics,
+                config=readiness_config,
+            )
+        except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
+            logger.warning(
+                "Topic readiness confirm raised for contract '%s' "
+                "(non-fatal, contract will be NOT-READY)",
+                name,
+                exc_info=True,
+            )
+            readiness = ModelTopicSetReadiness(
+                topics=provision_topics,
+                status=EnumTopicReadinessStatus.UNAVAILABLE,
+            )
+        if not readiness.is_ready:
+            logger.warning(
+                "Contract '%s' NOT-READY: topic metadata did not converge "
+                "(status=%s failures=%s) — skipping consumer attach, runtime "
+                "stays live (OMN-13237)",
+                name,
+                readiness.status.value,
+                [f.topic for f in readiness.failures],
+            )
+            return ModelContractAttachResult(
+                contract_name=name,
+                status=EnumContractAttachStatus.NOT_READY,
+                readiness=readiness,
+                detail=f"readiness {readiness.status.value}",
+            )
+
+    # (3) Attach the consumer (readiness passed or no provisioner supplied).
+    try:
         topics_subscribed = await _subscribe_contract_topics(
             contract=contract,
             dispatch_engine=dispatch_engine,
             event_bus=event_bus,
             environment=environment,
-            result_applier=(result_appliers_by_contract or {}).get(name),
+            result_applier=result_applier,
         )
-        return name, tuple(topics_subscribed)
+    except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
+        logger.warning(
+            "Contract '%s' consumer attach FAILED after readiness (non-fatal): %s",
+            name,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        return ModelContractAttachResult(
+            contract_name=name,
+            status=EnumContractAttachStatus.FAILED,
+            readiness=readiness,
+            detail=type(exc).__name__,
+        )
 
-    results = await asyncio.gather(
-        *(_subscribe_contract(name, contract) for name, contract in eligible)
+    return ModelContractAttachResult(
+        contract_name=name,
+        status=EnumContractAttachStatus.ATTACHED,
+        topics_subscribed=tuple(topics_subscribed),
+        readiness=readiness,
     )
-    return dict(results)
 
 
 def _prioritize_subscription_results(
@@ -2791,11 +3344,11 @@ def _prepare_handler_wiring(
     from omnibase_core.enums.enum_handler_resolution_outcome import (
         EnumHandlerResolutionOutcome,
     )
+    from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.resolver.model_handler_resolution import (
         ModelHandlerResolution,
     )
     from omnibase_infra.enums import EnumMessageCategory
-    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     handler_ref = entry.handler
     handler_key = _derive_handler_entry_key(entry)
@@ -2952,7 +3505,40 @@ def _prepare_handler_wiring(
                     reason=EnumQuarantineReason.PROTOCOL_HANDLER_DECLARATION,
                     detail=_sanitize_exc(exc),
                 )
-            raise
+            # OMN-13203: a bare resolver TypeError that is NOT a Protocol target
+            # is exactly the unsatisfiable-ctor (ServiceHandlerResolver Step 6)
+            # or ctor-arg-mismatch (Step 2) per-handler wiring bug. These are
+            # the ONLY `raise TypeError` sites in the resolver (Steps 1a/2/6),
+            # are deterministic, never recoverable runtime state, and never an
+            # infra outage — broker/DB/secret failures surface as ModelOnexError
+            # / InfraConnectionError / ConnectionError / OSError, never a bare
+            # resolver TypeError. Before this change the bare re-raise here
+            # propagated through the OMN-8735 TypeError guards and crashed the
+            # whole runtime-effects boot (every healthy handler with it). Quarantine
+            # the single bad handler and continue so the runtime binds its health
+            # server and reports failed=N. Strict mode re-raises (preserves the
+            # boot-crash invariant) so the gate can still fail closed.
+            if _wiring_strict_mode_enabled():
+                raise
+            return _quarantine_prepared(
+                reason=EnumQuarantineReason.UNRESOLVABLE_HANDLER,
+                detail=_sanitize_exc(exc),
+            )
+        except ValueError as exc:
+            # OMN-13203: a per-handler ValueError from resolver/context construction
+            # (not-handle-shaped handler, blank-required field) is the same class
+            # of deterministic per-handler wiring bug as the unsatisfiable-ctor
+            # TypeError above — contain it identically. ValueError is NOT raised by
+            # broker/DB/secret transports (those raise ModelOnexError /
+            # InfraConnectionError / ConnectionError / OSError, caught by the
+            # `except Exception` arms upstream which still propagate), so this does
+            # not over-broaden the catch into infra outages. Strict mode re-raises.
+            if _wiring_strict_mode_enabled():
+                raise
+            return _quarantine_prepared(
+                reason=EnumQuarantineReason.UNRESOLVABLE_HANDLER,
+                detail=_sanitize_exc(exc),
+            )
         except RuntimeError as exc:
             # OMN-9457: deterministic containment for handlers whose
             # construction path calls asyncio.run() inside runtime-managed
@@ -3005,18 +3591,28 @@ def _prepare_handler_wiring(
             and contract.terminal_event in contract.event_bus.publish_topics
             else None
         )
+        # OMN-13548 (D-03): resolve the malformed-event DLQ destination from the
+        # contract's event_bus.dlq_topics (not the typed subcontract, which omits
+        # the field) so a projection handler error routes to the bus instead of
+        # being logged + dropped. Never hardcoded here.
+        projection_dlq_topics = _read_dlq_topics(contract.contract_path)
         callback = _make_projection_dispatch_callback(
             handler_instance,
             db_tables,
             subscribe_topics,
-            event_bus=event_bus,
-            terminal_event=projection_terminal_event,
+            sinks=ProjectionDispatchSinks(
+                event_bus=event_bus,
+                terminal_event=projection_terminal_event,
+                dlq_topics=tuple(projection_dlq_topics),
+            ),
         )
         logger.info(
-            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s terminal_event=%s",
+            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s "
+            "terminal_event=%s dlq_topics=%s",
             handler_ref.name,
             [t.get("name") for t in db_tables],
             projection_terminal_event,
+            projection_dlq_topics,
         )
         # Projection handlers route by topic/db_io, not event_model; leave
         # them untyped so the projection dispatch path is unchanged.
@@ -3046,7 +3642,7 @@ def _prepare_handler_wiring(
                 route_id=route_id,
                 topic_pattern=topic_pattern,
                 message_category=category,
-                dispatcher_id=dispatcher_id,
+                handler_id=dispatcher_id,
             )
             route_ids.append(route_id)
             routes.append(route)

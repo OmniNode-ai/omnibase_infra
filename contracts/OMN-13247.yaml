@@ -1,0 +1,57 @@
+# OMN-13247 contract file for omnibase_infra deploy-gate.
+# The canonical ticket contract and PASS receipts live in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-13247"
+title: "fix(OMN-13247): route each coding-agent orchestrator emit to its own topic (multi-output dispatch-applier fix)"
+summary: >-
+  The e2e proof surfaced a multi-output topic-routing defect that the handler-isolation and golden-chain suites could not see: those suites assert the orchestrator HANDLER OUTPUT event_type is correct, but they never run the dispatch result applier that resolves the actual Kafka publish topic. DispatchResultApplier.apply() Phase-2 publish loop resolved the publish topic from event.topic (absent on a ModelEventEnvelope), then the class-name topic_router / output_topic_map (no match — an ORCHESTRATOR-emitted output_event is always a ModelEventEnvelope), then the single output_topic fallback — which for the coding-agent orchestrator contract is the top-level terminal_event (coding-agent-completed.v1). So the orchestrator's first emit (the workspace-validate command, event_type correctly set to the validate topic) was published to the TERMINAL topic and the validate->invoke->capture chain never executed.
+
+  CANONICAL BASIS (node_redeploy_orchestrator, OMN-13211): a multi-step ONEX orchestrator sequences a workflow by emitting one ModelEventEnvelope per next-command whose event_type IS the full destination topic of that emit. node_redeploy uses the identical pattern and shares the identical latent bug — it only appears to work for hop 1 because its first emit's destination happens to equal the first-publish-topic fallback. So the applier genuinely lacks the multi-output support the canonical pattern needs; the fix lands in the applier (benefiting every orchestrator), not as a per-node shim.
+
+  FIX (no hardcoded topic map, no bespoke shim): (1) service_dispatch_result_applier._resolve_embedded_output_topic now recognizes the canonical routing field — a ModelEventEnvelope output event whose event_type is a contract-declared (allowed) publish topic routes to THAT topic, folded into the existing embedded-topic resolution so the class method count is unchanged. (2) _publish_payload_for_output_event unwraps a ModelEventEnvelope output event to its inner payload so the bus receives the command/event itself, not a double-nested ModelEventEnvelope (mirrors the existing ModelDelegationEventEnvelope unwrap). (3) auto_wiring.handler_wiring._make_dispatch_callback: an envelope-accepting ORCHESTRATOR that consumes the heterogeneous follow-up events on its other subscribe topics (validated / completed / failed) — whose payloads do NOT validate as its declared entrypoint event_model — now re-hydrates the typed envelope with the RAW domain payload (new _materialize_raw_event_envelope, preserving event_type) so the handler's own event_type-keyed coercion runs, instead of failing entrypoint-model validation; this is the second layer the OMN-13247 #2042 entrypoint-rename fix left, and non-envelope (typed-payload) handlers keep strict fail-fast. registry_outcome = bug_fix. Scope = OMN-13247 routing fix (epic OMN-13245).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      New real-dispatch multi-topic hop suite drives a published ModelCodingAgentInvokeCommand through the real MessageDispatchEngine + the real DispatchResultApplier (only the CLI subprocess is mocked) and asserts the topic the bus actually receives per hop: (a) the orchestrator emits the workspace-validate command to the VALIDATE topic, NOT the terminal topic; (b) COMPUTE consumes it and the verdict routes to workspace-validated; (c) the orchestrator emits the invoke command to the EFFECT invoke topic; (d) the EFFECT subprocess seam is reached and (f) the result is published carrying a typed ModelCodingAgentResult. New applier-layer unit coverage proves event_type routing, sequential distinct-topic routing, undeclared-event_type fallback, and inner-payload unwrap. These MUST fail on pre-fix dev (every emit -> terminal) and pass after the fix. The existing applier topic-routing + applier suites + the full coding-agent suite + runtime unit suite remain green (no regressions).
+    command: "uv run pytest tests/unit/nodes/node_coding_agent/test_real_dispatch_multitopic_routing.py tests/unit/runtime/test_dispatch_result_applier_topic_routing.py tests/unit/runtime/test_service_dispatch_result_applier.py tests/unit/nodes/node_coding_agent/ -q"
+  - kind: ci
+    description: >-
+      mypy --strict clean on the two changed source modules; ruff format + check clean; ONEX Pattern Validation passes (DispatchResultApplier method count unchanged — the event_type routing is folded into the existing _resolve_embedded_output_topic); no hardcoded topic literals introduced (routing reads the contract-declared allowed publish topics).
+    command: "uv run mypy src/omnibase_infra/runtime/service_dispatch_result_applier.py src/omnibase_infra/runtime/auto_wiring/handler_wiring.py --strict"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-orchestrator-emit-routes-to-own-topic
+    description: >-
+      Hop (a)+(c): driven through the real dispatch engine + real applier, the orchestrator's workspace-validate command publishes to the VALIDATE topic (not the terminal topic) and its invoke command publishes to the EFFECT invoke topic. This is the headline misroute and it MUST fail on pre-fix dev.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/node_coding_agent/test_real_dispatch_multitopic_routing.py -q"
+  - id: dod-applier-event_type-routing
+    description: >-
+      The applier routes a ModelEventEnvelope output event by its event_type when that event_type is a contract-declared publish topic, routes sequential emits to distinct topics, falls back to output_topic for an undeclared event_type, and publishes the inner payload (never a double-nested ModelEventEnvelope).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_dispatch_result_applier_topic_routing.py::TestOrchestratorEmittedEnvelopeRouting -q"
+  - id: dod-no-regression
+    description: >-
+      The existing applier suite and the full coding-agent node suite stay green — the routing change is additive (named-topic precedence) and the inbound re-hydration fallback only applies to envelope-accepting handlers whose payload fails entrypoint validation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/runtime/test_service_dispatch_result_applier.py tests/unit/nodes/node_coding_agent/ -q"
+  - id: dod-mypy-strict
+    description: >-
+      mypy --strict is clean on the changed dispatch-applier and auto-wiring modules.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run mypy src/omnibase_infra/runtime/service_dispatch_result_applier.py src/omnibase_infra/runtime/auto_wiring/handler_wiring.py --strict"

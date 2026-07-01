@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: '1.0.0'
+ticket_id: OMN-13403
+title: 'Workspace sibling-pin guard: allow same-version clone-ahead'
+summary: >-
+  Make the workspace-mode sibling-pin guard treat a same-version, strictly clone-AHEAD (git-descendant) sibling as a non-fatal clone_ahead note instead of fatal drift, closing the unwinnable OCC re-lock loop while preserving the anti-stale (clone-behind / version-mismatch) protection.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Guard unit + compatibility tests prove exact-match (pass), same-version clone-ahead (pass with note), clone-behind/stale (fatal), version-mismatch (fatal), and unrelated/absent-SHA (fatal).
+    command: >-
+      uv run pytest tests/unit/scripts/test_check_sibling_lock_pins.py tests/scripts/test_check_sibling_lock_pins.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks <PR> --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: >-
+      compare_pins classifies a same-version, git-descendant clone as a non-fatal clone_ahead note (matches stays True); clone-behind, version-mismatch, absent-SHA, and no-repo-root cases all stay fatal.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_check_sibling_lock_pins.py -q'
+  - id: dod-002
+    description: >-
+      check_pins returns rc 0 with clone_ahead_count=1 / drift_count=0 for a same-version clone-ahead sibling, and rc 1 with drift_count=1 for a clone-behind sibling; the compatibility test surface stays green.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_check_sibling_lock_pins.py -q'

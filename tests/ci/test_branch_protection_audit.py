@@ -176,6 +176,45 @@ class TestFindOrphans:
     def test_empty_required_returns_empty(self) -> None:
         assert lib.find_orphan_contexts([], {"ci / build"}) == []
 
+    def test_pr_only_context_not_flagged_when_unseen(self) -> None:
+        """`main-target-guard` binds its check-run to the PR head SHA, never to
+        a `main` commit, so it can never appear in `seen`. It must NOT be
+        flagged as an orphan even with an empty `seen` set (OMN-13517).
+        """
+        assert lib.find_orphan_contexts(["main-target-guard"], set()) == []
+
+    def test_genuine_stale_context_still_flagged_when_unseen(self) -> None:
+        """A genuinely-stale (renamed/removed) CI context like `CI Summary`
+        must STILL be flagged when absent from `seen` — the PR-only allowlist
+        must not mask real drift (e.g. omninode_infra's stale contexts).
+        """
+        assert lib.find_orphan_contexts(["CI Summary"], set()) == ["CI Summary"]
+
+    def test_pr_only_excluded_but_other_orphans_kept(self) -> None:
+        """In a mixed list, the PR-only context is suppressed while a real
+        orphan in the same call is preserved — order-stable.
+        """
+        orphans = lib.find_orphan_contexts(
+            ["main-target-guard", "CI Summary", "ci / build"],
+            {"ci / build"},
+        )
+        assert orphans == ["CI Summary"]
+
+    def test_pr_only_context_present_in_seen_also_not_flagged(self) -> None:
+        """Even if `main-target-guard` somehow appears in `seen`, it is not an
+        orphan — covers both filter branches.
+        """
+        assert (
+            lib.find_orphan_contexts(["main-target-guard"], {"main-target-guard"}) == []
+        )
+
+    def test_pr_only_contexts_constant_contains_main_target_guard(self) -> None:
+        """Regression guard: the allowlist must contain `main-target-guard`
+        (OMN-12243 / OMN-13517) and be an immutable frozenset.
+        """
+        assert "main-target-guard" in lib.PR_ONLY_CONTEXTS
+        assert isinstance(lib.PR_ONLY_CONTEXTS, frozenset)
+
 
 # ---------------------------------------------------------------------------
 # collect_seen_check_run_names — exercises pagination (OMN-9034 thread 7)

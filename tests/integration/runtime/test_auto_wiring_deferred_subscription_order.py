@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -65,7 +66,7 @@ async def test_auto_wiring_defers_subscriptions_until_explicit_commit() -> None:
     contract = _contract()
     manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
     dispatch_engine = MessageDispatchEngine()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
     with patch(

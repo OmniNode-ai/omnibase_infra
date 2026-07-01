@@ -1,0 +1,4 @@
+{
+  "siblings": {},
+  "_note": "Placeholder committed so the Dockerfile COPY always resolves. In workspace mode, stage_workspace.sh overwrites this with the real per-repo {vcs_ref, vcs_dirty, vcs_branch} provenance (OMN-13030). Release mode ignores it."
+}

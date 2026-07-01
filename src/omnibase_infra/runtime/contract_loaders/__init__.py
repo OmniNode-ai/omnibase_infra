@@ -42,6 +42,7 @@ from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
     convert_class_to_handler_key,
     load_handler_class_info_from_contract,
     load_handler_routing_subcontract,
+    validate_handler_class_exists,
 )
 from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
     load_operation_bindings_subcontract,
@@ -63,6 +64,7 @@ __all__ = [
     "load_handler_class_info_from_contract",
     "load_handler_routing_subcontract",
     "load_operation_bindings_subcontract",
+    "validate_handler_class_exists",
     "load_tiered_resolution_configs",
     "load_tiered_resolution_from_contract",
     "load_trust_domain_configs",

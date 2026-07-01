@@ -197,6 +197,42 @@ class ServiceTopicRegistry:
                 topic_suffixes.SUFFIX_BUILD_LOOP_CYCLE_COMPLETED
             ),
             topic_keys.BUILD_LOOP_FAILED: topic_suffixes.SUFFIX_BUILD_LOOP_FAILED,
+            # Delegation pipeline (OMN-7040 / OMN-13191)
+            topic_keys.DELEGATION_REQUEST: (topic_suffixes.SUFFIX_DELEGATION_REQUEST),
+            topic_keys.DELEGATION_ROUTING_DECISION: (
+                topic_suffixes.SUFFIX_DELEGATION_ROUTING_DECISION
+            ),
+            topic_keys.DELEGATION_COMPLETED: (
+                topic_suffixes.SUFFIX_DELEGATION_COMPLETED
+            ),
+            topic_keys.DELEGATION_FAILED: (topic_suffixes.SUFFIX_DELEGATION_FAILED),
+            topic_keys.DELEGATION_QUALITY_GATE_RESULT: (
+                topic_suffixes.SUFFIX_DELEGATION_QUALITY_GATE_RESULT
+            ),
+            topic_keys.DELEGATION_ROUTING_REQUEST: (
+                topic_suffixes.SUFFIX_DELEGATION_ROUTING_REQUEST
+            ),
+            topic_keys.DELEGATION_INVOCATION_COMMAND: (
+                topic_suffixes.SUFFIX_DELEGATION_INVOCATION_COMMAND
+            ),
+            topic_keys.DELEGATION_AGENT_TASK_LIFECYCLE: (
+                topic_suffixes.SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE
+            ),
+            topic_keys.DELEGATION_QUALITY_GATE_REQUEST: (
+                topic_suffixes.SUFFIX_DELEGATION_QUALITY_GATE_REQUEST
+            ),
+            topic_keys.DELEGATION_INFERENCE_REQUEST: (
+                topic_suffixes.SUFFIX_DELEGATION_INFERENCE_REQUEST
+            ),
+            topic_keys.DELEGATION_INFERENCE_RESPONSE: (
+                topic_suffixes.SUFFIX_DELEGATION_INFERENCE_RESPONSE
+            ),
+            topic_keys.DELEGATION_TASK_DELEGATED: (
+                topic_suffixes.SUFFIX_DELEGATION_TASK_DELEGATED
+            ),
+            topic_keys.DELEGATION_BASELINE_COMPARISON: (
+                topic_suffixes.SUFFIX_DELEGATION_BASELINE_COMPARISON
+            ),
         }
 
         # Wiring health monitored topics (matches WIRING_HEALTH_MONITORED_TOPICS)

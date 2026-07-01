@@ -47,6 +47,7 @@ Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -83,19 +84,21 @@ class TestServiceDlqTrackingInitialization:
     """Tests for ServiceDlqTracking initialization and lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_initialize_creates_table(
+    async def test_initialize_opens_pool_against_provisioned_table(
         self,
         dlq_tracking_service: ServiceDlqTracking,
         dlq_tracking_config: ModelDlqTrackingConfig,
     ) -> None:
-        """Test that initialize creates the tracking table.
+        """Test that initialize opens a pool against the pre-provisioned table.
 
-        Verifies that:
+        The ``dlq_replay_history`` table is provisioned by the canonical forward
+        migration runner (OMN-12633), not by ``initialize()``.  This test
+        verifies that:
         1. Connection pool is created successfully
-        2. Table is created with correct name
+        2. The pre-provisioned table is reachable with the configured name
         3. Table exists in information_schema
         """
-        # Table should exist after initialization
+        # Pool should be open after initialization; table was provisioned by the fixture
         assert dlq_tracking_service._pool is not None
         assert dlq_tracking_service.is_initialized is True
 
@@ -109,14 +112,15 @@ class TestServiceDlqTrackingInitialization:
             )
 
     @pytest.mark.asyncio
-    async def test_initialize_creates_indexes(
+    async def test_provisioned_table_has_required_indexes(
         self,
         dlq_tracking_service: ServiceDlqTracking,
         dlq_tracking_config: ModelDlqTrackingConfig,
     ) -> None:
-        """Test that initialize creates required indexes.
+        """Test that the provisioned table carries the required indexes.
 
-        Verifies that:
+        The indexes are part of the canonical schema provisioned by the forward
+        migration runner (OMN-12633), not created by ``initialize()``.  Verifies:
         1. Index on original_message_id exists
         2. Index on replay_timestamp exists
         """
@@ -557,12 +561,16 @@ class TestServiceDlqTrackingHealth:
     async def test_health_check_after_shutdown(
         self,
         dlq_tracking_config: ModelDlqTrackingConfig,
+        provision_dlq_table: Callable[[ModelDlqTrackingConfig], Awaitable[None]],
     ) -> None:
         """Test health check returns False after shutdown.
 
         After shutdown, the service should report unhealthy since
         the connection pool is closed.
         """
+        # Provision the table — health_check verifies table existence and the
+        # service no longer creates it at runtime (OMN-12633).
+        await provision_dlq_table(dlq_tracking_config)
         service = ServiceDlqTracking(dlq_tracking_config)
         await service.initialize()
 

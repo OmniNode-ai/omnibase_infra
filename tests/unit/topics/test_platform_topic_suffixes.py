@@ -547,8 +547,11 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
             SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
             SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_PHASE_METRICS,
             SUFFIX_OMNICLAUDE_ROUTING_DECISION,
             SUFFIX_OMNICLAUDE_SESSION_ENDED,
             SUFFIX_OMNICLAUDE_SESSION_OUTCOME,
@@ -593,6 +596,11 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_VALIDATOR_CATCH,
             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
             SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
+            # Emit-daemon phase-metrics + notification topics (OMN-13700) — consumed
+            # by the omnibase_infra emit daemon notification consumer / registrations
+            SUFFIX_OMNICLAUDE_PHASE_METRICS,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,
+            SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
             if spec.suffix in three_partition_suffixes:
@@ -739,3 +747,35 @@ class TestOmnimemoryEnabledGating:
             assert suffix in suffixes, (
                 f"OmniMemory suffix missing from provisioned when OMNIMEMORY_ENABLED=true: {suffix}"
             )
+
+
+class TestGeneratedToolTopicBuilders:
+    """OMN-12841: per-tool invoke/result suffixes for generated wrapper surfaces."""
+
+    def test_invoke_suffix_is_canonical_and_valid(self) -> None:
+        from omnibase_infra.topics import build_generated_tool_invoke_suffix
+
+        suffix = build_generated_tool_invoke_suffix("node_sentiment_classifier")
+        assert suffix == "onex.cmd.generated.node-sentiment-classifier-invoke.v1"
+        assert validate_topic_suffix(suffix).is_valid is True
+
+    def test_result_suffix_is_canonical_and_valid(self) -> None:
+        from omnibase_infra.topics import build_generated_tool_result_suffix
+
+        suffix = build_generated_tool_result_suffix("node_sentiment_classifier")
+        assert suffix == "onex.evt.generated.node-sentiment-classifier-result.v1"
+        assert validate_topic_suffix(suffix).is_valid is True
+
+    def test_snake_case_is_converted_to_kebab(self) -> None:
+        from omnibase_infra.topics import build_generated_tool_invoke_suffix
+
+        suffix = build_generated_tool_invoke_suffix("a_b_c")
+        assert "a-b-c" in suffix
+        assert "_" not in suffix.split(".")[3]
+
+    def test_empty_tool_name_fails_fast(self) -> None:
+        from omnibase_core.errors import OnexError
+        from omnibase_infra.topics import build_generated_tool_invoke_suffix
+
+        with pytest.raises(OnexError):
+            build_generated_tool_invoke_suffix("   ")

@@ -133,6 +133,26 @@ validation_rules:
     suggested_fix: >
       Remove state transition logic from orchestrator. State transitions belong exclusively to reducer nodes. Orchestrators should call reducers for FSM decisions.
 
+  - rule_id: "ARCH-004"
+    name: "Contract-Declared Orchestrator Workflow Must Be Bound To An Executor"
+    description: >
+      Cross-file, node-directory rule (OMN-13472). An orchestrator-like node that declares an fsm:/workflow-state set MUST bind it to a runtime executor. It must NOT leave the contract transition table decorative (ModelContractOrchestrator has no typed fsm/state_machine field, no traverser consumes orchestrator fsm.transitions) while a handler drives the transitions itself. Catches the delegation-shaped anti-pattern (_transition(...) calls in a non-"*Orchestrator" handler, payload_type_match catchall funneling 3+ payload types into one handler, and one handler that both selects the next state and constructs terminal/compat events) that ARCH-003's single-file, class-name-gated AST approach structurally misses. Reducers are exempt.
+
+    # ERROR severity: a declared-but-unbound orchestrator FSM driven imperatively
+    # by a handler is the OMN-13408-class footgun (terminal/projection corruption).
+    severity: "ERROR"
+    detection_strategy:
+      type: "node_directory_join"
+      checks:
+        - decorative_fsm_with_handler_driven_transitions
+        - payload_type_match_fanin_3plus
+        - handler_selects_state_and_constructs_events
+      target_files:
+        - "contract.yaml"
+        - "handlers/handler_*.py"
+    suggested_fix: >
+      Bind the contract fsm to an executor (migrate to a typed, executor-bound workflow/DAG field per OMN-12835) or decompose the monolithic handler into per-step thin handlers driven by a reducer. See OMN-13471 (delegation decomposition epic). New/worsened cases on touched nodes fail the changed-node ratchet; accepted debt is recorded in architecture-handshakes/imperative-orchestrator-baseline.yaml with an owner ticket.
+
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_ast_analyzer"

@@ -158,7 +158,7 @@ class MixinKafkaBroadcast:
         Serializes the envelope to JSON bytes and publishes.
 
         Args:
-            envelope: Envelope object to publish (ModelOnexEnvelope)
+            envelope: Envelope object to publish (ModelEventEnvelope)
             topic: Target topic name
             key: Optional partition key for per-entity ordering. When provided,
                 the underlying transport uses this key for partition assignment

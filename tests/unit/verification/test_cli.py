@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
+from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
 from omnibase_infra.verification import cli
 from omnibase_infra.verification.cli import build_parser, main
 
@@ -142,8 +144,20 @@ class TestCLIMain:
         assert len(data) == 1
         assert exit_code in (0, 2)
 
-    def test_registration_only(self, tmp_path: Path, capsys: Any) -> None:
+    def test_registration_only(
+        self,
+        tmp_path: Path,
+        capsys: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """--registration-only finds and verifies registration contracts."""
+        # Hermeticity: clear OMNIBASE_INFRA_DB_URL so _make_runtime_db_query_fn()
+        # returns None. When the var leaks in from a developer shell or a CI
+        # runner pointed at a live Postgres, the DB-backed checks PASS against
+        # real data and main() returns 0 instead of the asserted (1, 2). The
+        # "No runtime DB is configured in this unit test" precondition below is
+        # only true once this var is removed.
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
         # Create the 3 registration contract dirs
         for node_name in (
             "node_registration_orchestrator",
@@ -239,3 +253,61 @@ class TestCLIMain:
         """--registration-only with empty dir -> exit 1."""
         exit_code = main(["--registration-only", "--contracts-dir", str(tmp_path)])
         assert exit_code == 1
+
+
+@pytest.mark.unit
+class TestCLIWiresDbQueryFn:
+    """Regression for OMN-13555 Defect 2.
+
+    ``--all`` and ``--contract-path`` must build a real ``db_query_fn`` from
+    ``OMNIBASE_INFRA_DB_URL`` (mirroring ``--registration-only``) so projection
+    probes run instead of auto-QUARANTINE.
+    """
+
+    def _capture_configs(self, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+        captured: list[Any] = []
+        real_report = MagicMock()
+        real_report.model_dump.return_value = {"overall_verdict": "pass", "checks": []}
+        real_report.overall_verdict = EnumValidationVerdict.PASS
+
+        def fake_run(path: Path, config: Any) -> Any:
+            captured.append(config)
+            return real_report
+
+        monkeypatch.setattr(cli, "run_contract_verification", fake_run)
+        # Force a real (non-None) db_query_fn regardless of host DB config.
+        sentinel_fn = lambda sql: []  # noqa: E731
+        monkeypatch.setattr(cli, "_make_runtime_db_query_fn", lambda: sentinel_fn)
+        return captured
+
+    def test_all_builds_non_none_db_query_fn(
+        self, tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured = self._capture_configs(monkeypatch)
+        _write_contract(tmp_path, _make_contract("node_a"), "node_a")
+
+        cli.main(["--all", "--contracts-dir", str(tmp_path)])
+        capsys.readouterr()
+
+        assert captured, "run_contract_verification was never invoked"
+        assert all(cfg.db_query_fn is not None for cfg in captured)
+
+    def test_contract_path_builds_non_none_db_query_fn(
+        self, tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured = self._capture_configs(monkeypatch)
+        path = _write_contract(tmp_path, _make_contract("node_b"), "node_b")
+
+        cli.main(["--contract-path", str(path)])
+        capsys.readouterr()
+
+        assert len(captured) == 1
+        assert captured[0].db_query_fn is not None
+
+    def test_make_runtime_config_wires_db_query_fn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sentinel_fn = lambda sql: []  # noqa: E731
+        monkeypatch.setattr(cli, "_make_runtime_db_query_fn", lambda: sentinel_fn)
+        config = cli._make_runtime_config()
+        assert config.db_query_fn is sentinel_fn

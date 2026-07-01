@@ -747,7 +747,7 @@ def create_secret_resolver() -> SecretResolver:
     # Phase 1: Bootstrap Infisical credentials (always from env)
     infisical_client_id = os.environ.get("INFISICAL_CLIENT_ID")
     infisical_client_secret = os.environ.get("INFISICAL_CLIENT_SECRET")
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://192.168.86.200:8200")
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://<onex-host>:8200")
 
     # Phase 2: Initialize Infisical handler if available
     infisical_handler = None
@@ -898,7 +898,7 @@ from omnibase_core.container import ModelONEXContainer
 
 handler = HandlerInfisical(container)
 await handler.initialize({
-    "host": "http://192.168.86.200:8880",   # INFISICAL_ADDR from .env
+    "host": "http://<onex-host>:8880",   # INFISICAL_ADDR from .env
     "client_id": "...",                      # INFISICAL_CLIENT_ID
     "client_secret": "...",                  # INFISICAL_CLIENT_SECRET
     "project_id": "xxxxxxxx-xxxx-...",       # INFISICAL_PROJECT_ID

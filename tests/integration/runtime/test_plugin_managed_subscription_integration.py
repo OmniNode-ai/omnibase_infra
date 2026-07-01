@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -79,7 +80,7 @@ async def test_plugin_managed_prevents_duplicate_subscription_immediate() -> Non
     )
     manifest = ModelAutoWiringManifest(contracts=(managed,), errors=())
     dispatch_engine = MessageDispatchEngine()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
     with patch(
@@ -106,7 +107,7 @@ async def test_mixed_manifest_only_subscribes_non_plugin_managed_integration() -
     normal = _make_contract("node_normal_worker", _NORMAL_TOPIC, plugin_managed=False)
     manifest = ModelAutoWiringManifest(contracts=(managed, normal), errors=())
     dispatch_engine = MessageDispatchEngine()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
     with patch(
@@ -139,7 +140,7 @@ async def test_deferred_subscription_skips_plugin_managed_integration() -> None:
     normal = _make_contract("node_normal_worker", _NORMAL_TOPIC, plugin_managed=False)
     manifest = ModelAutoWiringManifest(contracts=(managed, normal), errors=())
     dispatch_engine = MessageDispatchEngine()
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.subscribe = AsyncMock(return_value=AsyncMock())
 
     with patch(

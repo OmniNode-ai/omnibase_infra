@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for publication verification probe [OMN-7040]."""
+"""Unit tests for publication verification probe [OMN-7040, OMN-13555]."""
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -14,8 +16,10 @@ from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
 from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
+from omnibase_infra.verification.probes import probe_publication
 from omnibase_infra.verification.probes.probe_publication import (
     CORE_REGISTRATION_SUFFIXES,
+    _rpk_watermark_fallback,
     check_publications,
 )
 
@@ -185,3 +189,39 @@ class TestCheckPublicationsOnePerTopic:
         results = check_publications(contract, watermark_fn=_make_watermark_fn())
         assert len(results) == 1
         assert results[0].verdict == EnumValidationVerdict.PASS
+
+
+@pytest.mark.unit
+class TestRpkWatermarkFallbackHonorsBrokerEnv:
+    """Regression for OMN-13555 Defect 1.
+
+    The rpk watermark fallback must pass the broker-merged environment to the
+    subprocess so it dials ``RPK_BROKERS`` instead of the rpk default
+    ``127.0.0.1:9092``.
+    """
+
+    def test_subprocess_receives_broker_env(self) -> None:
+        sentinel_env = {"RPK_BROKERS": "192.0.2.10:9092"}
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = (
+            '{"partitions": [{"log_start_offset": 0, "high_watermark": 7}]}'
+        )
+
+        with (
+            patch.object(
+                probe_publication, "rpk_env", return_value=sentinel_env
+            ) as mock_env,
+            patch.object(
+                probe_publication.subprocess, "run", return_value=fake_result
+            ) as mock_run,
+        ):
+            low, high = _rpk_watermark_fallback("onex.evt.platform.foo.v1")
+
+        assert (low, high) == (0, 7)
+        mock_env.assert_called_once()
+        # The subprocess must be invoked with the broker-merged env, not None.
+        _args, kwargs = mock_run.call_args
+        assert kwargs["env"] is sentinel_env
+        assert kwargs["env"]["RPK_BROKERS"] == "192.0.2.10:9092"

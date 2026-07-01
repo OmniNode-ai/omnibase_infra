@@ -494,7 +494,8 @@ def test_stability_runbook_is_validation_only() -> None:
 
     assert "install-infra-watchdog" not in runbook
     assert "systemctl" not in runbook
-    assert "does not deploy, restart, or change `.201`" in runbook
+    assert "does not deploy, restart, or change the runtime host" in runbook
+    assert "`.201`" not in runbook
     assert "It does not run `docker compose up`." in runbook
     assert "does not expose inherited production host ports" in runbook
     assert "does not render inherited out-of-lane runtime services" in runbook
