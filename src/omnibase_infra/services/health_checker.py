@@ -1148,6 +1148,42 @@ class ServiceHealth:
 
         try:
             await self._try_attach_runtime_from_container()
+            if self._runtime is None:
+                # OMN-13768: mirror _handle_health's graceful runtime_pending
+                # branch instead of falling through to self.runtime, which
+                # raises ProtocolConfigurationError [ONEX_CORE_041]. That
+                # raise is still caught below (defense in depth), but it
+                # produces an "unhealthy"/error-shaped body rather than the
+                # structured "starting up" response k8s/operators expect
+                # during the (now much shorter, OMN-13768-reordered) window
+                # before RuntimeHostProcess is attached.
+                self._log_health_transition(
+                    status="degraded",
+                    runtime_attached=False,
+                    startup_in_progress=True,
+                    is_running=False,
+                    event_bus_healthy=False,
+                )
+                response = ModelHealthCheckResponse.success(
+                    status="unhealthy",
+                    version=self._version,
+                    details=cast(
+                        "dict[str, JsonType]",
+                        {
+                            "ready": False,
+                            "is_running": False,
+                            "runtime_attached": False,
+                            "startup_phase": "runtime_pending",
+                            "correlation_id": str(correlation_id),
+                        },
+                    ),
+                )
+                return web.Response(
+                    text=response.model_dump_json(exclude_none=True),
+                    status=503,
+                    content_type="application/json",
+                )
+
             readiness_details = await self.runtime.readiness_check(
                 correlation_id=correlation_id,
             )
