@@ -417,6 +417,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv-with-retry pip install "setuptools>=78.1.1"
 
+# Security: upgrade cryptography to clear GHSA-537c-gmf6-5ccf (HIGH, fixed in >=48.0.1).
+# cryptography 46.0.7 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
+# Force upgrade here after all plugin installs to ensure the patched version is present.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv-with-retry pip install "cryptography>=48.0.1"
+
 # Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
 RUN /app/.venv/bin/python -c "\
 import torch, pkgutil; \
