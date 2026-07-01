@@ -62,6 +62,15 @@ class ModelDiscoveredContract(BaseModel):
         default=None,
         description="Optional contract-declared terminal event topic.",
     )
+    requires_cloud_gateway: bool = Field(
+        default=False,
+        description=(
+            "True when the contract declares a cloud gateway leg "
+            "(config.gateway_forwarder.cloud_leg). Such a node forwards between "
+            "the local bus and a hosted cloud Kafka edge and must only be wired "
+            "on lanes where cloud mirroring is provisioned/enabled (OMN-13809)."
+        ),
+    )
     event_bus: ModelEventBusWiring | None = Field(
         default=None, description="Event bus wiring if declared"
     )

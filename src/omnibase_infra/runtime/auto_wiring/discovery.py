@@ -33,6 +33,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
+    is_gateway_cloud_mirroring_enabled,
     is_runtime_package_active,
     is_runtime_topic_active,
 )
@@ -63,6 +64,45 @@ def _contract_targets_active_runtime_packages(
         or topic in compatibility_publish_topics
         for topic in contract.event_bus.publish_topics
     )
+
+
+def _contract_requires_cloud_gateway(raw: dict) -> bool:
+    """Return True when a contract declares a cloud gateway forwarding leg.
+
+    Detected structurally via ``config.gateway_forwarder.cloud_leg`` rather than
+    by node name, so any node that mirrors between the local bus and a hosted
+    cloud Kafka edge is treated uniformly. Such a node must only be wired on
+    lanes where the cloud leg is provisioned (OMN-13809).
+    """
+    config = raw.get("config")
+    if not isinstance(config, dict):
+        return False
+    forwarder = config.get("gateway_forwarder")
+    if not isinstance(forwarder, dict):
+        return False
+    return isinstance(forwarder.get("cloud_leg"), dict)
+
+
+def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
+    """Return True when a cloud-gateway contract must be skipped on this lane.
+
+    A contract that declares a cloud gateway leg is dormant unless cloud
+    mirroring is explicitly enabled. Skipping it prevents the runtime from
+    subscribing its ``ModelGatewayEnvelope`` handlers to bare domain topics
+    whose real payloads are domain models — the ``ValidationError``-on-every-
+    delegation failure fixed in OMN-13809.
+    """
+    if not contract.requires_cloud_gateway:
+        return False
+    if is_gateway_cloud_mirroring_enabled():
+        return False
+    logger.info(
+        "Skipping contract '%s' because it declares a cloud gateway leg but "
+        "cloud mirroring is not enabled on this lane (set %s to enable)",
+        contract.name,
+        "ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED",
+    )
+    return True
 
 
 def discover_contracts() -> ModelAutoWiringManifest:
@@ -170,6 +210,9 @@ def discover_contracts() -> ModelAutoWiringManifest:
             )
             continue
 
+        if _skip_dormant_cloud_gateway(contract):
+            continue
+
         # Duplicate contract name guard (OMN-11958): two packages shipping a
         # contract with the same ``name`` field would produce identical dispatcher
         # IDs and crash with ONEX_CORE_064_DUPLICATE_REGISTRATION.  Surface the
@@ -261,6 +304,8 @@ def discover_contracts_from_paths(
                 contract.name,
                 path,
             )
+            continue
+        if _skip_dormant_cloud_gateway(contract):
             continue
         contracts.append(contract)
 
@@ -399,6 +444,7 @@ def _parse_contract(
         runtime_profiles=runtime_profiles,
         compatibility_publish_topics=raw.get("compatibility_publish_topics"),
         terminal_event=raw.get("terminal_event"),
+        requires_cloud_gateway=_contract_requires_cloud_gateway(raw),
         event_bus=event_bus,
         handler_routing=handler_routing,
     )
