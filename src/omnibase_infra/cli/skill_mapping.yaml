@@ -425,6 +425,21 @@ skills:
       - {name: epic-id, payload_field: epic_id, arg_type: string}
       - {name: check-interval-seconds, payload_field: check_interval_seconds, arg_type: integer}
       - {name: stall-timeout-seconds, payload_field: stall_timeout_seconds, arg_type: integer}
+  # OMN-13834: dispatch_engine was rebuilt from a facade into a thin router over
+  # RSD scoring (node_rsd_fill_compute) + self-healing fan-out
+  # (node_self_healing_dispatch_orchestrator). The backing node input is
+  # ModelSkillRequest (skill_name/skill_path required); static_payload supplies
+  # the skill identity (repo-relative SKILL.md path — no absolute path). Inert in
+  # the canonical env until the OMN-13829 omnimarket re-pin, but correct forward
+  # progress so `onex skill dispatch_engine` resolves once omnimarket is installed.
+  - skill_name: dispatch_engine
+    node_name: node_skill_dispatch_engine_orchestrator
+    result_model: omnimarket.nodes.node_skill_dispatch_engine_orchestrator.models.model_dispatch_engine_receipt.ModelDispatchEngineReceipt
+    static_payload:
+      skill_name: dispatch_engine
+      skill_path: omniclaude/plugins/onex/skills/dispatch_engine/SKILL.md
+    args:
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: env_sync_alert
     node_name: node_env_sync_alert_effect
     result_model: omnimarket.nodes.node_env_sync_alert_effect.models.model_env_sync_alert_result.ModelEnvSyncAlertResult
