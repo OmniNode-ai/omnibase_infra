@@ -509,6 +509,7 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
                 operation=h.get("operation"),
                 event_type=h.get("event_type"),
                 message_category=h.get("message_category"),
+                topic=h.get("topic"),
             )
         )
     return ModelHandlerRouting(

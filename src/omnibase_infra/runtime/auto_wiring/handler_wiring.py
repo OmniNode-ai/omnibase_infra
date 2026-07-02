@@ -2248,6 +2248,20 @@ def _topics_for_handler_entry(
         return ()
 
     topics = contract.event_bus.subscribe_topics
+
+    # OMN-13825: honor a contract-declared per-handler topic (topic_match
+    # strategy). When a handler entry names its own subscribe topic, that
+    # entry deterministically owns exactly that topic — the reducer's
+    # topic_match contract (e.g. node_projection_swarm, two handlers each
+    # declaring one of two subscribe topics) previously fell through to the
+    # multi-handler ambiguity guard (return ()) and registered ZERO dispatch
+    # routes, orphaning the dispatcher ("No dispatcher found"). An entry_topic
+    # that is not an actual subscribe topic returns () so a real contract
+    # error surfaces rather than silently mis-routing.
+    entry_topic = entry.topic.strip() if entry.topic else ""
+    if entry_topic:
+        return (entry_topic,) if entry_topic in topics else ()
+
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         matched = tuple(
