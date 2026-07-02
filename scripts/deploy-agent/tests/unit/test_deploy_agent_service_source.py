@@ -4,9 +4,11 @@
 
 from pathlib import Path
 
+_DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
+
 
 def test_service_uses_canonical_repo_source() -> None:
-    service = Path(__file__).resolve().parents[2] / "deploy" / "deploy-agent.service"
+    service = _DEPLOY_DIR / "deploy-agent.service"
     text = service.read_text()
 
     assert "WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent" in text
@@ -33,3 +35,28 @@ def test_service_uses_canonical_repo_source() -> None:
     assert all(
         "/data/omninode/deploy-agent/venv" not in line for line in exec_start_lines
     )
+
+
+def test_service_declares_no_watchdog() -> None:
+    """OMN-13760: the base unit must not arm WatchdogSec.
+
+    The agent runs minutes-long synchronous rebuilds that block the event loop,
+    so a systemd liveness watchdog SIGABRTs it mid-rebuild. Restart=on-failure
+    covers genuine crashes instead.
+    """
+    text = (_DEPLOY_DIR / "deploy-agent.service").read_text()
+    unit_lines = [ln.strip() for ln in text.splitlines()]
+    assert not any(ln.startswith("WatchdogSec=") for ln in unit_lines), (
+        "deploy-agent.service must not declare WatchdogSec (see OMN-13760)"
+    )
+
+
+def test_override_drop_in_disables_watchdog() -> None:
+    """The tracked .201 drop-in must explicitly disable the watchdog.
+
+    Belt-and-suspenders in case an older base unit carrying WatchdogSec=30 is
+    still installed on the host.
+    """
+    override = _DEPLOY_DIR / "deploy-agent.service.d" / "override.conf"
+    text = override.read_text()
+    assert "WatchdogSec=0" in text
