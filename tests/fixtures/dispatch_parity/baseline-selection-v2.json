@@ -137,10 +137,6 @@
       "message_types": [
         "ModelChainLearnCommand",
         "omnibase-infra.chain-learn",
-        "omnibase-infra.chain-replay-result",
-        "omnibase-infra.chain-retrieval-result",
-        "omnibase-infra.chain-stored",
-        "omnibase-infra.chain-verified",
         "onex.cmd.omnibase-infra.chain-learn.v1",
         "onex.evt.omnibase-infra.chain-replay-result.v1",
         "onex.evt.omnibase-infra.chain-retrieval-result.v1",
@@ -151,7 +147,7 @@
       "type_scoped": true
     },
     "dispatcher.auto.node_chain_orchestrator.HandlerChainReplayComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_chain_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_replay_result",
       "event_model_name": "ModelChainReplayResult",
@@ -160,11 +156,7 @@
       "handler_name": "HandlerChainReplayComplete",
       "message_types": [
         "ModelChainReplayResult",
-        "omnibase-infra.chain-learn",
         "omnibase-infra.chain-replay-result",
-        "omnibase-infra.chain-retrieval-result",
-        "omnibase-infra.chain-stored",
-        "omnibase-infra.chain-verified",
         "onex.cmd.omnibase-infra.chain-learn.v1",
         "onex.evt.omnibase-infra.chain-replay-result.v1",
         "onex.evt.omnibase-infra.chain-retrieval-result.v1",
@@ -175,7 +167,7 @@
       "type_scoped": true
     },
     "dispatcher.auto.node_chain_orchestrator.HandlerChainRetrievalComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_chain_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_retrieval_result",
       "event_model_name": "ModelChainRetrievalResult",
@@ -184,11 +176,7 @@
       "handler_name": "HandlerChainRetrievalComplete",
       "message_types": [
         "ModelChainRetrievalResult",
-        "omnibase-infra.chain-learn",
-        "omnibase-infra.chain-replay-result",
         "omnibase-infra.chain-retrieval-result",
-        "omnibase-infra.chain-stored",
-        "omnibase-infra.chain-verified",
         "onex.cmd.omnibase-infra.chain-learn.v1",
         "onex.evt.omnibase-infra.chain-replay-result.v1",
         "onex.evt.omnibase-infra.chain-retrieval-result.v1",
@@ -199,7 +187,7 @@
       "type_scoped": true
     },
     "dispatcher.auto.node_chain_orchestrator.HandlerChainStoreComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_chain_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_store_result",
       "event_model_name": "ModelChainStoreResult",
@@ -208,11 +196,7 @@
       "handler_name": "HandlerChainStoreComplete",
       "message_types": [
         "ModelChainStoreResult",
-        "omnibase-infra.chain-learn",
-        "omnibase-infra.chain-replay-result",
-        "omnibase-infra.chain-retrieval-result",
         "omnibase-infra.chain-stored",
-        "omnibase-infra.chain-verified",
         "onex.cmd.omnibase-infra.chain-learn.v1",
         "onex.evt.omnibase-infra.chain-replay-result.v1",
         "onex.evt.omnibase-infra.chain-retrieval-result.v1",
@@ -594,7 +578,7 @@
       "type_scoped": false
     },
     "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerAutoMergeComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_merge_sweep_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result",
       "event_model_name": "ModelAutoMergeResult",
@@ -607,16 +591,13 @@
         "onex.evt.skill.merge-sweep-auto-merged.v1",
         "onex.evt.skill.merge-sweep-classified.v1",
         "onex.evt.skill.merge-sweep-pr-list.v1",
-        "skill.merge-sweep",
-        "skill.merge-sweep-auto-merged",
-        "skill.merge-sweep-classified",
-        "skill.merge-sweep-pr-list"
+        "skill.merge-sweep-auto-merged"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerClassifyComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_merge_sweep_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result",
       "event_model_name": "ModelClassifyResult",
@@ -629,10 +610,7 @@
         "onex.evt.skill.merge-sweep-auto-merged.v1",
         "onex.evt.skill.merge-sweep-classified.v1",
         "onex.evt.skill.merge-sweep-pr-list.v1",
-        "skill.merge-sweep",
-        "skill.merge-sweep-auto-merged",
-        "skill.merge-sweep-classified",
-        "skill.merge-sweep-pr-list"
+        "skill.merge-sweep-classified"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -651,16 +629,13 @@
         "onex.evt.skill.merge-sweep-auto-merged.v1",
         "onex.evt.skill.merge-sweep-classified.v1",
         "onex.evt.skill.merge-sweep-pr-list.v1",
-        "skill.merge-sweep",
-        "skill.merge-sweep-auto-merged",
-        "skill.merge-sweep-classified",
-        "skill.merge-sweep-pr-list"
+        "skill.merge-sweep"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerPRListComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_merge_sweep_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result",
       "event_model_name": "ModelPRListResult",
@@ -673,9 +648,6 @@
         "onex.evt.skill.merge-sweep-auto-merged.v1",
         "onex.evt.skill.merge-sweep-classified.v1",
         "onex.evt.skill.merge-sweep-pr-list.v1",
-        "skill.merge-sweep",
-        "skill.merge-sweep-auto-merged",
-        "skill.merge-sweep-classified",
         "skill.merge-sweep-pr-list"
       ],
       "package": "omnibase_infra",
@@ -714,13 +686,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.registry-request-introspection.v1",
         "onex.intent.platform.runtime-tick.v1",
-        "platform.node-heartbeat",
-        "platform.node-introspection",
-        "platform.node-registration-acked",
-        "platform.registry-request-introspection",
-        "platform.request-introspection",
-        "platform.runtime-tick",
-        "platform.topic-catalog-query"
+        "platform.request-introspection"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -830,12 +796,6 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.registry-request-introspection.v1",
         "onex.intent.platform.runtime-tick.v1",
-        "platform.node-heartbeat",
-        "platform.node-introspection",
-        "platform.node-registration-acked",
-        "platform.registry-request-introspection",
-        "platform.request-introspection",
-        "platform.runtime-tick",
         "platform.topic-catalog-query"
       ],
       "package": "omnibase_infra",
@@ -869,7 +829,7 @@
       "type_scoped": false
     },
     "dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_routing_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_model_health_effect.models.model_health_snapshot",
       "event_model_name": "ModelHealthSnapshot",
@@ -882,10 +842,7 @@
         "onex.evt.router.health-snapshot.v1",
         "onex.evt.router.routing-outcome.v1",
         "onex.evt.router.scoring-decision.v1",
-        "router.health-snapshot",
-        "router.route-request",
-        "router.routing-outcome",
-        "router.scoring-decision"
+        "router.health-snapshot"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -904,16 +861,13 @@
         "onex.evt.router.health-snapshot.v1",
         "onex.evt.router.routing-outcome.v1",
         "onex.evt.router.scoring-decision.v1",
-        "router.health-snapshot",
-        "router.route-request",
-        "router.routing-outcome",
-        "router.scoring-decision"
+        "router.route-request"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_routing_orchestrator.HandlerScoringComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_routing_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision",
       "event_model_name": "ModelRoutingDecision",
@@ -926,9 +880,6 @@
         "onex.evt.router.health-snapshot.v1",
         "onex.evt.router.routing-outcome.v1",
         "onex.evt.router.scoring-decision.v1",
-        "router.health-snapshot",
-        "router.route-request",
-        "router.routing-outcome",
         "router.scoring-decision"
       ],
       "package": "omnibase_infra",
@@ -947,7 +898,7 @@
       "type_scoped": false
     },
     "dispatcher.auto.node_rsd_orchestrator.HandlerRsdDataFetchComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_rsd_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result",
       "event_model_name": "ModelRsdDataFetchResult",
@@ -960,10 +911,7 @@
         "onex.evt.rsd.data-fetched.v1",
         "onex.evt.rsd.scores-calculated.v1",
         "onex.evt.rsd.scores-stored.v1",
-        "rsd.data-fetched",
-        "rsd.score",
-        "rsd.scores-calculated",
-        "rsd.scores-stored"
+        "rsd.data-fetched"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -982,16 +930,13 @@
         "onex.evt.rsd.data-fetched.v1",
         "onex.evt.rsd.scores-calculated.v1",
         "onex.evt.rsd.scores-stored.v1",
-        "rsd.data-fetched",
-        "rsd.score",
-        "rsd.scores-calculated",
-        "rsd.scores-stored"
+        "rsd.score"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_rsd_orchestrator.HandlerRsdScoreComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_rsd_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result",
       "event_model_name": "ModelRsdScoreResult",
@@ -1004,10 +949,7 @@
         "onex.evt.rsd.data-fetched.v1",
         "onex.evt.rsd.scores-calculated.v1",
         "onex.evt.rsd.scores-stored.v1",
-        "rsd.data-fetched",
-        "rsd.score",
-        "rsd.scores-calculated",
-        "rsd.scores-stored"
+        "rsd.scores-calculated"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1087,16 +1029,13 @@
         "onex.evt.skill.scope-extracted.v1",
         "onex.evt.skill.scope-file-read.v1",
         "onex.evt.skill.scope-manifest-written.v1",
-        "skill.scope-check",
-        "skill.scope-extracted",
-        "skill.scope-file-read",
-        "skill.scope-manifest-written"
+        "skill.scope-check"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeExtractComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_scope_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted",
       "event_model_name": "ModelScopeExtracted",
@@ -1109,16 +1048,13 @@
         "onex.evt.skill.scope-extracted.v1",
         "onex.evt.skill.scope-file-read.v1",
         "onex.evt.skill.scope-manifest-written.v1",
-        "skill.scope-check",
-        "skill.scope-extracted",
-        "skill.scope-file-read",
-        "skill.scope-manifest-written"
+        "skill.scope-extracted"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeFileReadComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_scope_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result",
       "event_model_name": "ModelScopeFileReadResult",
@@ -1131,16 +1067,13 @@
         "onex.evt.skill.scope-extracted.v1",
         "onex.evt.skill.scope-file-read.v1",
         "onex.evt.skill.scope-manifest-written.v1",
-        "skill.scope-check",
-        "skill.scope-extracted",
-        "skill.scope-file-read",
-        "skill.scope-manifest-written"
+        "skill.scope-file-read"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
     },
     "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeManifestWriteComplete": {
-      "category": "command",
+      "category": "event",
       "contract_name": "node_scope_workflow_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_written",
       "event_model_name": "ModelScopeManifestWritten",
@@ -1153,9 +1086,6 @@
         "onex.evt.skill.scope-extracted.v1",
         "onex.evt.skill.scope-file-read.v1",
         "onex.evt.skill.scope-manifest-written.v1",
-        "skill.scope-check",
-        "skill.scope-extracted",
-        "skill.scope-file-read",
         "skill.scope-manifest-written"
       ],
       "package": "omnibase_infra",
@@ -1308,7 +1238,7 @@
       "distinct_subscribe_topics": 83,
       "probe_count": 305,
       "registered_dispatchers": 71,
-      "registered_routes": 66,
+      "registered_routes": 86,
       "type_scoped_dispatchers": 36
     },
     "duplicate_winners": [],
@@ -1362,24 +1292,31 @@
     "p0_outcomes": {
       "P0-1_guard_tripped_orchestrators": {
         "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
-        "corpus_caveat": "This slice excludes omnimarket (outside infra's dependency closure); a full cross-repo corpus could add sibling handlers that alter the success/no_dispatcher split. The gate pins THIS slice's behavior and a cross-repo corpus job is tracked under OMN-12525.",
+        "corpus_caveat": "This slice excludes omnimarket (outside infra's dependency closure); a full cross-repo corpus could add sibling handlers. The gate pins THIS slice's post-fix behavior; a cross-repo corpus job is tracked under OMN-12525.",
         "date": "2026-07-02",
-        "gate_posture": "The gate PINS the observed per-topic behavior as-is (design D1). The rsd/routing/merge-sweep/scope outage is a High finding under OMN-12525, fixed BEHIND the gate \u2014 not in this parity PR. The D5 over-generalization is corrected here by evidence.",
+        "declared_dlq_topics": {
+          "node_chain_orchestrator": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+          "node_merge_sweep_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
+          "node_registration_orchestrator": "onex.dlq.omnibase-infra.platform.v1",
+          "node_routing_orchestrator": "onex.dlq.omnibase-infra.router.v1",
+          "node_rsd_orchestrator": "onex.dlq.omnibase-infra.rsd.v1",
+          "node_scope_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1"
+        },
+        "gate_posture": "The gate PINS the post-OMN-13852 behavior: each of the six registers a route per handler and dispatches its real payload. If a future change re-drops these routes (regression to the silent-drop bug), the success P4 probes flip to no_dispatcher and this fixture drifts \u2014 the gate fires first.",
         "live_probed_end_to_end": [
           "node_rsd_orchestrator"
         ],
-        "mixed_routing_orchestrators": [
-          "node_chain_orchestrator",
-          "node_registration_orchestrator"
-        ],
-        "summary": "Routing outage CONFIRMED at runtime for node_rsd_orchestrator: live-probed end-to-end (synthetic publish to onex.evt.rsd.scores-calculated.v1, offset 19; runtime log at 2026-07-02T18:12:20 shows 'No dispatcher found ... routing to DLQ topic onex.dlq.omnibase-infra.rsd.v1'). The static oracle (this fixture) REFINES the design-D5 blanket claim that all six generalize identically: 4 of the 6 are uniformly NO_DISPATCHER on every subscribe topic (the guard registers ZERO routes \u2014 _topics_for_handler_entry returns () at handler_wiring.py:2242-2281), but 2 (node_chain_orchestrator, node_registration_orchestrator) are MIXED \u2014 some handler entries dodge the guard and DO register routes, so those topics dispatch while their event_model-only multi-handler topics still fall through to NO_DISPATCHER. Secondary: the rsd DLQ topic did not exist at runtime, so the event was fully dropped.",
-        "uniform_no_dispatcher_orchestrators": [
+        "now_routing_orchestrators": [
           "node_rsd_orchestrator",
           "node_routing_orchestrator",
           "node_merge_sweep_workflow_orchestrator",
-          "node_scope_workflow_orchestrator"
+          "node_scope_workflow_orchestrator",
+          "node_chain_orchestrator",
+          "node_registration_orchestrator"
         ],
-        "verdict": "NO_DISPATCHER_DLQ_REFINED"
+        "residual_no_dispatcher_note": "P4 probes drive every type-scoped dispatcher on ALL of its contract's subscribe topics; a handler's real payload dispatches on its OWN topic (status=success) and is correctly type-scoped OUT on sibling topics (status=no_dispatcher) \u2014 that is the OMN-12416 narrowing working, not a routing gap. P1 probes drive an opaque _DictPayload that matches no event_model, so they remain no_dispatcher by design.",
+        "summary": "FIXED under OMN-13852 (contract disambiguation). The six multi-handler orchestrators previously declared handler entries with event_model but no event_type, so _topics_for_handler_entry hit the multi-handler ambiguity guard (handler_wiring.py:2242-2281), returned (), and registered ZERO dispatch routes \u2014 every inbound message fell through to NO_DISPATCHER (live-proven on node_rsd_orchestrator: synthetic publish to onex.evt.rsd.scores-calculated.v1 offset 19, runtime log 2026-07-02T18:12:20 'No dispatcher found ... routing to DLQ topic onex.dlq.omnibase-infra.rsd.v1'). Each handler entry now declares its topic-derived event_type alias (+ message_category), so a route registers per handler and the handler's real event_model payload DISPATCHES on its own topic (see the success P4 probes below). No runtime special-case was added \u2014 the MessageDispatchEngine is unchanged (OMN-12525 alignment). Secondary DLQ integrity: each contract now declares event_bus.dlq_topics matching the engine-derived NO_DISPATCHER target for its domain (OMN-13548 provisioning path), so the dead-letter escape hatch targets a real topic instead of silently dropping.",
+        "verdict": "ROUTES_REGISTERED_OMN13852"
       },
       "P0-2_live_contract_source": {
         "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
@@ -4071,6 +4008,7 @@
       },
       "selection": {
         "dispatcher_ids": [
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate",
           "dispatcher.auto.node_chain_retrieval_effect.HandlerChainRetrieval.chain_retrieve_489f06d3"
         ],
         "dlq_topic": null,
@@ -4184,11 +4122,13 @@
         "payload": "ModelChainReplayResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainReplayComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "omnibase-infra.chain-replay-result",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.omnibase-infra.chain-replay-result.v1"
     },
@@ -4296,11 +4236,13 @@
         "payload": "ModelChainRetrievalResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainRetrievalComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "omnibase-infra.chain-retrieval-result",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.omnibase-infra.chain-retrieval-result.v1"
     },
@@ -4408,11 +4350,13 @@
         "payload": "ModelChainStoreResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_chain_orchestrator.HandlerChainStoreComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "omnibase-infra.chain-stored",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.omnibase-infra.chain-stored.v1"
     },
@@ -4643,11 +4587,13 @@
         "payload": "ModelAutoMergeResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerAutoMergeComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.merge-sweep-auto-merged",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.merge-sweep-auto-merged.v1"
     },
@@ -4733,11 +4679,13 @@
         "payload": "ModelClassifyResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerClassifyComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.merge-sweep-classified",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.merge-sweep-classified.v1"
     },
@@ -4769,11 +4717,13 @@
         "payload": "ModelMergeSweepCommand"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "skill.merge-sweep",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.skill.merge-sweep.v1"
     },
@@ -4895,11 +4845,13 @@
         "payload": "ModelPRListResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerPRListComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.merge-sweep-pr-list",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.merge-sweep-pr-list.v1"
     },
@@ -4951,11 +4903,13 @@
         "payload": "ModelTopicCatalogRequest"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_registration_orchestrator.HandlerCatalogRequest"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.request-introspection",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.request-introspection.v1"
     },
@@ -5626,11 +5580,13 @@
         "payload": "ModelTopicCatalogQuery"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_registration_orchestrator.HandlerTopicCatalogQuery"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.topic-catalog-query",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.topic-catalog-query.v1"
     },
@@ -5738,11 +5694,13 @@
         "payload": "ModelHealthSnapshot"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.router.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "router.health-snapshot",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.router.health-snapshot.v1"
     },
@@ -5792,11 +5750,13 @@
         "payload": "ModelRoutingCommand"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.router.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_routing_orchestrator.HandlerRoutingInitiate"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "router.route-request",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.router.route-request.v1"
     },
@@ -5918,11 +5878,13 @@
         "payload": "ModelRoutingDecision"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.router.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_routing_orchestrator.HandlerScoringComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "router.scoring-decision",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.router.scoring-decision.v1"
     },
@@ -5954,11 +5916,13 @@
         "payload": "ModelRsdDataFetchResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.rsd.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_rsd_orchestrator.HandlerRsdDataFetchComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "rsd.data-fetched",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.rsd.data-fetched.v1"
     },
@@ -6008,11 +5972,13 @@
         "payload": "ModelRsdCommand"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.rsd.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_rsd_orchestrator.HandlerRsdInitiate"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "rsd.score",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.rsd.score.v1"
     },
@@ -6116,11 +6082,13 @@
         "payload": "ModelRsdScoreResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.rsd.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_rsd_orchestrator.HandlerRsdScoreComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "rsd.scores-calculated",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.rsd.scores-calculated.v1"
     },
@@ -6172,11 +6140,13 @@
         "payload": "ModelScopeCheckCommand"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "skill.scope-check",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.skill.scope-check.v1"
     },
@@ -6262,11 +6232,13 @@
         "payload": "ModelScopeExtracted"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeExtractComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.scope-extracted",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.scope-extracted.v1"
     },
@@ -6352,11 +6324,13 @@
         "payload": "ModelScopeFileReadResult"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeFileReadComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.scope-file-read",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.scope-file-read.v1"
     },
@@ -6442,11 +6416,13 @@
         "payload": "ModelScopeManifestWritten"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeManifestWriteComplete"
+        ],
+        "dlq_topic": null,
         "message_category": "event",
         "message_type": "skill.scope-manifest-written",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.evt.skill.scope-manifest-written.v1"
     },
@@ -6631,6 +6607,46 @@
       "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
       "topic_pattern": "*.evt.omnimarket.build-loop-orchestrator-completed.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_chain_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate",
+      "handler_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate",
+      "message_category": "command",
+      "route_id": "route.auto.node_chain_orchestrator.HandlerChainLearnInitiate.onex_cmd_omnibase_infra_chain_learn_v1",
+      "topic": "onex.cmd.omnibase-infra.chain-learn.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.chain-learn.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_chain_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainReplayComplete",
+      "handler_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainReplayComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_chain_orchestrator.HandlerChainReplayComplete.onex_evt_omnibase_infra_chain_replay_result_v1",
+      "topic": "onex.evt.omnibase-infra.chain-replay-result.v1",
+      "topic_pattern": "*.evt.omnibase-infra.chain-replay-result.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_chain_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainRetrievalComplete",
+      "handler_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainRetrievalComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_chain_orchestrator.HandlerChainRetrievalComplete.onex_evt_omnibase_infra_chain_retrieval_result_v1",
+      "topic": "onex.evt.omnibase-infra.chain-retrieval-result.v1",
+      "topic_pattern": "*.evt.omnibase-infra.chain-retrieval-result.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_chain_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainStoreComplete",
+      "handler_id": "dispatcher.auto.node_chain_orchestrator.HandlerChainStoreComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_chain_orchestrator.HandlerChainStoreComplete.onex_evt_omnibase_infra_chain_stored_v1",
+      "topic": "onex.evt.omnibase-infra.chain-stored.v1",
+      "topic_pattern": "*.evt.omnibase-infra.chain-stored.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_chain_retrieval_effect",
@@ -6973,6 +6989,46 @@
       "type_scoped": false
     },
     {
+      "contract_name": "node_merge_sweep_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerAutoMergeComplete",
+      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerAutoMergeComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_merge_sweep_workflow_orchestrator.HandlerAutoMergeComplete.onex_evt_skill_merge_sweep_auto_merged_v1",
+      "topic": "onex.evt.skill.merge-sweep-auto-merged.v1",
+      "topic_pattern": "*.evt.skill.merge-sweep-auto-merged.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_merge_sweep_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerClassifyComplete",
+      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerClassifyComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_merge_sweep_workflow_orchestrator.HandlerClassifyComplete.onex_evt_skill_merge_sweep_classified_v1",
+      "topic": "onex.evt.skill.merge-sweep-classified.v1",
+      "topic_pattern": "*.evt.skill.merge-sweep-classified.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_merge_sweep_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
+      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
+      "message_category": "command",
+      "route_id": "route.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate.onex_cmd_skill_merge_sweep_v1",
+      "topic": "onex.cmd.skill.merge-sweep.v1",
+      "topic_pattern": "*.cmd.skill.merge-sweep.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_merge_sweep_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerPRListComplete",
+      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerPRListComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_merge_sweep_workflow_orchestrator.HandlerPRListComplete.onex_evt_skill_merge_sweep_pr_list_v1",
+      "topic": "onex.evt.skill.merge-sweep-pr-list.v1",
+      "topic_pattern": "*.evt.skill.merge-sweep-pr-list.*",
+      "type_scoped": true
+    },
+    {
       "contract_name": "node_onboarding_orchestrator",
       "dispatcher_id": "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding",
       "handler_id": "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding",
@@ -6980,6 +7036,16 @@
       "route_id": "route.auto.node_onboarding_orchestrator.HandlerOnboarding.onex_cmd_omnibase_infra_onboarding_start_v1",
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1",
       "topic_pattern": "*.cmd.omnibase-infra.onboarding-start.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_registration_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_registration_orchestrator.HandlerCatalogRequest",
+      "handler_id": "dispatcher.auto.node_registration_orchestrator.HandlerCatalogRequest",
+      "message_category": "command",
+      "route_id": "route.auto.node_registration_orchestrator.HandlerCatalogRequest.onex_cmd_platform_request_introspection_v1",
+      "topic": "onex.cmd.platform.request-introspection.v1",
+      "topic_pattern": "*.cmd.platform.request-introspection.*",
       "type_scoped": true
     },
     {
@@ -7023,6 +7089,16 @@
       "type_scoped": true
     },
     {
+      "contract_name": "node_registration_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_registration_orchestrator.HandlerTopicCatalogQuery",
+      "handler_id": "dispatcher.auto.node_registration_orchestrator.HandlerTopicCatalogQuery",
+      "message_category": "command",
+      "route_id": "route.auto.node_registration_orchestrator.HandlerTopicCatalogQuery.onex_cmd_platform_topic_catalog_query_v1",
+      "topic": "onex.cmd.platform.topic-catalog-query.v1",
+      "topic_pattern": "*.cmd.platform.topic-catalog-query.*",
+      "type_scoped": true
+    },
+    {
       "contract_name": "node_remote_agent_invoke_effect",
       "dispatcher_id": "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e",
       "handler_id": "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e",
@@ -7031,6 +7107,66 @@
       "topic": "onex.cmd.omnibase-infra.remote-agent-invoke.v1",
       "topic_pattern": "*.cmd.omnibase-infra.remote-agent-invoke.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_routing_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete",
+      "handler_id": "dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_routing_orchestrator.HandlerHealthComplete.onex_evt_router_health_snapshot_v1",
+      "topic": "onex.evt.router.health-snapshot.v1",
+      "topic_pattern": "*.evt.router.health-snapshot.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_routing_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_routing_orchestrator.HandlerRoutingInitiate",
+      "handler_id": "dispatcher.auto.node_routing_orchestrator.HandlerRoutingInitiate",
+      "message_category": "command",
+      "route_id": "route.auto.node_routing_orchestrator.HandlerRoutingInitiate.onex_cmd_router_route_request_v1",
+      "topic": "onex.cmd.router.route-request.v1",
+      "topic_pattern": "*.cmd.router.route-request.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_routing_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_routing_orchestrator.HandlerScoringComplete",
+      "handler_id": "dispatcher.auto.node_routing_orchestrator.HandlerScoringComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_routing_orchestrator.HandlerScoringComplete.onex_evt_router_scoring_decision_v1",
+      "topic": "onex.evt.router.scoring-decision.v1",
+      "topic_pattern": "*.evt.router.scoring-decision.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_rsd_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdDataFetchComplete",
+      "handler_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdDataFetchComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_rsd_orchestrator.HandlerRsdDataFetchComplete.onex_evt_rsd_data_fetched_v1",
+      "topic": "onex.evt.rsd.data-fetched.v1",
+      "topic_pattern": "*.evt.rsd.data-fetched.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_rsd_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdInitiate",
+      "handler_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdInitiate",
+      "message_category": "command",
+      "route_id": "route.auto.node_rsd_orchestrator.HandlerRsdInitiate.onex_cmd_rsd_score_v1",
+      "topic": "onex.cmd.rsd.score.v1",
+      "topic_pattern": "*.cmd.rsd.score.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_rsd_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdScoreComplete",
+      "handler_id": "dispatcher.auto.node_rsd_orchestrator.HandlerRsdScoreComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_rsd_orchestrator.HandlerRsdScoreComplete.onex_evt_rsd_scores_calculated_v1",
+      "topic": "onex.evt.rsd.scores-calculated.v1",
+      "topic_pattern": "*.evt.rsd.scores-calculated.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_runner_usage_effect",
@@ -7071,6 +7207,46 @@
       "topic": "onex.evt.omnibase-infra.runtime-booted.v1",
       "topic_pattern": "*.evt.omnibase-infra.runtime-booted.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_scope_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate",
+      "handler_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate",
+      "message_category": "command",
+      "route_id": "route.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate.onex_cmd_skill_scope_check_v1",
+      "topic": "onex.cmd.skill.scope-check.v1",
+      "topic_pattern": "*.cmd.skill.scope-check.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_scope_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeExtractComplete",
+      "handler_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeExtractComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_scope_workflow_orchestrator.HandlerScopeExtractComplete.onex_evt_skill_scope_extracted_v1",
+      "topic": "onex.evt.skill.scope-extracted.v1",
+      "topic_pattern": "*.evt.skill.scope-extracted.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_scope_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeFileReadComplete",
+      "handler_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeFileReadComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_scope_workflow_orchestrator.HandlerScopeFileReadComplete.onex_evt_skill_scope_file_read_v1",
+      "topic": "onex.evt.skill.scope-file-read.v1",
+      "topic_pattern": "*.evt.skill.scope-file-read.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_scope_workflow_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeManifestWriteComplete",
+      "handler_id": "dispatcher.auto.node_scope_workflow_orchestrator.HandlerScopeManifestWriteComplete",
+      "message_category": "event",
+      "route_id": "route.auto.node_scope_workflow_orchestrator.HandlerScopeManifestWriteComplete.onex_evt_skill_scope_manifest_written_v1",
+      "topic": "onex.evt.skill.scope-manifest-written.v1",
+      "topic_pattern": "*.evt.skill.scope-manifest-written.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_topic_migration_executor_effect",

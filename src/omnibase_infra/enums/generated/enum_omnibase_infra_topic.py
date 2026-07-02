@@ -37,7 +37,12 @@ class EnumOmnibaseInfraTopic(str, Enum):
     DLQ_COMMANDS_V1 = "onex.dlq.omnibase-infra.commands.v1"  # onex.dlq.omnibase-infra.commands.v1
     DLQ_EVENTS_V1 = "onex.dlq.omnibase-infra.events.v1"  # onex.dlq.omnibase-infra.events.v1
     DLQ_INTENTS_V1 = "onex.dlq.omnibase-infra.intents.v1"  # onex.dlq.omnibase-infra.intents.v1
+    DLQ_OMNIBASE_INFRA_V1 = "onex.dlq.omnibase-infra.omnibase-infra.v1"  # onex.dlq.omnibase-infra.omnibase-infra.v1
+    DLQ_PLATFORM_V1 = "onex.dlq.omnibase-infra.platform.v1"  # onex.dlq.omnibase-infra.platform.v1
     DLQ_QUARANTINE_V1 = "onex.dlq.omnibase-infra.quarantine.v1"  # onex.dlq.omnibase-infra.quarantine.v1
+    DLQ_ROUTER_V1 = "onex.dlq.omnibase-infra.router.v1"  # onex.dlq.omnibase-infra.router.v1
+    DLQ_RSD_V1 = "onex.dlq.omnibase-infra.rsd.v1"  # onex.dlq.omnibase-infra.rsd.v1
+    DLQ_SKILL_V1 = "onex.dlq.omnibase-infra.skill.v1"  # onex.dlq.omnibase-infra.skill.v1
     EVT_AGENT_TASK_LIFECYCLE_V1 = "onex.evt.omnibase-infra.agent-task-lifecycle.v1"  # onex.evt.omnibase-infra.agent-task-lifecycle.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
     EVT_BUILD_LOOP_APPENDED_V1 = "onex.evt.omnibase-infra.build-loop-appended.v1"  # onex.evt.omnibase-infra.build-loop-appended.v1

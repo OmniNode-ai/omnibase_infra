@@ -27,6 +27,13 @@ event_bus:
   publish_topics:
     - "onex.evt.rsd.score-complete.v1"
     - "onex.evt.rsd.score-failed.v1"
+  # OMN-13852: DLQ destination for any unroutable inbound message. The
+  # MessageDispatchEngine derives this same name from the event_type domain
+  # ("rsd") on a NO_DISPATCHER fall-through; declaring it here ensures the
+  # topic is provisioned (ContractTopicExtractor / create_kafka_topics) so the
+  # dead-letter escape hatch targets a real topic instead of silently dropping.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.rsd.v1"
 input_model:
   name: "ModelRsdCommand"
   module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command"
@@ -41,6 +48,12 @@ handler_routing:
     - event_model:
         name: "ModelRsdCommand"
         module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command"
+      # OMN-13852: per-handler event_type disambiguates which subscribe topic this
+      # handler owns. Without it, _topics_for_handler_entry hits the multi-handler
+      # ambiguity guard, registers ZERO routes, and every inbound message falls
+      # through to NO_DISPATCHER (the live-proven silent drop).
+      event_type: "rsd.score"
+      message_category: "COMMAND"
       handler:
         name: "HandlerRsdInitiate"
         module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_initiate"
@@ -49,6 +62,8 @@ handler_routing:
     - event_model:
         name: "ModelRsdDataFetchResult"
         module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result"
+      event_type: "rsd.data-fetched"
+      message_category: "EVENT"
       handler:
         name: "HandlerRsdDataFetchComplete"
         module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_data_fetch_complete"
@@ -57,6 +72,8 @@ handler_routing:
     - event_model:
         name: "ModelRsdScoreResult"
         module: "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result"
+      event_type: "rsd.scores-calculated"
+      message_category: "EVENT"
       handler:
         name: "HandlerRsdScoreComplete"
         module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_score_complete"

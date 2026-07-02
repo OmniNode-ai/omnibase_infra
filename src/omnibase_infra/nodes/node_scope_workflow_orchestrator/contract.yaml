@@ -29,6 +29,11 @@ event_bus:
   publish_topics:
     - "onex.evt.skill.scope-check-complete.v1"
     - "onex.evt.skill.scope-check-failed.v1"
+  # OMN-13852: DLQ destination for unroutable inbound messages; matches the
+  # engine-derived NO_DISPATCHER topic for the "skill" event_type domain so
+  # the dead-letter escape hatch targets a provisioned topic.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.skill.v1"
 input_model:
   name: "ModelScopeCheckCommand"
   module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_command"
@@ -43,6 +48,11 @@ handler_routing:
     - event_model:
         name: "ModelScopeCheckCommand"
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_command"
+      # OMN-13852: per-handler event_type disambiguates the owned subscribe topic
+      # so routes register (previously the multi-handler ambiguity guard registered
+      # zero routes and every inbound message fell through to NO_DISPATCHER).
+      event_type: "skill.scope-check"
+      message_category: "COMMAND"
       handler:
         name: "HandlerScopeCheckInitiate"
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_check_initiate"
@@ -51,6 +61,8 @@ handler_routing:
     - event_model:
         name: "ModelScopeFileReadResult"
         module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result"
+      event_type: "skill.scope-file-read"
+      message_category: "EVENT"
       handler:
         name: "HandlerScopeFileReadComplete"
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_file_read_complete"
@@ -59,6 +71,8 @@ handler_routing:
     - event_model:
         name: "ModelScopeExtracted"
         module: "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted"
+      event_type: "skill.scope-extracted"
+      message_category: "EVENT"
       handler:
         name: "HandlerScopeExtractComplete"
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_extract_complete"
@@ -67,6 +81,8 @@ handler_routing:
     - event_model:
         name: "ModelScopeManifestWritten"
         module: "omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_written"
+      event_type: "skill.scope-manifest-written"
+      message_category: "EVENT"
       handler:
         name: "HandlerScopeManifestWriteComplete"
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_manifest_write_complete"

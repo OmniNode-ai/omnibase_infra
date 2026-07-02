@@ -92,6 +92,11 @@ event_bus:
     - "onex.cmd.platform.topic-catalog-query.v1"
     - "onex.cmd.platform.request-introspection.v1"
     - "onex.evt.platform.registration-snapshots.v1"
+  # OMN-13852: DLQ destination for unroutable inbound messages; matches the
+  # engine-derived NO_DISPATCHER topic for the "platform" event_type domain so
+  # the dead-letter escape hatch targets a provisioned topic.
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.platform.v1"
 # Feature Flags [OMN-5584]
 # Platform-housed flags: multiple services depend on these, so they live in
 # the central registration orchestrator contract.
@@ -464,6 +469,11 @@ handler_routing:
     - event_model:
         name: "ModelTopicCatalogQuery"
         module: "omnibase_infra.models.catalog.model_topic_catalog_query"
+      # OMN-13852: this entry previously omitted event_type, so the multi-handler
+      # ambiguity guard registered ZERO route for it and topic-catalog queries
+      # silently fell through to NO_DISPATCHER while the sibling routed handlers
+      # worked (the "mixed" split). The topic-derived alias restores its route.
+      event_type: "platform.topic-catalog-query"
       handler:
         name: "HandlerTopicCatalogQuery"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query"
@@ -479,6 +489,9 @@ handler_routing:
     - event_model:
         name: "ModelTopicCatalogRequest"
         module: "omnibase_infra.models.registration.model_topic_catalog_request"
+      # OMN-13852: same guard-tripped defect as HandlerTopicCatalogQuery above —
+      # add the topic-derived alias so this handler's route registers.
+      event_type: "platform.request-introspection"
       handler:
         name: "HandlerCatalogRequest"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_catalog_request"
