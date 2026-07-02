@@ -42,23 +42,11 @@ STATE_DIR = Path(
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
 
-# Guard: sd_notify is only available on Linux with systemd-python installed.
-# Falls back to a no-op so the agent runs correctly on dev/macOS/CI.
-# We use Type=simple (not Type=notify) to avoid a startup deadlock when the
-# library is absent — the watchdog ping still works regardless.
-try:
-    from systemd.daemon import notify as _sd_notify  # type: ignore[import-not-found]
-
-    def _watchdog_ping() -> None:
-        _sd_notify("WATCHDOG=1")
-
-except ImportError:  # pragma: no cover
-
-    def _watchdog_ping() -> None:  # type: ignore[misc]  # stub-ok: no-op fallback on non-Linux
-        pass
-
-
-WATCHDOG_INTERVAL = 10  # seconds — well under WatchdogSec=30 in the unit file
+# NOTE (OMN-13760): no systemd watchdog. _run_deploy runs minutes-long
+# synchronous subprocess.run() rebuilds that block the event loop, so a periodic
+# ping task cannot fire during a rebuild — and a background pinger would only
+# mask real hangs. The unit therefore declares no WatchdogSec; Restart=on-failure
+# recovers genuine crashes. See deploy/deploy-agent.service for the rationale.
 
 
 class DeployAgent:
@@ -128,8 +116,6 @@ class DeployAgent:
             loop.add_signal_handler(sig, self._handle_shutdown)
 
         publish_retry_task = asyncio.create_task(self._publish_retry_loop())
-        # Watchdog runs in its own task so long-running deploys don't miss the deadline.
-        watchdog_task = asyncio.create_task(self._watchdog_loop())
 
         try:
             while not self._shutdown:
@@ -142,7 +128,6 @@ class DeployAgent:
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
-            watchdog_task.cancel()
             consumer.close()
             await runner.cleanup()
             logger.info("Deploy agent stopped")
@@ -297,11 +282,6 @@ class DeployAgent:
             else:
                 self._publish_cb.record_failure(cid_str)
                 logger.warning("Retried publish for %s: still failing", cid_str)
-
-    async def _watchdog_loop(self) -> None:
-        while True:
-            _watchdog_ping()
-            await asyncio.sleep(WATCHDOG_INTERVAL)
 
     async def _publish_retry_loop(self) -> None:
         while True:
