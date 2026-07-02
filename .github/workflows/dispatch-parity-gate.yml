@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# dispatch-parity-gate.yml — OMN-12548 (S0 GO gate for epic OMN-12525)
+#
+# Pins the CURRENT behavior of the live MessageDispatchEngine selection (design D1:
+# warts included) against a committed fixture (tests/fixtures/dispatch_parity/
+# baseline-selection-v2.json). Any PR that drifts dispatch-selection semantics fails
+# this check.
+#
+# Enforcement, not detection (CLAUDE.md Rule 5): wired as a CI job in the same PR as
+# the test. Runs on every PR touching dispatch / routing / contract paths, plus
+# merge_group. It ALWAYS reports (merge_group short-circuits to exit 0, per the
+# deploy-gate pattern) so it can be promoted to a REQUIRED context without wedging
+# the merge queue.
+#
+# Promoting "dispatch-parity-gate" to a required status check is a SERIAL OPERATOR
+# FOLLOW-UP (branch-protection mutation) — NOT done in this PR. See the PR body.
+#
+# Design: docs/plans/2026-07-02-omn-12548-dispatch-parity-gate-design.md
+# Ticket:  OMN-12548 | Epic: OMN-12525
+
+name: Dispatch Parity Gate
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      # Selection logic + everything that can move it. Keep in sync with the
+      # engine/wiring/contract surface the parity oracle covers.
+      - "src/omnibase_infra/runtime/message_dispatch_engine.py"
+      - "src/omnibase_infra/runtime/auto_wiring/**"
+      - "src/omnibase_infra/models/dispatch/**"
+      - "src/omnibase_infra/enums/enum_message_category.py"
+      - "src/omnibase_infra/nodes/**/contract.yaml"
+      - "tests/fixtures/dispatch_parity/**"
+      - "tests/integration/runtime/test_dispatch_selection_parity.py"
+      - ".github/workflows/dispatch-parity-gate.yml"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: dispatch-parity-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.6.14"
+  CACHE_VERSION: "0.6.0"
+  # Force inmemory event bus (no Kafka in CI); the parity oracle never touches a
+  # broker — it drives MessageDispatchEngine.dispatch() in-process.
+  ONEX_EVENT_BUS_TYPE: "inmemory"
+  # Required by MixinLlmHttpTransport import paths pulled in transitively; dummy
+  # value since no LLM calls happen.
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+
+jobs:
+  dispatch-parity-gate:
+    name: dispatch-parity-gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted; public forks use ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      # merge_group short-circuit (deploy-gate pattern): the queue commit is
+      # already proven by the per-PR run; a required context must still report a
+      # green result on merge_group SHAs so it does not wedge the queue.
+      - name: Skip on merge_group
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "::notice::dispatch-parity-gate short-circuits on merge_group (proven on the PR run)."
+          exit 0
+
+      - name: Checkout code
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        if: github.event_name != 'merge_group'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run dispatch-selection parity test (Mode A + corpus guard)
+        if: github.event_name != 'merge_group'
+        run: |
+          uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -v
+
+      - name: Verify committed fixture is not stale
+        if: github.event_name != 'merge_group'
+        run: |
+          set -euo pipefail
+          # Regenerate the fixture into a temp file and diff against the committed
+          # one (ignoring the volatile generated_at_utc timestamp). A drift here
+          # means someone changed selection logic without regenerating the oracle.
+          uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-live.json
+          uv run python - <<'PY'
+          import json, sys
+          committed = json.load(open("tests/fixtures/dispatch_parity/baseline-selection-v2.json"))
+          live = json.load(open("/tmp/parity-live.json"))
+          for d in (committed, live):
+              d["header"].pop("generated_at_utc", None)
+          if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
+              print(
+                  "::error::Committed baseline-selection-v2.json is STALE vs the live "
+                  "engine. Regenerate with: uv run python -m "
+                  "tests.fixtures.dispatch_parity.harness --out "
+                  "tests/fixtures/dispatch_parity/baseline-selection-v2.json",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("Committed fixture matches live engine (ex-timestamp).")
+          PY
