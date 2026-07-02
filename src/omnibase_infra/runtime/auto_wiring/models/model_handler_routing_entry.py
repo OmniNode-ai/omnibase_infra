@@ -43,3 +43,11 @@ class ModelHandlerRoutingEntry(BaseModel):
             "subscribed topic."
         ),
     )
+    topic: str | None = Field(
+        default=None,
+        description=(
+            "Contract-declared subscribe topic this handler entry owns "
+            "(topic_match strategy). When set, the entry is deterministically "
+            "assigned exactly this topic for dispatch-route registration."
+        ),
+    )
