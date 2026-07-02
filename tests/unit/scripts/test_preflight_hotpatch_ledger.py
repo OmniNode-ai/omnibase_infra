@@ -236,6 +236,133 @@ class TestAncestorGate:
         assert rc == 1
 
 
+def _diverge(repo: Path) -> tuple[str, str, str]:
+    """Build two non-linear lineages from a shared base.
+
+    Returns ``(base, dev_tip, main_tip)`` where ``dev_tip`` and ``main_tip`` are
+    siblings — neither is an ancestor of the other. This models dev->main squash
+    promotion, where the same patch content lands as two unrelated commits.
+    """
+    base = _git(repo, "rev-parse", "HEAD")
+    dev_tip = _commit(repo, "dev-lineage")
+    _git(repo, "checkout", "-b", "main", base)
+    main_tip = _commit(repo, "main-lineage")
+    _git(repo, "checkout", "dev")
+    return base, dev_tip, main_tip
+
+
+@pytest.mark.unit
+class TestDualLineageMergeCommitList:
+    def _list_row(
+        self, container: str, repo: str, commits: list[str]
+    ) -> dict[str, object]:
+        row = _row(container, repo, "placeholder")
+        row["merge_commit"] = commits
+        return row
+
+    def _run(self, tmp_path: Path, ledger: Path, build_ref: str) -> int:
+        return MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                build_ref,
+                "--skip-tripwire",
+            ]
+        )
+
+    def test_list_passes_when_dev_candidate_is_ancestor(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        _base, dev_tip, main_tip = _diverge(repo)
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", [dev_tip, main_tip])],
+        )
+        # Building the dev ref: dev candidate is an ancestor, main candidate is
+        # a sibling that is NOT an ancestor -> row still passes.
+        assert self._run(tmp_path, ledger, f"omnimarket={dev_tip}") == 0
+
+    def test_list_passes_when_main_candidate_is_ancestor(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        _base, dev_tip, main_tip = _diverge(repo)
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", [dev_tip, main_tip])],
+        )
+        # Symmetric case: building the main ref, only the main candidate matches.
+        assert self._run(tmp_path, ledger, f"omnimarket={main_tip}") == 0
+
+    def test_list_passes_regardless_of_candidate_order(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        _base, dev_tip, main_tip = _diverge(repo)
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", [main_tip, dev_tip])],
+        )
+        assert self._run(tmp_path, ledger, f"omnimarket={dev_tip}") == 0
+
+    def test_list_fails_when_no_candidate_is_ancestor(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        base, dev_tip, main_tip = _diverge(repo)
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", [dev_tip, main_tip])],
+        )
+        # Building the shared base: neither sibling candidate is an ancestor.
+        assert self._run(tmp_path, ledger, f"omnimarket={base}") == 1
+        err = capsys.readouterr().err
+        # Failure message lists every candidate.
+        assert dev_tip in err
+        assert main_tip in err
+
+    def test_list_all_unknown_is_config_error(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", ["0" * 40, "1" * 40])],
+        )
+        assert (
+            self._run(tmp_path, ledger, f"omnimarket={_git(repo, 'rev-parse', 'HEAD')}")
+            == 2
+        )
+
+    def test_list_with_one_unknown_candidate_still_passes(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        _base, dev_tip, _main_tip = _diverge(repo)
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", ["0" * 40, dev_tip])],
+        )
+        # An unknown candidate is tolerated as long as a known one is an
+        # ancestor of the build ref.
+        assert self._run(tmp_path, ledger, f"omnimarket={dev_tip}") == 0
+
+    def test_scalar_row_unchanged_pass(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        sha = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml", [_row("c1", "omnimarket", sha)]
+        )
+        assert self._run(tmp_path, ledger, f"omnimarket={sha}") == 0
+
+    def test_empty_list_is_config_error(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml",
+            [self._list_row("c1", "omnimarket", [])],
+        )
+        assert (
+            self._run(tmp_path, ledger, f"omnimarket={_git(repo, 'rev-parse', 'HEAD')}")
+            == 2
+        )
+
+
 @pytest.mark.unit
 class TestLedgerLoading:
     def test_missing_ledger_is_config_error(self, tmp_path: Path) -> None:
