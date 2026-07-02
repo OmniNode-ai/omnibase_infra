@@ -6,35 +6,31 @@
 # ----------------------------------------------------------------------------
 # Install the node-backed skill package (`omnimarket`) into an omnibase_infra
 # virtualenv so the `onex skill` / `onex run-node` operator CLIs can resolve the
-# current mapped nodes (e.g. node_pr_lifecycle_orchestrator, node_aislop_sweep).
+# current mapped nodes (e.g. node_pr_lifecycle_orchestrator,
+# node_session_orchestrator, node_aislop_sweep).
 #
-# WHY THIS SCRIPT EXISTS (instead of a pyproject dependency):
-#   omnimarket cannot be declared as an omnibase_infra dependency and locked with
-#   `uv lock`, for two independent, verified reasons:
-#     1. Circular dependency: omnimarket depends back on omnibase-infra
-#        (>=0.38.3,<0.39.0). Declaring it as a runtime dep would publish a cycle
-#        in the omnibase-infra wheel; declaring it in a dev group still forces
-#        uv to re-resolve the graph.
-#     2. Upstream stale/self-referential pins: omnimarket's [tool.uv]
-#        override-dependencies git-pin omnibase-core/omnibase-infra to foreign
-#        revs (uv applies these transitively), and its required dependency
-#        omninode-memory==0.15.0 hard-pins omnibase-infra==0.30.1 / spi 0.20.x.
-#        Both collide with this repo's omnibase-core>=0.46.1 / spi>=0.23.0, so no
-#        `uv lock` / `uv pip install` (deps mode) can co-resolve.
-#   The published PyPI wheels (<=0.4.6) are worse still: they pin
-#   omnibase-core<0.45.0 / spi<0.22.0, so a plain version-range bump is also
-#   impossible. The only rev carrying the compatible pins AND the newer nodes is
-#   omnimarket@dev, installed with `--no-deps` (this repo's venv already supplies
-#   the omni-internal deps; only omnibase-compat + omninode-memory are added,
-#   also `--no-deps`, to bypass their stale metadata).
+# THIS IS THE CANONICAL CO-INSTALL MECHANISM (the permanent, correct approach).
+#   The onex CLI shipped in omnibase_infra composes market nodes at runtime via
+#   co-installed `onex.nodes` entry-points. omnimarket is a *provider* discovered
+#   at runtime, never a build/lock dependency of omnibase_infra. Installing it
+#   with `--no-deps` is the correct, permanent composition step: the infra venv
+#   already supplies every lower-layer omni dependency, and `--no-deps` layers
+#   the provider on top without perturbing (or re-resolving) the layer beneath.
 #
-# ROOT CAUSE TO FIX UPSTREAM (tracked for the durable fix): omnimarket + its
-# omninode-memory dependency must drop the stale/self-referential internal pins
-# and publish a wheel resolvable against current omnibase_infra. Once that lands,
-# retire this script in favour of a plain `uv add omnimarket>=X,<Y`.
+# WHY omnimarket IS NOT A pyproject DEPENDENCY (a layering boundary, not a bug):
+#   Repo layering is compat -> core -> spi -> infra, and omnimarket sits ABOVE
+#   infra (it depends on omnibase-infra >=0.38.3,<0.39.0). Declaring omnimarket
+#   as an omnibase_infra dependency would INVERT the layer graph and publish a
+#   cycle in the omnibase-infra wheel. The dependency direction is fixed by the
+#   architecture: infra must not depend on market. See docs/decisions and the
+#   OMN-13829 ticket for the recorded decision. This is why the skipped test in
+#   tests/unit/runtime/test_event_bus_subscriber_container_resolution.py asserts
+#   "omnimarket is no longer an omnibase_infra runtime dependency" — the runtime
+#   composes market; it does not depend on it.
 #
 # BLAST RADIUS: this MUTATES the target venv. It is gated behind --execute;
-# without it, the script only prints the plan.
+# without it, the script only prints the plan. It never runs on import or in CI;
+# nothing invokes it automatically. Real installs are operator-run only.
 #
 # Usage:
 #   scripts/install-node-skill-package.sh [--execute] [PYTHON]
@@ -45,13 +41,16 @@
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
-# Immutable dev-branch rev carrying compatible pins + the current node set.
-# Override via OMNIMARKET_REF when bumping to a newer compatible rev.
-OMNIMARKET_REF="${OMNIMARKET_REF:-363e4319aa7288bdf0f2858af7993bf8aa91fca0}"
+# Immutable rev carrying the current node set. Pinned to omnimarket@dev HEAD as
+# of 2026-07-02, which carries OMN-13836 (self-referential git-URL uv overrides
+# dropped; omnibase-core>=0.46.1). Override via OMNIMARKET_REF to bump to a newer
+# compatible rev without editing the script.
+OMNIMARKET_REF="${OMNIMARKET_REF:-bc516ef5da67a348947fbb0e3c88dc964b2cd541}"
 OMNIMARKET_GIT="https://github.com/OmniNode-ai/omnimarket.git"
 
-# Leaf deps not already provided by the omnibase_infra venv. Installed --no-deps
-# so their stale internal metadata does not drag in incompatible omni pins.
+# omnimarket's own required deps that live above/beside the infra layer. Pinned
+# to the versions omnimarket@dev requires and installed --no-deps so their
+# internal metadata does not re-resolve (or downgrade) the infra layer beneath.
 COMPAT_PIN="omnibase-compat==0.5.5"
 MEMORY_PIN="omninode-memory==0.15.0"
 # Pure-PyPI leaf deps (safe to resolve normally; no omni-internal metadata).
@@ -88,7 +87,7 @@ echo "  target python : $PYTHON_BIN"
 echo "  omnimarket ref: $OMNIMARKET_REF"
 echo "  step 1 (--no-deps): git+${OMNIMARKET_GIT}@${OMNIMARKET_REF} ${COMPAT_PIN} ${MEMORY_PIN}"
 echo "  step 2          : ${PYPI_LEAF_DEPS[*]}"
-echo "  step 3          : verify node_pr_lifecycle_orchestrator resolves"
+echo "  step 3          : verify merge_sweep / session / aislop_sweep nodes resolve"
 
 if [[ "$EXECUTE" -ne 1 ]]; then
   echo
@@ -111,7 +110,15 @@ import sys
 from importlib.metadata import entry_points
 
 eps = {e.name for e in entry_points(group="onex.nodes")}
-required = {"node_pr_lifecycle_orchestrator", "node_aislop_sweep"}
+# Nodes behind the operator skills this install must keep resolvable:
+#   merge_sweep -> node_pr_lifecycle_orchestrator
+#   session     -> node_session_orchestrator
+#   (aislop_sweep kept as a broad-coverage canary)
+required = {
+    "node_pr_lifecycle_orchestrator",
+    "node_session_orchestrator",
+    "node_aislop_sweep",
+}
 missing = sorted(required - eps)
 if missing:
     print(f"FAIL: mapped nodes still unresolved: {missing}", file=sys.stderr)

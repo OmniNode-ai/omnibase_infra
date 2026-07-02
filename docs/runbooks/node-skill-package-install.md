@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 SPDX-License-Identifier: MIT
 -->
 
-# Node-skill package install (omnimarket) — OMN-13829
+# Node-skill package co-install (omnimarket) — OMN-13829
 
 ## Symptom
 
@@ -24,33 +24,41 @@ It predates `node_pr_lifecycle_orchestrator` and the current node set (25 nodes 
 the snapshot vs 345+ today), so the `onex.nodes` entry-point lookup returns
 `Unknown node`.
 
-## Why not a `pyproject` dependency + `uv lock`?
+## Why omnimarket is co-installed, not a `pyproject` dependency (the canonical design)
 
-Both the declared-dependency route and a plain version bump are **impossible**,
-verified with `uv lock` / `uv pip install`:
+This is **not** a limitation to fix upstream — it is the repo layering boundary.
+Repo layering is `compat -> core -> spi -> infra`, and **omnimarket sits ABOVE
+infra** (omnimarket depends on `omnibase-infra >=0.38.3,<0.39.0`). Declaring
+omnimarket as an omnibase_infra dependency would **invert the layer graph** and
+publish a dependency cycle in the omnibase-infra wheel. The direction is fixed by
+the architecture: **omnibase_infra must not depend on omnimarket.**
 
-| Attempt | Result |
-|---|---|
-| `omnimarket>=0.4.6` from PyPI | Published wheels pin `omnibase-core<0.45.0` / `omnibase-spi<0.22.0`; conflict with infra's `core>=0.46.1` / `spi>=0.23.0`. |
-| Declare omnimarket + `uv lock` (git dev rev) | omnimarket depends back on `omnibase-infra` (circular), and its `[tool.uv] override-dependencies` git-pin `omnibase-core`/`omnibase-infra` to foreign revs (uv applies them transitively) → `conflicting URLs`. |
-| Force it via workspace source | Produces an inconsistent lock (no `omnimarket` package block, dropped transitive deps). |
-| `uv pip install` (deps mode) | omnimarket's required `omninode-memory==0.15.0` hard-pins `omnibase-infra==0.30.1` / `spi 0.20.x` → unsatisfiable. |
+Instead, the `onex` CLI shipped in omnibase_infra composes market nodes at
+**runtime** via co-installed `onex.nodes` entry-points. omnimarket is a *provider*
+discovered at runtime, never a build/lock dependency. `scripts/install-node-skill-package.sh`
+is the **canonical co-install** step that places that provider into an operator's
+venv. It installs `--no-deps` because the infra venv already supplies every
+lower-layer omni dependency; `--no-deps` layers the provider on top without
+re-resolving (or downgrading) the layer beneath it.
 
-The compatible pins (`omnibase-core>=0.45.0,<0.47.0`, `omnibase-spi>=0.23.0,<0.24.0`)
-plus the current nodes exist only on **omnimarket@dev**
-(`363e4319aa7288bdf0f2858af7993bf8aa91fca0`). It installs cleanly only with
-`--no-deps` (the infra venv already supplies the omni-internal deps; only
-`omnibase-compat==0.5.5` + `omninode-memory==0.15.0` are added, also `--no-deps`).
+This matches the repo's existing runtime contract — the skipped test in
+`tests/unit/runtime/test_event_bus_subscriber_container_resolution.py` asserts
+*"omnimarket is no longer an omnibase_infra runtime dependency"*: the runtime
+composes market; it does not depend on it.
 
-> Durable fix (upstream, separate ticket): omnimarket and its `omninode-memory`
-> dependency must drop the stale/self-referential internal pins and publish a
-> wheel resolvable against current omnibase_infra. Then replace this script with
-> a plain `uv add omnimarket>=X,<Y`.
+> For completeness, a `pyproject` dependency is also mechanically impossible today
+> (published PyPI wheels ≤0.4.6 pin `omnibase-core<0.45.0` / `spi<0.22.0`; a `uv
+> lock` against the dev rev hits the circular back-reference). But even if those
+> pins were clean, the co-install would remain the correct mechanism because of
+> the layering boundary above. OMN-13836 already cleaned omnimarket's `[tool.uv]`
+> overrides (`omnibase-core>=0.46.1`), so the pinned rev below carries clean
+> metadata.
 
-## The fix (operator-run — mutates the venv)
+## The co-install (operator-run — mutates the venv)
 
 `scripts/install-node-skill-package.sh` encapsulates the vetted install. It is
-gated behind `--execute`; without it, it prints the plan only.
+gated behind `--execute`; without it, it prints the plan only. It never runs on
+import or in CI — nothing invokes it automatically.
 
 ```bash
 # from the omnibase_infra repo root, with the target venv active
@@ -61,14 +69,22 @@ scripts/install-node-skill-package.sh --execute /path/to/venv/bin/python
 OMNIMARKET_REF=<newer-sha> scripts/install-node-skill-package.sh --execute
 ```
 
+The default pin is **omnimarket@dev `bc516ef5da67a348947fbb0e3c88dc964b2cd541`**
+(dev HEAD as of 2026-07-02, carrying OMN-13836). It is a full 40-hex SHA for
+reproducibility; bump `OMNIMARKET_REF` to advance to a newer compatible rev.
+
 ## Before / after (proven in a clean throwaway venv, canonical `.venv` untouched)
 
 ```console
-# BEFORE — fresh infra venv (uv sync), no omnimarket
-$ onex run-node node_pr_lifecycle_orchestrator
+# BEFORE — fresh infra venv (uv pip install -e .), no omnimarket
+$ onex skill merge_sweep --inventory-only
 Unknown node 'node_pr_lifecycle_orchestrator'. ...
 
-# AFTER — scripts/install-node-skill-package.sh --execute
-OK: 459 onex.nodes entry points; required nodes resolved:
-['node_aislop_sweep', 'node_pr_lifecycle_orchestrator']
+# AFTER — scripts/install-node-skill-package.sh --execute <throwaway-venv-python>
+== step 3: verify node resolution ==
+OK: N onex.nodes entry points; required nodes resolved:
+['node_aislop_sweep', 'node_pr_lifecycle_orchestrator', 'node_session_orchestrator']
+
+$ onex skill merge_sweep --inventory-only   # resolves (no 'Unknown node')
+$ onex skill session --help                 # resolves (no 'Unknown node')
 ```
