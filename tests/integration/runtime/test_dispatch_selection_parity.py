@@ -16,12 +16,13 @@ implementation so Mode B is a fixture addition, not a rewrite:
   in-process and assert every probe's equivalence tuple (design D2) equals the
   committed ``baseline-selection-v2.json`` oracle. Valuable from day one; satisfies
   the S0-gate-before-S0-seam ordering.
-* **Mode B — dual-implementation parity (SKIPPED until OMN-12549).** The same probe
+* **Mode B — dual-implementation parity (LIVE as of OMN-12549).** The same probe
   corpus driven through both ``MessageDispatchEngine`` and ``MixinNodeDispatch``
-  behind ``ProtocolDispatchEngine``, asserting tuple equality. ``MixinNodeDispatch``
-  does not exist yet (grep: zero hits) — this parameter point is skipped with a
-  clear reason. OMN-12549's DoD ("parity pytest green with the seam") is Mode B
-  green.
+  (``omnibase_core.runtime.mixin_node_dispatch``) behind ``ProtocolDispatchEngine``
+  (now in ``omnibase_spi.protocols.runtime``), asserting tuple equality against the
+  committed oracle. OMN-12549's DoD ("parity pytest green with the seam") is this
+  Mode B green; ``test_mode_b_is_live_not_skipped`` fails closed so a stale/pre-seam
+  ``omnibase_core`` cannot masquerade as parity by skipping Mode B.
 
 Equivalence tuple (design D2)::
 
@@ -258,27 +259,42 @@ def test_p0_1_mixed_orchestrators_documented(
 
 
 # ---------------------------------------------------------------------------
-# Mode B — dual-implementation parity (activates with OMN-12549).
+# Mode B — dual-implementation parity (LIVE as of OMN-12549).
 # ---------------------------------------------------------------------------
 
 # Parameterized by implementation. Mode A drives MessageDispatchEngine (the oracle
-# builder). Mode B's MixinNodeDispatch does not exist yet, so its parameter point is
-# skipped with an explicit reason referencing OMN-12549. When the seam lands, this
-# becomes a live parameter point and the same tuple-equality assertion applies.
-_MODE_B_UNAVAILABLE = "MixinNodeDispatch seam not built yet — activates in OMN-12549"
+# builder); Mode B drives MixinNodeDispatch behind ProtocolDispatchEngine. As of
+# OMN-12549 the mixin exists, so Mode B is a LIVE parameter point (no longer
+# skipped) and the same tuple-equality assertion applies to both impls.
+_MODE_B_UNAVAILABLE = (
+    "MixinNodeDispatch seam not importable — OMN-12549 core dependency missing "
+    "from this venv (expected only if omnibase_core predates the S0 seam)"
+)
 
 
 def _mixin_node_dispatch_available() -> bool:
-    """True once OMN-12549 introduces MixinNodeDispatch behind ProtocolDispatchEngine."""
+    """True once OMN-12549 introduces MixinNodeDispatch behind ProtocolDispatchEngine.
+
+    Guards Mode B against a stale omnibase_core in the venv (e.g. a released core
+    older than the S0 seam). When the core dep carries the seam, Mode B is live.
+    """
     try:
-        # Import path per design D4 / OMN-12549 (ProtocolDispatchEngine moves to spi,
-        # MixinNodeDispatch lands core-side). Absent today by construction.
         import importlib
 
         importlib.import_module("omnibase_core.runtime.mixin_node_dispatch")
         return True
-    except Exception:  # noqa: BLE001 — absence is the expected state at S0
+    except Exception:  # noqa: BLE001 — absence means a pre-seam core dependency
         return False
+
+
+@pytest.fixture(scope="module")
+def mixin_snapshot() -> dict[str, Any]:
+    """Regenerate MixinNodeDispatch's selection snapshot in-process (Mode B).
+
+    Drives the same corpus + probe taxonomy as :func:`live_snapshot` through the
+    node-owned mixin instead of the engine. Built once per module.
+    """
+    return harness.build_mixin_snapshot()
 
 
 @pytest.mark.integration
@@ -299,25 +315,54 @@ def test_dual_implementation_parity(
     implementation: str,
     committed_fixture: dict[str, Any],
     live_snapshot: dict[str, Any],
+    mixin_snapshot: dict[str, Any],
 ) -> None:
     """Protocol-parameterized parity.
 
-    Mode A (``mode_a_engine``): asserts the engine snapshot matches the oracle — the
-    same content as :func:`test_mode_a_selection_parity_against_committed_oracle`,
-    exercised here through the parameterized surface so Mode B slots in without a
-    rewrite.
+    Mode A (``mode_a_engine``): the engine snapshot matches the committed oracle.
 
-    Mode B (``mode_b_mixin``): SKIPPED until OMN-12549 builds ``MixinNodeDispatch``.
-    When present, it will drive the same probe corpus through the mixin behind
-    ``ProtocolDispatchEngine`` and assert tuple equality per D2.
+    Mode B (``mode_b_mixin``): the MixinNodeDispatch snapshot — the same probe
+    corpus driven through the node-owned mixin behind ``ProtocolDispatchEngine`` —
+    matches the committed oracle tuple-for-tuple. This is OMN-12549's DoD: the
+    mixin SELECTS exactly what the live engine selects for every probe.
     """
-    if implementation == "message_dispatch_engine":
-        committed = committed_fixture["probes"]
-        live = live_snapshot["probes"]
-        assert set(committed) == set(live)
-        for pid in committed:
-            assert _tuple(committed[pid]["selection"]) == _tuple(
-                live[pid]["selection"]
-            ), f"Mode A parity drift at {pid}"
-    else:  # pragma: no cover - skipped until OMN-12549
-        pytest.skip(_MODE_B_UNAVAILABLE)
+    snapshot = (
+        live_snapshot if implementation == "message_dispatch_engine" else mixin_snapshot
+    )
+    committed = committed_fixture["probes"]
+    actual = snapshot["probes"]
+    assert set(committed) == set(actual), (
+        f"{implementation}: probe set drift vs committed oracle. "
+        f"missing={sorted(set(committed) - set(actual))[:20]} "
+        f"added={sorted(set(actual) - set(committed))[:20]}"
+    )
+    diffs = [
+        pid
+        for pid in committed
+        if _tuple(committed[pid]["selection"]) != _tuple(actual[pid]["selection"])
+    ]
+    assert not diffs, (
+        f"{implementation}: {len(diffs)} probe(s) drifted from the committed "
+        f"selection oracle: {diffs[:40]}"
+    )
+
+
+@pytest.mark.integration
+def test_mode_b_is_live_not_skipped() -> None:
+    """Adversarial guard: Mode B must be genuinely exercised, never silently skipped.
+
+    OMN-12549's DoD is "Mode B green" — a green run where Mode B was skipped is a
+    false pass. This fails loudly if the mixin seam is not importable in the venv,
+    so a stale/pre-seam omnibase_core cannot masquerade as parity.
+    """
+    assert _mixin_node_dispatch_available(), (
+        "MixinNodeDispatch (omnibase_core.runtime.mixin_node_dispatch) is not "
+        "importable — Mode B would be SKIPPED, which is not a valid OMN-12549 pass. "
+        "Ensure the venv's omnibase_core carries the S0 seam."
+    )
+
+
+@pytest.mark.integration
+def test_mode_b_mixin_corpus_is_nonempty(mixin_snapshot: dict[str, Any]) -> None:
+    """Mode B must exercise a real corpus — a zero-probe mixin snapshot is not parity."""
+    assert mixin_snapshot["probes"], "Mode B mixin snapshot has zero probes"

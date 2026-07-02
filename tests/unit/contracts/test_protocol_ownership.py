@@ -50,7 +50,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolCapabilityProjection": "protocols/protocol_capability_projection.py",
     "ProtocolCapabilityQuery": "protocols/protocol_capability_query.py",
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
-    "ProtocolDispatchEngine": "protocols/protocol_dispatch_engine.py",
+    # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
     "ProtocolEventProjector": "protocols/protocol_event_projector.py",
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",

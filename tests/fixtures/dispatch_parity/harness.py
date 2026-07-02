@@ -245,18 +245,25 @@ def _stub_dispatcher(envelope: object) -> None:  # pragma: no cover - never invo
 # ---------------------------------------------------------------------------
 
 
-def _build_engine(
+def _register_corpus(
+    target: Any,
     contracts: list[Any],
-) -> tuple[
-    MessageDispatchEngine, dict[str, dict[str, Any]], list[dict[str, Any]], set[str]
-]:
-    """Build + freeze a real engine from ``contracts`` in the given order.
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], set[str]]:
+    """Register ``contracts`` into ``target`` (an engine OR the mixin) and freeze.
 
-    Returns (engine, dispatcher_meta, route_meta, subscribe_topics).
-    The caller decides the registration order — :func:`build_snapshot` sorts by
-    name (canonical), the determinism audit permutes it.
+    ``target`` is any object exposing the shared dispatch registration surface
+    (``register_dispatcher`` / ``register_route`` / ``freeze``) — both
+    :class:`MessageDispatchEngine` and
+    :class:`omnibase_core.runtime.mixin_node_dispatch.MixinNodeDispatch` satisfy
+    it. Driving Mode A (engine) and Mode B (mixin) through THIS single
+    registration path is what makes the dual-implementation parity a fixture
+    addition rather than a reimplementation (design D4 / OMN-12549): any drift
+    would be in the impls under test, never in divergent harness wiring.
+
+    Returns (dispatcher_meta, route_meta, subscribe_topics). The caller decides
+    the registration order — :func:`build_snapshot` sorts by name (canonical),
+    the determinism audit permutes it.
     """
-    engine = MessageDispatchEngine()
     dispatcher_meta: dict[str, dict[str, Any]] = {}
     route_meta: list[dict[str, Any]] = []
     subscribe_topics: set[str] = set()
@@ -285,7 +292,7 @@ def _build_engine(
                     if entry.event_model is not None
                     else None
                 )
-                engine.register_dispatcher(
+                target.register_dispatcher(
                     dispatcher_id=dispatcher_id,
                     dispatcher=_stub_dispatcher,
                     category=category,
@@ -327,7 +334,7 @@ def _build_engine(
                     message_category=category,
                     handler_id=dispatcher_id,
                 )
-                engine.register_route(route)
+                target.register_route(route)
                 registered_route_ids.add(route_id)
                 route_meta.append(
                     {
@@ -342,8 +349,37 @@ def _build_engine(
                     }
                 )
 
-    engine.freeze()
+    target.freeze()
+    return dispatcher_meta, route_meta, subscribe_topics
+
+
+def _build_engine(
+    contracts: list[Any],
+) -> tuple[
+    MessageDispatchEngine, dict[str, dict[str, Any]], list[dict[str, Any]], set[str]
+]:
+    """Build + freeze a real engine from ``contracts`` (Mode A oracle builder)."""
+    engine = MessageDispatchEngine()
+    dispatcher_meta, route_meta, subscribe_topics = _register_corpus(engine, contracts)
     return engine, dispatcher_meta, route_meta, subscribe_topics
+
+
+def _build_mixin(
+    contracts: list[Any],
+) -> tuple[Any, dict[str, dict[str, Any]], list[dict[str, Any]], set[str]]:
+    """Build + freeze a :class:`MixinNodeDispatch` from ``contracts`` (Mode B).
+
+    Injects the engine's own ``_derive_dlq_topic`` so the NO_DISPATCHER
+    ``dlq_topic`` element of the equivalence tuple matches Mode A — the only
+    engine behavior the core-only mixin cannot reproduce on its own (DLQ
+    derivation lives in infra ``event_bus.topic_constants``; OMN-12549).
+    """
+    from omnibase_core.runtime.mixin_node_dispatch import MixinNodeDispatch
+
+    mixin = MixinNodeDispatch()
+    mixin.set_dlq_topic_deriver(_derive_dlq_topic)
+    dispatcher_meta, route_meta, subscribe_topics = _register_corpus(mixin, contracts)
+    return mixin, dispatcher_meta, route_meta, subscribe_topics
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +749,33 @@ def build_snapshot() -> dict[str, Any]:
         "dispatchers": dict(sorted(dispatcher_meta.items())),
         "routes": sorted(route_meta, key=lambda r: r["route_id"]),
         "probes": probes,
+    }
+
+
+def build_mixin_snapshot() -> dict[str, Any]:
+    """Build the Mode-B snapshot by driving the same probe corpus through
+    :class:`MixinNodeDispatch` (OMN-12549).
+
+    Uses the identical corpus, canonical registration order (design D3), and
+    probe taxonomy as :func:`build_snapshot`, but the dispatch impl under test is
+    the node-owned mixin instead of the engine. The Mode-B parity test asserts
+    this snapshot's per-probe equivalence tuples equal Mode A's — i.e. the mixin
+    SELECTS exactly what the live engine selects for every probe.
+    """
+    contracts, _discovery_errors, _duplicate_winners = _corpus_from_discovery()
+    ordered = sorted(contracts, key=lambda c: c.name)
+    mixin, dispatcher_meta, route_meta, subscribe_topics = _build_mixin(ordered)
+    probe_result = asyncio.run(
+        _run_probes(
+            mixin,
+            dispatcher_meta=dispatcher_meta,
+            subscribe_topics=subscribe_topics,
+        )
+    )
+    return {
+        "dispatchers": dict(sorted(dispatcher_meta.items())),
+        "routes": sorted(route_meta, key=lambda r: r["route_id"]),
+        "probes": probe_result["probes"],
     }
 
 

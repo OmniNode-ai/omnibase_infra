@@ -1395,9 +1395,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
         from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 
         try:
-            from omnibase_infra.protocols.protocol_dispatch_engine import (
-                ProtocolDispatchEngine,
-            )
+            from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
             result = await _wire_single_contract(
                 contract=contract,
