@@ -493,6 +493,44 @@ resolve_compose_file_args() {
     fi
 }
 
+resolve_lane_runtime_container_name() {
+    # Echo the lane-scoped `container_name` of the omninode-runtime main container
+    # for a compose project. Each lane overlay prefixes the runtime container_name
+    # with its lane (the compose *service* key stays "omninode-runtime" in every
+    # overlay -- only container_name changes):
+    #   omnibase-infra                -> omninode-runtime               (dev, no prefix)
+    #   omnibase-infra-stability-test -> omninode-stability-test-runtime
+    #   omnibase-infra-prod           -> omninode-prod-runtime
+    #   omnibase-infra-judge          -> omninode-judge-runtime
+    #
+    # verify_deployment must probe THIS name, not the hardcoded dev name: the dev
+    # `omninode-runtime` container commonly runs alongside a non-dev lane on the
+    # same host, so an anchored `name=^/omninode-runtime$` filter would resolve the
+    # wrong (dev) container and emit a false image-label mismatch (OMN-13826).
+    #
+    # Fails closed on an unknown non-dev lane, using the same whitelist as
+    # resolve_lane_overlay_filename, so a typo'd project can't silently probe dev.
+    local compose_project="$1"
+
+    local lane="${compose_project#omnibase-infra}"
+    lane="${lane#-}"
+
+    case "${lane}" in
+        "")
+            echo "omninode-runtime"
+            ;;
+        stability-test|prod|judge)
+            echo "omninode-${lane}-runtime"
+            ;;
+        *)
+            log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
+            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
+            log_error "  Refusing to resolve a runtime container name for an unknown lane (OMN-13826)."
+            exit 1
+            ;;
+    esac
+}
+
 # =============================================================================
 # Prerequisites
 # =============================================================================
@@ -2277,6 +2315,11 @@ verify_deployment() {
 
     log_step "Verify Deployment"
 
+    # Resolve the lane-scoped runtime container name so every probe below targets
+    # THIS lane's container, not the hardcoded dev `omninode-runtime` (OMN-13826).
+    local runtime_container_name
+    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+
     # 1. Health endpoint
     log_info "Checking health endpoint (${HEALTH_CHECK_URL})..."
     local attempt=0
@@ -2297,15 +2340,18 @@ verify_deployment() {
     else
         log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
-        log_error "Check container logs: docker logs omninode-runtime"
+        log_error "Check container logs: docker logs ${runtime_container_name}"
         exit 1
     fi
 
-    # 2. Resolve runtime container ID. Prefer the fixed runtime container name
-    # used by docker-compose.infra.yml, then fall back to a compose label lookup.
+    # 2. Resolve runtime container ID. Prefer the lane-scoped runtime container
+    # name (docker-compose.<lane>.yml prefixes container_name per lane), then fall
+    # back to a compose label lookup. The label fallback filters by the lane's
+    # compose project AND the compose service key -- which stays "omninode-runtime"
+    # in every overlay -- so the project filter is what disambiguates the lane.
     log_info "Checking image labels for VCS_REF..."
     local container_id
-    container_id="$(docker ps -q --filter "name=^/omninode-runtime$" | head -1)"
+    container_id="$(docker ps -q --filter "name=^/${runtime_container_name}$" | head -1)"
     if [[ -z "${container_id}" ]]; then
         container_id="$(
             docker ps -q \
@@ -2316,7 +2362,7 @@ verify_deployment() {
     fi
 
     if [[ -z "${container_id}" ]]; then
-        log_warn "Could not resolve container ID for omninode-runtime; skipping label/log checks."
+        log_warn "Could not resolve container ID for ${runtime_container_name}; skipping label/log checks."
         return 0
     fi
 

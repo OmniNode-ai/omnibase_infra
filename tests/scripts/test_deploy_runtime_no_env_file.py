@@ -107,10 +107,21 @@ def test_compose_project_defaults_to_live_runtime_project() -> None:
 
 
 @pytest.mark.unit
-def test_verify_deployment_uses_fixed_runtime_container_name() -> None:
-    """deploy-runtime.sh must inspect the fixed omninode-runtime container first."""
+def test_verify_deployment_uses_lane_scoped_runtime_container_name() -> None:
+    """deploy-runtime.sh must inspect the LANE-SCOPED runtime container by name.
+
+    OMN-13826: verify_deployment previously anchored on the hardcoded dev name
+    ``name=^/omninode-runtime$``. Because the dev ``omninode-runtime`` container
+    commonly runs alongside a non-dev lane, that anchored filter resolved the wrong
+    (dev) container on a non-dev deploy and emitted a false image-label mismatch.
+    The name probe must now use the lane-derived ``${runtime_container_name}``
+    (per-lane derivation asserted in test_deploy_runtime_verify_container_name.py).
+
+    It must still NOT use the compose-default ``<project>-<service>-1`` naming.
+    """
     text = "\n".join(_read_script_lines())
 
-    assert "name=^/omninode-runtime$" in text
+    assert "name=^/${runtime_container_name}$" in text
+    assert "name=^/omninode-runtime$" not in text
     assert "${compose_project}-omninode-runtime-1" not in text
     assert '${compose_project}-omninode-runtime" | head -1' not in text
