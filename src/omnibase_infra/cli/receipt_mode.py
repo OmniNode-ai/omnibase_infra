@@ -16,6 +16,20 @@ Layer A of the skill-output-suppression slice
   :class:`~omnibase_core.models.dispatch.model_skill_result.ModelSkillResult`
   JSON object carrying the FULL result.
 
+Skill lifecycle projection (OMN-13830):
+
+- Headless ``onex skill/node <name>`` invocations also emit a
+  ``skill-started`` event *before* the node body runs and a ``skill-completed``
+  event *after* it finishes, through the SAME emit daemon socket used by the
+  two capture events. Both share one ``run_id`` (the projection join key) and
+  one ``correlation_id`` so the ``skill_executions`` projection (migration
+  ``048_create_skill_executions.sql``, consumed by
+  ``services/observability/skill_lifecycle/consumer.py``) is populated for CLI
+  runs — not only for omniclaude hook-driven invocations. The concrete topic
+  strings are resolved from the canonical topic registry
+  (``omnibase_infra.topics``); they are never hardcoded and are never imported
+  from omniclaude (layering).
+
 Artifact store root resolution (OMN-13537):
 
 - The artifact store root defaults to ``<state_root>/artifacts`` when
@@ -39,6 +53,9 @@ Failure asymmetry (capture vs telemetry):
 .. versionchanged:: OMN-13537
    Artifact store root defaults to ``<state_root>/artifacts`` when unset
    (was: KeyError → fail-open, receipts silently dropped).
+.. versionchanged:: OMN-13830
+   Emit ``skill-started`` / ``skill-completed`` lifecycle events so headless
+   CLI invocations populate the ``skill_executions`` projection.
 """
 
 from __future__ import annotations
@@ -67,6 +84,10 @@ from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_core.runtime.runtime_local import RuntimeLocal
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
+from omnibase_infra.topics import (
+    SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
+    SUFFIX_OMNICLAUDE_SKILL_STARTED,
+)
 
 __all__ = [
     "CAPTURE_DIR_NAME",
@@ -100,6 +121,25 @@ _WORKFLOW_TO_STATUS: dict[EnumWorkflowResult, EnumSkillResultStatus] = {
     EnumWorkflowResult.FAILED: EnumSkillResultStatus.FAILED,
     EnumWorkflowResult.TIMEOUT: EnumSkillResultStatus.FAILED,
 }
+
+# The ``skill_executions.status`` column CHECK constraint (migration 048) admits
+# only 'success' | 'failed' | 'partial'. Map every receipt status onto that set;
+# ERROR (and any non-success/partial outcome) collapses to 'failed'.
+_SKILL_STATUS_DB_VALUE: dict[EnumSkillResultStatus, str] = {
+    EnumSkillResultStatus.SUCCESS: "success",
+    EnumSkillResultStatus.PARTIAL: "partial",
+    EnumSkillResultStatus.FAILED: "failed",
+    EnumSkillResultStatus.ERROR: "failed",
+}
+
+# Repository identity stamped onto skill lifecycle events emitted by this CLI.
+# ``skill_executions.repo_id`` is NOT NULL and disambiguates skill-name
+# collisions across repos; receipt-mode events originate from the omnibase_infra
+# ``onex`` CLI, so that is the honest emitter identity.
+_RECEIPT_EMIT_REPO_ID = "omnibase_infra"
+
+# Optional Claude Code session correlation, when the caller exports it.
+_SESSION_ID_ENV = "ONEX_SESSION_ID"
 
 
 def default_emit_socket_path() -> Path:
@@ -157,15 +197,21 @@ def _emit_or_spool(
     spool_dir: Path,
     spool_stem: str,
     socket_path: Path,
-) -> None:
+) -> bool:
     """Emit ``event_type`` via the daemon socket; spool locally on failure.
 
     Telemetry asymmetry (plan Phase 2 item 1): once the artifact exists, an
     emission failure must never re-flood the caller — the event is recorded
     to a local outbox file for later replay and the receipt still prints.
+
+    Returns:
+        ``True`` when the daemon accepted the event, ``False`` when it was
+        spooled locally. Callers that need to record whether an upstream emit
+        succeeded (e.g. ``skill_executions.started_emit_failed``) read this.
     """
     try:
         _emit_via_socket(socket_path, event_type, payload)
+        return True
     except (OSError, ValueError, RuntimeError) as exc:
         # OSError covers socket/connection/timeout failures; ValueError covers
         # malformed daemon JSON; RuntimeError covers daemon rejections.
@@ -185,6 +231,64 @@ def _emit_or_spool(
             type(exc).__name__,
             spool_path,
         )
+        return False
+
+
+def _skill_started_payload(
+    *,
+    run_id: uuid.UUID,
+    correlation_id: uuid.UUID,
+    node_name: str,
+    contract_path: Path,
+    session_id: str | None,
+) -> dict[str, JsonValue]:
+    """Build a ``skill-started`` event payload shaped for migration 048 columns.
+
+    ``run_id`` is the projection join key shared with the paired
+    ``skill-completed`` event; ``event_id`` is unique per event (the table's
+    idempotency primary key).
+    """
+    return {
+        "event_id": str(uuid.uuid4()),
+        "run_id": str(run_id),
+        "skill_name": node_name,
+        "skill_id": str(contract_path),
+        "repo_id": _RECEIPT_EMIT_REPO_ID,
+        "correlation_id": str(correlation_id),
+        "session_id": session_id,
+        "emitted_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _skill_completed_payload(
+    *,
+    run_id: uuid.UUID,
+    correlation_id: uuid.UUID,
+    node_name: str,
+    status: EnumSkillResultStatus,
+    duration_ms: int,
+    error_type: str | None,
+    started_emit_failed: bool,
+    session_id: str | None,
+) -> dict[str, JsonValue]:
+    """Build a ``skill-completed`` event payload shaped for migration 048 columns.
+
+    Shares ``run_id`` / ``correlation_id`` with the paired ``skill-started``
+    event; ``status`` is mapped onto the DB CHECK set (ERROR ⇒ 'failed').
+    """
+    return {
+        "event_id": str(uuid.uuid4()),
+        "run_id": str(run_id),
+        "skill_name": node_name,
+        "repo_id": _RECEIPT_EMIT_REPO_ID,
+        "correlation_id": str(correlation_id),
+        "status": _SKILL_STATUS_DB_VALUE.get(status, "failed"),
+        "duration_ms": duration_ms,
+        "error_type": error_type,
+        "started_emit_failed": started_emit_failed,
+        "session_id": session_id,
+        "emitted_at": datetime.now(UTC).isoformat(),
+    }
 
 
 def _configure_capture_logging(capture_path: Path, *, verbose: bool) -> None:
@@ -326,6 +430,11 @@ def run_receipt_mode(
     runtime raised before producing a workflow result).
     """
     run_id = uuid.uuid4()
+    # One correlation id shared by the skill-started / skill-completed pair so
+    # the skill_executions projection can join the two rows (OMN-13830). This is
+    # decided BEFORE the run because the started event fires before the body.
+    lifecycle_correlation_id = uuid.uuid4()
+    session_id = os.environ.get(_SESSION_ID_ENV) or None
     capture_path = state_root / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
     spool_dir = state_root / SPOOL_DIR_NAME
     _configure_capture_logging(capture_path, verbose=verbose)
@@ -333,8 +442,27 @@ def run_receipt_mode(
 
     _load_omnibase_env_file()
 
+    # --- Skill lifecycle: skill-started (before the body runs) -------------
+    # Emitted through the SAME emit daemon socket as the capture events; the
+    # daemon accept/spool outcome feeds started_emit_failed on the completed
+    # event so consumers can detect orphaned completions.
+    started_emit_ok = _emit_or_spool(
+        SUFFIX_OMNICLAUDE_SKILL_STARTED,
+        _skill_started_payload(
+            run_id=run_id,
+            correlation_id=lifecycle_correlation_id,
+            node_name=node_name,
+            contract_path=contract_path,
+            session_id=session_id,
+        ),
+        spool_dir=spool_dir,
+        spool_stem=f"{run_id}-started",
+        socket_path=emit_socket,
+    )
+
     started = time.monotonic()
     runtime_error = ""
+    runtime_error_type: str | None = None
     workflow_result: EnumWorkflowResult | None = None
     exit_code = 1
     handler_result_obj: object | None = None
@@ -349,11 +477,12 @@ def run_receipt_mode(
         workflow_result = runtime.run()
         exit_code = runtime.exit_code
         handler_result_obj = runtime.handler_result
-    except Exception:
+    except Exception as exc:
         # RuntimeLocal.run() records execution failures itself; reaching here
         # means contract load / bus construction raised. Errors are never
         # hidden: the traceback goes to the capture AND inline in the result.
         runtime_error = traceback.format_exc()
+        runtime_error_type = type(exc).__name__
         logger.exception("receipt_mode: runtime raised")
     duration_ms = int((time.monotonic() - started) * 1000)
 
@@ -373,6 +502,27 @@ def run_receipt_mode(
             if workflow_result is not None
             else EnumWorkflowResult.FAILED
         ]
+
+    # --- Skill lifecycle: skill-completed (after the body finishes) --------
+    # Emitted before the artifact-capture block so it always fires, even when a
+    # genuine artifact-write failure short-circuits to the full-output path.
+    # Shares run_id + correlation_id with the started event above.
+    _emit_or_spool(
+        SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
+        _skill_completed_payload(
+            run_id=run_id,
+            correlation_id=lifecycle_correlation_id,
+            node_name=node_name,
+            status=status,
+            duration_ms=duration_ms,
+            error_type=runtime_error_type,
+            started_emit_failed=not started_emit_ok,
+            session_id=session_id,
+        ),
+        spool_dir=spool_dir,
+        spool_stem=f"{run_id}-completed",
+        socket_path=emit_socket,
+    )
 
     # --- Layer B: durable capture (parent invariant 1) -------------------
     # Resolve the artifact store root BEFORE constructing the store: default it

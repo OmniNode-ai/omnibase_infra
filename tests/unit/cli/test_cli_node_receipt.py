@@ -275,11 +275,158 @@ class TestReceiptModeSuccess:
         assert event_types == [
             "artifact.captured",
             "artifact.captured",
+            "onex.evt.omniclaude.skill-completed.v1",
+            "onex.evt.omniclaude.skill-started.v1",
             "tool.output.captured",
         ]
         # Daemon accepted everything — nothing may be spooled.
         spool_dir = state_root / SPOOL_DIR_NAME
         assert not spool_dir.exists() or not list(spool_dir.iterdir())
+
+
+class TestSkillLifecycleEvents:
+    """OMN-13830: headless receipt-mode runs populate skill_executions.
+
+    Every ``onex skill/node <name>`` run emits a ``skill-started`` event before
+    the body and a ``skill-completed`` event after it, through the SAME emit
+    daemon socket as the capture events. Both share one run_id (the projection
+    join key) and one correlation_id, and their topic strings match exactly what
+    ``skill_lifecycle/consumer.py`` subscribes to.
+    """
+
+    _STARTED_TOPIC = "onex.evt.omniclaude.skill-started.v1"
+    _COMPLETED_TOPIC = "onex.evt.omniclaude.skill-completed.v1"
+
+    def test_started_and_completed_share_ids_and_shape(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # UDS paths are capped (~104 chars on macOS); use a short tempdir.
+        socket_dir = Path(tempfile.mkdtemp(prefix="omn13830-"))
+        socket_path = socket_dir / "emit.sock"
+        if len(str(socket_path)) > 100:
+            pytest.skip("temp dir too long for a Unix domain socket")
+
+        received: list[dict[str, object]] = []
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(socket_path))
+        server.listen(8)
+        server.settimeout(10.0)
+        stop = threading.Event()
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                except (TimeoutError, OSError):
+                    return
+                with conn:
+                    data = b""
+                    while not data.endswith(b"\n"):
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                    if data:
+                        received.append(json.loads(data.decode("utf-8")))
+                    conn.sendall(b'{"status": "queued", "event_id": "test"}\n')
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            result, _ = _invoke_receipt(tmp_path, monkeypatch, socket_path=socket_path)
+        finally:
+            stop.set()
+            server.close()
+            thread.join(timeout=5.0)
+            shutil.rmtree(socket_dir, ignore_errors=True)
+
+        assert result.exit_code == 0
+        _parse_single_receipt(result.stdout)
+
+        by_topic = {
+            str(r["event_type"]): r["payload"]
+            for r in received
+            if str(r["event_type"]).startswith("onex.evt.omniclaude.skill-")
+        }
+        # Both lifecycle events must have been emitted, on the EXACT topics the
+        # consumer subscribes to.
+        assert self._STARTED_TOPIC in by_topic
+        assert self._COMPLETED_TOPIC in by_topic
+
+        started = by_topic[self._STARTED_TOPIC]
+        completed = by_topic[self._COMPLETED_TOPIC]
+        assert isinstance(started, dict)
+        assert isinstance(completed, dict)
+
+        # Shared invocation identity: one run_id (join key) + one correlation_id.
+        assert started["run_id"] == completed["run_id"]
+        assert started["correlation_id"] == completed["correlation_id"]
+        # Distinct event_ids (the table's idempotency primary key).
+        assert started["event_id"] != completed["event_id"]
+
+        # started payload shaped for migration 048 required + optional columns.
+        for field in (
+            "event_id",
+            "run_id",
+            "skill_name",
+            "repo_id",
+            "correlation_id",
+            "emitted_at",
+        ):
+            assert field in started, field
+        assert started["skill_name"] == "proof_noop"
+        assert started["skill_id"]  # repo-relative contract path
+
+        # completed payload shaped for migration 048 required + completed columns.
+        for field in (
+            "event_id",
+            "run_id",
+            "skill_name",
+            "repo_id",
+            "correlation_id",
+            "status",
+            "duration_ms",
+            "emitted_at",
+        ):
+            assert field in completed, field
+        assert completed["skill_name"] == "proof_noop"
+        # DB CHECK admits only success | failed | partial.
+        assert completed["status"] in {"success", "failed", "partial"}
+        assert completed["status"] == "success"
+        assert isinstance(completed["duration_ms"], int)
+        # Daemon accepted the started emit, so no orphan flag.
+        assert completed["started_emit_failed"] is False
+
+    def test_lifecycle_events_spooled_when_daemon_unreachable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No daemon ⇒ both lifecycle events spool locally (never lost)."""
+        result, state_root = _invoke_receipt(tmp_path, monkeypatch)
+        assert result.exit_code == 0
+        _parse_single_receipt(result.stdout)
+
+        spool_dir = state_root / SPOOL_DIR_NAME
+        started_files = sorted(
+            spool_dir.glob("onex-evt-omniclaude-skill-started-v1-*.json")
+        )
+        completed_files = sorted(
+            spool_dir.glob("onex-evt-omniclaude-skill-completed-v1-*.json")
+        )
+        assert len(started_files) == 1
+        assert len(completed_files) == 1
+
+        started = json.loads(started_files[0].read_text(encoding="utf-8"))
+        completed = json.loads(completed_files[0].read_text(encoding="utf-8"))
+        assert started["event_type"] == self._STARTED_TOPIC
+        assert completed["event_type"] == self._COMPLETED_TOPIC
+        # Even spooled, the shared invocation identity holds.
+        assert started["payload"]["run_id"] == completed["payload"]["run_id"]
+        assert (
+            started["payload"]["correlation_id"]
+            == completed["payload"]["correlation_id"]
+        )
+        # The started emit failed (no daemon), so the completed event records it.
+        assert completed["payload"]["started_emit_failed"] is True
 
 
 class TestArtifactStoreRootDefault:
