@@ -113,6 +113,8 @@ def test_runner_healthcheck_probes_github_egress() -> None:
     )
     assert "pgrep -f Runner.Listener" in script
     assert "--max-time" in script
+    assert "--connect-timeout" in script
+    assert "-fsS" in script
     curl_commands = [
         shlex.split(line.removeprefix("if ! ").removesuffix("; then").strip())
         for line in script.splitlines()
@@ -122,9 +124,24 @@ def test_runner_healthcheck_probes_github_egress() -> None:
     endpoint = urlsplit(curl_commands[0][-1])
     assert (endpoint.scheme, endpoint.netloc, endpoint.path) == (
         "https",
-        "github.com",
-        "/",
+        "api.github.com",
+        "/rate_limit",
     )
+
+
+def test_runner_entrypoint_disables_self_update_and_relaunches_clean_exit() -> None:
+    """Runner self-update can make ``run.sh`` exit 0 and leave no listener.
+
+    The entrypoint must disable self-update on registration and treat clean
+    runner exits as relaunchable so a container does not stay Up without
+    ``Runner.Listener``.
+    """
+    script = (REPO_ROOT / "docker" / "runners" / "entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "--disableupdate" in script
+    assert "Relaunching listener after short backoff" in script
+    assert "continue" in script
 
 
 def test_runner_compose_healthcheck_uses_egress_script() -> None:

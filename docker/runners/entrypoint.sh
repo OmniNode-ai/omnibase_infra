@@ -188,6 +188,7 @@ _register() {
         --runnergroup "${RUNNER_GROUP}" \
         --work "${RUNNER_WORK_DIR}" \
         --unattended \
+        --disableupdate \
         --replace
 }
 
@@ -254,8 +255,10 @@ while true; do
             fi
             # Fall through to the registration retry loop below
         else
-            echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
-            break
+            echo "[entrypoint] Runner exited cleanly (exit 0). Relaunching listener after short backoff."
+            sleep 5
+            attempt=0
+            continue
         fi
     fi
 

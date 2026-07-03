@@ -16,9 +16,10 @@ fi
 
 # 2. github.com must be reachable. A connected listener with no in-flight job is
 #    expected; an egress fault that drops the GitHub connection is what we catch.
-#    Use a short-timeout unauthenticated request. This proves network egress
-#    without requiring an API token.
-if ! curl -fsS --max-time 8 -o /dev/null https://github.com/; then
+#    Use a short-timeout, small unauthenticated API probe. Do not GET
+#    github.com here: under runner saturation that can stream hundreds of KB and
+#    time out despite working egress, causing false unhealthy flaps.
+if ! curl -fsS --connect-timeout 3 --max-time 8 -o /dev/null https://api.github.com/rate_limit; then
   echo "unhealthy: github.com egress unreachable"
   exit 1
 fi
