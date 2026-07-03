@@ -17,19 +17,29 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     48cf8b0, spi 3c99ed4) onto the published PyPI releases so main can build a
     clean, reproducible runtime image from immutable artifacts. The proven
     runtime inputs are now the released versions, not git revs.
+
+    OMN-12549 closure: the temporary MixinNodeDispatch-seam git-rev overrides
+    (core 2a07385d, spi cdfe1a47) are removed and the pins bumped to the exact
+    released versions (core 0.46.3, spi 0.23.1), keeping a fully PyPI-sourced
+    reproducible lock.
     """
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    # The proven runtime now pins the published PyPI releases.
-    assert "omnibase-core>=0.46.1,<0.47.0" in pyproject
-    assert "omnibase-spi>=0.23.0,<0.24.0" in pyproject
+    # The proven runtime now pins the published PyPI releases (exact versions).
+    assert "omnibase-core==0.46.3" in pyproject
+    assert "omnibase-spi==0.23.1" in pyproject
 
-    # The retired git-rev override must be gone from both manifest and lock.
-    retired_core_rev = "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d"
-    assert retired_core_rev not in pyproject
-    assert retired_core_rev not in uv_lock
+    # The retired git-rev overrides must be gone from both manifest and lock:
+    # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.
+    for retired_rev in (
+        "48cf8b0be1c1f6d04d1e92c7f18ceb58c812471d",
+        "2a07385dec0ff06903f62572c546ec201f964aaf",
+        "cdfe1a470e96cbe8414ba6b08bbc99a452f09018",
+    ):
+        assert retired_rev not in pyproject
+        assert retired_rev not in uv_lock
 
 
 def test_release_backmerge_preserves_runner_identity_lock() -> None:
@@ -39,8 +49,8 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13762 R3: identity regenerated after relocking onto the published
-    # PyPI core 0.46.1 / spi 0.23.0 releases, which changed the runtime
-    # dependency-manifest and shared-env inputs.
-    assert lock["identity_digest"] == "585efe7a10449e68db1823034cad3814"
-    assert lock["shared_env_digest"] == "34829d3bf76bf07612be9295"
+    # OMN-12549 closure: identity regenerated after repinning onto the exact
+    # published PyPI core 0.46.3 / spi 0.23.1 releases and relocking, which
+    # changed the runtime dependency-manifest and shared-env digest inputs.
+    assert lock["identity_digest"] == "16eb3a1f6ace99e4025fdcbb337a4ca1"
+    assert lock["shared_env_digest"] == "4b6ac48c4746924f480b1281"
