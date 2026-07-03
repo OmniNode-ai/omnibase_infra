@@ -542,6 +542,38 @@ def test_offline_idle_runner_renders_named_safe_bounce_without_auto_run(
     )
 
 
+def test_offline_idle_runner_does_not_auto_bounce_even_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """GitHub can report offline/idle while the local listener is still working.
+
+    Even with auto-bounce enabled, this ambiguous class must remain alert-only;
+    automatic mutation is reserved for crash-loop and silent-wedge findings.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        extra_env={"MONITOR_AUTO_BOUNCE": "1"},
+    )
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
+    calls = str(state["_docker_calls"])
+    assert "compose" not in calls, (
+        f"offline-idle runners must not be auto-bounced: {calls}"
+    )
+
+
 def test_script_documents_safe_bounce_and_forbids_docker_restart() -> None:
     """Static guarantee on the script text: the safe-bounce recipe uses
     force-recreate of NAMED services with a fresh token, and the script never

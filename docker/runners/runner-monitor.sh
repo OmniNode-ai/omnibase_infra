@@ -25,10 +25,10 @@
 #
 #   3. OFFLINE-IDLE-REGISTRATION (OMN-13912): Docker can report
 #      `Up (healthy)` while GitHub reports the runner offline. When GitHub also
-#      says the runner is not busy, the monitor can safely force-recreate only
-#      that named service with a fresh token. Busy/offline runners are alerted
-#      but not bounced, because they may be completing an in-flight job while
-#      the org runner API lags.
+#      says the runner is not busy, the monitor records the named service for
+#      operator remediation. It does not auto-bounce this class because the
+#      org runner API can lag or misreport busy state while a local listener is
+#      still completing an assigned job.
 #
 #   4. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
 #      these runners — the entrypoint re-runs config.sh, which reports "already
@@ -421,16 +421,10 @@ fi
 #
 # remediation_targets: space-separated service names extracted from the
 # wedge/crash-loop findings. Empty when the issue is something else (offline,
-# OOM, socket) where the bounce recipe does not apply.
+# OOM, socket) where automatic bounce is unsafe.
 collect_remediation_targets() {
     local targets=()
     local entry svc
-    if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
-        for entry in "${offline_idle_bounce_list[@]}"; do
-            svc="${entry%%:*}"
-            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
-        done
-    fi
     if [[ "${#crashloop_list[@]}" -gt 0 ]]; then
         for entry in "${crashloop_list[@]}"; do
             svc="${entry%%:*}"
