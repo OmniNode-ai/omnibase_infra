@@ -201,12 +201,32 @@ JSON
         """,
     )
 
-    # --- gh mock: token mint (only used by auto-bounce, which stays OFF here)
+    # --- gh mock: runner status / queued work APIs + token mint.
     _write_exec(
         bindir / "gh",
-        """\
+        f"""\
         set -euo pipefail
-        echo "mock-registration-token"
+        path=""
+        for a in "$@"; do
+          if [[ "${{a}}" == /* ]]; then path="${{a}}"; fi
+        done
+        if [[ "$*" == *"registration-token"* ]]; then
+          echo "mock-registration-token"
+        elif [[ "${{path}}" == *"/actions/runners?"* ]]; then
+          cat <<'JSON'
+{runners_json}
+JSON
+        elif [[ "${{path}}" == *"/actions/runs?status=queued"* ]]; then
+          cat <<'JSON'
+{_queued_runs_json(queued_run_id)}
+JSON
+        elif [[ "${{path}}" == *"/actions/runs/"*"/jobs"* ]]; then
+          cat <<'JSON'
+{_queued_jobs_json(created_at=queued_job_created_at)}
+JSON
+        else
+          echo '{{}}'
+        fi
         """,
     )
 
@@ -488,6 +508,33 @@ def test_monitor_never_runs_docker_restart_or_empty_bounce(tmp_path: Path) -> No
         queued_age_seconds=3600,  # wedge too
     )
     state = _run_monitor(tmp_path, bindir)
+    calls = str(state["_docker_calls"])
+    assert "restart" not in calls, f"forbidden `docker restart` invoked: {calls}"
+    assert "compose" not in calls, (
+        f"auto-bounce ran a compose recreate while MONITOR_AUTO_BOUNCE=0: {calls}"
+    )
+
+
+def test_offline_idle_runner_renders_named_safe_bounce_without_auto_run(
+    tmp_path: Path,
+) -> None:
+    """Docker healthy + GitHub offline is the recurring live failure mode. The
+    monitor must include the named services in the safe remediation path, while
+    preserving the default observe-and-alert behavior."""
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
     calls = str(state["_docker_calls"])
     assert "restart" not in calls, f"forbidden `docker restart` invoked: {calls}"
     assert "compose" not in calls, (

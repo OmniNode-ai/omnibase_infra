@@ -23,7 +23,14 @@
 #      has been queued longer than WEDGE_QUEUE_AGE_SECONDS while the fleet sits
 #      idle (online + not busy), the fleet is wedged.
 #
-#   3. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
+#   3. OFFLINE-IDLE-REGISTRATION (OMN-13912): Docker can report
+#      `Up (healthy)` while GitHub reports the runner offline. When GitHub also
+#      says the runner is not busy, the monitor can safely force-recreate only
+#      that named service with a fresh token. Busy/offline runners are alerted
+#      but not bounced, because they may be completing an in-flight job while
+#      the org runner API lags.
+#
+#   4. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
 #      these runners — the entrypoint re-runs config.sh, which reports "already
 #      configured", exits, and compose `restart: unless-stopped` immediately
 #      restarts it. This shows up as a climbing container RestartCount and/or
@@ -137,13 +144,36 @@ slack_post() {
         )" > /dev/null 2>&1
 }
 
+# github_api_get — fetch a GitHub API path as JSON. Empty string on failure.
+# Prefer `gh api` because the deployed host already has working gh auth; fall
+# back to RUNNER_GITHUB_TOKEN for environments without gh. Retry transient
+# misses so a single GitHub/gh blip does not become a false runner outage.
+github_api_get() {
+    local path="$1"
+    local attempt output
+    for attempt in 1 2 3; do
+        output=""
+        if command -v gh >/dev/null 2>&1; then
+            output=$(gh api "${path}" 2>/dev/null || true)
+        else
+            output=$(curl -fsS \
+                -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com${path}" 2>/dev/null || true)
+        fi
+        if [[ -n "${output}" ]] && jq -e 'type == "object"' <<< "${output}" >/dev/null 2>&1; then
+            printf '%s\n' "${output}"
+            return 0
+        fi
+        sleep "${attempt}"
+    done
+    return 0
+}
+
 # gh_api_runners — fetch the org self-hosted runner list as JSON. Empty string
 # on failure (caller treats empty as github_api_failed).
 gh_api_runners() {
-    curl -fsS \
-        -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null || true
+    github_api_get "/orgs/${RUNNER_ORG}/actions/runners?per_page=100"
 }
 
 # oldest_queued_job_age_seconds — across WEDGE_WATCH_REPOS, find the OLDEST
@@ -158,10 +188,7 @@ oldest_queued_job_age_seconds() {
     now_epoch=$(date -u +%s)
 
     for repo in ${WEDGE_WATCH_REPOS}; do
-        runs_json=$(curl -fsS \
-            -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${repo}/actions/runs?status=queued&per_page=20" 2>/dev/null || true)
+        runs_json=$(github_api_get "/repos/${repo}/actions/runs?status=queued&per_page=20")
         [[ -z "${runs_json}" ]] && continue
 
         run_ids=$(jq -r '.workflow_runs[]?.id // empty' <<< "${runs_json}" 2>/dev/null || true)
@@ -169,10 +196,7 @@ oldest_queued_job_age_seconds() {
 
         while IFS= read -r run_id; do
             [[ -z "${run_id}" ]] && continue
-            jobs_json=$(curl -fsS \
-                -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${repo}/actions/runs/${run_id}/jobs?per_page=50" 2>/dev/null || true)
+            jobs_json=$(github_api_get "/repos/${repo}/actions/runs/${run_id}/jobs?per_page=50")
             [[ -z "${jobs_json}" ]] && continue
 
             # Only count queued jobs that target a self-hosted label. Hosted
@@ -245,6 +269,7 @@ busy_count=0
 unhealthy_list=()
 wedge_list=()
 crashloop_list=()
+offline_idle_bounce_list=()
 github_api_failed=false
 
 while IFS=$'\t' read -r name status; do
@@ -318,6 +343,9 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 
     gh_state="${github_status[$name]:-missing}"
     if [[ "${gh_state}" != "online" ]]; then
+        if [[ "${github_busy[$name]:-false}" != "true" ]]; then
+            offline_idle_bounce_list+=("${name}: OFFLINE-IDLE (${gh_state}, Docker ${docker_state})")
+        fi
         unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state}")
         continue
     fi
@@ -397,6 +425,12 @@ fi
 collect_remediation_targets() {
     local targets=()
     local entry svc
+    if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
+        for entry in "${offline_idle_bounce_list[@]}"; do
+            svc="${entry%%:*}"
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+        done
+    fi
     if [[ "${#crashloop_list[@]}" -gt 0 ]]; then
         for entry in "${crashloop_list[@]}"; do
             svc="${entry%%:*}"
@@ -479,6 +513,7 @@ jq -n \
     --argjson docker_ok "$docker_ok" \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
+    --arg offline_idle_bounce_names "$(printf '%s\n' "${offline_idle_bounce_list[@]}" 2>/dev/null || echo '')" \
     '{
         healthy: $healthy,
         unhealthy_count: $unhealthy_count,
@@ -490,7 +525,8 @@ jq -n \
         total: $total,
         docker_ok: $docker_ok,
         timestamp: $timestamp,
-        unhealthy_names: $unhealthy_names
+        unhealthy_names: $unhealthy_names,
+        offline_idle_bounce_names: $offline_idle_bounce_names
     }' > "$STATE_FILE"
 
 # ---------------------------------------------------------------------------
@@ -507,6 +543,9 @@ fi
 special_findings=""
 if [[ "${wedge_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${wedge_list[@]}")"$'\n'
+fi
+if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
+    special_findings+="$(printf '%s\n' "${offline_idle_bounce_list[@]}")"$'\n'
 fi
 if [[ "${crashloop_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${crashloop_list[@]}")"$'\n'
