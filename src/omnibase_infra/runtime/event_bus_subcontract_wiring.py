@@ -121,9 +121,10 @@ from omnibase_infra.models.event_bus import (
     ModelOffsetPolicyConfig,
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
-from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
+from omnibase_infra.protocols import ProtocolIdempotencyStore
 from omnibase_infra.topics import TopicResolver
 from omnibase_infra.utils import compute_consumer_group_id
+from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.service_dispatch_result_applier import (

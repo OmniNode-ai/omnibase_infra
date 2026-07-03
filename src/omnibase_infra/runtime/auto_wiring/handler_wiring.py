@@ -112,15 +112,13 @@ if TYPE_CHECKING:
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
-    from omnibase_infra.protocols.protocol_dispatch_engine import (
-        ProtocolDispatchEngine,
-    )
     from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
         ProtocolPatternBBrokerTransport,
     )
     from omnibase_infra.runtime.service_terminal_event_consumer import (
         TerminalEventConsumer,
     )
+    from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 logger = logging.getLogger(__name__)
 
