@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.46.1,<0.47.0",
-    "omnibase-spi>=0.23.0,<0.24.0",
+    "omnibase-core==0.46.3",
+    "omnibase-spi==0.23.1",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -173,8 +173,8 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.46.1,<0.47.0",
-    "omnibase-spi>=0.23.0,<0.24.0",
+    "omnibase-core==0.46.3",
+    "omnibase-spi==0.23.1",
 ]
 
 [tool.uv.sources]
@@ -183,15 +183,11 @@ override-dependencies = [
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
-# OMN-12549 TEMPORARY cross-repo seam overrides — REMOVE AT MERGE-LANE RELEASE.
-# The S0-seam Mode-B parity gate requires the MixinNodeDispatch (omnibase_core)
-# and the relocated ProtocolDispatchEngine (omnibase_spi), which are not yet on
-# PyPI. These immutable-rev git pins let this PR's CI prove Mode B green end-to-end.
-# Release train: merge+release omnibase_core PR #1373 and omnibase_spi PR #252,
-# then DELETE these two lines (worktree versions 0.46.2/0.23.0 already satisfy the
-# existing pins, so no pin bump is needed once released).
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "2a07385dec0ff06903f62572c546ec201f964aaf" } # raw-override-ok: OMN-12549
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "cdfe1a470e96cbe8414ba6b08bbc99a452f09018" } # raw-override-ok: OMN-12549
+# OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
+# omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
+# omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
+# the released exact versions, restoring a fully PyPI-sourced reproducible lock.
+
 [tool.ruff]
 target-version = "py312"
 line-length = 88

@@ -9,8 +9,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2a07385dec0ff06903f62572c546ec201f964aaf" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=cdfe1a470e96cbe8414ba6b08bbc99a452f09018" },
+    { name = "omnibase-core", specifier = "==0.46.3" },
+    { name = "omnibase-spi", specifier = "==0.23.1" },
 ]
 
 [[package]]
@@ -2083,8 +2083,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.46.2"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2a07385dec0ff06903f62572c546ec201f964aaf#2a07385dec0ff06903f62572c546ec201f964aaf" }
+version = "0.46.3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2098,6 +2098,10 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/c9/598d22a6c4abadcd7805ea428324d07d7d972021aafb922095fe7884c315/omnibase_core-0.46.3.tar.gz", hash = "sha256:1b2d1e4f0928132c26ad84113c506a9b3c2a048e2213223122c491c3e0a86934", size = 9013978, upload-time = "2026-07-03T06:36:51.597Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/40/0c11789b9efff99bb841a680dcb331e713516a6cf98e9143c4e3034481e9/omnibase_core-0.46.3-py3-none-any.whl", hash = "sha256:61cf13283b89acf671df87626a0e26e0f62001e20b0ce9737d2f5794caae285f", size = 6364318, upload-time = "2026-07-03T06:36:49.384Z" },
 ]
 
 [[package]]
@@ -2199,8 +2203,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=2a07385dec0ff06903f62572c546ec201f964aaf" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=cdfe1a470e96cbe8414ba6b08bbc99a452f09018" },
+    { name = "omnibase-core", specifier = "==0.46.3" },
+    { name = "omnibase-spi", specifier = "==0.23.1" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.64" },
@@ -2257,12 +2261,16 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.23.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=cdfe1a470e96cbe8414ba6b08bbc99a452f09018#cdfe1a470e96cbe8414ba6b08bbc99a452f09018" }
+version = "0.23.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/5c/ab273b77c5f4733a93dc4b7cc838c932cff521a9c1100d8006e6563e0b6f/omnibase_spi-0.23.1.tar.gz", hash = "sha256:052129cde0811f232886bf1adf2c933549a0645190d6543d6d57b3133e8007f9", size = 1141814, upload-time = "2026-07-03T06:17:34.705Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/0f/88eeff6e7078df14ea147ca6654d07d819570511204de6e59d6675f8c8cd/omnibase_spi-0.23.1-py3-none-any.whl", hash = "sha256:8f15d75ec17828ffac6790199854181df8011e9765efd2177cc9e117cf68dcf6", size = 746623, upload-time = "2026-07-03T06:17:32.991Z" },
 ]
 
 [[package]]
