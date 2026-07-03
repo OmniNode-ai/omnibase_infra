@@ -42,5 +42,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # OMN-13762 R3: identity regenerated after relocking onto the published
     # PyPI core 0.46.1 / spi 0.23.0 releases, which changed the runtime
     # dependency-manifest and shared-env inputs.
-    assert lock["identity_digest"] == "2db6ed47be815d786b9852bb63b8c777"
-    assert lock["shared_env_digest"] == "c56c42cf178cde77518ab430"
+    assert lock["identity_digest"] == "585efe7a10449e68db1823034cad3814"
+    assert lock["shared_env_digest"] == "34829d3bf76bf07612be9295"
