@@ -190,8 +190,8 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # Release train: merge+release omnibase_core PR #1373 and omnibase_spi PR #252,
 # then DELETE these two lines (worktree versions 0.46.2/0.23.0 already satisfy the
 # existing pins, so no pin bump is needed once released).
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "2a07385dec0ff06903f62572c546ec201f964aaf" }
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "cdfe1a470e96cbe8414ba6b08bbc99a452f09018" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "2a07385dec0ff06903f62572c546ec201f964aaf" } # raw-override-ok: OMN-12549
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "cdfe1a470e96cbe8414ba6b08bbc99a452f09018" } # raw-override-ok: OMN-12549
 [tool.ruff]
 target-version = "py312"
 line-length = 88

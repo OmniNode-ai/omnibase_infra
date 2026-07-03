@@ -54,6 +54,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up uv
         if: ${{ github.event_name == 'pull_request' }}
@@ -62,11 +63,12 @@ jobs:
       - name: Forbid first-party git-source overrides on dev/main
         if: ${{ github.event_name == 'pull_request' }}
         shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
 
-          BASE_REF="origin/${{ github.base_ref }}"
-          CHANGED=$(git diff --name-only "$BASE_REF"...HEAD -- pyproject.toml || true)
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD -- pyproject.toml || true)
 
           if [ -z "$CHANGED" ]; then
             echo "pyproject.toml unchanged in this PR — no new provenance surface. Skipping."

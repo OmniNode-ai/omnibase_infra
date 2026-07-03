@@ -110,6 +110,36 @@ def test_reject_tag_override(mod, tmp_path: Path) -> None:
     assert mod.main(["--pyproject", str(path)]) == 1
 
 
+def test_reject_single_quoted_git_override(mod, tmp_path: Path) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        "omnibase-core = { git = 'https://github.com/OmniNode-ai/omnibase_core.git', "
+        "rev = 'deadbeef' }\n"
+    )
+    path = _write_pyproject(tmp_path, block)
+    assert mod.main(["--pyproject", str(path)]) == 1
+
+
+def test_reject_indented_inline_table(mod, tmp_path: Path) -> None:
+    block = (
+        "[tool.uv.sources]\n"
+        '    omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", '
+        'rev = "deadbeef" }\n'
+    )
+    path = _write_pyproject(tmp_path, block)
+    assert mod.main(["--pyproject", str(path)]) == 1
+
+
+def test_reject_uv_sources_subtable(mod, tmp_path: Path) -> None:
+    block = (
+        "[tool.uv.sources.omnibase-compat]\n"
+        'git = "https://github.com/OmniNode-ai/omnibase_compat.git"\n'
+        'rev = "deadbeef"\n'
+    )
+    path = _write_pyproject(tmp_path, block)
+    assert mod.main(["--pyproject", str(path)]) == 1
+
+
 # ---------------------------------------------------------------------------
 # ALLOW: occ-only override (the current legitimate state)
 # ---------------------------------------------------------------------------

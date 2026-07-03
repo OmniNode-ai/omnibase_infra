@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -70,25 +71,17 @@ _GIT_SOURCE_KEYS: frozenset[str] = frozenset({"git", "rev", "branch", "tag"})
 _ESCAPE_TOKEN_RE = re.compile(r"#\s*raw-override-ok:\s*(\S+)")
 
 # ---------------------------------------------------------------------------
-# [tool.uv.sources] parsing — regex-based, adapted (with attribution) from
-# scripts/check-pinned-wheels.py::_parse_uv_sources. Copied rather than imported
-# because that module's filename contains a hyphen (not a clean import target).
-# We parse only the uv.sources block, which is sufficient for provenance.
-#
-# Note: the header pattern is anchored with ``^`` (start-of-line) so a commented
-# ``#   [tool.uv.sources]`` example elsewhere in the file (as this repo carries
-# in its dependency-guidance comments) does not shadow the real section.
+# [tool.uv.sources] parsing. TOML is authoritative for source classification so
+# single quotes, indentation, and package subtables cannot hide a git override.
+# Raw text is still used only to find the inline escape token, because TOML drops
+# comments.
 # ---------------------------------------------------------------------------
 
 _UVS_BLOCK_RE = re.compile(
-    r"^\[tool\.uv\.sources\](.*?)(?=^\[|\Z)",
+    r"^\[tool\.uv\.sources\](.*?)(?=^\[(?!tool\.uv\.sources\.)|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-_UVS_ENTRY_RE = re.compile(
-    r"^(\S+)\s*=\s*\{([^}]+)\}",
-    re.MULTILINE,
-)
-_KV_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+_UVS_SUBTABLE_RE = re.compile(r"^\[tool\.uv\.sources\.([^\]]+)\]")
 
 
 def _normalize(pkg: str) -> str:
@@ -102,13 +95,27 @@ def _uv_sources_block(text: str) -> str | None:
     return block_m.group(1) if block_m else None
 
 
-def _parse_uv_source_entries(block: str) -> dict[str, dict[str, str]]:
-    """Return {normalized_pkg: {key: value}} for [tool.uv.sources] entries."""
-    sources: dict[str, dict[str, str]] = {}
-    for entry_m in _UVS_ENTRY_RE.finditer(block):
-        pkg = _normalize(entry_m.group(1))
-        kv_str = entry_m.group(2)
-        sources[pkg] = dict(_KV_RE.findall(kv_str))
+def _parse_uv_source_entries(text: str) -> dict[str, dict[str, object]]:
+    """Return {normalized_pkg: source_mapping} from pyproject TOML."""
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"invalid TOML: {exc}") from exc
+
+    tool = parsed.get("tool", {})
+    if not isinstance(tool, dict):
+        return {}
+    uv = tool.get("uv", {})
+    if not isinstance(uv, dict):
+        return {}
+    raw_sources = uv.get("sources", {})
+    if not isinstance(raw_sources, dict):
+        return {}
+
+    sources: dict[str, dict[str, object]] = {}
+    for pkg, attrs in raw_sources.items():
+        if isinstance(attrs, dict):
+            sources[_normalize(str(pkg))] = attrs
     return sources
 
 
@@ -118,9 +125,12 @@ def _line_for_package(block: str, pkg: str) -> str | None:
         stripped = raw_line.lstrip()
         if not stripped or stripped.startswith("#"):
             continue
+        subtable_m = _UVS_SUBTABLE_RE.match(stripped)
+        if subtable_m and _normalize(subtable_m.group(1)) == pkg:
+            return raw_line
         # Entry key is the text before the first '=' on the line.
-        key = stripped.split("=", 1)[0]
-        if _normalize(key) == pkg:
+        key = stripped.split("=", 1)[0] if "=" in stripped else ""
+        if key and _normalize(key) == pkg:
             return raw_line
     return None
 
@@ -137,12 +147,12 @@ def find_violations(text: str) -> list[str]:
     gate fails (exit 1). Lines carrying a valid `# raw-override-ok: <token>`
     escape are excluded.
     """
-    block = _uv_sources_block(text)
-    if block is None:
-        # No [tool.uv.sources] block at all — nothing can be overridden.
-        return []
+    block = _uv_sources_block(text) or text
 
-    entries = _parse_uv_source_entries(block)
+    try:
+        entries = _parse_uv_source_entries(text)
+    except ValueError as exc:
+        return [str(exc)]
     violations: list[str] = []
 
     for pkg, attrs in entries.items():
