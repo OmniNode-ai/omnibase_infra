@@ -74,6 +74,25 @@ CRED_CACHE_DIR="/home/runner/.runner-creds"
 LOG_FILE="/tmp/runner-listener.log"
 
 # ---------------------------------------------------------------------------
+# Listener watchdog (OMN-13915)
+# ---------------------------------------------------------------------------
+# Incident: Runner.Listener died inside 37/48 containers while the run.sh
+# wrapper tree stayed alive, so the entrypoint never saw an exit code and the
+# container sat "Up (healthy)" for four days. The watchdog closes that gap:
+# while run.sh is running, assert a bin/Runner.Listener process exists. After
+# LISTENER_SUPERVISE_MISSES consecutive misses (the grace window covers runner
+# self-update, which briefly restarts the listener), kill the wrapper tree so
+# the main loop restarts the runner with the cached in-place credentials.
+# Bounded by LISTENER_RESTART_MAX to surface a genuinely crash-looping
+# listener as a container exit (compose restart policy + runner-monitor alert)
+# instead of hiding it behind unbounded silent restarts.
+LISTENER_SUPERVISE_INTERVAL="${LISTENER_SUPERVISE_INTERVAL:-60}"
+LISTENER_SUPERVISE_MISSES="${LISTENER_SUPERVISE_MISSES:-5}"
+LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
+# LISTENER_PGREP_PATTERN is derived from RUNNER_HOME below (after RUNNER_HOME
+# is resolved) so it matches THIS runner home's listener binary only.
+
+# ---------------------------------------------------------------------------
 # Credential cache helpers
 # ---------------------------------------------------------------------------
 
@@ -207,6 +226,10 @@ _deregister() {
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
 
+# Watchdog pattern (OMN-13915): match THIS runner home's listener binary path.
+# Dots escaped for pgrep's ERE matching.
+LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Listener}"
+
 # Check for credentials in priority order:
 # 1. In-place (container restart — files already in RUNNER_HOME)
 # 2. Volume cache (fresh container — restore from mounted volume)
@@ -229,14 +252,54 @@ else
 fi
 
 attempt=0
+listener_restarts=0
 while true; do
     echo "[entrypoint] Starting runner (attempt $((attempt + 1)))"
     set +e
-    _as_runner "${RUNNER_HOME}/run.sh" 2>&1 | tee "${LOG_FILE}"
-    exit_code=${PIPESTATUS[0]}
+    _as_runner "${RUNNER_HOME}/run.sh" > >(tee "${LOG_FILE}") 2>&1 &
+    runner_pid=$!
+
+    # Watchdog: run.sh alive but no Runner.Listener process = the OMN-13915
+    # zombie mode. Recycle the wrapper tree so this loop restarts the runner.
+    supervised_kill=0
+    misses=0
+    while kill -0 "${runner_pid}" 2>/dev/null; do
+        sleep "${LISTENER_SUPERVISE_INTERVAL}"
+        kill -0 "${runner_pid}" 2>/dev/null || break
+        if pgrep -f "${LISTENER_PGREP_PATTERN}" >/dev/null 2>&1; then
+            misses=0
+            continue
+        fi
+        misses=$((misses + 1))
+        echo "[entrypoint] WATCHDOG: run.sh alive (pid ${runner_pid}) but no Runner.Listener process (miss ${misses}/${LISTENER_SUPERVISE_MISSES})"
+        if [[ ${misses} -ge ${LISTENER_SUPERVISE_MISSES} ]]; then
+            echo "[entrypoint] WATCHDOG: listener dead-in-container — recycling runner wrapper tree (OMN-13915)"
+            supervised_kill=1
+            kill -TERM "${runner_pid}" 2>/dev/null || true
+            pkill -TERM -f "run-helper" 2>/dev/null || true
+            sleep 10
+            kill -KILL "${runner_pid}" 2>/dev/null || true
+            pkill -KILL -f "run-helper" 2>/dev/null || true
+            break
+        fi
+    done
+
+    wait "${runner_pid}"
+    exit_code=$?
     set -e
 
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
+
+    if [[ ${supervised_kill} -eq 1 ]]; then
+        listener_restarts=$((listener_restarts + 1))
+        if [[ ${listener_restarts} -gt ${LISTENER_RESTART_MAX} ]]; then
+            echo "[entrypoint] WATCHDOG: listener died ${listener_restarts} times (> ${LISTENER_RESTART_MAX}). Exiting so the container restart policy + runner-monitor surface it."
+            exit 1
+        fi
+        echo "[entrypoint] WATCHDOG: restarting runner after listener death (restart ${listener_restarts}/${LISTENER_RESTART_MAX})"
+        sleep 10
+        continue
+    fi
 
     if [[ ${exit_code} -eq 0 ]]; then
         # GitHub runner exits 0 even when registration is server-side deleted

@@ -67,6 +67,14 @@ x-runner-base: &runner-base
   # reachable. The old pgrep-only check passed while runners were silently
   # disconnected from GitHub (lost egress), letting dead runners stay in the
   # pool and wedge the merge queue. timeout covers the curl --max-time 8.
+  # OMN-13915: healthcheck.sh additionally asserts the listener HEARTBEAT is
+  # fresh (_diag activity within RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, default
+  # 900s) so a dead/zombied listener inside a live wrapper tree flips the
+  # container unhealthy within minutes instead of staying green for days.
+  # entrypoint.sh also runs a listener watchdog that auto-recycles the runner.
+  # NOTE: the healthcheck DEFINITION is captured at container creation — a
+  # container created before this stanza keeps its old (or absent) healthcheck
+  # until it is force-recreated. Rollout requires recreate, not file sync alone.
   healthcheck:
     test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
     interval: 30s
