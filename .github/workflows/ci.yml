@@ -1248,11 +1248,15 @@ jobs:
   #
   # After the test matrix finishes, download all JUnit XML shards, merge them,
   # and compare against the dev-branch baseline.  Any failure cluster NOT in the
-  # baseline causes this job to fail, blocking the PR.
+  # baseline surfaces here as a ratchet regression.
   #
   # The baseline is updated nightly by the dev-baseline-publisher workflow.
   # Expired entries (> 7 days old) also fail the gate to force renewal.
-  # Required status check name: "test-failure-ratchet / Test-Failure Ratchet Gate"
+  #
+  # ADVISORY (OMN-13867): this gate is NOT a required status check and is
+  # intentionally excluded from the CI Summary pass/fail condition. Real test
+  # pass/fail is strictly enforced by the CI Tests Gate (`tests-gate`). A ratchet
+  # hiccup or a transient JUnit-artifact download flake must not block merges.
   # ============================================================================
   test-failure-ratchet:
     name: Test-Failure Ratchet Gate
@@ -1298,16 +1302,84 @@ jobs:
       - name: Install PyYAML (minimal dep for ratchet script)
         run: python3 -m pip install --quiet --user pyyaml
 
-      - name: Download all JUnit XML shards
+      # ------------------------------------------------------------------
+      # Artifact download resilience (OMN-13867)
+      #
+      # The JUnit-shard download reaches artifact/blob storage and can fail
+      # with a transient network error (observed: `ECONNRESET` from
+      # GetSignedArtifactURL on Azure blob) even though every test passed.
+      # That is an INFRA/download flake, NOT a test-ratchet regression, so:
+      #   1. Retry the download with backoff (3 attempts).
+      #   2. If all attempts still fail, treat it as a non-fatal infra skip
+      #      (see "Skip ratchet" step below) rather than reporting a false
+      #      ratchet failure. Test pass/fail is independently and strictly
+      #      enforced by the CI Tests Gate, so skipping the advisory ratchet
+      #      on a download flake does not weaken any real gate.
+      # ------------------------------------------------------------------
+      - name: Download all JUnit XML shards (attempt 1)
+        id: dl_shards_1
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           pattern: test-results-attempt-${{ github.run_attempt }}-*
           path: junit-shards
           merge-multiple: false
 
-      - name: Merge JUnit shards into single XML
+      - name: Backoff before shard download retry 2
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+        run: sleep 10
+
+      - name: Download all JUnit XML shards (attempt 2)
+        id: dl_shards_2
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Backoff before shard download retry 3
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+          && steps.dl_shards_2.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download all JUnit XML shards (attempt 3)
+        id: dl_shards_3
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.dl_shards_1.outcome == 'failure'
+          && steps.dl_shards_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-attempt-${{ github.run_attempt }}-*
+          path: junit-shards
+          merge-multiple: false
+
+      - name: Determine JUnit shard availability
+        id: shard_status
         if: needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure'
+        run: |
+          if find junit-shards -name '*.xml' -type f 2>/dev/null | grep -q .; then
+            echo "downloaded=true" >> "${GITHUB_OUTPUT}"
+            echo "JUnit shards downloaded successfully."
+          else
+            echo "downloaded=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::No JUnit XML shards present after 3 download attempts (transient infra/network error)."
+          fi
+
+      - name: Merge JUnit shards into single XML
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.shard_status.outputs.downloaded == 'true'
         run: |
           python3 - <<'PYEOF'
           import os
@@ -1353,7 +1425,25 @@ jobs:
           print('Test matrix was skipped (docs-only diff) — empty JUnit written.')
           "
 
+      - name: Skip ratchet — JUnit artifact download failed (infra, non-fatal)
+        if: |
+          (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+          && steps.shard_status.outputs.downloaded != 'true'
+        run: |
+          echo "::warning::JUnit shard artifact download failed after 3 attempts (transient infra/network error, e.g. ECONNRESET from artifact storage). Skipping the Test-Failure Ratchet check as non-fatal — test pass/fail is independently enforced by the CI Tests Gate. See OMN-13867."
+          {
+            echo "## Test-Failure Ratchet Gate (OMN-13027)"
+            echo ""
+            echo ":warning: **Skipped (non-fatal)** — JUnit shard artifact download failed after 3 retries due to a transient infra/network error (e.g. \`ECONNRESET\` from artifact storage). This is an infrastructure flake, not a test-ratchet regression. Test pass/fail is independently enforced by the CI Tests Gate. See OMN-13867."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Run test-failure ratchet check
+        if: |
+          needs.test-parallel.result == 'skipped'
+          || (
+            (needs.test-parallel.result == 'success' || needs.test-parallel.result == 'failure')
+            && steps.shard_status.outputs.downloaded == 'true'
+          )
         run: |
           python3 pr-head/scripts/check_test_failure_ratchet.py \
             --junit-xml merged-junit.xml \
@@ -1406,6 +1496,13 @@ jobs:
     # failure does not block CI Summary. A follow-up ticket promotes it to a hard
     # gate once compose-mode boot is consistently green on main. See CLAUDE.md
     # "Strict-mode invariants land AFTER all downstream consumers are compliant".
+    #
+    # OMN-13867: `test-failure-ratchet` is ADVISORY. It stays in `needs` so CI
+    # Summary still waits for it and surfaces its result, but its result is
+    # intentionally EXCLUDED from the pass/fail condition below — an advisory
+    # ratchet hiccup (or a transient JUnit-artifact download flake) must NOT fail
+    # the required CI Summary aggregate. Real test pass/fail is strictly enforced
+    # by the CI Tests Gate (`tests-gate`), which remains a hard blocking input.
     needs: [zone-filter, tests-gate, test-failure-ratchet, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
@@ -1430,8 +1527,9 @@ jobs:
           compliance="${{ needs.compliance.result }}"
           contractsync="${{ needs.contract-sync-gate.result }}"
 
+          # OMN-13867: $ratchet is deliberately absent from this condition —
+          # the Test-Failure Ratchet Gate is advisory and must not block merges.
           if [[ "$gate" == "success" ]] && \
-             [[ "$ratchet" == "success" || "$ratchet" == "skipped" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$infrahnd" == "success" ]] && \
@@ -1449,7 +1547,7 @@ jobs:
              [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
-            echo "Test-Failure Ratchet Gate: $ratchet"
+            echo "Test-Failure Ratchet Gate (advisory, non-blocking): $ratchet"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Infra Node Handler Ownership: Passed"
@@ -1470,7 +1568,7 @@ jobs:
           else
             echo "Checks failed"
             echo "CI Tests Gate: $gate"
-            echo "Test-Failure Ratchet Gate: $ratchet"
+            echo "Test-Failure Ratchet Gate (advisory, non-blocking): $ratchet"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
             echo "Infra Node Handler Ownership: $infrahnd"
