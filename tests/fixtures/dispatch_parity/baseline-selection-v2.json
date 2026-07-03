@@ -1279,9 +1279,9 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-02T23:00:14.424581+00:00",
+    "generated_at_utc": "2026-07-03T06:47:09.166621+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.46.2",
+      "omnibase-core": "0.46.3",
       "omnibase-infra": "0.38.4",
       "omniclaude": null,
       "omniintelligence": null,
