@@ -201,61 +201,62 @@ def test_mode_a_selection_parity_against_committed_oracle(
 
 
 @pytest.mark.integration
-def test_p0_1_uniform_no_dispatcher_orchestrators_pinned(
+def test_p0_1_guard_tripped_orchestrators_now_route(
     committed_fixture: dict[str, Any],
 ) -> None:
-    """P8/D5 tripwire: the 4 uniformly-guard-tripped orchestrators stay NO_DISPATCHER.
+    """OMN-13852 fix tripwire: all six formerly-guard-tripped orchestrators route.
 
-    The 2026-07-02 live trace CONFIRMED node_rsd_orchestrator routes ZERO dispatchers
-    and falls through to DLQ. The static oracle REFINES design D5: only 4 of the 6
-    are uniformly NO_DISPATCHER on every topic; 2 (chain / registration) register
-    some routes and are tracked separately (see
-    ``test_p0_1_mixed_orchestrators_documented``). This tripwire pins the uniform
-    set — if a future change wires any of them, THIS assertion flips first. It must
-    NOT encode the (false) ticket-comment claim that they "payload-route at runtime".
+    The 2026-07-02 live trace CONFIRMED node_rsd_orchestrator registered ZERO
+    dispatch routes and fell through to NO_DISPATCHER (silent drop). OMN-13852 fixed
+    this by contract disambiguation — each handler entry now declares its
+    topic-derived event_type alias, so a route registers per handler and the
+    handler's real event_model payload DISPATCHES on its own topic. This tripwire
+    pins the FIX: every one of the six must now show at least one ``success`` probe.
+    If a future change re-drops these routes (regression to the silent-drop bug),
+    the success probes flip to no_dispatcher and THIS assertion fires first.
     """
     p0 = committed_fixture["header"]["p0_outcomes"]["P0-1_guard_tripped_orchestrators"]
-    assert p0["verdict"] == "NO_DISPATCHER_DLQ_REFINED"
-    uniform = set(p0["uniform_no_dispatcher_orchestrators"])
+    assert p0["verdict"] == "ROUTES_REGISTERED_OMN13852"
+    now_routing = p0["now_routing_orchestrators"]
+    assert len(now_routing) == 6, "Expected all six orchestrators recorded as routing"
 
-    offenders: list[str] = []
-    for pid, probe in committed_fixture["probes"].items():
-        did = probe.get("dispatcher_id", "")
-        if any(orch in did for orch in uniform):
-            if probe["selection"]["status"] != "no_dispatcher":
-                offenders.append(f"{pid} -> {probe['selection']['status']}")
-    assert not offenders, (
-        "A uniformly-guard-tripped orchestrator now routes (P0-1 tripwire fired — a "
-        "wiring path changed; re-run the live trace and update the oracle "
-        "deliberately):\n  " + "\n  ".join(offenders[:20])
-    )
-
-
-@pytest.mark.integration
-def test_p0_1_mixed_orchestrators_documented(
-    committed_fixture: dict[str, Any],
-) -> None:
-    """P8/D5: the 2 mixed-routing orchestrators are documented AND actually mixed.
-
-    node_chain_orchestrator and node_registration_orchestrator each have BOTH
-    routing (success) and non-routing (no_dispatcher) topics in this corpus slice —
-    the evidence that corrected design D5's blanket over-generalization. This test
-    pins that mixed reality: each must show both statuses, so a regression that
-    silently makes them uniform (either all-route or all-drop) is caught.
-    """
-    p0 = committed_fixture["header"]["p0_outcomes"]["P0-1_guard_tripped_orchestrators"]
-    mixed = p0["mixed_routing_orchestrators"]
-    for orch in mixed:
+    regressed: list[str] = []
+    for orch in now_routing:
         statuses = {
             probe["selection"]["status"]
             for probe in committed_fixture["probes"].values()
             if orch in probe.get("dispatcher_id", "")
         }
-        assert "success" in statuses and "no_dispatcher" in statuses, (
-            f"{orch} is documented as mixed-routing but the oracle shows only "
-            f"{sorted(statuses)}. Re-run the live trace and correct the P0-1 record "
-            "if its routing behavior changed."
-        )
+        if "success" not in statuses:
+            regressed.append(f"{orch} -> {sorted(statuses)}")
+    assert not regressed, (
+        "A formerly-guard-tripped orchestrator registers NO routing route again "
+        "(OMN-13852 regression — the silent-drop bug is back; re-check the "
+        "per-handler event_type declarations in its contract.yaml):\n  "
+        + "\n  ".join(regressed)
+    )
+
+
+@pytest.mark.integration
+def test_p0_1_declared_dlq_topics_recorded(
+    committed_fixture: dict[str, Any],
+) -> None:
+    """OMN-13852 DLQ integrity: each orchestrator declares its NO_DISPATCHER DLQ.
+
+    The engine derives a per-domain DLQ topic on a NO_DISPATCHER fall-through
+    (``onex.dlq.omnibase-infra.<domain>.v1``). Before OMN-13852 that topic was
+    never provisioned, so the escape hatch was a no-op and the message was fully
+    dropped. Each of the six now declares the matching topic in
+    ``event_bus.dlq_topics`` (provisioned via the OMN-13548 ContractTopicExtractor
+    path). This pins that the fixture header records a DLQ topic per orchestrator so
+    a silent removal is caught.
+    """
+    p0 = committed_fixture["header"]["p0_outcomes"]["P0-1_guard_tripped_orchestrators"]
+    declared = p0["declared_dlq_topics"]
+    for orch in p0["now_routing_orchestrators"]:
+        assert orch in declared and declared[orch].startswith(
+            "onex.dlq.omnibase-infra."
+        ), f"{orch} is missing a declared DLQ topic in the P0-1 record"
 
 
 # ---------------------------------------------------------------------------

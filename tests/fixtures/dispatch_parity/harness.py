@@ -114,47 +114,66 @@ EXPECTED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
 #: gate does not silently encode the (false) ticket-comment claim.
 P0_OUTCOMES: dict[str, Any] = {
     "P0-1_guard_tripped_orchestrators": {
-        "verdict": "NO_DISPATCHER_DLQ_REFINED",
+        "verdict": "ROUTES_REGISTERED_OMN13852",
         "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
         "date": "2026-07-02",
         "summary": (
-            "Routing outage CONFIRMED at runtime for node_rsd_orchestrator: "
-            "live-probed end-to-end (synthetic publish to "
-            "onex.evt.rsd.scores-calculated.v1, offset 19; runtime log at "
-            "2026-07-02T18:12:20 shows 'No dispatcher found ... routing to DLQ topic "
-            "onex.dlq.omnibase-infra.rsd.v1'). The static oracle (this fixture) "
-            "REFINES the design-D5 blanket claim that all six generalize "
-            "identically: 4 of the 6 are uniformly NO_DISPATCHER on every subscribe "
-            "topic (the guard registers ZERO routes — "
-            "_topics_for_handler_entry returns () at handler_wiring.py:2242-2281), "
-            "but 2 (node_chain_orchestrator, node_registration_orchestrator) are "
-            "MIXED — some handler entries dodge the guard and DO register routes, so "
-            "those topics dispatch while their event_model-only multi-handler topics "
-            "still fall through to NO_DISPATCHER. Secondary: the rsd DLQ topic did "
-            "not exist at runtime, so the event was fully dropped."
+            "FIXED under OMN-13852 (contract disambiguation). The six "
+            "multi-handler orchestrators previously declared handler entries with "
+            "event_model but no event_type, so _topics_for_handler_entry hit the "
+            "multi-handler ambiguity guard (handler_wiring.py:2242-2281), returned "
+            "(), and registered ZERO dispatch routes — every inbound message fell "
+            "through to NO_DISPATCHER (live-proven on node_rsd_orchestrator: "
+            "synthetic publish to onex.evt.rsd.scores-calculated.v1 offset 19, "
+            "runtime log 2026-07-02T18:12:20 'No dispatcher found ... routing to DLQ "
+            "topic onex.dlq.omnibase-infra.rsd.v1'). Each handler entry now declares "
+            "its topic-derived event_type alias (+ message_category), so a route "
+            "registers per handler and the handler's real event_model payload "
+            "DISPATCHES on its own topic (see the success P4 probes below). No "
+            "runtime special-case was added — the MessageDispatchEngine is unchanged "
+            "(OMN-12525 alignment). Secondary DLQ integrity: each contract now "
+            "declares event_bus.dlq_topics matching the engine-derived NO_DISPATCHER "
+            "target for its domain (OMN-13548 provisioning path), so the "
+            "dead-letter escape hatch targets a real topic instead of silently "
+            "dropping."
         ),
-        "uniform_no_dispatcher_orchestrators": [
+        "now_routing_orchestrators": [
             "node_rsd_orchestrator",
             "node_routing_orchestrator",
             "node_merge_sweep_workflow_orchestrator",
             "node_scope_workflow_orchestrator",
-        ],
-        "mixed_routing_orchestrators": [
             "node_chain_orchestrator",
             "node_registration_orchestrator",
         ],
+        "declared_dlq_topics": {
+            "node_rsd_orchestrator": "onex.dlq.omnibase-infra.rsd.v1",
+            "node_routing_orchestrator": "onex.dlq.omnibase-infra.router.v1",
+            "node_merge_sweep_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
+            "node_scope_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
+            "node_chain_orchestrator": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+            "node_registration_orchestrator": "onex.dlq.omnibase-infra.platform.v1",
+        },
         "live_probed_end_to_end": ["node_rsd_orchestrator"],
+        "residual_no_dispatcher_note": (
+            "P4 probes drive every type-scoped dispatcher on ALL of its contract's "
+            "subscribe topics; a handler's real payload dispatches on its OWN topic "
+            "(status=success) and is correctly type-scoped OUT on sibling topics "
+            "(status=no_dispatcher) — that is the OMN-12416 narrowing working, not a "
+            "routing gap. P1 probes drive an opaque _DictPayload that matches no "
+            "event_model, so they remain no_dispatcher by design."
+        ),
         "corpus_caveat": (
             "This slice excludes omnimarket (outside infra's dependency closure); "
-            "a full cross-repo corpus could add sibling handlers that alter the "
-            "success/no_dispatcher split. The gate pins THIS slice's behavior and a "
-            "cross-repo corpus job is tracked under OMN-12525."
+            "a full cross-repo corpus could add sibling handlers. The gate pins THIS "
+            "slice's post-fix behavior; a cross-repo corpus job is tracked under "
+            "OMN-12525."
         ),
         "gate_posture": (
-            "The gate PINS the observed per-topic behavior as-is (design D1). The "
-            "rsd/routing/merge-sweep/scope outage is a High finding under "
-            "OMN-12525, fixed BEHIND the gate — not in this parity PR. The D5 "
-            "over-generalization is corrected here by evidence."
+            "The gate PINS the post-OMN-13852 behavior: each of the six registers a "
+            "route per handler and dispatches its real payload. If a future change "
+            "re-drops these routes (regression to the silent-drop bug), the "
+            "success P4 probes flip to no_dispatcher and this fixture drifts — the "
+            "gate fires first."
         ),
     },
     "P0-2_live_contract_source": {
