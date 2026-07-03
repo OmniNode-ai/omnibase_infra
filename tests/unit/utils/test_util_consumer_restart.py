@@ -143,21 +143,39 @@ class TestRunWithRestart:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_transient_error_retried(self) -> None:
-        """Transient errors should trigger retry with backoff."""
+        """Transient errors should trigger retry with backoff.
+
+        Deterministic by construction: the shutdown event is set from inside
+        the coro itself on the successful 3rd call rather than from a
+        wall-clock timer, and ``_shutdown_aware_sleep`` is replaced with an
+        instant stand-in. An earlier version raced a ``call_later(0.5, ...)``
+        shutdown timer against real backoff sleeps — under CPU contention
+        (e.g. parallel merge-queue runs) the timer could fire before the 3rd
+        attempt ran, dropping call_count to 1. See OMN-13870.
+        """
         call_count = 0
+        shutdown = asyncio.Event()
 
         async def fail_then_shutdown() -> None:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
                 raise RuntimeError("transient")
-            # Third call: succeed and return (which triggers restart loop)
+            # Third call: succeed, then request shutdown so the loop exits
+            # deterministically instead of relying on a real-time timer.
+            shutdown.set()
 
-        shutdown = asyncio.Event()
-        # Set shutdown after enough time for 3 attempts
-        asyncio.get_running_loop().call_later(0.5, shutdown.set)
+        async def instant_sleep(_seconds: float, event: asyncio.Event | None) -> bool:
+            """Stand-in for _shutdown_aware_sleep with no real delay."""
+            return event is not None and event.is_set()
 
-        with patch("omnibase_infra.utils.util_consumer_restart.random") as mock_random:
+        with (
+            patch("omnibase_infra.utils.util_consumer_restart.random") as mock_random,
+            patch(
+                "omnibase_infra.utils.util_consumer_restart._shutdown_aware_sleep",
+                side_effect=instant_sleep,
+            ),
+        ):
             mock_random.uniform.return_value = 1.0  # No jitter variance
             await run_with_restart(
                 fail_then_shutdown,
@@ -167,7 +185,7 @@ class TestRunWithRestart:
                 max_backoff_s=0.1,
             )
 
-        assert call_count >= 3
+        assert call_count == 3
 
     @pytest.mark.unit
     @pytest.mark.asyncio
