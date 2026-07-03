@@ -4,6 +4,7 @@
 # lane-manifest.yaml — Versioned DESIRED-STATE census for the .201 runtime lanes (OMN-13011).
 #
 # verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
+# verified: 2026-07-03 via docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.<lane>.yml config (OMN-13815 compose-derived container_name parity); running-state basis: live .201 `docker inspect` evidence in OMN-13815 (2026-07-02) confirming these consumers run under the omnibase-infra-stability-test project.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -89,6 +90,23 @@ lanes:
       - name: omninode-stability-test-runtime-worker
         kind: service
         replicas: 1
+      # OMN-13815: deploy-runtime.sh's RUNTIME_SERVICES warm-restart starts these
+      # four consumers/APIs explicitly by name (bypassing the compose disabled
+      # profile), so they run in this lane and must carry lane-scoped names +
+      # be tracked here. Live .201 evidence (2026-07-02, OMN-13815) confirmed all
+      # four running under the omnibase-infra-stability-test project.
+      - name: omninode-stability-test-agent-actions-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-stability-test-skill-lifecycle-consumer
+        kind: service
+        replicas: 1
+      - name: omnibase-stability-test-intelligence-api
+        kind: service
+        replicas: 1
+      - name: omninode-stability-test-contract-resolver
+        kind: service
+        replicas: 1
   prod:
     compose_file: docker/docker-compose.prod.yml
     compose_project: omnibase-infra-prod
@@ -123,6 +141,21 @@ lanes:
         kind: service
         replicas: 1
       - name: omninode-prod-runtime-worker
+        kind: service
+        replicas: 1
+      # OMN-13815: same RUNTIME_SERVICES warm-restart set as stability-test —
+      # deploy-runtime.sh starts these four explicitly by name, so they run in the
+      # prod lane and require lane-scoped names + census tracking here.
+      - name: omninode-prod-agent-actions-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-prod-skill-lifecycle-consumer
+        kind: service
+        replicas: 1
+      - name: omnibase-prod-intelligence-api
+        kind: service
+        replicas: 1
+      - name: omninode-prod-contract-resolver
         kind: service
         replicas: 1
   judge:

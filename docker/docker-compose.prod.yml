@@ -223,15 +223,29 @@ services:
       # docker/runtime-policy.env supplies PROD_WORKER_REPLICAS=1; a recreate
       # without it now fails loudly instead of dropping the worker with no signal.
       replicas: ${PROD_WORKER_REPLICAS:?runtime policy contract must set PROD_WORKER_REPLICAS (source docker/runtime-policy.env)}
+  # OMN-13815: agent-actions-consumer, skill-lifecycle-consumer, intelligence-api
+  # and omninode-contract-resolver are disabled-by-profile for the --profile
+  # runtime cold path, but deploy-runtime.sh's RUNTIME_SERVICES warm-restart path
+  # starts them explicitly by name (`up -d --no-deps --force-recreate <service>`),
+  # which bypasses the profile gate. Without a lane-scoped container_name they
+  # inherit the bare base name and collide with the dev lane's bring-up. Pin
+  # lane-scoped names so the explicit start is host-name-isolated. These four are
+  # the only currently-disabled services the deploy path instantiates;
+  # context-audit-consumer / phoenix / autoheal are neither in RUNTIME_SERVICES
+  # nor otherwise started here, so they never occupy a host name in this lane.
   agent-actions-consumer:
+    container_name: omninode-prod-agent-actions-consumer
     profiles: !override ["prod-disabled"]
   skill-lifecycle-consumer:
+    container_name: omninode-prod-skill-lifecycle-consumer
     profiles: !override ["prod-disabled"]
   context-audit-consumer:
     profiles: !override ["prod-disabled"]
   intelligence-api:
+    container_name: omnibase-prod-intelligence-api
     profiles: !override ["prod-disabled"]
   omninode-contract-resolver:
+    container_name: omninode-prod-contract-resolver
     profiles: !override ["prod-disabled"]
   phoenix:
     profiles: !override ["prod-disabled"]
