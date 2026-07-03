@@ -241,15 +241,30 @@ services:
       # supplies STABILITY_TEST_WORKER_REPLICAS=1; a recreate without it now
       # fails loudly here instead of scaling the worker to zero with no signal.
       replicas: ${STABILITY_TEST_WORKER_REPLICAS:?runtime policy contract must set STABILITY_TEST_WORKER_REPLICAS (source docker/runtime-policy.env)}
+  # OMN-13815: agent-actions-consumer, skill-lifecycle-consumer, intelligence-api
+  # and omninode-contract-resolver are disabled-by-profile for the --profile
+  # runtime cold path, but deploy-runtime.sh's RUNTIME_SERVICES warm-restart path
+  # starts them explicitly by name (`up -d --no-deps --force-recreate <service>`),
+  # which bypasses the profile gate. Without a lane-scoped container_name they
+  # inherit the bare base name and collide with the dev lane's bring-up (live
+  # repro on .201 2026-07-02). Pin lane-scoped names so the explicit start is
+  # host-name-isolated. These four are the only currently-disabled services the
+  # deploy path actually instantiates; context-audit-consumer / phoenix / autoheal
+  # / infisical are neither in RUNTIME_SERVICES nor otherwise started here, so they
+  # never occupy a host name in this lane and keep the base disable untouched.
   agent-actions-consumer:
+    container_name: omninode-stability-test-agent-actions-consumer
     profiles: !override ["stability-test-disabled"]
   skill-lifecycle-consumer:
+    container_name: omninode-stability-test-skill-lifecycle-consumer
     profiles: !override ["stability-test-disabled"]
   context-audit-consumer:
     profiles: !override ["stability-test-disabled"]
   intelligence-api:
+    container_name: omnibase-stability-test-intelligence-api
     profiles: !override ["stability-test-disabled"]
   omninode-contract-resolver:
+    container_name: omninode-stability-test-contract-resolver
     profiles: !override ["stability-test-disabled"]
   phoenix:
     profiles: !override ["stability-test-disabled"]
