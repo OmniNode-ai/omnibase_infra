@@ -22,6 +22,7 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
 
     assert config.github_org == "OmniNode-ai"
+    assert config.runner_host == "omninode-pc.tail75df5e.ts.net"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
     # OMN-12582: reconciled to the live .201 fleet of 48 always-on steady-state
@@ -79,6 +80,24 @@ def test_runner_scripts_do_not_embed_legacy_count() -> None:
 
     assert "RUNNER_COUNT=10" not in deploy_script
     assert "EXPECTED_RUNNERS=10" not in monitor_script
+
+
+def test_deploy_runner_monitor_cron_uses_bash_for_source() -> None:
+    """Runner monitor cron must not rely on /bin/sh accepting ``source``.
+
+    Cron runs commands with /bin/sh unless SHELL is overridden. On Ubuntu that is
+    dash, so a line like ``set -a && source .monitor-env`` exits before loading
+    Slack/GitHub credentials and no alert is sent. The deploy script must install
+    a cron line that explicitly uses bash and captures setup failures in the log.
+    """
+    deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/bin/bash -lc" in deploy_script
+    assert "source ${monitor_env}" in deploy_script
+    assert ">> /tmp/runner-monitor.log 2>&1" in deploy_script
+    assert 'local cron_line="*/3 * * * * set -a && source' not in deploy_script
 
 
 def test_runner_healthcheck_probes_github_egress() -> None:

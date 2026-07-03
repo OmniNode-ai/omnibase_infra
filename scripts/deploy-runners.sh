@@ -348,7 +348,11 @@ ENVEOF
     # Install cron idempotently: replace any existing runner-monitor line
     local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
     local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
-    local cron_line="*/3 * * * * set -a && source ${monitor_env} && set +a && ${monitor_script} >> /tmp/runner-monitor.log 2>&1"
+    # Cron uses /bin/sh by default on the runner host; bare `source` fails there
+    # before credentials load, silently disabling Slack alerts when no MTA exists.
+    # Force bash and redirect the whole monitor invocation so setup failures are
+    # visible in /tmp/runner-monitor.log.
+    local cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> /tmp/runner-monitor.log 2>&1"
 
     run_ssh "
         EXISTING=\$(crontab -l 2>/dev/null || true)
