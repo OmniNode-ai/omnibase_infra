@@ -5,6 +5,7 @@
 #
 # verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
 # verified: 2026-07-03 via docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.<lane>.yml config (OMN-13815 compose-derived container_name parity); running-state basis: live .201 `docker inspect` evidence in OMN-13815 (2026-07-02) confirming these consumers run under the omnibase-infra-stability-test project.
+# verified: 2026-07-03 via LANE_MANIFEST=deploy/lane-census/lane-manifest.yaml python3 scripts/lane_census_plan.py fed the live .201 docker inventory (docker ps -a / docker network ls over ssh, read-only) — migration-gate keepalive reclassification clears the oneshot_stuck false-positive on the healthy stability-test and judge lanes (OMN-13772).
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -34,6 +35,11 @@
 #              (0). It is NOT drift for a oneshot to be absent (compose removes it)
 #              or Exited; it IS drift for a oneshot to be Running-stuck or Exited
 #              non-zero. Tracked, not required-running.
+#   keepalive — long-running healthcheck sentinel (migration-gate): the compose
+#              entrypoint is `while true; do sleep 3600; done` with a continuous
+#              healthcheck, so Running is its healthy steady state — NEVER
+#              oneshot_stuck. Like oneshot, absence/Exited(0) is not drift and
+#              Exited non-zero IS drift (OMN-13772 census false-positive fix).
 #
 # replicas: the REQUIRED running count for a service container. 1 unless a lane
 # explicitly scales out. A service whose replicas resolve to 0 is itself drift
@@ -73,7 +79,7 @@ lanes:
       - name: omnibase-infra-stability-test-forward-migration
         kind: oneshot
       - name: omnibase-infra-stability-test-migration-gate
-        kind: oneshot
+        kind: keepalive
       - name: omnibase-infra-stability-test-intelligence-migration
         kind: oneshot
       - name: omninode-stability-test-runtime
@@ -127,7 +133,7 @@ lanes:
       - name: omnibase-infra-prod-forward-migration
         kind: oneshot
       - name: omnibase-infra-prod-migration-gate
-        kind: oneshot
+        kind: keepalive
       - name: omnibase-infra-prod-intelligence-migration
         kind: oneshot
       # The four runtime services that were silently absent on 2026-06-11.
@@ -178,7 +184,7 @@ lanes:
       - name: omnibase-infra-judge-forward-migration
         kind: oneshot
       - name: omnibase-infra-judge-migration-gate
-        kind: oneshot
+        kind: keepalive
       - name: omnibase-infra-judge-intelligence-migration
         kind: oneshot
       - name: omninode-judge-runtime
