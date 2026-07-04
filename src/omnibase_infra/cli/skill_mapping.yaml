@@ -365,7 +365,7 @@ skills:
   # strings) so bare invocation runs over the local bus. Only nodes whose
   # input model rejects an empty/defaulted value carry a fixture: a
   # required positional arg (recall query, checkpoint action) or a
-  # representative static_payload (env_parity env_by_lane).
+  # representative static_payload.
   # ===================================================================
   - skill_name: agent_healthcheck
     node_name: node_worker_stall_recovery
@@ -381,25 +381,29 @@ skills:
       - {name: max-redispatches, payload_field: max_redispatches, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: env_parity
-    node_name: node_env_parity_compute
-    result_model: omnimarket.nodes.node_env_parity_compute.models.model_env_parity_compute_result.ModelEnvParityComputeResult
-    # env_by_lane is a required dict-of-dict (min_length=1) that cannot be a
-    # CLI scalar; this representative two-lane snapshot makes `onex skill
-    # env_parity` compute a real parity result over the local bus (the prod
-    # lane is missing LOG_LEVEL → a real gap). Live snapshot collection is a
-    # future enhancement; this is the proven fixture.
-    static_payload:
-      env_by_lane:
-        dev:
-          ONEX_ENV: dev
-          LOG_LEVEL: DEBUG
-        prod:
-          ONEX_ENV: prod
-          LOG_LEVEL: null
+    node_name: node_env_parity_collect_effect
+    result_model: omnimarket.nodes.node_env_parity_collect_effect.models.model_env_parity_collect_result.ModelEnvParityCollectResult
+    # OMN-13925: env_parity previously dispatched the pure compute primitive
+    # over a STATIC two-lane sample baked into this mapping, so `onex skill
+    # env_parity` emitted a sample-data verdict masquerading as live lane
+    # parity. It now dispatches the live collection EFFECT, which snapshots
+    # the real runtime lanes read-only over ssh (docker ps + docker inspect
+    # .Config.Env per the lane census topology in its contract) and evaluates
+    # the shared parity engine over the freshly collected env. The receipt
+    # carries per-lane provenance (container name/id, UTC collected_at, env
+    # var counts). With no --ssh-target and no ONEX_LANE_SSH_TARGET the node
+    # FAILS FAST stating no live collection input was provided — it never
+    # substitutes sample data. Caller-supplied env_by_lane snapshots remain
+    # available ONLY by dispatching node_env_parity_compute directly
+    # (`onex run-node`), which is the TEST-ONLY sample path by construction.
+    # tests/unit/cli/test_cli_skill.py::test_env_parity_mapping_has_no_static_lane_snapshot
+    # enforces that a static env_by_lane payload can never come back here.
     args:
       - {name: scope, payload_field: scope, arg_type: string}
       - {name: lanes, payload_field: lanes, arg_type: string_list}
       - {name: variable-names, payload_field: variable_names, arg_type: string_list}
+      - {name: ssh-target, payload_field: ssh_target, arg_type: string}
+      - {name: connect-timeout-seconds, payload_field: connect_timeout_seconds, arg_type: integer}
   - skill_name: bus_audit
     node_name: node_bus_audit_compute
     result_model: omnimarket.nodes.node_bus_audit_compute.models.model_bus_audit_compute_result.ModelBusAuditComputeResult

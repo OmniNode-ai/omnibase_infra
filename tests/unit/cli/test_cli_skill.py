@@ -329,7 +329,9 @@ def test_every_node_backed_sweep_skill_is_registered() -> None:
 # --------------------------------------------------------------------------- #
 _OMN_13712_WIRE_MAP_SKILLS: dict[str, str] = {
     "agent_healthcheck": "node_worker_stall_recovery",
-    "env_parity": "node_env_parity_compute",
+    # OMN-13925: env_parity re-wired from the pure compute primitive (which
+    # only ever saw a static sample payload) to the live collection EFFECT.
+    "env_parity": "node_env_parity_collect_effect",
     "bus_audit": "node_bus_audit_compute",
     "plan_audit": "node_plan_audit_compute",
     "recall": "node_recall_compute",
@@ -394,6 +396,40 @@ def test_omn_13712_wire_map_nodes_resolve_in_catalog() -> None:
     assert not unresolved, (
         "OMN-13712 skill(s) reference node_name(s) absent from the canonical "
         f"omnimarket onex.nodes catalog: {unresolved}"
+    )
+
+
+def test_env_parity_mapping_has_no_static_lane_snapshot() -> None:
+    """OMN-13925 recurrence guard: env_parity must execute LIVE collection.
+
+    The defect class: the mapping carried a static two-lane ``env_by_lane``
+    sample in ``static_payload``, so ``onex skill env_parity`` emitted a
+    sample-data verdict (status=success over zero live entities) masquerading
+    as live lane parity. The skill must dispatch the live collection EFFECT
+    and the mapping must never bake an env snapshot into the payload again —
+    snapshots are collected at run time or the node fails fast stating that
+    no live collection input was provided.
+    """
+    registry = load_skill_registry()
+    mapping = next((s for s in registry.skills if s.skill_name == "env_parity"), None)
+    assert mapping is not None, "env_parity missing from skill_mapping.yaml"
+    assert mapping.node_name == "node_env_parity_collect_effect", (
+        f"env_parity must dispatch the live collection effect, got "
+        f"{mapping.node_name!r}"
+    )
+    assert "env_by_lane" not in mapping.static_payload, (
+        "env_parity static_payload smuggles a static env_by_lane snapshot — "
+        "the OMN-13925 sample-data defect has recurred"
+    )
+    assert not any(
+        isinstance(value, dict) for value in mapping.static_payload.values()
+    ), (
+        "env_parity static_payload carries a nested mapping; env snapshots "
+        "must be collected live, never baked into the dispatch mapping"
+    )
+    assert "ModelEnvParityCollectResult" in mapping.result_model, (
+        "env_parity result_model must be the collect receipt (provenance + "
+        f"parity), got {mapping.result_model!r}"
     )
 
 
