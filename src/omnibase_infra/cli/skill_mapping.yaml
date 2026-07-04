@@ -238,6 +238,9 @@ skills:
       - {name: admin-fallback-threshold-minutes, payload_field: admin_fallback_threshold_minutes, arg_type: integer}
       - {name: verify, payload_field: verify, arg_type: boolean, default: false}
       - {name: verify-timeout-seconds, payload_field: verify_timeout_seconds, arg_type: integer}
+      - {name: loop-until-done, payload_field: loop_until_done, arg_type: boolean, default: true}
+      - {name: max-sweep-passes, payload_field: max_sweep_passes, arg_type: integer}
+      - {name: sweep-sleep-seconds, payload_field: sweep_sleep_seconds, arg_type: integer}
   - skill_name: plan_to_tickets
     node_name: node_plan_to_tickets
     result_model: omnimarket.nodes.node_plan_to_tickets.handlers.handler_plan_to_tickets.ModelPlanToTicketsResult
