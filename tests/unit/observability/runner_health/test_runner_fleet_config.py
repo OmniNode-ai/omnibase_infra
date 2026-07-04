@@ -100,6 +100,20 @@ def test_deploy_runner_monitor_cron_uses_bash_for_source() -> None:
     assert 'local cron_line="*/3 * * * * set -a && source' not in deploy_script
 
 
+def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
+    """Runner repair must be a bounded timer, not an ad hoc operator command."""
+    deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "*/10 * * * *" in deploy_script
+    assert "runner-repair-check" in deploy_script
+    assert "MONITOR_AUTO_BOUNCE=1" in deploy_script
+    assert "OFFLINE_IDLE_RECREATE_AGE_SECONDS=600" in deploy_script
+    assert ">> /tmp/runner-repair.log 2>&1" in deploy_script
+    assert "grep -Ev 'runner-monitor|runner-repair-check'" in deploy_script
+
+
 def test_runner_healthcheck_probes_github_egress() -> None:
     """OMN-12433: the runner healthcheck must verify github.com egress.
 
