@@ -199,6 +199,69 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
     assert stuck and stuck[0]["severity"] == "warning"
 
 
+def test_keepalive_migration_gate_running_is_not_drift() -> None:
+    """OMN-13772 census false-positive regression.
+
+    migration-gate is a long-running healthcheck sentinel BY DESIGN
+    (`while true; do sleep 3600; done` + continuous healthcheck), yet the
+    manifest classified it `oneshot`, so every healthy lane ticketed
+    oneshot_stuck. Reclassified `keepalive`: Running is its healthy steady
+    state and must produce ZERO findings.
+    """
+    containers = _healthy_prod_containers()
+    gate = next(
+        c for c in containers if c["Names"] == "omnibase-infra-prod-migration-gate"
+    )
+    assert gate["State"] == "running", "helper must model the keepalive as Running"
+    envelope = {
+        "lane": "prod",
+        "containers": containers,
+        "networks": ["omnibase-infra-prod-network"],
+        "runtime_tag": None,
+    }
+    plan = PLAN.build_plan(envelope, MANIFEST)
+    stuck = [f for f in plan["findings"] if f["kind"] == "oneshot_stuck"]
+    assert not stuck, f"keepalive migration-gate flagged oneshot_stuck: {stuck}"
+    assert plan["has_drift"] is False, plan["findings"]
+
+
+def test_keepalive_exited_nonzero_is_still_critical_drift() -> None:
+    """A keepalive that DIED non-zero is still oneshot_failed critical drift."""
+    containers = _healthy_prod_containers()
+    for c in containers:
+        if c["Names"] == "omnibase-infra-prod-migration-gate":
+            c["State"] = "exited"
+            c["Status"] = "Exited (137) 5 minutes ago"
+    envelope = {
+        "lane": "prod",
+        "containers": containers,
+        "networks": ["omnibase-infra-prod-network"],
+        "runtime_tag": None,
+    }
+    plan = PLAN.build_plan(envelope, MANIFEST)
+    failed = [f for f in plan["findings"] if f["kind"] == "oneshot_failed"]
+    assert failed and failed[0]["severity"] == "critical", plan["findings"]
+
+
+def test_migration_gate_is_keepalive_in_every_compose_lane() -> None:
+    """Manifest ratchet: migration-gate must stay `keepalive` (OMN-13772).
+
+    Flipping it back to `oneshot` reintroduces the census false-positive on
+    every healthy lane; flipping it to `service` would hard-require a
+    container whose restart policy is `restart: "no"` on some lanes.
+    """
+    for lane in ("stability-test", "prod", "judge"):
+        gate = next(
+            svc
+            for svc in MANIFEST["lanes"][lane]["services"]
+            if svc["name"].endswith("-migration-gate")
+        )
+        assert gate["kind"] == "keepalive", (
+            f"lane {lane!r}: migration-gate kind is {gate['kind']!r}, expected "
+            f"'keepalive' (long-running healthcheck sentinel, OMN-13772)"
+        )
+
+
 def test_unexpected_lane_labeled_container_is_drift() -> None:
     """A container labeled for the lane but not declared is unexpected_container."""
     containers = _healthy_prod_containers()

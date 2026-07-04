@@ -70,6 +70,35 @@ class TestHandlerRegistryApiGetHealth:
         assert "kafka" in components
         assert "qdrant" in components
 
+    @pytest.mark.asyncio
+    async def test_get_health_passes_msk_iam_auth_kwargs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kafka health check uses MSK IAM auth kwargs when configured."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "b-1.example:9098")
+        monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+        monkeypatch.setenv("KAFKA_SASL_MECHANISM", "AWS_MSK_IAM")
+        monkeypatch.setenv("KAFKA_MSK_REGION", "us-east-1")
+        handler = HandlerRegistryApiGetHealth()
+
+        mock_admin = AsyncMock()
+        mock_admin.start = AsyncMock()
+        mock_admin.close = AsyncMock()
+
+        with patch(
+            "aiokafka.admin.AIOKafkaAdminClient", return_value=mock_admin
+        ) as admin_cls:
+            result = await handler.handle(request=object(), correlation_id=uuid4())
+
+        from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
+
+        assert isinstance(result, ModelRegistryApiResponse)
+        kwargs = admin_cls.call_args.kwargs
+        assert kwargs["bootstrap_servers"] == "b-1.example:9098"
+        assert kwargs["security_protocol"] == "SASL_SSL"
+        assert kwargs["sasl_mechanism"] == "OAUTHBEARER"
+        assert isinstance(kwargs["sasl_oauth_token_provider"], MSKTokenProvider)
+
 
 @pytest.mark.unit
 class TestHandlerRegistryApiGetWidgetMapping:

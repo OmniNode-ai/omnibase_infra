@@ -115,8 +115,12 @@ Environment Variables:
 
         KAFKA_SASL_MECHANISM: SASL authentication mechanism (optional)
             Default: None (no SASL)
-            Options: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"
+            Options: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER", "AWS_MSK_IAM"
             Requires: security_protocol must be SASL_PLAINTEXT or SASL_SSL
+
+        KAFKA_MSK_REGION: AWS region for MSK IAM token generation
+            Default: "us-east-1"
+            Required when: KAFKA_SASL_MECHANISM=AWS_MSK_IAM
 
         KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL: Token endpoint for OAUTHBEARER (optional)
             Default: None
@@ -386,10 +390,11 @@ class ModelKafkaEventBusConfig(BaseModel):
         default=None,
         description=(
             "SASL mechanism for authentication. "
-            "Valid values: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, OAUTHBEARER. "
-            "Requires security_protocol to be SASL_PLAINTEXT or SASL_SSL."
+            "Valid values: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, OAUTHBEARER, AWS_MSK_IAM. "
+            "Requires security_protocol to be SASL_PLAINTEXT or SASL_SSL. "
+            "AWS_MSK_IAM uses the AWS credential chain to generate MSK IAM tokens."
         ),
-        pattern=r"^(PLAIN|SCRAM-SHA-256|SCRAM-SHA-512|OAUTHBEARER)$",
+        pattern=r"^(PLAIN|SCRAM-SHA-256|SCRAM-SHA-512|OAUTHBEARER|AWS_MSK_IAM)$",
     )
     sasl_oauthbearer_token_endpoint_url: str | None = Field(
         default=None,
@@ -419,6 +424,24 @@ class ModelKafkaEventBusConfig(BaseModel):
             "Used when security_protocol is SSL or SASL_SSL."
         ),
     )
+    msk_region: str = Field(
+        default="us-east-1",
+        description=(
+            "AWS region for MSK IAM token generation. "
+            "Only used when sasl_mechanism is AWS_MSK_IAM. "
+            "Override via KAFKA_MSK_REGION."
+        ),
+    )
+
+    @field_validator("msk_region", mode="before")
+    @classmethod
+    def validate_msk_region(cls, v: object) -> str:
+        """Normalize MSK region so blank env values fail in auth validation."""
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            v = str(v)
+        return v.strip()
 
     # Reconnect backoff configuration (OMN-2916)
     reconnect_backoff_ms: int = Field(
@@ -596,6 +619,23 @@ class ModelKafkaEventBusConfig(BaseModel):
                         parameter="sasl_mechanism",
                         value=self.sasl_mechanism,
                     )
+            elif (
+                self.sasl_mechanism == "AWS_MSK_IAM"
+                and self.security_protocol != "SASL_SSL"
+            ):
+                raise ProtocolConfigurationError(
+                    "AWS_MSK_IAM requires security_protocol='SASL_SSL'",
+                    context=context,
+                    parameter="security_protocol",
+                    value=self.security_protocol,
+                )
+            elif self.sasl_mechanism == "AWS_MSK_IAM" and not self.msk_region:
+                raise ProtocolConfigurationError(
+                    "AWS_MSK_IAM requires non-empty msk_region",
+                    context=context,
+                    parameter="msk_region",
+                    value=self.msk_region,
+                )
         return self
 
     # Instance discriminator for multi-container dev environments (OMN-2251)
@@ -922,6 +962,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_SASL_OAUTHBEARER_CLIENT_ID": "sasl_oauthbearer_client_id",
             "KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET": "sasl_oauthbearer_client_secret",
             "KAFKA_SSL_CA_FILE": "ssl_ca_file",
+            "KAFKA_MSK_REGION": "msk_region",
             "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
             "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
             "KAFKA_MAX_REQUEST_SIZE": "max_request_size",

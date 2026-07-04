@@ -354,6 +354,43 @@ def _load_workflow_data(state_root: Path) -> dict[str, JsonValue]:
     return cast("dict[str, JsonValue]", parsed)
 
 
+def _load_merge_sweep_handler_result(
+    state_root: Path, correlation_id: JsonValue
+) -> dict[str, JsonValue] | None:
+    """Load durable merge-sweep output when runtime terminal capture missed it."""
+    if not isinstance(correlation_id, str) or not correlation_id:
+        return None
+    merge_sweep_root = state_root / "merge-sweep"
+    if not merge_sweep_root.is_dir():
+        return None
+    for result_path in sorted(
+        merge_sweep_root.glob("*/result.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    ):
+        try:
+            raw = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(raw, dict) or raw.get("correlation_id") != correlation_id:
+            continue
+        return {
+            "correlation_id": raw.get("correlation_id", correlation_id),
+            "prs_inventoried": raw.get("prs_inventoried", 0),
+            "prs_merged": raw.get("prs_merged", 0),
+            "prs_fixed": raw.get("prs_fixed", 0),
+            "prs_skipped": raw.get("prs_skipped", 0),
+            "prs_verified": raw.get("prs_verified", 0),
+            "prs_verification_blocked": raw.get("prs_verification_blocked", 0),
+            "verification_breakdown": raw.get("verification_breakdown", {}),
+            "final_state": raw.get("final_state", "FAILED"),
+            "error_message": raw.get("error_message"),
+            "org_wide_open_count": raw.get("org_wide_open_count", 0),
+            "org_wide_open_remainders": raw.get("org_wide_open_remainders", []),
+        }
+    return None
+
+
 def _print_full_output_on_capture_failure(
     *,
     reason: str,
@@ -429,6 +466,7 @@ def run_receipt_mode(
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
     """
+    state_root = state_root.resolve()
     run_id = uuid.uuid4()
     # One correlation id shared by the skill-started / skill-completed pair so
     # the skill_executions projection can join the two rows (OMN-13830). This is
@@ -466,6 +504,8 @@ def run_receipt_mode(
     workflow_result: EnumWorkflowResult | None = None
     exit_code = 1
     handler_result_obj: object | None = None
+    previous_onex_state_dir = os.environ.get("ONEX_STATE_DIR")
+    os.environ["ONEX_STATE_DIR"] = str(state_root.resolve())
     try:
         runtime = RuntimeLocal(
             workflow_path=contract_path,
@@ -484,6 +524,11 @@ def run_receipt_mode(
         runtime_error = traceback.format_exc()
         runtime_error_type = type(exc).__name__
         logger.exception("receipt_mode: runtime raised")
+    finally:
+        if previous_onex_state_dir is None:
+            os.environ.pop("ONEX_STATE_DIR", None)
+        else:
+            os.environ["ONEX_STATE_DIR"] = previous_onex_state_dir
     duration_ms = int((time.monotonic() - started) * 1000)
 
     _close_capture_logging()
@@ -492,6 +537,25 @@ def run_receipt_mode(
     )
     workflow_data = _load_workflow_data(state_root)
     correlation_id = _extract_correlation_id(workflow_data)
+    handler_result_model_name: str | None = (
+        _fully_qualified_name(handler_result_obj)
+        if handler_result_obj is not None
+        else None
+    )
+
+    if (
+        node_name == "node_pr_lifecycle_orchestrator"
+        and workflow_data.get("handler_result") is None
+    ):
+        merge_sweep_result = _load_merge_sweep_handler_result(
+            state_root, str(correlation_id)
+        )
+        if merge_sweep_result is not None:
+            workflow_data["handler_result"] = merge_sweep_result
+            handler_result_model_name = (
+                "omnimarket.nodes.node_pr_lifecycle_orchestrator.handlers."
+                "handler_pr_lifecycle_orchestrator.ModelPrLifecycleResult"
+            )
 
     if runtime_error:
         status = EnumSkillResultStatus.ERROR
@@ -617,7 +681,7 @@ def run_receipt_mode(
     if (
         status.is_success_like
         and handler_result_json is not None
-        and handler_result_obj is not None
+        and handler_result_model_name is not None
     ):
         receipt = ModelSkillResult[JsonValue](
             skill_name=node_name,
@@ -628,7 +692,7 @@ def run_receipt_mode(
             exit_code=exit_code,
             duration_ms=duration_ms,
             result=handler_result_json,
-            result_model=_fully_qualified_name(handler_result_obj),
+            result_model=handler_result_model_name,
             metrics=metrics,
             artifact_refs=artifact_refs,
         )

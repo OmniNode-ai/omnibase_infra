@@ -26,6 +26,7 @@ fixture handler (no mocked runtime).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import tempfile
@@ -165,6 +166,19 @@ class TestReceiptModeSuccess:
         assert len(captures) == 1
         capture_text = captures[0].read_text(encoding="utf-8")
         assert "RuntimeLocal" in capture_text
+
+    def test_onex_state_dir_is_bound_to_state_root_during_runtime(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        previous_state_dir = tmp_path / "operator-state"
+        monkeypatch.setenv("ONEX_STATE_DIR", str(previous_state_dir))
+
+        result, state_root = _invoke_receipt(tmp_path, monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        env_record = json.loads((state_root / "env.json").read_text(encoding="utf-8"))
+        assert env_record["ONEX_STATE_DIR"] == str(state_root.resolve())
+        assert os.environ["ONEX_STATE_DIR"] == str(previous_state_dir)
 
     def test_artifacts_are_retrievable_and_hash_verified(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
