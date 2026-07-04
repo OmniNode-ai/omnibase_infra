@@ -41,6 +41,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_DOCKERFILE = REPO_ROOT / "docker" / "runners" / "Dockerfile"
+OMNI_CURL_SCRIPT = REPO_ROOT / "docker" / "runners" / "omni-curl"
 LOCK_FILE = REPO_ROOT / "docker" / "runners" / "runner-image.lock.json"
 
 # node24 *execution* support landed in actions/runner 2.327.0 (actions/runner
@@ -158,13 +159,14 @@ def test_runner_image_external_downloads_are_retried() -> None:
     in those downloads should be retried in the Docker build itself.
     """
     source = RUNNER_DOCKERFILE.read_text(encoding="utf-8")
+    omni_curl = OMNI_CURL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "RUN cat >/usr/local/bin/omni-curl" in source
-    assert "--http1.1" in source
-    assert "--retry 5" in source
-    assert "--retry-connrefused" in source
-    assert "--retry-all-errors" in source
-    assert "--retry-max-time 300" in source
+    assert "COPY omni-curl /usr/local/bin/omni-curl" in source
+    assert "--http1.1" in omni_curl
+    assert "--retry 5" in omni_curl
+    assert "--retry-connrefused" in omni_curl
+    assert "--retry-all-errors" in omni_curl
+    assert "--retry-max-time 300" in omni_curl
     assert 'omni-curl "https://github.com/astral-sh/uv' not in source
     assert 'omni-curl "https://github.com/cli/cli' not in source
 
