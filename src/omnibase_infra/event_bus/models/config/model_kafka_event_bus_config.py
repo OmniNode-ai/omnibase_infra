@@ -433,6 +433,16 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
     )
 
+    @field_validator("msk_region", mode="before")
+    @classmethod
+    def validate_msk_region(cls, v: object) -> str:
+        """Normalize MSK region so blank env values fail in auth validation."""
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            v = str(v)
+        return v.strip()
+
     # Reconnect backoff configuration (OMN-2916)
     reconnect_backoff_ms: int = Field(
         default=2000,
@@ -618,6 +628,13 @@ class ModelKafkaEventBusConfig(BaseModel):
                     context=context,
                     parameter="security_protocol",
                     value=self.security_protocol,
+                )
+            elif self.sasl_mechanism == "AWS_MSK_IAM" and not self.msk_region:
+                raise ProtocolConfigurationError(
+                    "AWS_MSK_IAM requires non-empty msk_region",
+                    context=context,
+                    parameter="msk_region",
+                    value=self.msk_region,
                 )
         return self
 

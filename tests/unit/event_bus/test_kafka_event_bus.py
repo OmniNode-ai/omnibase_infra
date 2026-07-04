@@ -3307,6 +3307,20 @@ class TestKafkaAuthConfig:
         assert "SASL_SSL" in str(exc_info.value)
 
     @pytest.mark.unit
+    def test_kafka_config_aws_msk_iam_rejects_blank_region(self) -> None:
+        """AWS_MSK_IAM must fail fast when KAFKA_MSK_REGION is blank."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="SASL_SSL",
+                sasl_mechanism="AWS_MSK_IAM",
+                msk_region="  ",
+            )
+
+        assert "msk_region" in str(exc_info.value)
+
+    @pytest.mark.unit
     async def test_event_bus_kafka_passes_aws_msk_iam_token_provider(self) -> None:
         """AWS_MSK_IAM is exposed to aiokafka as OAUTHBEARER with an MSK token provider."""
         config = ModelKafkaEventBusConfig(

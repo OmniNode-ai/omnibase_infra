@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 from aiokafka.abc import AbstractTokenProvider
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -38,7 +37,21 @@ class OAuthBearerTokenProvider(AbstractTokenProvider):
 
     async def token(self) -> str:
         """Fetch OAuth2 bearer token using client credentials flow."""
-        async with httpx.AsyncClient() as client:
+        if not self._token_endpoint_url.startswith("https://"):
+            raise ValueError("OAuth token endpoint must use https")
+
+        from omnibase_infra.runtime.models.model_http_client_config import (
+            ModelHttpClientConfig,
+        )
+        from omnibase_infra.runtime.providers.provider_http_client import (
+            ProviderHttpClient,
+        )
+
+        provider = ProviderHttpClient(
+            ModelHttpClientConfig(timeout_seconds=30.0, follow_redirects=False)
+        )
+        client = await provider.create()
+        try:
             response = await client.post(
                 self._token_endpoint_url,
                 data={
@@ -50,8 +63,12 @@ class OAuthBearerTokenProvider(AbstractTokenProvider):
             )
             response.raise_for_status()
             payload = response.json()
-            access_token: str = payload["access_token"]
+            access_token = payload["access_token"]
+            if not isinstance(access_token, str):
+                raise TypeError("OAuth token response access_token must be a string")
             return access_token
+        finally:
+            await ProviderHttpClient.close(client)
 
 
 class MSKTokenProvider(AbstractTokenProvider):
@@ -62,6 +79,18 @@ class MSKTokenProvider(AbstractTokenProvider):
 
     async def token(self) -> str:
         """Generate a fresh SigV4-backed MSK IAM OAUTHBEARER token."""
+        if not self._region.strip():
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="msk_token",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                "AWS_MSK_IAM requires non-empty msk_region",
+                context=context,
+                parameter="msk_region",
+                value=self._region,
+            )
         from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
 
         loop = asyncio.get_running_loop()
