@@ -11,6 +11,7 @@ import from or depend on this module.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -46,6 +47,10 @@ class HandlerProofNoop:
         state_root.mkdir(parents=True, exist_ok=True)
         (state_root / "echo.json").write_text(
             json.dumps({"name": request.name, "count": request.count}),
+            encoding="utf-8",
+        )
+        (state_root / "env.json").write_text(
+            json.dumps({"ONEX_STATE_DIR": os.environ.get("ONEX_STATE_DIR")}),
             encoding="utf-8",
         )
         return ModelProofNoopResult(

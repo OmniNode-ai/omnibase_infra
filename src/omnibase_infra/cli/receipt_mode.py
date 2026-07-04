@@ -466,6 +466,8 @@ def run_receipt_mode(
     workflow_result: EnumWorkflowResult | None = None
     exit_code = 1
     handler_result_obj: object | None = None
+    previous_onex_state_dir = os.environ.get("ONEX_STATE_DIR")
+    os.environ["ONEX_STATE_DIR"] = str(state_root.resolve())
     try:
         runtime = RuntimeLocal(
             workflow_path=contract_path,
@@ -484,6 +486,11 @@ def run_receipt_mode(
         runtime_error = traceback.format_exc()
         runtime_error_type = type(exc).__name__
         logger.exception("receipt_mode: runtime raised")
+    finally:
+        if previous_onex_state_dir is None:
+            os.environ.pop("ONEX_STATE_DIR", None)
+        else:
+            os.environ["ONEX_STATE_DIR"] = previous_onex_state_dir
     duration_ms = int((time.monotonic() - started) * 1000)
 
     _close_capture_logging()
