@@ -65,4 +65,3 @@ def test_runner_healthcheck_fails_when_listener_dies(runner_home: Path) -> None:
     finally:
         if proc.poll() is None:
             proc.kill()
-
