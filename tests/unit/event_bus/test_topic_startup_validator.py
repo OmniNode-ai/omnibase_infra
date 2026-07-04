@@ -207,6 +207,44 @@ async def test_strict_mode_raises(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_validator_passes_msk_iam_auth_kwargs(
+    validator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup validation uses MSK IAM auth kwargs for direct admin clients."""
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "b-1.example:9098")
+    monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+    monkeypatch.setenv("KAFKA_SASL_MECHANISM", "AWS_MSK_IAM")
+    monkeypatch.setenv("KAFKA_MSK_REGION", "us-east-1")
+
+    mock_admin = _make_mock_admin(
+        broker_topics={s: MagicMock() for s in SAMPLE_SUFFIXES}
+    )
+    mock_admin_cls = MagicMock(return_value=mock_admin)
+    fake_admin_module = ModuleType("aiokafka.admin")
+    fake_admin_module.AIOKafkaAdminClient = mock_admin_cls  # type: ignore[attr-defined]
+    fake_aiokafka = ModuleType("aiokafka")
+
+    with patch.dict(
+        sys.modules,
+        {
+            "aiokafka": fake_aiokafka,
+            "aiokafka.admin": fake_admin_module,
+        },
+    ):
+        result = await validator.validate(correlation_id=uuid4())
+
+    from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
+
+    assert result.is_valid is True
+    admin_kwargs = mock_admin_cls.call_args.kwargs
+    assert admin_kwargs["security_protocol"] == "SASL_SSL"
+    assert admin_kwargs["sasl_mechanism"] == "OAUTHBEARER"
+    assert isinstance(admin_kwargs["sasl_oauth_token_provider"], MSKTokenProvider)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_broker_unreachable(
     validator,
     caplog: pytest.LogCaptureFixture,
