@@ -2053,6 +2053,7 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     from aiokafka import AIOKafkaConsumer
     from aiokafka.admin import AIOKafkaAdminClient
 
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
     from omnibase_infra.migration.service_consumer_lag_observer import (
@@ -2061,8 +2062,9 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
 
     bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE: env
-    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
-    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers)
+    auth_kwargs = build_aiokafka_auth_kwargs_from_env()
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers, **auth_kwargs)
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, **auth_kwargs)
     lag_admin = AdapterKafkaAdminLag(admin, consumer)
     observer = ServiceConsumerLagObserver(lag_admin)
     return {

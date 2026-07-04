@@ -41,7 +41,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_DOCKERFILE = REPO_ROOT / "docker" / "runners" / "Dockerfile"
-OMNI_CURL_SCRIPT = REPO_ROOT / "docker" / "runners" / "omni-curl.sh"
+OMNI_CURL_SCRIPT = REPO_ROOT / "docker" / "runners" / "omni-curl"
 LOCK_FILE = REPO_ROOT / "docker" / "runners" / "runner-image.lock.json"
 
 # node24 *execution* support landed in actions/runner 2.327.0 (actions/runner
@@ -161,7 +161,7 @@ def test_runner_image_external_downloads_are_retried() -> None:
     source = RUNNER_DOCKERFILE.read_text(encoding="utf-8")
     omni_curl = OMNI_CURL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "COPY omni-curl.sh /usr/local/bin/omni-curl" in source
+    assert "COPY omni-curl /usr/local/bin/omni-curl" in source
     assert "--http1.1" in omni_curl
     assert "--retry 5" in omni_curl
     assert "--retry-connrefused" in omni_curl

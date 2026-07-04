@@ -76,13 +76,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so one-shot curl calls make the image contract depend on transient CDN/TLS
 # behavior. Force HTTP/1.1 and retry connection/protocol resets with a cap.
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-# omni-curl is COPY'd from a real script file rather than materialised via a
-# `RUN cat <<'EOF'` heredoc. Heredoc-in-RUN is BuildKit-only syntax; when the
-# self-hosted omnibase-ci runner lost its buildx component and fell back to the
-# legacy builder, the heredoc body was not consumed and omni-curl was written
-# empty — so every later download no-oped and the uv fetch failed with a
-# missing tarball (OMN-13915). A COPY'd script builds under either builder.
-COPY omni-curl.sh /usr/local/bin/omni-curl
+COPY omni-curl /usr/local/bin/omni-curl
 RUN chmod +x /usr/local/bin/omni-curl
 
 # Install Python 3.12 via deadsnakes PPA
