@@ -35,7 +35,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.unit
+# tests/ci/ is the project-recognized home for CI/CD parity tests (OMN-4307).
+# These tests exercise local subprocesses and a localhost HTTP stub but no
+# external infrastructure, matching the registered ``ci`` marker semantics.
+pytestmark = pytest.mark.ci
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEALTHCHECK = REPO_ROOT / "docker" / "runners" / "healthcheck.sh"

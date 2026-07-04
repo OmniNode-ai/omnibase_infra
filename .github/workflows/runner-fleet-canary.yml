@@ -28,6 +28,10 @@ jobs:
     steps:
       - name: Checkout (fleet config + canary script)
         uses: actions/checkout@v4
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
 
       - name: Compare org runner registry vs expected fleet size
         env:
