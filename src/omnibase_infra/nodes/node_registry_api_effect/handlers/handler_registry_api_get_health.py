@@ -82,9 +82,15 @@ class HandlerRegistryApiGetHealth:
 
             from aiokafka.admin import AIOKafkaAdminClient
 
+            from omnibase_infra.event_bus.kafka_auth import (
+                build_aiokafka_auth_kwargs_from_env,
+            )
+
             _kafka = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE  # fmt: skip
             admin = AIOKafkaAdminClient(
-                bootstrap_servers=_kafka, request_timeout_ms=2000
+                bootstrap_servers=_kafka,
+                request_timeout_ms=2000,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
             await admin.start()
             await admin.close()

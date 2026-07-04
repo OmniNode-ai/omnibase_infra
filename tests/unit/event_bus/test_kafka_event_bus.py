@@ -3277,3 +3277,85 @@ class TestKafkaAuthConfig:
         assert token_provider._client_secret == "my-client-secret"
 
         await bus.close()
+
+    @pytest.mark.unit
+    def test_kafka_config_accepts_aws_msk_iam_without_oauth_fields(self) -> None:
+        """AWS_MSK_IAM uses the AWS credential chain, not OAuth client fields."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+        )
+
+        assert config.sasl_mechanism == "AWS_MSK_IAM"
+        assert config.msk_region == "us-east-1"
+
+    @pytest.mark.unit
+    def test_kafka_config_aws_msk_iam_requires_sasl_ssl(self) -> None:
+        """AWS_MSK_IAM must not be used without TLS."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="SASL_PLAINTEXT",
+                sasl_mechanism="AWS_MSK_IAM",
+            )
+
+        assert "AWS_MSK_IAM" in str(exc_info.value)
+        assert "SASL_SSL" in str(exc_info.value)
+
+    @pytest.mark.unit
+    async def test_event_bus_kafka_passes_aws_msk_iam_token_provider(self) -> None:
+        """AWS_MSK_IAM is exposed to aiokafka as OAUTHBEARER with an MSK token provider."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            security_protocol="SASL_SSL",
+            sasl_mechanism="AWS_MSK_IAM",
+            msk_region="us-east-1",
+        )
+
+        captured_kwargs: dict[str, object] = {}
+
+        mock_producer = AsyncMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer.send = AsyncMock()
+        mock_producer._closed = False
+
+        def capture_producer(**kwargs: object) -> AsyncMock:
+            captured_kwargs.update(kwargs)
+            return mock_producer
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=capture_producer,
+        ):
+            bus = EventBusKafka(config=config)
+            await bus.start()
+
+        assert captured_kwargs.get("security_protocol") == "SASL_SSL"
+        assert captured_kwargs.get("sasl_mechanism") == "OAUTHBEARER"
+
+        from omnibase_infra.event_bus.event_bus_kafka import MSKTokenProvider
+
+        token_provider = captured_kwargs.get("sasl_oauth_token_provider")
+        assert isinstance(token_provider, MSKTokenProvider)
+        assert token_provider._region == "us-east-1"
+
+        await bus.close()
+
+    @pytest.mark.unit
+    async def test_msk_token_provider_returns_aiokafka_token_string(self) -> None:
+        """aiokafka AbstractTokenProvider.token must return only the token string."""
+        from omnibase_infra.event_bus.event_bus_kafka import MSKTokenProvider
+
+        with patch(
+            "aws_msk_iam_sasl_signer.MSKAuthTokenProvider.generate_auth_token",
+            return_value=("signed-token", 1920000000000),
+        ):
+            token = await MSKTokenProvider(region="us-east-1").token()
+
+        assert token == "signed-token"

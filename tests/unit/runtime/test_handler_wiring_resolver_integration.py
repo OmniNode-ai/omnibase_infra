@@ -430,6 +430,31 @@ class TestPrepareHandlerWiringDelegatesToResolver:
         assert set(deps) == {"provisioner", "drain_proof_gate"}
 
     @pytest.mark.unit
+    def test_topic_migration_executor_builder_passes_msk_iam_auth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Migration lag clients receive MSK IAM auth kwargs when configured."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "b-1.example:9098")
+        monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+        monkeypatch.setenv("KAFKA_SASL_MECHANISM", "AWS_MSK_IAM")
+        monkeypatch.setenv("KAFKA_MSK_REGION", "us-east-1")
+
+        with (
+            patch("aiokafka.admin.AIOKafkaAdminClient") as admin_cls,
+            patch("aiokafka.AIOKafkaConsumer") as consumer_cls,
+        ):
+            deps = _build_topic_migration_executor_dependencies()
+
+        from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
+
+        for kwargs in (admin_cls.call_args.kwargs, consumer_cls.call_args.kwargs):
+            assert kwargs["bootstrap_servers"] == "b-1.example:9098"
+            assert kwargs["security_protocol"] == "SASL_SSL"
+            assert kwargs["sasl_mechanism"] == "OAUTHBEARER"
+            assert isinstance(kwargs["sasl_oauth_token_provider"], MSKTokenProvider)
+        assert set(deps) == {"provisioner", "drain_proof_gate"}
+
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_wire_from_manifest_threads_materialized_deps_to_resolver(
         self,

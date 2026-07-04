@@ -34,6 +34,7 @@ from omnibase_infra.event_bus.enum_topic_readiness_failure_reason import (
 from omnibase_infra.event_bus.enum_topic_readiness_status import (
     EnumTopicReadinessStatus,
 )
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
@@ -283,10 +284,12 @@ class TopicProvisioner:
         TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
+        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
+                **auth_kwargs,
             )
             await admin.start()
 
@@ -443,10 +446,12 @@ class TopicProvisioner:
         TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
+        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
+                **auth_kwargs,
             )
             await admin.start()
 
@@ -560,10 +565,12 @@ class TopicProvisioner:
         admin: AIOKafkaAdminClient | None = None
         last_evaluation: ModelTopicSetReadiness | None = None
         attempts = 0
+        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
+                **auth_kwargs,
             )
             await admin.start()
 
