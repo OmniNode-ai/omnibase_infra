@@ -74,6 +74,13 @@ CRASHLOOP_RESTART_THRESHOLD="${CRASHLOOP_RESTART_THRESHOLD:-5}"
 CRASHLOOP_LOG_TAIL_LINES="${CRASHLOOP_LOG_TAIL_LINES:-200}"
 CRASHLOOP_REREGISTER_MARKER_THRESHOLD="${CRASHLOOP_REREGISTER_MARKER_THRESHOLD:-3}"
 
+# GitHub can report a runner offline while Docker still has a healthy listener.
+# Recreating immediately can cancel an assigned job, so only auto-remediate this
+# class after it persists for a grace period and local logs do not show an
+# in-flight job.
+OFFLINE_IDLE_RECREATE_AGE_SECONDS="${OFFLINE_IDLE_RECREATE_AGE_SECONDS:-900}"
+OFFLINE_IDLE_LOG_TAIL_LINES="${OFFLINE_IDLE_LOG_TAIL_LINES:-240}"
+
 # Auto-bounce is OFF by default: this monitor DETECTS and ALERTS. It does NOT
 # mutate the live fleet unless an operator deliberately sets MONITOR_AUTO_BOUNCE=1
 # in the monitor env. Even then it force-recreates only the named services with
@@ -254,6 +261,21 @@ container_is_crashlooping() {
     return 1
 }
 
+runner_has_active_job() {
+    local name="${1}"
+    local logs last_running last_completed
+
+    logs=$(docker logs --tail "${OFFLINE_IDLE_LOG_TAIL_LINES}" "${name}" 2>&1 || true)
+    last_running=$(grep -n 'Running job:' <<< "${logs}" | tail -n 1 | cut -d: -f1 || true)
+    [[ -z "${last_running}" ]] && return 1
+
+    last_completed=$(grep -nE 'Job .+ completed with result:' <<< "${logs}" | tail -n 1 | cut -d: -f1 || true)
+    if [[ -z "${last_completed}" ]] || [[ "${last_running}" -gt "${last_completed}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Collect current state
 # ---------------------------------------------------------------------------
@@ -270,7 +292,14 @@ unhealthy_list=()
 wedge_list=()
 crashloop_list=()
 offline_idle_bounce_list=()
+offline_idle_recreate_list=()
 github_api_failed=false
+now_epoch=$(date -u +%s)
+offline_first_seen_lines=""
+prev_offline_first_seen_json="{}"
+if [[ -f "${STATE_FILE}" ]]; then
+    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || echo "{}")
+fi
 
 while IFS=$'\t' read -r name status; do
     [[ -z "${name}" ]] && continue
@@ -344,7 +373,20 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     gh_state="${github_status[$name]:-missing}"
     if [[ "${gh_state}" != "online" ]]; then
         if [[ "${github_busy[$name]:-false}" != "true" ]]; then
-            offline_idle_bounce_list+=("${name}: OFFLINE-IDLE (${gh_state}, Docker ${docker_state})")
+            first_seen=$(jq -r --arg name "${name}" '.[$name] // empty' <<< "${prev_offline_first_seen_json}" 2>/dev/null || true)
+            if [[ ! "${first_seen}" =~ ^[0-9]+$ ]]; then
+                first_seen="${now_epoch}"
+            fi
+            offline_first_seen_lines+="${name}"$'\t'"${first_seen}"$'\n'
+            offline_age=$(( now_epoch - first_seen ))
+            offline_idle_bounce_list+=("${name}: OFFLINE-IDLE (${gh_state}, age=${offline_age}s, Docker ${docker_state})")
+            if [[ "${offline_age}" -ge "${OFFLINE_IDLE_RECREATE_AGE_SECONDS}" ]]; then
+                if runner_has_active_job "${name}"; then
+                    offline_idle_bounce_list+=("${name}: OFFLINE-IDLE not auto-recreated; local logs show active job")
+                else
+                    offline_idle_recreate_list+=("${name}: OFFLINE-IDLE-RECREATE age=${offline_age}s >= ${OFFLINE_IDLE_RECREATE_AGE_SECONDS}s")
+                fi
+            fi
         fi
         unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state}")
         continue
@@ -425,6 +467,12 @@ fi
 collect_remediation_targets() {
     local targets=()
     local entry svc
+    if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
+        for entry in "${offline_idle_recreate_list[@]}"; do
+            svc="${entry%%:*}"
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+        done
+    fi
     if [[ "${#crashloop_list[@]}" -gt 0 ]]; then
         for entry in "${crashloop_list[@]}"; do
             svc="${entry%%:*}"
@@ -493,6 +541,19 @@ fi
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
 crashloop_count=${#crashloop_list[@]}
+offline_first_seen_json="{}"
+if [[ -n "${offline_first_seen_lines}" ]]; then
+    offline_first_seen_json=$(printf '%s' "${offline_first_seen_lines}" | jq -Rn '
+        reduce inputs as $line ({};
+            if ($line | length) == 0 then
+                .
+            else
+                ($line | split("\t")) as $parts
+                | . + {($parts[0]): ($parts[1] | tonumber)}
+            end
+        )
+    ')
+fi
 
 # Write current state
 jq -n \
@@ -508,6 +569,8 @@ jq -n \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
     --arg offline_idle_bounce_names "$(printf '%s\n' "${offline_idle_bounce_list[@]}" 2>/dev/null || echo '')" \
+    --arg offline_idle_recreate_names "$(printf '%s\n' "${offline_idle_recreate_list[@]}" 2>/dev/null || echo '')" \
+    --argjson offline_first_seen "${offline_first_seen_json}" \
     '{
         healthy: $healthy,
         unhealthy_count: $unhealthy_count,
@@ -520,7 +583,9 @@ jq -n \
         docker_ok: $docker_ok,
         timestamp: $timestamp,
         unhealthy_names: $unhealthy_names,
-        offline_idle_bounce_names: $offline_idle_bounce_names
+        offline_idle_bounce_names: $offline_idle_bounce_names,
+        offline_idle_recreate_names: $offline_idle_recreate_names,
+        offline_first_seen: $offline_first_seen
     }' > "$STATE_FILE"
 
 # ---------------------------------------------------------------------------
@@ -540,6 +605,9 @@ if [[ "${wedge_count}" -gt 0 ]]; then
 fi
 if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${offline_idle_bounce_list[@]}")"$'\n'
+fi
+if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
+    special_findings+="$(printf '%s\n' "${offline_idle_recreate_list[@]}")"$'\n'
 fi
 if [[ "${crashloop_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${crashloop_list[@]}")"$'\n'
@@ -617,4 +685,5 @@ Host: ${RUNNER_HOST}" "good"
 else
     # No state change — silent
     log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} unhealthy (wedge=${wedge_count} crashloop=${crashloop_count}, no change)."
+    auto_bounce "${remediation_targets}"
 fi
