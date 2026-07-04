@@ -151,8 +151,8 @@ class TopicStartupValidator:
 
         # Guard: broker unreachable
         admin: AIOKafkaAdminClient | None = None
-        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
+            auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
