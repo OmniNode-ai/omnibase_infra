@@ -1,6 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
+# onex-topic-sot: canonical topic-suffix registry (OMN-13905 Part-1). The
+# module-level SUFFIX_* constants below are the sanctioned declaration site
+# for platform/domain topic suffixes; do not treat them as hardcoded-topic
+# violations. See the module docstring for the registry's scope and usage.
+
 """Platform and domain topic suffixes for ONEX infrastructure.
 
 This module defines topic suffixes for:
