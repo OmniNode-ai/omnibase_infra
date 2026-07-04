@@ -609,10 +609,15 @@ def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
     state = _run_monitor(
         tmp_path,
         bindir,
-        extra_env={"MONITOR_AUTO_BOUNCE": "1", "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600"},
+        extra_env={
+            "MONITOR_AUTO_BOUNCE": "1",
+            "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
+        },
         previous_state={
             "unhealthy_count": 1,
-            "offline_first_seen": {f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)},
+            "offline_first_seen": {
+                f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
+            },
         },
     )
 
@@ -623,7 +628,9 @@ def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
             break
         time.sleep(0.1)
     calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
-    assert "compose" in calls, f"persistent offline-idle runners were not recreated: {calls}"
+    assert "compose" in calls, (
+        f"persistent offline-idle runners were not recreated: {calls}"
+    )
     assert "--force-recreate" in calls, calls
 
 
@@ -645,14 +652,21 @@ def test_persistent_offline_idle_runner_with_active_local_job_does_not_bounce(
     state = _run_monitor(
         tmp_path,
         bindir,
-        extra_env={"MONITOR_AUTO_BOUNCE": "1", "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600"},
+        extra_env={
+            "MONITOR_AUTO_BOUNCE": "1",
+            "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
+        },
         previous_state={
             "unhealthy_count": 1,
-            "offline_first_seen": {f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)},
+            "offline_first_seen": {
+                f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
+            },
         },
     )
 
-    assert "local logs show active job" in str(state["offline_idle_bounce_names"]), state
+    assert "local logs show active job" in str(state["offline_idle_bounce_names"]), (
+        state
+    )
     calls = str(state["_docker_calls"])
     assert "compose" not in calls, f"active-job runner was incorrectly bounced: {calls}"
 
