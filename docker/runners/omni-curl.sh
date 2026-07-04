@@ -32,6 +32,8 @@ for attempt in 1 2 3; do
     --fail \
     --show-error \
     --location \
+    --connect-timeout 15 \
+    --max-time 300 \
     --retry 5 \
     --retry-delay 5 \
     --retry-max-time 300 \
