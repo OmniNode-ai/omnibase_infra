@@ -81,6 +81,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.topics import TopicResolver
 
@@ -371,6 +372,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
             heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
             max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
+            **build_aiokafka_auth_kwargs_from_env(),
         )
 
         rr_instance.consumer = consumer
