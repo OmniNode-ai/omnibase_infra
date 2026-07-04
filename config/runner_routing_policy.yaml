@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+trusted_runner_variable:
+  name: OMNI_TRUSTED_CI_RUNS_ON_JSON
+  expected_json: '["self-hosted","omnibase-ci"]'
+
+public_pr_runner_variable:
+  name: OMNI_PUBLIC_PR_RUNS_ON_JSON
+  expected_json: '["ubuntu-latest"]'
+
+repositories:
+  - omnibase_core
+  - omnibase_infra
+  - omniclaude
+  - omnimarket
+  - onex_change_control
+
+hosted_runner_allowlist:
+  - path: .github/workflows/build-and-push-runtime.yml
+    reason: "OMN-13747: ECR push remains hosted until the self-hosted egress failure is retired."
+  - path: .github/workflows/omnigate.yml
+    reason: "Fork-only untrusted PR verification must not execute on self-hosted runners."
