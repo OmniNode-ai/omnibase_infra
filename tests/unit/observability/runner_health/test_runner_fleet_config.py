@@ -121,11 +121,12 @@ def test_runner_healthcheck_probes_github_egress() -> None:
         if line.startswith("if ! curl ")
     ]
     assert len(curl_commands) == 1
+    assert any(arg.startswith("-") and "I" in arg for arg in curl_commands[0])
     endpoint = urlsplit(curl_commands[0][-1])
     assert (endpoint.scheme, endpoint.netloc, endpoint.path) == (
         "https",
-        "api.github.com",
-        "/rate_limit",
+        "github.com",
+        "/",
     )
 
 

@@ -614,7 +614,7 @@ def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
             "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
         },
         previous_state={
-            "unhealthy_count": 1,
+            "unhealthy_count": TEST_FLEET_COUNT,
             "offline_first_seen": {
                 f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
             },
@@ -657,7 +657,7 @@ def test_persistent_offline_idle_runner_with_active_local_job_does_not_bounce(
             "OFFLINE_IDLE_RECREATE_AGE_SECONDS": "600",
         },
         previous_state={
-            "unhealthy_count": 1,
+            "unhealthy_count": TEST_FLEET_COUNT,
             "offline_first_seen": {
                 f"{PREFIX}-{i}": NOW - 1200 for i in range(1, TEST_FLEET_COUNT + 1)
             },

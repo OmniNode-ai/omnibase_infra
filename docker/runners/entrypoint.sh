@@ -208,6 +208,13 @@ _deregister() {
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
 
+shutdown_requested=0
+_request_shutdown() {
+    shutdown_requested=1
+    echo "[entrypoint] Shutdown requested; runner listener will not be relaunched."
+}
+trap _request_shutdown TERM INT
+
 # Check for credentials in priority order:
 # 1. In-place (container restart — files already in RUNNER_HOME)
 # 2. Volume cache (fresh container — restore from mounted volume)
@@ -238,6 +245,11 @@ while true; do
     set -e
 
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
+
+    if [[ ${shutdown_requested} -eq 1 ]]; then
+        echo "[entrypoint] Runner exited during shutdown; stopping entrypoint loop."
+        exit 0
+    fi
 
     if [[ ${exit_code} -eq 0 ]]; then
         # GitHub runner exits 0 even when registration is server-side deleted
