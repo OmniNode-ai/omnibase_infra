@@ -284,8 +284,8 @@ class TopicProvisioner:
         TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
-        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
+            auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
@@ -446,8 +446,8 @@ class TopicProvisioner:
         TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
-        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
+            auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
@@ -565,8 +565,8 @@ class TopicProvisioner:
         admin: AIOKafkaAdminClient | None = None
         last_evaluation: ModelTopicSetReadiness | None = None
         attempts = 0
-        auth_kwargs = build_aiokafka_auth_kwargs_from_env()
         try:
+            auth_kwargs = build_aiokafka_auth_kwargs_from_env()
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 request_timeout_ms=self._request_timeout_ms,
