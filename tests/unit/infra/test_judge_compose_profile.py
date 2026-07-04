@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,13 @@ EXPECTED_SERVICES = {
     "projection-api",
 }
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects")
+# OMN-13772: base-infra services with NO compose profile that a layered
+# `-f infra.yml -f judge.yml` render would otherwise activate on the DEV
+# network. The judge overlay pins them behind a never-enabled profile.
+DISABLED_STUB_SERVICES = {
+    "keycloak",
+    "infisical",
+}
 OUT_OF_SCOPE_SERVICES = {
     "keycloak",
     "infisical",
@@ -52,8 +60,29 @@ PRODUCTION_CONTAINER_NAMES = {
 }
 
 
+def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
+    """Passthrough constructor for Docker Compose `!override` / `!reset` tags."""
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    assert isinstance(node, yaml.ScalarNode)
+    return loader.construct_scalar(node)
+
+
+class _ComposeLoader(yaml.SafeLoader):
+    """SafeLoader that unwraps compose merge/override tags (OMN-13772)."""
+
+
+_ComposeLoader.add_constructor("!override", _construct_compose_value)
+_ComposeLoader.add_constructor("!reset", _construct_compose_value)
+
+
 def _load_compose() -> dict[str, Any]:
-    compose = yaml.safe_load(JUDGE_COMPOSE_FILE.read_text(encoding="utf-8"))
+    raw = JUDGE_COMPOSE_FILE.read_text(encoding="utf-8")
+    # _ComposeLoader extends SafeLoader; the extra constructors only unwrap
+    # compose merge/override tags.
+    compose = yaml.load(raw, Loader=_ComposeLoader)  # noqa: S506
     assert isinstance(compose, dict)
     return compose
 
@@ -79,11 +108,13 @@ def test_judge_compose_is_standalone_minimal_stack() -> None:
     services = compose["services"]
 
     assert compose["name"] == "omnibase-infra-judge"
-    assert set(services) == EXPECTED_SERVICES
-    assert set(services).isdisjoint(OUT_OF_SCOPE_SERVICES)
+    assert set(services) == EXPECTED_SERVICES | DISABLED_STUB_SERVICES
 
-    for service in services.values():
-        assert service["profiles"] == ["judge"]
+    for name, service in services.items():
+        if name in DISABLED_STUB_SERVICES:
+            assert service["profiles"] == ["judge-disabled"], name
+        else:
+            assert service["profiles"] == ["judge"], name
 
 
 @pytest.mark.unit
@@ -92,15 +123,49 @@ def test_judge_profile_omits_keycloak_and_infisical_dependencies() -> None:
     services = compose["services"]
     compose_text = JUDGE_COMPOSE_FILE.read_text(encoding="utf-8")
 
-    assert "keycloak:" not in compose_text
-    assert "infisical:" not in compose_text
     assert 'KEYCLOAK_ISSUER: ""' in compose_text
     assert 'INFISICAL_ADDR: ""' in compose_text
 
-    for service in services.values():
+    # keycloak / infisical exist ONLY as never-enabled disabled stubs
+    # (OMN-13772): they must define nothing beyond the profile pin, so a
+    # layered `-f infra.yml -f judge.yml` render can never activate them on
+    # the dev network.
+    for stub in DISABLED_STUB_SERVICES:
+        assert services[stub] == {"profiles": ["judge-disabled"]}, stub
+
+    for name, service in services.items():
+        if name in DISABLED_STUB_SERVICES:
+            continue
         depends_on = service.get("depends_on", {})
         assert "keycloak" not in depends_on
         assert "infisical" not in depends_on
+
+
+@pytest.mark.unit
+def test_judge_overlay_networks_and_ports_carry_override_tag() -> None:
+    """Every service-level `networks:` / `ports:` key must be `!override`-tagged.
+
+    deploy-runtime.sh layers this file on docker-compose.infra.yml (OMN-13581
+    resolve_compose_file_args). A plain list SEQUENCE-MERGES (union) with the
+    base file, attaching every judge service to BOTH the judge and dev networks
+    and double-publishing dev+judge host ports (OMN-13772: valkey collided on
+    dev 16379). The `!override` tag replaces instead of merging — this ratchet
+    keeps any future service from regressing to the plain-list form.
+    """
+    compose_text = JUDGE_COMPOSE_FILE.read_text(encoding="utf-8")
+    violations = [
+        f"line {lineno}: {line.strip()!r}"
+        for lineno, line in enumerate(compose_text.splitlines(), start=1)
+        # Service-level keys are indented; the top-level `networks:` block
+        # (column 0) legitimately has no tag and is excluded by the leading
+        # whitespace requirement.
+        if re.fullmatch(r"\s+(networks|ports):\s*", line)
+    ]
+    assert not violations, (
+        "docker-compose.judge.yml has plain-list networks:/ports: keys that "
+        "will union-merge with docker-compose.infra.yml when layered by "
+        f"deploy-runtime.sh — tag them `!override` (OMN-13772): {violations}"
+    )
 
 
 @pytest.mark.unit

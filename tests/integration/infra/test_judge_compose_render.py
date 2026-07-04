@@ -15,6 +15,32 @@ import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
 COMPOSE_FILE = "docker/docker-compose.judge.yml"
+BASE_COMPOSE_FILE = "docker/docker-compose.infra.yml"
+JUDGE_NETWORK = "omnibase-infra-judge-network"
+
+# OMN-13772: interpolation-only dummies for the LAYERED render. Compose
+# interpolates EVERY input file before merge, so layering the base infra file
+# surfaces its `:?`-required vars even for services excluded from the judge
+# profile. These values are never used to run containers — `config` only.
+LAYERED_RENDER_DUMMY_ENV = {
+    "GITHUB_TOKEN": "layered-render-dummy",
+    "LINEAR_API_KEY": "layered-render-dummy",
+    "ONEX_REGISTRATION_AUTO_ACK": "false",
+    "ONEX_SERVICE_CLIENT_SECRET": "layered-render-dummy",
+    "LLM_CODER_URL": "http://layered-render-dummy",
+    "LLM_CODER_FAST_URL": "http://layered-render-dummy",
+    "LLM_EMBEDDING_URL": "http://layered-render-dummy",
+    "LLM_DEEPSEEK_R1_URL": "http://layered-render-dummy",
+    "LLM_GLM_URL": "http://layered-render-dummy",
+    "LLM_GLM_MODEL_NAME": "layered-render-dummy",
+    "LLM_GLM_API_KEY": "layered-render-dummy",
+    # `:?` interpolation rejects empty values — use a harmless loopback CIDR.
+    "LLM_ENDPOINT_CIDR_ALLOWLIST": "127.0.0.1/32",
+    "INFISICAL_DB_CONNECTION_URI": "layered-render-dummy",
+    "INFISICAL_REDIS_URL": "layered-render-dummy",
+    "INFISICAL_ENCRYPTION_KEY": "layered-render-dummy",
+    "INFISICAL_AUTH_SECRET": "layered-render-dummy",
+}
 
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
@@ -141,6 +167,44 @@ def _compose_config_json() -> dict[str, Any]:
     return cast("dict[str, Any]", rendered_config)
 
 
+def _layered_compose_config_json() -> dict[str, Any]:
+    """Render the DEPLOYED shape: base infra compose + judge overlay.
+
+    deploy-runtime.sh (resolve_compose_file_args, OMN-13581) layers
+    docker-compose.judge.yml ON TOP of docker-compose.infra.yml on the .201
+    host — the standalone render alone cannot catch base<->overlay merge
+    defects (OMN-13772: plain-list networks:/ports: union-merged with the base,
+    attaching judge services to the dev network and double-publishing ports).
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "docker/runtime-policy.env",
+            "--env-file",
+            "docker/judge.env.example",
+            "-f",
+            BASE_COMPOSE_FILE,
+            "-f",
+            COMPOSE_FILE,
+            "--profile",
+            "judge",
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        env={**_compose_render_env(), **LAYERED_RENDER_DUMMY_ENV},
+        text=True,
+    )
+    rendered_config = json.loads(result.stdout)
+    assert isinstance(rendered_config, dict)
+    return cast("dict[str, Any]", rendered_config)
+
+
 def _published_ports(service_config: dict[str, Any]) -> set[str]:
     ports = cast("list[dict[str, Any]]", service_config.get("ports", []))
     return {str(port["published"]) for port in ports}
@@ -241,6 +305,43 @@ def test_judge_lane_render_raises_redpanda_fd_and_partition_capacity() -> None:
     assert command[command.index("--reserve-memory") + 1] == "0M"
     assert "--check=false" in command
     assert "topic_partitions_per_shard=7000" in command
+
+
+@pytest.mark.integration
+def test_layered_render_isolates_every_judge_service_to_judge_network() -> None:
+    """OMN-13772 regression gate — the deployed base+overlay merge shape.
+
+    Every judge service must resolve to EXACTLY the judge lane network and
+    ONLY its lane-scoped published ports. Before the `!override` tags, the
+    plain-list form union-merged with docker-compose.infra.yml: every judge
+    service attached to BOTH the judge and dev networks (cross-lane isolation
+    hole, ambiguous postgres/valkey/redpanda DNS) and double-published dev+
+    judge host ports (valkey collided on dev 16379).
+    """
+    rendered_config = _layered_compose_config_json()
+    services = rendered_config["services"]
+
+    # keycloak / infisical carry no profile in the base file; the judge
+    # overlay pins them behind a never-enabled profile so the layered render
+    # cannot activate them on the dev network.
+    assert set(services) == EXPECTED_RENDERED_SERVICES
+
+    for service_name, service_config in services.items():
+        networks = set(service_config.get("networks", {}))
+        assert networks == {JUDGE_NETWORK}, (
+            f"{service_name}: expected exactly {{{JUDGE_NETWORK!r}}}, "
+            f"got {sorted(networks)} — plain-list networks: union-merged "
+            f"with the base file (missing !override, OMN-13772)"
+        )
+
+        published_ports = _published_ports(service_config)
+        assert published_ports == EXPECTED_PUBLISHED_PORTS[service_name], (
+            f"{service_name}: published ports {sorted(published_ports)} != "
+            f"expected {sorted(EXPECTED_PUBLISHED_PORTS[service_name])} — "
+            f"plain-list ports: union-merged with the base file "
+            f"(missing !override, OMN-13772)"
+        )
+        assert published_ports.isdisjoint(DEV_OR_PROD_PUBLISHED_PORTS)
 
 
 @pytest.mark.integration
