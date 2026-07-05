@@ -55,6 +55,10 @@ ENV OMNI_RUNNER_IMAGE_VERSION=${OMNI_RUNNER_IMAGE_VERSION}
 ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 
 # Install system dependencies
+# libatomic1 (OMN-13946): the GitHub Actions bundled node runtime (used by
+# node-based actions, e.g. pyright) dlopens libatomic.so.1 at load time.
+# Ubuntu 22.04 does not pull it in transitively; without it every node-based
+# action fails with "node: libatomic.so.1: cannot open shared object file".
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -62,6 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     tar \
     unzip \
+    libatomic1 \
     libicu-dev \
     libkrb5-3 \
     zlib1g \
