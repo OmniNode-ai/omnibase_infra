@@ -45,7 +45,8 @@
 #   with a FRESHLY minted registration token, run DETACHED.
 #   NEVER `docker restart`           → crash-loops (cached creds + baked token expired)
 #   NEVER an empty service filter    → would recreate all 48 at once
-#   NEVER block on the bounce        → 2-minute hard limit, run in background
+#   NEVER block on the bounce        → run in background, mutex-guarded, timeout
+#                                       scales with batch size (OMN-13947)
 
 set -euo pipefail
 
@@ -84,10 +85,29 @@ OFFLINE_IDLE_LOG_TAIL_LINES="${OFFLINE_IDLE_LOG_TAIL_LINES:-240}"
 # Auto-bounce is OFF by default: this monitor DETECTS and ALERTS. It does NOT
 # mutate the live fleet unless an operator deliberately sets MONITOR_AUTO_BOUNCE=1
 # in the monitor env. Even then it force-recreates only the named services with
-# a fresh token, detached, with a 2-minute hard limit — never `docker restart`,
-# never an empty filter. Steady state is observe-and-alert.
+# a fresh token, detached — never `docker restart`, never an empty filter.
+# Steady state is observe-and-alert.
 MONITOR_AUTO_BOUNCE="${MONITOR_AUTO_BOUNCE:-0}"
-AUTO_BOUNCE_HARD_LIMIT_SECONDS="${AUTO_BOUNCE_HARD_LIMIT_SECONDS:-120}"
+
+# OMN-13947: a single fixed timeout SIGTERMed `docker compose up --force-recreate`
+# mid-batch under host load, leaving containers half-recreated (Status=created
+# but never started, or the stale old container never actually replaced) —
+# 36% of recreate attempts never completed during the 2026-07-04 incident. The
+# timeout now scales with the number of containers in the batch: floor for a
+# single-container bounce, a per-container budget for larger batches (a
+# fleet-wide silent-wedge bounce targets all EXPECTED_RUNNERS at once), capped
+# at a generous ceiling so a genuinely hung daemon still gets killed eventually.
+AUTO_BOUNCE_HARD_LIMIT_SECONDS="${AUTO_BOUNCE_HARD_LIMIT_SECONDS:-120}"          # floor
+AUTO_BOUNCE_PER_CONTAINER_BUDGET_SECONDS="${AUTO_BOUNCE_PER_CONTAINER_BUDGET_SECONDS:-30}"
+AUTO_BOUNCE_TIMEOUT_CEILING_SECONDS="${AUTO_BOUNCE_TIMEOUT_CEILING_SECONDS:-1800}"
+# Bounded retries after the compose call returns, verifying every target is
+# actually Status=running (not left at Status=created) before giving up.
+AUTO_BOUNCE_VERIFY_RETRY_COUNT="${AUTO_BOUNCE_VERIFY_RETRY_COUNT:-3}"
+AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS="${AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS:-3}"
+# flock mutex so the */10 cron cannot dispatch a second bounce while a prior one
+# is still in flight — the race produced literal daemon errors ("removal of
+# container ... is already in progress") during the incident.
+AUTO_BOUNCE_LOCKFILE="${AUTO_BOUNCE_LOCKFILE:-/tmp/runner-monitor-bounce.lock}"
 
 config_field() {
     local field="${1}"
@@ -293,6 +313,11 @@ wedge_list=()
 crashloop_list=()
 offline_idle_bounce_list=()
 offline_idle_recreate_list=()
+# OMN-13947: containers left at Docker Status=created (docker create succeeded,
+# docker start never ran — the signature of a bounce killed mid-batch) matched
+# NONE of crashloop/wedge, so collect_remediation_targets() never re-selected
+# them: a straggler that survived one bounce attempt was orphaned forever.
+stuck_created_list=()
 github_api_failed=false
 now_epoch=$(date -u +%s)
 offline_first_seen_lines=""
@@ -348,6 +373,14 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     if [[ "${docker_oom_killed[$name]:-false}" == "true" ]]; then
         unhealthy_list+=("${name}: Docker OOMKilled=true while ${docker_state}")
         continue
+    fi
+
+    # OMN-13947: a container stuck at "Created" (never started) is the direct
+    # fingerprint of a force-recreate batch that got SIGTERM'd mid-flight.
+    # Flag it as a remediation target in its own right — it will never match
+    # crashloop (no RestartCount, no logs) or wedge (fleet-wide only).
+    if [[ "${docker_state}" == Created* ]]; then
+        stuck_created_list+=("${name}: Docker Created but never started — orphaned mid-recreate")
     fi
 
     if [[ "${docker_state}" != *"(healthy)"* ]] || [[ "${docker_state}" != Up* ]]; then
@@ -479,6 +512,15 @@ collect_remediation_targets() {
             [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
         done
     fi
+    # OMN-13947: re-target stragglers left at Status=created by a prior bounce
+    # that never completed. Without this, a container that survives one
+    # auto_bounce verify-retry cycle is permanently invisible to remediation.
+    if [[ "${#stuck_created_list[@]}" -gt 0 ]]; then
+        for entry in "${stuck_created_list[@]}"; do
+            svc="${entry%%:*}"
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+        done
+    fi
     # A silent wedge is fleet-wide: the safe recipe bounces the whole configured
     # fleet, but STILL one explicit service list (never an empty filter).
     if [[ "${#wedge_list[@]}" -gt 0 ]]; then
@@ -493,26 +535,76 @@ collect_remediation_targets() {
     fi
 }
 
+# bounce_timeout_seconds — timeout for a force-recreate batch, scaled by the
+# number of targets (OMN-13947). A fixed cap SIGTERMs `docker compose up`
+# mid-batch under host load; scaling with batch size and keeping a generous
+# ceiling means a multi-container recreate is never killed before it can
+# finish, while a genuinely hung daemon still gets bounded eventually.
+bounce_timeout_seconds() {
+    local target_list="$1"
+    local target_count timeout_seconds
+    target_count=$(wc -w <<< "${target_list}")
+    timeout_seconds=$(( target_count * AUTO_BOUNCE_PER_CONTAINER_BUDGET_SECONDS ))
+    [[ "${timeout_seconds}" -lt "${AUTO_BOUNCE_HARD_LIMIT_SECONDS}" ]] && timeout_seconds="${AUTO_BOUNCE_HARD_LIMIT_SECONDS}"
+    [[ "${timeout_seconds}" -gt "${AUTO_BOUNCE_TIMEOUT_CEILING_SECONDS}" ]] && timeout_seconds="${AUTO_BOUNCE_TIMEOUT_CEILING_SECONDS}"
+    echo "${timeout_seconds}"
+}
+
 render_safe_bounce_cmd() {
     local target_list="$1"
     [[ -z "${target_list// /}" ]] && { echo ""; return 0; }
+    local timeout_seconds
+    timeout_seconds=$(bounce_timeout_seconds "${target_list}")
     cat <<RECIPE
 # SAFE BOUNCE — force-recreate ONLY these services with a FRESH token, detached.
 # NEVER 'docker restart' (crash-loops: cached creds + expired baked token).
 # NEVER an empty service filter (would recreate all 48 at once).
+# NEVER run this manually while an auto_bounce is in flight — check for a lock
+# on ${AUTO_BOUNCE_LOCKFILE} first (concurrent recreates race the daemon).
 TOKEN=\$(gh api --method POST /orgs/${RUNNER_ORG}/actions/runners/registration-token --jq .token)
-RUNNER_TOKEN="\$TOKEN" timeout ${AUTO_BOUNCE_HARD_LIMIT_SECONDS} \\
+RUNNER_TOKEN="\$TOKEN" timeout ${timeout_seconds} \\
   docker compose -f ${COMPOSE_FILE} up -d --force-recreate --no-deps ${target_list}
 RECIPE
 }
 
 # auto_bounce — execute the safe recipe IFF MONITOR_AUTO_BOUNCE=1. Detached,
-# fresh token, named services only, 2-minute hard limit. This is the documented
-# remediation; it is gated OFF by default so this script stays observe-and-alert.
+# fresh token, named services only. This is the documented remediation; it is
+# gated OFF by default so this script stays observe-and-alert.
+#
+# OMN-13947 hardening over the original implementation:
+#   1. flock mutex — the */10 cron fired unconditionally even while a prior
+#      bounce was still running in the background, producing literal daemon
+#      races ("removal of container ... is already in progress"). A
+#      non-blocking flock probe skips this cycle instead of racing.
+#   2. Batch-scaled timeout — see bounce_timeout_seconds().
+#   3. Verify-start + bounded retry — `docker compose up` can return having
+#      `docker create`d some targets without starting them (killed mid-batch).
+#      Assert Status=running for every target after the call returns; explicit
+#      `docker start` + retry for any straggler instead of leaving it orphaned.
 auto_bounce() {
     local target_list="$1"
     [[ "${MONITOR_AUTO_BOUNCE}" != "1" ]] && return 0
     [[ -z "${target_list// /}" ]] && return 0
+
+    # Non-blocking lock probe. If a prior bounce still holds the lock, skip
+    # this cycle rather than dispatching a second concurrent recreate. The
+    # deployed Linux host has flock; the mkdir fallback keeps local macOS tests
+    # exercising the same single-flight behavior.
+    local lock_kind="flock"
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"${AUTO_BOUNCE_LOCKFILE}"
+        if ! flock -n 9; then
+            log "AUTO-BOUNCE skipped: a prior bounce is still in flight (lock held on ${AUTO_BOUNCE_LOCKFILE})."
+            exec 9>&-
+            return 0
+        fi
+    else
+        lock_kind="mkdir"
+        if ! mkdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null; then
+            log "AUTO-BOUNCE skipped: a prior bounce is still in flight (lock held on ${AUTO_BOUNCE_LOCKFILE}.d)."
+            return 0
+        fi
+    fi
 
     log "AUTO-BOUNCE enabled (MONITOR_AUTO_BOUNCE=1). Force-recreating: ${target_list}"
     local token
@@ -520,14 +612,52 @@ auto_bounce() {
     if [[ -z "${token}" ]]; then
         log "AUTO-BOUNCE aborted: could not mint a fresh registration token."
         slack_post "*[RUNNER AUTO-BOUNCE ABORTED]* could not mint registration token. Manual bounce required for: ${target_list}" "danger"
+        if [[ "${lock_kind}" == "flock" ]]; then
+            exec 9>&-
+        else
+            rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true
+        fi
         return 0
     fi
-    # Detached, named services only, hard 2-minute limit, never blocking.
+
+    local timeout_seconds
+    timeout_seconds=$(bounce_timeout_seconds "${target_list}")
+
+    # The subshell inherits fd 9 (and therefore the flock) from this process.
+    # We close our own copy right after forking so the lock is held for
+    # exactly as long as the background subshell (compose + verify/retry) is
+    # running, then released automatically when it exits.
     # shellcheck disable=SC2086
-    RUNNER_TOKEN="${token}" timeout "${AUTO_BOUNCE_HARD_LIMIT_SECONDS}" \
-        docker compose -f "${COMPOSE_FILE}" up -d --force-recreate --no-deps ${target_list} \
-        >> /tmp/runner-monitor-bounce.log 2>&1 &
-    log "AUTO-BOUNCE dispatched in background (limit ${AUTO_BOUNCE_HARD_LIMIT_SECONDS}s)."
+    (
+        if [[ "${lock_kind}" == "mkdir" ]]; then
+            trap 'rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true' EXIT
+        fi
+        RUNNER_TOKEN="${token}" timeout "${timeout_seconds}" \
+            docker compose -f "${COMPOSE_FILE}" up -d --force-recreate --no-deps ${target_list} \
+            >> /tmp/runner-monitor-bounce.log 2>&1
+
+        svc=""
+        for svc in ${target_list}; do
+            attempt=1
+            status="$(docker inspect --format '{{.State.Status}}' "${svc}" 2>/dev/null || echo missing)"
+            while [[ "${status}" != "running" ]] && [[ "${attempt}" -le "${AUTO_BOUNCE_VERIFY_RETRY_COUNT}" ]]; do
+                echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE straggler: ${svc} Status=${status} (attempt ${attempt}/${AUTO_BOUNCE_VERIFY_RETRY_COUNT}) — explicit docker start." \
+                    >> /tmp/runner-monitor-bounce.log
+                docker start "${svc}" >> /tmp/runner-monitor-bounce.log 2>&1 || true
+                sleep "${AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS}"
+                status="$(docker inspect --format '{{.State.Status}}' "${svc}" 2>/dev/null || echo missing)"
+                attempt=$(( attempt + 1 ))
+            done
+            if [[ "${status}" != "running" ]]; then
+                echo "[runner-monitor] $(date '+%H:%M:%S') AUTO-BOUNCE FAILED to bring ${svc} to running (final Status=${status}) after ${AUTO_BOUNCE_VERIFY_RETRY_COUNT} retries — left for next cycle (stuck_created detection will re-target it)." \
+                    >> /tmp/runner-monitor-bounce.log
+            fi
+        done
+    ) &
+    if [[ "${lock_kind}" == "flock" ]]; then
+        exec 9>&-
+    fi
+    log "AUTO-BOUNCE dispatched in background (timeout ${timeout_seconds}s for $(wc -w <<< "${target_list}") target(s), verify+retry up to ${AUTO_BOUNCE_VERIFY_RETRY_COUNT}x)."
 }
 
 # ---------------------------------------------------------------------------
@@ -541,6 +671,7 @@ fi
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
 crashloop_count=${#crashloop_list[@]}
+stuck_created_count=${#stuck_created_list[@]}
 offline_first_seen_json="{}"
 if [[ -n "${offline_first_seen_lines}" ]]; then
     offline_first_seen_json=$(printf '%s' "${offline_first_seen_lines}" | jq -Rn '
@@ -561,6 +692,7 @@ jq -n \
     --argjson unhealthy_count "$current_unhealthy_count" \
     --argjson wedge_count "$wedge_count" \
     --argjson crashloop_count "$crashloop_count" \
+    --argjson stuck_created_count "$stuck_created_count" \
     --argjson online "$online_count" \
     --argjson busy "$busy_count" \
     --argjson queued_age "$queued_age" \
@@ -576,6 +708,7 @@ jq -n \
         unhealthy_count: $unhealthy_count,
         wedge_count: $wedge_count,
         crashloop_count: $crashloop_count,
+        stuck_created_count: $stuck_created_count,
         online: $online,
         busy: $busy,
         oldest_queued_job_age_seconds: $queued_age,
@@ -612,6 +745,9 @@ fi
 if [[ "${crashloop_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${crashloop_list[@]}")"$'\n'
 fi
+if [[ "${stuck_created_count}" -gt 0 ]]; then
+    special_findings+="$(printf '%s\n' "${stuck_created_list[@]}")"$'\n'
+fi
 
 if [[ $current_unhealthy_count -gt 0 ]] && [[ $prev_unhealthy_count -eq 0 ]]; then
     # Transition: all-good → something broken
@@ -641,7 +777,7 @@ ${safe_bounce_block}
 \`\`\`"
     fi
     slack_post "${msg}" "danger"
-    log "ALERT: ${current_unhealthy_count} runners unhealthy (was 0). wedge=${wedge_count} crashloop=${crashloop_count}. Slack notified."
+    log "ALERT: ${current_unhealthy_count} runners unhealthy (was 0). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}. Slack notified."
     auto_bounce "${remediation_targets}"
 
 elif [[ $current_unhealthy_count -gt 0 ]] && [[ $prev_unhealthy_count -gt 0 ]] && [[ $current_unhealthy_count -ne $prev_unhealthy_count ]]; then
@@ -670,7 +806,7 @@ ${safe_bounce_block}
 \`\`\`"
     fi
     slack_post "${msg}" "warning"
-    log "UPDATE: ${current_unhealthy_count} unhealthy (was ${prev_unhealthy_count}). wedge=${wedge_count} crashloop=${crashloop_count}. Slack notified."
+    log "UPDATE: ${current_unhealthy_count} unhealthy (was ${prev_unhealthy_count}). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}. Slack notified."
     auto_bounce "${remediation_targets}"
 
 elif [[ $current_unhealthy_count -eq 0 ]] && [[ $prev_unhealthy_count -gt 0 ]]; then
@@ -684,6 +820,6 @@ Host: ${RUNNER_HOST}" "good"
 
 else
     # No state change — silent
-    log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} unhealthy (wedge=${wedge_count} crashloop=${crashloop_count}, no change)."
+    log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} unhealthy (wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}, no change)."
     auto_bounce "${remediation_targets}"
 fi
