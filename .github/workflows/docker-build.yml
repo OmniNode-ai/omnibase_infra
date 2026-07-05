@@ -130,19 +130,24 @@ jobs:
         id: repo
         run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # Set up Docker Buildx with native docker driver (self-hosted runners
-      # have persistent local cache, so GHA cache export is unnecessary)
+      # OMN-13950 (SAT2 fleet-load): use the docker-container driver so build
+      # layers can be shared across the whole self-hosted runner fleet via a GHCR
+      # registry cache. The native `docker` driver only keeps a cache LOCAL to one
+      # runner, so a build landing on a cold runner re-ran the full (~40-89 min)
+      # torch + uv-sync install; the previous ~8 min figure only held when the
+      # same runner had a warm local cache. A shared registry cache lets any cold
+      # runner import unchanged layers instead of rebuilding them.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
-          driver: docker
+          driver: docker-container
 
       - name: Verify Buildx driver
         run: |
           DRIVER=$(docker buildx inspect --bootstrap 2>/dev/null | grep -oP 'Driver:\s+\K\S+' || echo "unknown")
           echo "Buildx driver: ${DRIVER}"
-          if [[ "${DRIVER}" != "docker" ]]; then
-            echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
+          if [[ "${DRIVER}" != "docker-container" ]]; then
+            echo "::warning::Expected Buildx driver 'docker-container', got '${DRIVER}'"
           fi
 
       # Authenticate for registry access (pulls and pushes)
@@ -185,6 +190,17 @@ jobs:
           load: ${{ github.ref != 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # OMN-13950 (SAT2 fleet-load): shared GHCR registry layer cache.
+          #   cache-from (always): a cold runner imports unchanged layers instead
+          #     of re-running the ~40-89 min torch + uv-sync install. A missing
+          #     :buildcache ref on the first run is a tolerated cache miss, not an
+          #     error.
+          #   cache-to (main only): the post-merge main build writes the shared
+          #     cache with mode=max (all intermediate layers). PRs never write, so
+          #     fork/PR builds cannot poison the cache and PR wall-clock is not
+          #     charged the export cost.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=registry,ref={0}/{1}/{2}:buildcache,mode=max', env.REGISTRY, steps.repo.outputs.owner, env.IMAGE_NAME) || '' }}
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
@@ -246,10 +262,12 @@ jobs:
       }}
     needs: [occ-preflight, docker-build]
     timeout-minutes: 30
-    # OMN-13949 merge-sweep unblock: this informational job can hold a
-    # self-hosted runner for 30 minutes on every docker-touching PR. Keep it on
-    # post-merge push/manual runs, while the required docker-build and source
-    # attestation checks continue to gate PRs.
+    # OMN-13950 (SAT2 fleet-load): this job is informational (continue-on-error)
+    # and never gates merge, yet it held a self-hosted runner for up to 30 min on
+    # EVERY docker-touching PR (rebuilding images inside pytest). Restrict it to
+    # post-merge push events (main/develop) + manual dispatch so PRs stop paying
+    # the fleet cost for a non-blocking signal. Merge safety is unchanged — the
+    # required gate is the docker-build job, which still runs on PRs.
     if: >-
       (github.event_name != 'pull_request') &&
       (github.event.inputs.run_full_tests != 'false')
