@@ -48,6 +48,7 @@ permissions:
 
 jobs:
   auto-merge:
+    timeout-minutes: 30
     name: Enable Auto-Merge
     runs-on: >-
       ${{

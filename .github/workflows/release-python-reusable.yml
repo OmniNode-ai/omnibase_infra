@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   release:
+    timeout-minutes: 30
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&

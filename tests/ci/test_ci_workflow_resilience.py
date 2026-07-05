@@ -196,6 +196,15 @@ def test_docker_integration_build_timeout_matches_workflow_budget() -> None:
     assert '--timeout="${OMNI_DOCKER_BUILD_TIMEOUT_SECONDS}"' in step["run"]
 
 
+def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    job = workflow["jobs"]["docker-integration-tests"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "github.event.inputs.run_full_tests != 'false'" in job["if"]
+    assert job["continue-on-error"] is True
+
+
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"

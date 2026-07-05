@@ -32,6 +32,7 @@ on:
 
 jobs:
   todo-audit:
+    timeout-minutes: 30
     name: TODO Audit
     if: github.event.pull_request.merged == true
     runs-on: >-

@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   release:
+    timeout-minutes: 30
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     outputs:
@@ -122,6 +123,7 @@ jobs:
   # Post-release: advisory checks that must NOT block publish (OMN-3833)
   # ---------------------------------------------------------------------------
   post-release-checks:
+    timeout-minutes: 30
     name: Post-Release Checks
     needs: release
     if: always() && needs.release.result == 'success'
@@ -161,6 +163,7 @@ jobs:
   # If CROSS_REPO_PAT is absent the dispatch step is skipped with a warning so
   # that the release itself is not marked as failed.
   trigger-runtime-rebuild:
+    timeout-minutes: 30
     name: Trigger Runtime Image Rebuild
     needs: release
     if: ${{ !contains(needs.release.outputs.version, 'rc') }}

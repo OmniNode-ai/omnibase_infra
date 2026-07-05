@@ -26,6 +26,7 @@ on:
 
 jobs:
   gate:
+    timeout-minutes: 30
     name: CodeRabbit Thread Check
     runs-on: >-
       ${{

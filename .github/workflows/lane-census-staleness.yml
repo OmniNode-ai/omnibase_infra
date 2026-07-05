@@ -51,7 +51,7 @@ on:
 
 concurrency:
   group: lane-census-staleness-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"

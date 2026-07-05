@@ -234,7 +234,13 @@ jobs:
       }}
     needs: docker-build
     timeout-minutes: 30
-    if: github.event.inputs.run_full_tests != 'false'
+    # OMN-13949 merge-sweep unblock: this informational job can hold a
+    # self-hosted runner for 30 minutes on every docker-touching PR. Keep it on
+    # post-merge push/manual runs, while the required docker-build and source
+    # attestation checks continue to gate PRs.
+    if: >-
+      (github.event_name != 'pull_request') &&
+      (github.event.inputs.run_full_tests != 'false')
     continue-on-error: true  # Docker infra tests are informational — Postgres/Docker availability varies by runner
 
     steps:
@@ -436,6 +442,7 @@ jobs:
 
   # Build summary
   build-summary:
+    timeout-minutes: 30
     name: Build Summary
     runs-on: >-
       ${{
