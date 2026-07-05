@@ -549,3 +549,25 @@ skills:
       - {name: resume, payload_field: resume, arg_type: boolean, default: false}
       - {name: fail-fast, payload_field: fail_fast, arg_type: boolean, default: false}
       - {name: defer-repo-conflicts, payload_field: defer_repo_conflicts, arg_type: boolean, default: false}
+  # OMN-13918: `redeploy` was a documented skill (docs/) with NO entry here, so
+  # `onex skill redeploy` returned "Unknown skill" — the .201 runtime redeploy
+  # path had no executable CLI surface and no explicit lane targeting. `lane`
+  # is the DoD's required explicit-lane parameter: it maps to
+  # ModelRedeployStartCommand.runtime_lane, which defaults to "dev" — the
+  # mapping never sets a default here, so the lane can never silently resolve
+  # to prod. A prod lane request still routes through the real
+  # prod-promotion-grant-resolve -> gate-evaluate chain (node_redeploy_orchestrator
+  # never trusts a caller-attached grant). `dry-run` short-circuits BEFORE that
+  # chain to a REAL terminal ModelRedeployCompletedEvent with no live I/O: DONE
+  # for dev/stability-test, BLOCKED for prod (a dry-run cannot resolve the
+  # out-of-band grant, so it never fabricates a passing gate decision).
+  # correlation_id is auto-injected by RuntimeLocal (OMN-13591), so it is never
+  # exposed as a CLI arg.
+  - skill_name: redeploy
+    node_name: node_redeploy_orchestrator
+    result_model: omnimarket.events.runtime_deployment.ModelRedeployCompletedEvent
+    args:
+      - {name: lane, payload_field: runtime_lane, arg_type: string}
+      - {name: scope, payload_field: scope, arg_type: string}
+      - {name: git-ref, payload_field: git_ref, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
