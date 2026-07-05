@@ -436,6 +436,7 @@ jobs:
 
   # Build summary
   build-summary:
+    timeout-minutes: 30
     name: Build Summary
     runs-on: >-
       ${{

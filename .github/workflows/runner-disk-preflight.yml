@@ -43,7 +43,7 @@ on:
 # event to provide a consistent baseline for failure attribution.
 concurrency:
   group: runner-disk-preflight-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+  cancel-in-progress: true
 
 jobs:
   # ---------------------------------------------------------------------------

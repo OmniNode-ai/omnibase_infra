@@ -98,6 +98,7 @@ jobs:
 
   # Summary job to report overall status
   nightly-summary:
+    timeout-minutes: 30
     name: Nightly Summary
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-

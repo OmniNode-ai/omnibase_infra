@@ -16,8 +16,15 @@ on:
     # Run weekly on Monday at 06:00 UTC
     - cron: "0 6 * * 1"
 
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   codeql:
+    timeout-minutes: 30
     name: CodeQL
     runs-on: >-
       ${{

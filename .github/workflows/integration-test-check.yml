@@ -24,11 +24,18 @@ on:
 # Promotion date: 14 days after first deployment. Update this date
 # when the check is first deployed to track the promotion timeline.
 # After this date, the check becomes a hard gate (exit 1 on missing tests).
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   PROMOTION_DATE: "2026-04-13"
 
 jobs:
   check-integration-tests:
+    timeout-minutes: 30
     name: Integration Test Coverage
     runs-on: >-
       ${{
@@ -110,6 +117,7 @@ jobs:
           fi
 
   check-test-removal:
+    timeout-minutes: 30
     name: Integration Test Removal Gate
     runs-on: >-
       ${{

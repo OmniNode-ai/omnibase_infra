@@ -8,12 +8,14 @@ on:
   merge_group:
   workflow_dispatch:
 
-# OMN-6488: cancel-in-progress for merge_group events only — re-enqueue should
-# cancel the previous run.  Regular PR pushes keep cancel-in-progress: false so
-# in-flight tests aren't killed when a new commit is pushed.
+# OMN-6488 / OMN-13949: cancel superseded runs on both PR pushes and merge_group
+# re-enqueues. Superseded runs were holding saturated self-hosted runners; the
+# fleet-load fix (OMN-13932 §5.2) makes killing them the default. The group keys
+# on PR number (falling back to github.ref), and merge_group entries carry a
+# unique github.ref so distinct queue entries never cross-cancel.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+  cancel-in-progress: true
 
 env:
   UV_VERSION: "0.6.14"
@@ -756,6 +758,7 @@ jobs:
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
+    timeout-minutes: 30
     name: Contract Path Pre-Flight
     runs-on: >-
       ${{
@@ -802,6 +805,7 @@ jobs:
           fi
 
   contract-sync-gate:
+    timeout-minutes: 30
     name: Contract Sync Gate (Wave C) [OMN-8915]
     runs-on: >-
       ${{
@@ -839,6 +843,7 @@ jobs:
   # and selected_paths, activating the smart-selection pytest step instead.
 
   detect-changes:
+    timeout-minutes: 30
     name: Detect Changes
     needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1136,6 +1141,7 @@ jobs:
   # branch protection AND .github/required-checks.yaml
   # ============================================================================
   tests-gate:
+    timeout-minutes: 30
     name: CI Tests Gate
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1169,6 +1175,7 @@ jobs:
   # ============================================================================
 
   migration-conflict-check:
+    timeout-minutes: 30
     name: Cross-Repo Migration Conflicts
     runs-on: >-
       ${{
@@ -1482,6 +1489,7 @@ jobs:
       mode: compose
 
   ci-summary:
+    timeout-minutes: 30
     name: CI Summary
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1702,6 +1710,7 @@ jobs:
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:
+    timeout-minutes: 30
     name: Writer-Migration Coupling Check
     runs-on: >-
       ${{
@@ -1898,6 +1907,7 @@ jobs:
           echo "All 24 tables present."
 
   ai-slop-check:
+    timeout-minutes: 30
     name: AI-Slop Pattern Check (strict, PR diff)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-

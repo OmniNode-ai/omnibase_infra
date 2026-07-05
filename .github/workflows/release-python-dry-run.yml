@@ -16,6 +16,7 @@ on:
 
 jobs:
   dry-run:
+    timeout-minutes: 30
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
 

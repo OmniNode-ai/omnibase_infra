@@ -16,6 +16,12 @@ on:
   merge_group:
   workflow_dispatch:
 
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sibling-compat:
     name: Sibling Compat Check (OMN-4315)
