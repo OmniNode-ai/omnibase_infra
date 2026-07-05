@@ -295,6 +295,21 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-13886: reject a bare `docker compose ... down` against a runtime lane.
+      # The ONEX runtime services are gated behind compose profiles
+      # ["runtime","full"], so a bare down (no --profile runtime/full and no
+      # --remove-orphans) tears down the un-profiled core deps while orphaning
+      # the profile-gated runtime containers — the "2 hits in 24h" teardown
+      # defect. always_run: the scanner walks the whole tracked tree, and a bad
+      # recipe can be introduced by a file that is not itself staged. SYNC with
+      # the CI gate .github/workflows/no-bare-compose-teardown.yml.
+      - id: no-bare-compose-teardown
+        name: No bare compose teardown (OMN-13886)
+        entry: uv run --frozen python tests/test_compose_profile_teardown_policy.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
