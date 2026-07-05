@@ -35,6 +35,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # pytest is imported by the module (for the @pytest.mark decorators), but
+      # the gate runs the module's standalone __main__ scanner — NOT `pytest` —
+      # so `tests/conftest.py` (which pulls heavy runtime deps) is never loaded.
+      # The self-tests run in the full `uv run pytest tests/` suite + pre-commit.
       - run: pip install pytest
       - name: Scan for bare runtime-lane teardown recipes
-        run: python -m pytest tests/test_compose_profile_teardown_policy.py -q
+        run: python tests/test_compose_profile_teardown_policy.py
