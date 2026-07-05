@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQQuarantineProducer,
     ModelDlqReplayEngineConfig,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models.model_kafka_producer_config import (
     ModelKafkaProducerConfig,
 )
@@ -116,7 +117,7 @@ async def test_request_response_wiring_passes_msk_auth_kwargs(
         "build_aiokafka_auth_kwargs_from_env",
         lambda: {"security_protocol": "SASL_SSL"},
     )
-    event_bus = MagicMock()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.publish = AsyncMock()
     config = ModelRequestResponseConfig(
         instances=[
