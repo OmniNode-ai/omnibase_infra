@@ -253,6 +253,10 @@ async def test_tick_projects_into_ledger_with_correct_shape(
     assert by_col["next_required_outcome"] == "pr_merged"
     assert by_col["approaching_halt_conditions"][0]["condition_id"] == "cost_ceiling"
     assert by_col["accumulated_cost"] == 1.25
+    assert by_col["started_at"] == datetime.fromisoformat(payload.started_at)
+    assert by_col["started_at"].tzinfo is not None
+    assert by_col["emitted_at"] == datetime.fromisoformat(payload.emitted_at)
+    assert by_col["emitted_at"].tzinfo is not None
 
 
 @pytest.mark.asyncio
