@@ -18,6 +18,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner
@@ -936,6 +937,118 @@ def test_skill_functional_audit_payload_validates_against_request_model() -> Non
     payload = _parse_skill_args(audit, ("--skills-filter", "merge_sweep,gap"))
     request = ModelSkillFunctionalAuditComputeRequest.model_validate(payload)
     assert request.skills_filter == ["merge_sweep", "gap"]
+
+
+# --------------------------------------------------------------------------- #
+# OMN-13918: `redeploy` was documented (docs/) but had no skill_mapping.yaml
+# entry — `onex skill redeploy` returned "Unknown skill" and the .201 runtime
+# redeploy path had no executable CLI surface or explicit lane targeting.
+# --------------------------------------------------------------------------- #
+
+
+def test_redeploy_registered_with_no_default_lane() -> None:
+    """`redeploy` is mapped to the real orchestrator node.
+
+    The `lane` arg spec must declare NO default (`default is None` means the
+    arg is omitted entirely when unset, letting the node-input model's own
+    "dev" default apply) — the mapping itself must never be able to resolve
+    the lane to "prod" when the caller omits `--lane`.
+    """
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    assert redeploy.node_name == "node_redeploy_orchestrator"
+
+    lane_spec = next(
+        spec for spec in redeploy.args if spec.payload_field == "runtime_lane"
+    )
+    assert lane_spec.default is None
+    assert lane_spec.required is False
+
+
+def test_redeploy_payload_validates_against_request_model() -> None:
+    """The OMN-13918 redeploy mapping builds a payload the command model accepts.
+
+    ``ModelRedeployStartCommand`` is ``extra="forbid"`` — every CLI arg the
+    mapping surfaces must be a real field on that model. ``correlation_id`` is
+    a required field the mapping intentionally does NOT expose as a CLI arg
+    (RuntimeLocal auto-injects it, OMN-13591); the test supplies one directly
+    to validate the rest of the CLI-constructed payload.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(
+        redeploy,
+        ("--lane", "dev", "--scope", "full", "--git-ref", "origin/main", "--dry-run"),
+    )
+    assert "correlation_id" not in payload
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "dev"
+    assert request.scope.value == "full"
+    assert request.git_ref == "origin/main"
+    assert request.dry_run is True
+
+
+def test_redeploy_lane_omitted_defaults_to_dev_never_prod() -> None:
+    """Omitting `--lane` must never silently resolve to prod (OMN-13918 DoD).
+
+    The mapping sets no default for `lane`, so the payload field is absent
+    entirely; ``ModelRedeployStartCommand.runtime_lane`` then applies its own
+    "dev" default. Prod is reachable ONLY via an explicit ``--lane prod``.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(redeploy, ())
+    assert "runtime_lane" not in payload
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "dev"
+
+
+def test_redeploy_prod_lane_is_explicit_and_still_requires_the_gate() -> None:
+    """`--lane prod` is honored explicitly but never bypasses the promotion gate.
+
+    This proves only the mapping/payload layer: the CLI faithfully forwards an
+    explicit `--lane prod` request unmodified. The orchestrator itself (tested
+    in omnimarket) always routes a prod ``ModelRedeployStartCommand`` through
+    the out-of-band grant-resolve -> gate-evaluate chain and never trusts a
+    caller-attached grant — dry-run included, which reports BLOCKED rather
+    than fabricating a passing gate decision.
+    """
+    command_module = pytest.importorskip(
+        "omnimarket.nodes.node_redeploy_orchestrator.models."
+        "model_redeploy_start_command"
+    )
+    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
+
+    registry = load_skill_registry()
+    redeploy = registry.get("redeploy")
+    assert redeploy is not None
+    payload = _parse_skill_args(redeploy, ("--lane", "prod", "--dry-run"))
+    payload["correlation_id"] = str(uuid4())
+
+    request = ModelRedeployStartCommand.model_validate(payload)
+    assert request.runtime_lane.value == "prod"
+    # promotion_grant is not a CLI-exposed field — a caller cannot self-grant.
+    assert "promotion_grant" not in payload
+    assert request.promotion_grant is None
 
 
 def test_command_writes_payload_under_state_root_not_tmp(

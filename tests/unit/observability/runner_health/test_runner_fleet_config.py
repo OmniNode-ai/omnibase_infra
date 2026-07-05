@@ -125,14 +125,19 @@ def test_runner_healthcheck_probes_github_egress() -> None:
     script = (REPO_ROOT / "docker" / "runners" / "healthcheck.sh").read_text(
         encoding="utf-8"
     )
-    assert "pgrep -f Runner.Listener" in script
+    # OMN-13915: the pgrep pattern is RUNNER_HOME-anchored so wrapper
+    # processes (or another runner's listener) can never satisfy it.
+    assert 'pgrep -f "${listener_pattern}"' in script
+    assert "bin/Runner\\.Listener" in script
     assert "--max-time" in script
     assert "--connect-timeout" in script
     assert "-fsS" in script
+    # OMN-13915: the egress curl is gated behind RUNNER_HEALTH_EGRESS_CHECK
+    # (default on) and therefore indented — strip before matching.
     curl_commands = [
-        shlex.split(line.removeprefix("if ! ").removesuffix("; then").strip())
+        shlex.split(line.strip().removeprefix("if ! ").removesuffix("; then").strip())
         for line in script.splitlines()
-        if line.startswith("if ! curl ")
+        if line.strip().startswith("if ! curl ")
     ]
     assert len(curl_commands) == 1
     assert any(arg.startswith("-") and "I" in arg for arg in curl_commands[0])
