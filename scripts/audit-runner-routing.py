@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Audit GitHub Actions runner routing for trusted OmniNode CI.
 
@@ -137,7 +137,7 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
         if isinstance(item, dict) and "path" in item
     }
     bare_hosted = re.compile(
-        r"^\s*runs-on:\s*(?:\[)?\s*ubuntu-latest\b", re.MULTILINE
+        r"^\s*runs-on:\s*(?:\[)?\s*ubuntu-latest(?![\w-])", re.MULTILINE
     )
     findings: list[Finding] = []
     for path in _workflow_paths(repo_root):
@@ -177,7 +177,9 @@ def main() -> int:
 
     if findings:
         for finding in findings:
-            print(f"::error title=Runner routing drift::{finding.scope}: {finding.message}")
+            print(
+                f"::error title=Runner routing drift::{finding.scope}: {finding.message}"
+            )
         return 1
 
     print("Runner routing audit passed.")
