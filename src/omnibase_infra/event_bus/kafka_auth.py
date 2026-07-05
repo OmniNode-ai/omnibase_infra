@@ -10,6 +10,7 @@ topic provisioning, or lag checks on plaintext-only client construction.
 from __future__ import annotations
 
 import asyncio
+import ssl
 
 from aiokafka.abc import AbstractTokenProvider
 
@@ -135,7 +136,7 @@ def build_aiokafka_auth_kwargs(config: ModelKafkaEventBusConfig) -> dict[str, ob
         kwargs["sasl_oauth_token_provider"] = MSKTokenProvider(region=config.msk_region)
 
     if config.ssl_ca_file is not None:
-        kwargs["ssl_cafile"] = config.ssl_ca_file
+        kwargs["ssl_context"] = ssl.create_default_context(cafile=config.ssl_ca_file)
 
     return kwargs
 
