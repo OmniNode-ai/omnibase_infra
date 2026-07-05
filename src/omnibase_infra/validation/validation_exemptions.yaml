@@ -3688,6 +3688,29 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Node Identity Model)
     ticket: OMN-13237
+  # ==========================================================================
+  # Runner-Fleet-Maintain Exemptions (OMN-13942)
+  # ==========================================================================
+  # ModelZombieRunCandidate.workflow_name is the GitHub Actions workflow's
+  # display name string as reported by the org runners/runs API -- there is
+  # no internal workflow entity with its own ID; the name IS the identifier
+  # GitHub exposes.
+  - file_pattern: 'model_zombie_run_candidate\.py'
+    violation_pattern: "Field 'workflow_name' might reference an entity"
+    reason: >
+      workflow_name is GitHub's own workflow display-name string from the Actions API, not a foreign key to an internal workflow entity with ID + display_name.
+
+    ticket: OMN-13942
+  # ModelRecommendedAction.target_id is deliberately polymorphic: a runner
+  # container/registration name (e.g. "omninode-runner-3") or a GitHub
+  # Actions numeric run id rendered as str. Neither is a UUID, and the two
+  # target kinds are distinguished by action_type, not by a shared ID space.
+  - file_pattern: 'model_recommended_action\.py'
+    violation_pattern: "Field 'target_id' should use UUID type instead of str"
+    reason: >
+      target_id is polymorphic across recommendation types: a runner name string (RESTART_RUNNER) or a GitHub Actions run id rendered as str (CANCEL_RUN). Neither is a UUID.
+
+    ticket: OMN-13942
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================

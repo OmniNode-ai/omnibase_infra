@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRunnerFleetMaintainOrchestrator
+#
+# Runner-fleet-maintain workflow orchestrator (OMN-13942, Increment 1 --
+# detection core, strictly read-only). Coordinates: receive tick -> dispatch
+# snapshot gather (EFFECT) -> dispatch health classification (COMPUTE) ->
+# emit terminal completion event carrying the health verdict. No I/O in this
+# node or its handlers; no mutation is reachable from any code path in this
+# workflow.
+#
+# Trigger: reuses OMN-13915's runner-fleet-canary 15-min GitHub-hosted
+# schedule -- no new parallel schedule is introduced.
+#
+# Increment 2 (design-only, NOT built here) would extend this workflow to
+# additionally route verdict.recommended_actions through a grant-gated
+# recovery EFFECT and an FSM reducer before reaching the terminal event --
+# mirroring omnimarket's node_redeploy_orchestrator gate-then-effect-then-
+# terminal-event pattern.
+#
+# Related Tickets:
+#   - OMN-13932: motivating gap (buildx/codeload blind spots)
+#   - OMN-13915 / OMN-13912 / OMN-13109: heuristics ported into the COMPUTE node
+name: "node_runner_fleet_maintain_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the runner-fleet-maintain workflow: receive tick command, dispatch snapshot gather, dispatch health classification, emit a read-only completion event carrying the health verdict. No mutation in Increment 1.
+
+runtime_profiles:
+  - effects
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"
+    - "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+    - "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"
+  publish_topics:
+    - "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
+    - "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"
+    - "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
+input_model:
+  name: "ModelRunnerFleetMaintainStartCommand"
+  module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command"
+  description: "Command to start one runner-fleet-maintain tick."
+output_model:
+  name: "ModelRunnerFleetMaintainCompletedEvent"
+  module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_completed_event"
+  description: "Terminal event carrying the health verdict. No mutation performed."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelRunnerFleetMaintainStartCommand"
+        module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command"
+      handler:
+        name: "HandlerRunnerFleetMaintainStart"
+        module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_maintain_start"
+      output_events:
+        - "ModelRunnerFleetSnapshotGatherCommand"
+    - event_model:
+        name: "ModelRunnerFleetSnapshot"
+        module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot"
+      handler:
+        name: "HandlerRunnerFleetSnapshotComplete"
+        module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_snapshot_complete"
+      output_events:
+        - "ModelRunnerFleetHealthEvaluateCommand"
+    - event_model:
+        name: "ModelRunnerFleetHealthVerdict"
+        module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict"
+      handler:
+        name: "HandlerRunnerFleetHealthVerdictComplete"
+        module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_health_verdict_complete"
+      output_events:
+        - "ModelRunnerFleetMaintainCompletedEvent"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "runner_fleet_maintain_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Increment 1: read-only runner-fleet detection (no mutation)"
+    execution_graph:
+      nodes:
+        - node_id: "gather_snapshot"
+          node_type: EFFECT_GENERIC
+          description: "Gather read-only gh-api/SSH/Docker facts about the runner fleet"
+        - node_id: "evaluate_health"
+          node_type: COMPUTE_GENERIC
+          description: "Classify the snapshot into per-runner states + fleet aggregates"
+          depends_on: ["gather_snapshot"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 120000
+published_events:
+  - topic: "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
+    event_type: "RunnerFleetMaintainCompletedEvent"
+    message_category: "EVENT"
+    description: "Terminal event for one runner-fleet-maintain tick (health report only, no mutation)"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
+metadata:
+  description: "Runner-fleet-maintain orchestrator (OMN-13942 Increment 1 -- read-only detection core)"
+  author: "OmniNode Team"
+  created: "2026-07-04"
+  tags:
+    - "orchestrator"
+    - "runner-fleet"
+    - "health"
+    - "detection-only"

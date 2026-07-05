@@ -5,15 +5,27 @@
 # ONEX Node Contract
 # Node: NodeRunnerHealthSnapshotEffect
 #
-# Publishes periodic runner health snapshots to the event bus.
-# CLI-based emitter (collector_runner_health.py) — full ONEX node
-# conversion deferred to OMN-6091.
+# Read-only EFFECT node for the runner-fleet-maintain workflow (OMN-13942,
+# Increment 1). Gathers gh-api runner records, SSH/Docker inspection facts
+# (incl. RestartCount + _diag heartbeat freshness), queue/run-age facts, and
+# the two new OMN-13932 probes (buildx availability, codeload-throttle
+# signatures), then publishes a facts-only ModelRunnerFleetSnapshot. No
+# mutation capability is compiled into this node.
+#
+# Completes the OMN-6091 stub in place -- this is the same contract/topics
+# declared since OMN-6082, not a fork.
 #
 # Related Tickets:
 #   - OMN-6082: Runner health snapshot CLI emitter
-#   - OMN-6091: Full ONEX node conversion (deferred)
+#   - OMN-6091: Full ONEX node conversion (deferred; completed by OMN-13942)
 #   - OMN-7114: Register missing topics in provisioner
-#   - OMN-12566: Docker subnet-pool occupancy events (same CLI emitter)
+#   - OMN-12566: Docker subnet-pool occupancy events (network-pool-status.v1
+#     remains deferred -- not implemented by this node, still declared for
+#     provisioning continuity)
+#   - OMN-13109 / OMN-13912 / OMN-13915: wedge/crash-loop/heartbeat heuristics
+#     whose raw facts this node now gathers (classification lives in
+#     node_runner_fleet_health_compute)
+#   - OMN-13932: motivating gap (buildx/codeload blind spots)
 name: "node_runner_health_snapshot_effect"
 contract_version:
   major: 1
@@ -25,22 +37,36 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node for runner health snapshot emission. Publishes periodic health snapshots from GitHub Actions runners via the event bus. Currently implemented as a CLI-based emitter; full ONEX node conversion is tracked by OMN-6091.
+  Effect node for runner-fleet snapshot gathering. Publishes read-only, facts-only health snapshots from GitHub Actions runners + Docker inspection via the event bus. Completed for OMN-13942 (was a contract stub since OMN-6091).
 
 input_model:
-  name: "ModelRunnerHealthSnapshotInput"
-  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect"
-  description: "Input for runner health snapshot emission (stub)."
+  name: "ModelRunnerFleetSnapshotGatherCommand"
+  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command"
+  description: "Command to gather a point-in-time runner-fleet snapshot."
 output_model:
-  name: "ModelRunnerHealthSnapshotOutput"
-  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect"
-  description: "Output for runner health snapshot emission (stub)."
+  name: "ModelRunnerFleetSnapshot"
+  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot"
+  description: "Facts-only runner-fleet snapshot (no classification)."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelRunnerFleetSnapshotGatherCommand"
+        module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command"
+      handler:
+        name: "HandlerRunnerFleetSnapshot"
+        module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot"
+      output_events:
+        - "ModelRunnerFleetSnapshot"
+runtime_profiles:
+  - effects
 event_bus:
   version:
     major: 1
     minor: 0
     patch: 0
-  subscribe_topics: []
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.runner-health-snapshot.v1"
     - "onex.evt.omnibase-infra.network-pool-status.v1"
