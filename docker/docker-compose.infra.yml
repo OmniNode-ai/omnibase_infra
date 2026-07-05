@@ -27,11 +27,12 @@
 #   # Build runtime and start
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
 #
-#   # Stop services
-#   docker compose -f docker/docker-compose.infra.yml down
+#   # Stop services (--remove-orphans also removes profile-gated runtime
+#   # containers, which a bare `down` would leave orphaned — OMN-13886)
+#   docker compose -f docker/docker-compose.infra.yml down --remove-orphans
 #
 #   # Stop and remove volumes (CAUTION: destroys data)
-#   docker compose -f docker/docker-compose.infra.yml down -v
+#   docker compose -f docker/docker-compose.infra.yml down -v --remove-orphans
 #
 # Profiles:
 #   - (default): Core infrastructure (postgres, valkey, redpanda, keycloak)

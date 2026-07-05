@@ -477,7 +477,7 @@ pre-commit run --all-files                 # Pre-commit hooks
 docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
 docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
 docker compose --env-file .env -f docker/docker-compose.infra.yml logs -f
-docker compose --env-file .env -f docker/docker-compose.infra.yml down
+docker compose --env-file .env -f docker/docker-compose.infra.yml down --remove-orphans
 ```
 
 ## Common Mistakes

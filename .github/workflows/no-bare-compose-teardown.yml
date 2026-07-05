@@ -1,0 +1,40 @@
+name: No bare compose teardown (OMN-13886)
+
+# Mechanical enforcement of profile-aware runtime-lane teardown. The ONEX
+# runtime services are gated behind compose `profiles: ["runtime","full"]`, so a
+# bare `docker compose ... down` (no `--profile runtime`/`--profile full` and no
+# `--remove-orphans`) tears down the un-profiled core deps while orphaning the
+# profile-gated runtime containers — the OMN-13886 teardown defect. Rejects any
+# committed bare runtime-lane teardown unless the line carries `--remove-orphans`
+# / `--profile runtime` or an explicit `# compose-profile-ok:` annotation.
+#
+# CLAUDE.md Operating Rule #5: enforcement, not detection. This gate runs the
+# same `tests/test_compose_profile_teardown_policy.py` that a developer runs
+# locally (also wired as a pre-commit hook).
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: no-bare-compose-teardown-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  no-bare-compose-teardown:
+    name: No bare compose teardown
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git ls-files (used by the scanner) needs the full tracked index.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest
+      - name: Scan for bare runtime-lane teardown recipes
+        run: python -m pytest tests/test_compose_profile_teardown_policy.py -q
