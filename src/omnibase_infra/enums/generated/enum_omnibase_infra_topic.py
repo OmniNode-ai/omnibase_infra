@@ -32,6 +32,9 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
     CMD_PATTERN_B_DISPATCH_V1 = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex.cmd.omnibase-infra.pattern-b-dispatch.v1
     CMD_REMOTE_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"  # onex.cmd.omnibase-infra.remote-agent-invoke.v1
+    CMD_RUNNER_FLEET_HEALTH_EVALUATE_V1 = "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"  # onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1
+    CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
+    CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1 = "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"  # onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1
     CMD_TOPIC_MIGRATION_EXECUTE_V1 = "onex.cmd.omnibase-infra.topic-migration-execute.v1"  # onex.cmd.omnibase-infra.topic-migration-execute.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     DLQ_COMMANDS_V1 = "onex.dlq.omnibase-infra.commands.v1"  # onex.dlq.omnibase-infra.commands.v1
@@ -72,6 +75,8 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
+    EVT_RUNNER_FLEET_HEALTH_VERDICT_V1 = "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"  # onex.evt.omnibase-infra.runner-fleet-health-verdict.v1
+    EVT_RUNNER_FLEET_MAINTAIN_COMPLETED_V1 = "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"  # onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_BOOTED_V1 = "onex.evt.omnibase-infra.runtime-booted.v1"  # onex.evt.omnibase-infra.runtime-booted.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1

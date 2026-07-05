@@ -192,6 +192,14 @@ src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_initiate.py 
 src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_score_complete.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_rsd_score_compute/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_rsd_score_compute/handlers/handler_rsd_score_calculate.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_runner_fleet_health_compute/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_health_compute/handlers/handler_runner_fleet_health_evaluate.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_health_verdict_complete.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_maintain_start.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_snapshot_complete.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_health_snapshot_effect/handlers/__init__.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
+src/omnibase_infra/nodes/node_runner_health_snapshot_effect/handlers/handler_runner_fleet_snapshot.py  # OMN-13942: runner fleet is an infra domain object (CI runner maintenance), not a market business workflow.
 src/omnibase_infra/nodes/node_runner_usage_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_runner_usage_effect/handlers/handler_runner_usage_savings.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_runtime_error_triage_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.

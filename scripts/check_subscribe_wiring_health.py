@@ -87,6 +87,10 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # not a contract-declared node publisher. The script publishes to this topic to trigger the
     # node_baselines_batch_compute effect node. (OMN-11177)
     "onex.cmd.omnibase-infra.baselines-batch-compute.v1": "Published by scripts/run_baselines_batch_compute.py CLI trigger, not a contract-declared node | owner: jonah | expiry: 2026-12-01",
+    # Runner-fleet-maintain tick — triggered by the reused OMN-13915
+    # runner-fleet-canary 15-min GitHub-hosted schedule (OMN-13942 Increment 1),
+    # not a contract-declared Kafka publisher.
+    "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1": "Triggered by the reused OMN-13915 runner-fleet-canary GHA schedule, not Kafka | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRunnerFleetHealthCompute
+#
+# Pure/deterministic classifier for the runner-fleet-maintain workflow
+# (OMN-13942, Increment 1). Consumes a facts-only ModelRunnerFleetSnapshot
+# (gathered upstream by node_runner_health_snapshot_effect) and produces a
+# typed ModelRunnerFleetHealthVerdict. No I/O of any kind -- this node never
+# calls gh, ssh, or docker. It only recommends actions; it never executes
+# them.
+#
+# Related Tickets:
+#   - OMN-13109 / OMN-13912 / OMN-13915: wedge/crash-loop/heartbeat heuristics
+#     ported into this node's classification logic
+#   - OMN-13932: motivating gap; this node adds BUILDX_UNAVAILABLE and
+#     CODELOAD_THROTTLED, which close a live blind spot in the current
+#     bash/CLI substrate
+name: "node_runner_fleet_health_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: per-runner state, fleet aggregates, and recorded (never executed) recommended actions.
+
+input_model:
+  name: "ModelRunnerFleetHealthEvaluateCommand"
+  module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_evaluate_command"
+  description: "Command carrying the snapshot to classify."
+output_model:
+  name: "ModelRunnerFleetHealthVerdict"
+  module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict"
+  description: "Per-runner + fleet-level health verdict with recommended actions."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelRunnerFleetHealthEvaluateCommand"
+        module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_evaluate_command"
+      handler:
+        name: "HandlerRunnerFleetHealthEvaluate"
+        module: "omnibase_infra.nodes.node_runner_fleet_health_compute.handlers.handler_runner_fleet_health_evaluate"
+      output_events:
+        - "ModelRunnerFleetHealthVerdict"
+runtime_profiles:
+  - effects
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"
+published_events:
+  - topic: "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"
+    event_type: "RunnerFleetHealthVerdictEvent"
+    message_category: "EVENT"
+    description: "Classified per-runner + fleet-level runner-fleet health verdict"
+    topic_config:
+      partitions: 1
+      replication_factor: 1
+      kafka_config:
+        "retention.ms": "604800000"
+        "cleanup.policy": "delete"
+metadata:
+  description: "Runner-fleet health classifier (OMN-13942 Increment 1 -- read-only detection core)"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-07-04"
+  tags:
+    - compute
+    - health
+    - runner
+    - fleet-maintain

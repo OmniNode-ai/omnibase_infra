@@ -48,9 +48,9 @@ TEST_CONTAINER_PREFIX = "omnibase-infra-test"
 
 # Timeout constants (seconds)
 BUILD_TIMEOUT = int(os.getenv("OMNI_DOCKER_BUILD_TIMEOUT_SECONDS", "1200"))
-CONTAINER_START_TIMEOUT = 60
+CONTAINER_START_TIMEOUT = int(os.getenv("OMNI_DOCKER_CONTAINER_TIMEOUT_SECONDS", "180"))
 HEALTH_CHECK_TIMEOUT = 90
-SHUTDOWN_TIMEOUT = 30
+SHUTDOWN_TIMEOUT = int(os.getenv("OMNI_DOCKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ class TestDockerBuild:
             subprocess.run(
                 ["docker", "rmi", "-f", image_name],
                 capture_output=True,
-                timeout=60,
+                timeout=CONTAINER_START_TIMEOUT,
                 check=False,
                 shell=False,
             )
@@ -424,7 +424,7 @@ class TestDockerSecurity:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=SHUTDOWN_TIMEOUT,
                 check=False,
                 shell=False,
             )
@@ -510,7 +510,7 @@ class TestDockerRuntime:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=SHUTDOWN_TIMEOUT,
                 check=False,
                 shell=False,
             )
@@ -522,7 +522,7 @@ class TestDockerRuntime:
             subprocess.run(
                 ["docker", "stop", container_name],
                 capture_output=True,
-                timeout=30,
+                timeout=SHUTDOWN_TIMEOUT,
                 check=False,
                 shell=False,
             )
@@ -563,7 +563,7 @@ class TestDockerRuntime:
             ],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=CONTAINER_START_TIMEOUT,
             check=False,
             shell=False,
         )

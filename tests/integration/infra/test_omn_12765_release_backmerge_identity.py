@@ -49,8 +49,10 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-12549 closure: identity regenerated after repinning onto the exact
-    # published PyPI core 0.46.3 / spi 0.23.1 releases and relocking, which
-    # changed the runtime dependency-manifest and shared-env digest inputs.
-    assert lock["identity_digest"] == "510420fa4a9f2715947143cf59a72045"
-    assert lock["shared_env_digest"] == "ee4f6133e595729fb4c3b68e"
+    # OMN-13942: identity regenerated after registering the two new
+    # runner-fleet-maintain node entry-points in pyproject.toml. The identity
+    # binds the full dependency-manifest bytes (binding-not-label), so adding
+    # entry-points rebinds it; the new lock is build-proven by the passing
+    # runner-image-build-smoke gate on this PR.
+    assert lock["identity_digest"] == "bc29a18863d52c583ed367f709364d4e"
+    assert lock["shared_env_digest"] == "d115872323933b6fe1490d95"
