@@ -63,10 +63,12 @@ x-runner-base: &runner-base
     - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
   group_add:
     - "984" # Match host Docker socket GID for DinD access
-  # OMN-12433: healthcheck proves BOTH the listener is alive AND github.com is
-  # reachable. The old pgrep-only check passed while runners were silently
-  # disconnected from GitHub (lost egress), letting dead runners stay in the
-  # pool and wedge the merge queue. timeout covers the curl --max-time 8.
+  # OMN-12433 / OMN-13915: healthcheck proves BOTH the listener is alive AND
+  # github.com is reachable, with _diag heartbeat freshness to catch dead
+  # Runner.Listener processes. Healthcheck definitions are frozen at container creation,
+  # so changing docker/runners/healthcheck.sh requires recreating the runner
+  # containers; a bind-mounted file update alone does not change the live
+  # container healthcheck command.
   healthcheck:
     test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
     interval: 30s
