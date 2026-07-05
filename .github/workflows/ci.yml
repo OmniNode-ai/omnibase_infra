@@ -1527,7 +1527,7 @@ jobs:
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
     needs: [occ-preflight, tests-gate]
-    if: needs.occ-preflight.result == 'success' && (needs.tests-gate.result == 'success')
+    if: github.event_name != 'pull_request' && needs.occ-preflight.result == 'success' && needs.tests-gate.result == 'success'
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose

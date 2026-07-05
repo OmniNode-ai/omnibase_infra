@@ -205,6 +205,16 @@ def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
     assert job["continue-on-error"] is True
 
 
+def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["runtime-boot-smoke"]
+    summary = workflow["jobs"]["ci-summary"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "needs.tests-gate.result == 'success'" in job["if"]
+    assert "runtime-boot-smoke" not in summary["needs"]
+
+
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
