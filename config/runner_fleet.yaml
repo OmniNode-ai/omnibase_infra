@@ -4,7 +4,9 @@
 # and the runner health CLI. Do not duplicate these values in scripts.
 version: "1.0"
 github_org: OmniNode-ai
-runner_host: 192.168.86.201
+# Use Tailscale MagicDNS so rebuild/deploy/monitor flows do not depend on the
+# runner host's current LAN or Tailscale IP address.
+runner_host: omninode-pc.tail75df5e.ts.net
 runner_group: omnibase-ci
 runner_name_prefix: omninode-runner
 # Reconciled to the live .201 fleet (OMN-12582): 48 always-on steady-state

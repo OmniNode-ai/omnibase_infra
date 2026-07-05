@@ -22,6 +22,7 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
 
     assert config.github_org == "OmniNode-ai"
+    assert config.runner_host == "omninode-pc.tail75df5e.ts.net"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
     # OMN-12582: reconciled to the live .201 fleet of 48 always-on steady-state
@@ -81,6 +82,38 @@ def test_runner_scripts_do_not_embed_legacy_count() -> None:
     assert "EXPECTED_RUNNERS=10" not in monitor_script
 
 
+def test_deploy_runner_monitor_cron_uses_bash_for_source() -> None:
+    """Runner monitor cron must not rely on /bin/sh accepting ``source``.
+
+    Cron runs commands with /bin/sh unless SHELL is overridden. On Ubuntu that is
+    dash, so a line like ``set -a && source .monitor-env`` exits before loading
+    Slack/GitHub credentials and no alert is sent. The deploy script must install
+    a cron line that explicitly uses bash and captures setup failures in the log.
+    """
+    deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/bin/bash -lc" in deploy_script
+    assert "source ${monitor_env}" in deploy_script
+    assert ">> /tmp/runner-monitor.log 2>&1" in deploy_script
+    assert 'local cron_line="*/3 * * * * set -a && source' not in deploy_script
+
+
+def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
+    """Runner repair must be a bounded timer, not an ad hoc operator command."""
+    deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "*/10 * * * *" in deploy_script
+    assert "runner-repair-check" in deploy_script
+    assert "MONITOR_AUTO_BOUNCE=1" in deploy_script
+    assert "OFFLINE_IDLE_RECREATE_AGE_SECONDS=600" in deploy_script
+    assert ">> /tmp/runner-repair.log 2>&1" in deploy_script
+    assert "grep -Ev 'runner-monitor|runner-repair-check'" in deploy_script
+
+
 def test_runner_healthcheck_probes_github_egress() -> None:
     """OMN-12433: the runner healthcheck must verify github.com egress.
 
@@ -97,6 +130,8 @@ def test_runner_healthcheck_probes_github_egress() -> None:
     assert 'pgrep -f "${listener_pattern}"' in script
     assert "bin/Runner\\.Listener" in script
     assert "--max-time" in script
+    assert "--connect-timeout" in script
+    assert "-fsS" in script
     # OMN-13915: the egress curl is gated behind RUNNER_HEALTH_EGRESS_CHECK
     # (default on) and therefore indented — strip before matching.
     curl_commands = [
@@ -105,12 +140,28 @@ def test_runner_healthcheck_probes_github_egress() -> None:
         if line.strip().startswith("if ! curl ")
     ]
     assert len(curl_commands) == 1
+    assert any(arg.startswith("-") and "I" in arg for arg in curl_commands[0])
     endpoint = urlsplit(curl_commands[0][-1])
     assert (endpoint.scheme, endpoint.netloc, endpoint.path) == (
         "https",
         "github.com",
         "/",
     )
+
+
+def test_runner_entrypoint_disables_self_update_and_relaunches_clean_exit() -> None:
+    """Runner self-update can make ``run.sh`` exit 0 and leave no listener.
+
+    The entrypoint must disable self-update on registration and treat clean
+    runner exits as relaunchable so a container does not stay Up without
+    ``Runner.Listener``.
+    """
+    script = (REPO_ROOT / "docker" / "runners" / "entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "--disableupdate" in script
+    assert "Relaunching listener after short backoff" in script
+    assert "continue" in script
 
 
 def test_runner_compose_healthcheck_uses_egress_script() -> None:

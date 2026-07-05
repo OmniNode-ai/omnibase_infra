@@ -345,17 +345,22 @@ ENVEOF
         ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
     fi
 
-    # Install cron idempotently: replace any existing runner-monitor line
+    # Install cron idempotently: replace any existing runner monitor/repair line
     local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
     local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
-    local cron_line="*/3 * * * * set -a && source ${monitor_env} && set +a && ${monitor_script} >> /tmp/runner-monitor.log 2>&1"
+    # Cron uses /bin/sh by default on the runner host; bare `source` fails there
+    # before credentials load, silently disabling Slack alerts when no MTA exists.
+    # Force bash and redirect the whole monitor invocation so setup failures are
+    # visible in /tmp/runner-monitor.log.
+    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> /tmp/runner-monitor.log 2>&1 # runner-monitor-alert"
+    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> /tmp/runner-repair.log 2>&1 # runner-repair-check"
 
     run_ssh "
         EXISTING=\$(crontab -l 2>/dev/null || true)
-        echo \"\${EXISTING}\" | grep -v 'runner-monitor' | { cat; echo '${cron_line}'; } | crontab -
+        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | { cat; echo '${monitor_cron_line}'; echo '${repair_cron_line}'; } | crontab -
     "
 
-    log "Runner health monitor cron installed (every 3 minutes)."
+    log "Runner health monitor cron installed (alerts every 3 minutes, repair every 10 minutes)."
 }
 
 # ---------------------------------------------------------------------------

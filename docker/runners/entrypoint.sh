@@ -207,6 +207,7 @@ _register() {
         --runnergroup "${RUNNER_GROUP}" \
         --work "${RUNNER_WORK_DIR}" \
         --unattended \
+        --disableupdate \
         --replace
 }
 
@@ -225,6 +226,13 @@ _deregister() {
 
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
+
+shutdown_requested=0
+_request_shutdown() {
+    shutdown_requested=1
+    echo "[entrypoint] Shutdown requested; runner listener will not be relaunched."
+}
+trap _request_shutdown TERM INT
 
 # Watchdog pattern (OMN-13915): match THIS runner home's listener binary path.
 # Dots escaped for pgrep's ERE matching.
@@ -290,6 +298,11 @@ while true; do
 
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
 
+    if [[ ${shutdown_requested} -eq 1 ]]; then
+        echo "[entrypoint] Runner exited during shutdown; stopping entrypoint loop."
+        exit 0
+    fi
+
     if [[ ${supervised_kill} -eq 1 ]]; then
         listener_restarts=$((listener_restarts + 1))
         if [[ ${listener_restarts} -gt ${LISTENER_RESTART_MAX} ]]; then
@@ -317,8 +330,10 @@ while true; do
             fi
             # Fall through to the registration retry loop below
         else
-            echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
-            break
+            echo "[entrypoint] Runner exited cleanly (exit 0). Relaunching listener after short backoff."
+            sleep 5
+            attempt=0
+            continue
         fi
     fi
 

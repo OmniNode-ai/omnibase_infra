@@ -23,7 +23,14 @@
 #      has been queued longer than WEDGE_QUEUE_AGE_SECONDS while the fleet sits
 #      idle (online + not busy), the fleet is wedged.
 #
-#   3. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
+#   3. OFFLINE-IDLE-REGISTRATION (OMN-13912): Docker can report
+#      `Up (healthy)` while GitHub reports the runner offline. When GitHub also
+#      says the runner is not busy, the monitor records the named service for
+#      operator remediation. It does not auto-bounce this class because the
+#      org runner API can lag or misreport busy state while a local listener is
+#      still completing an assigned job.
+#
+#   4. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
 #      these runners — the entrypoint re-runs config.sh, which reports "already
 #      configured", exits, and compose `restart: unless-stopped` immediately
 #      restarts it. This shows up as a climbing container RestartCount and/or
@@ -66,6 +73,13 @@ WEDGE_WATCH_REPOS="${WEDGE_WATCH_REPOS:-OmniNode-ai/omnibase_infra OmniNode-ai/o
 CRASHLOOP_RESTART_THRESHOLD="${CRASHLOOP_RESTART_THRESHOLD:-5}"
 CRASHLOOP_LOG_TAIL_LINES="${CRASHLOOP_LOG_TAIL_LINES:-200}"
 CRASHLOOP_REREGISTER_MARKER_THRESHOLD="${CRASHLOOP_REREGISTER_MARKER_THRESHOLD:-3}"
+
+# GitHub can report a runner offline while Docker still has a healthy listener.
+# Recreating immediately can cancel an assigned job, so only auto-remediate this
+# class after it persists for a grace period and local logs do not show an
+# in-flight job.
+OFFLINE_IDLE_RECREATE_AGE_SECONDS="${OFFLINE_IDLE_RECREATE_AGE_SECONDS:-900}"
+OFFLINE_IDLE_LOG_TAIL_LINES="${OFFLINE_IDLE_LOG_TAIL_LINES:-240}"
 
 # Auto-bounce is OFF by default: this monitor DETECTS and ALERTS. It does NOT
 # mutate the live fleet unless an operator deliberately sets MONITOR_AUTO_BOUNCE=1
@@ -137,13 +151,36 @@ slack_post() {
         )" > /dev/null 2>&1
 }
 
+# github_api_get — fetch a GitHub API path as JSON. Empty string on failure.
+# Prefer `gh api` because the deployed host already has working gh auth; fall
+# back to RUNNER_GITHUB_TOKEN for environments without gh. Retry transient
+# misses so a single GitHub/gh blip does not become a false runner outage.
+github_api_get() {
+    local path="$1"
+    local attempt output
+    for attempt in 1 2 3; do
+        output=""
+        if command -v gh >/dev/null 2>&1; then
+            output=$(gh api "${path}" 2>/dev/null || true)
+        else
+            output=$(curl -fsS \
+                -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com${path}" 2>/dev/null || true)
+        fi
+        if [[ -n "${output}" ]] && jq -e 'type == "object"' <<< "${output}" >/dev/null 2>&1; then
+            printf '%s\n' "${output}"
+            return 0
+        fi
+        sleep "${attempt}"
+    done
+    return 0
+}
+
 # gh_api_runners — fetch the org self-hosted runner list as JSON. Empty string
 # on failure (caller treats empty as github_api_failed).
 gh_api_runners() {
-    curl -fsS \
-        -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null || true
+    github_api_get "/orgs/${RUNNER_ORG}/actions/runners?per_page=100"
 }
 
 # oldest_queued_job_age_seconds — across WEDGE_WATCH_REPOS, find the OLDEST
@@ -158,10 +195,7 @@ oldest_queued_job_age_seconds() {
     now_epoch=$(date -u +%s)
 
     for repo in ${WEDGE_WATCH_REPOS}; do
-        runs_json=$(curl -fsS \
-            -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${repo}/actions/runs?status=queued&per_page=20" 2>/dev/null || true)
+        runs_json=$(github_api_get "/repos/${repo}/actions/runs?status=queued&per_page=20")
         [[ -z "${runs_json}" ]] && continue
 
         run_ids=$(jq -r '.workflow_runs[]?.id // empty' <<< "${runs_json}" 2>/dev/null || true)
@@ -169,10 +203,7 @@ oldest_queued_job_age_seconds() {
 
         while IFS= read -r run_id; do
             [[ -z "${run_id}" ]] && continue
-            jobs_json=$(curl -fsS \
-                -H "Authorization: Bearer ${RUNNER_GITHUB_TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${repo}/actions/runs/${run_id}/jobs?per_page=50" 2>/dev/null || true)
+            jobs_json=$(github_api_get "/repos/${repo}/actions/runs/${run_id}/jobs?per_page=50")
             [[ -z "${jobs_json}" ]] && continue
 
             # Only count queued jobs that target a self-hosted label. Hosted
@@ -230,6 +261,21 @@ container_is_crashlooping() {
     return 1
 }
 
+runner_has_active_job() {
+    local name="${1}"
+    local logs last_running last_completed
+
+    logs=$(docker logs --tail "${OFFLINE_IDLE_LOG_TAIL_LINES}" "${name}" 2>&1 || true)
+    last_running=$(grep -n 'Running job:' <<< "${logs}" | tail -n 1 | cut -d: -f1 || true)
+    [[ -z "${last_running}" ]] && return 1
+
+    last_completed=$(grep -nE 'Job .+ completed with result:' <<< "${logs}" | tail -n 1 | cut -d: -f1 || true)
+    if [[ -z "${last_completed}" ]] || [[ "${last_running}" -gt "${last_completed}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Collect current state
 # ---------------------------------------------------------------------------
@@ -245,7 +291,15 @@ busy_count=0
 unhealthy_list=()
 wedge_list=()
 crashloop_list=()
+offline_idle_bounce_list=()
+offline_idle_recreate_list=()
 github_api_failed=false
+now_epoch=$(date -u +%s)
+offline_first_seen_lines=""
+prev_offline_first_seen_json="{}"
+if [[ -f "${STATE_FILE}" ]]; then
+    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || echo "{}")
+fi
 
 while IFS=$'\t' read -r name status; do
     [[ -z "${name}" ]] && continue
@@ -318,6 +372,22 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 
     gh_state="${github_status[$name]:-missing}"
     if [[ "${gh_state}" != "online" ]]; then
+        if [[ "${github_busy[$name]:-false}" != "true" ]]; then
+            first_seen=$(jq -r --arg name "${name}" '.[$name] // empty' <<< "${prev_offline_first_seen_json}" 2>/dev/null || true)
+            if [[ ! "${first_seen}" =~ ^[0-9]+$ ]]; then
+                first_seen="${now_epoch}"
+            fi
+            offline_first_seen_lines+="${name}"$'\t'"${first_seen}"$'\n'
+            offline_age=$(( now_epoch - first_seen ))
+            offline_idle_bounce_list+=("${name}: OFFLINE-IDLE (${gh_state}, age=${offline_age}s, Docker ${docker_state})")
+            if [[ "${offline_age}" -ge "${OFFLINE_IDLE_RECREATE_AGE_SECONDS}" ]]; then
+                if runner_has_active_job "${name}"; then
+                    offline_idle_bounce_list+=("${name}: OFFLINE-IDLE not auto-recreated; local logs show active job")
+                else
+                    offline_idle_recreate_list+=("${name}: OFFLINE-IDLE-RECREATE age=${offline_age}s >= ${OFFLINE_IDLE_RECREATE_AGE_SECONDS}s")
+                fi
+            fi
+        fi
         unhealthy_list+=("${name}: GitHub ${gh_state} while Docker ${docker_state}")
         continue
     fi
@@ -393,10 +463,16 @@ fi
 #
 # remediation_targets: space-separated service names extracted from the
 # wedge/crash-loop findings. Empty when the issue is something else (offline,
-# OOM, socket) where the bounce recipe does not apply.
+# OOM, socket) where automatic bounce is unsafe.
 collect_remediation_targets() {
     local targets=()
     local entry svc
+    if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
+        for entry in "${offline_idle_recreate_list[@]}"; do
+            svc="${entry%%:*}"
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+        done
+    fi
     if [[ "${#crashloop_list[@]}" -gt 0 ]]; then
         for entry in "${crashloop_list[@]}"; do
             svc="${entry%%:*}"
@@ -465,6 +541,19 @@ fi
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
 crashloop_count=${#crashloop_list[@]}
+offline_first_seen_json="{}"
+if [[ -n "${offline_first_seen_lines}" ]]; then
+    offline_first_seen_json=$(printf '%s' "${offline_first_seen_lines}" | jq -Rn '
+        reduce inputs as $line ({};
+            if ($line | length) == 0 then
+                .
+            else
+                ($line | split("\t")) as $parts
+                | . + {($parts[0]): ($parts[1] | tonumber)}
+            end
+        )
+    ')
+fi
 
 # Write current state
 jq -n \
@@ -479,6 +568,9 @@ jq -n \
     --argjson docker_ok "$docker_ok" \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
+    --arg offline_idle_bounce_names "$(printf '%s\n' "${offline_idle_bounce_list[@]}" 2>/dev/null || echo '')" \
+    --arg offline_idle_recreate_names "$(printf '%s\n' "${offline_idle_recreate_list[@]}" 2>/dev/null || echo '')" \
+    --argjson offline_first_seen "${offline_first_seen_json}" \
     '{
         healthy: $healthy,
         unhealthy_count: $unhealthy_count,
@@ -490,7 +582,10 @@ jq -n \
         total: $total,
         docker_ok: $docker_ok,
         timestamp: $timestamp,
-        unhealthy_names: $unhealthy_names
+        unhealthy_names: $unhealthy_names,
+        offline_idle_bounce_names: $offline_idle_bounce_names,
+        offline_idle_recreate_names: $offline_idle_recreate_names,
+        offline_first_seen: $offline_first_seen
     }' > "$STATE_FILE"
 
 # ---------------------------------------------------------------------------
@@ -507,6 +602,12 @@ fi
 special_findings=""
 if [[ "${wedge_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${wedge_list[@]}")"$'\n'
+fi
+if [[ "${#offline_idle_bounce_list[@]}" -gt 0 ]]; then
+    special_findings+="$(printf '%s\n' "${offline_idle_bounce_list[@]}")"$'\n'
+fi
+if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
+    special_findings+="$(printf '%s\n' "${offline_idle_recreate_list[@]}")"$'\n'
 fi
 if [[ "${crashloop_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${crashloop_list[@]}")"$'\n'
@@ -584,4 +685,5 @@ Host: ${RUNNER_HOST}" "good"
 else
     # No state change — silent
     log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} unhealthy (wedge=${wedge_count} crashloop=${crashloop_count}, no change)."
+    auto_bounce "${remediation_targets}"
 fi

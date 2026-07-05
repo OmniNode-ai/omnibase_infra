@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+name: Runner Routing Audit
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - ".github/workflows/**"
+      - "config/runner_routing_policy.yaml"
+      - "scripts/audit-runner-routing.py"
+      - ".github/workflows/runner-routing-audit.yml"
+  merge_group:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    name: Runner Routing Audit
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-enabled: "false"
+          install-args: "--frozen"
+
+      - name: Audit local workflow routing
+        run: uv run python scripts/audit-runner-routing.py --local-workflows
+
+      - name: Audit GitHub runner variables
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: uv run python scripts/audit-runner-routing.py --github-vars

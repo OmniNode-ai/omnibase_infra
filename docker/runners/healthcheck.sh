@@ -53,9 +53,11 @@ fi
 
 # 3. github.com must be reachable (OMN-12433). A connected listener with no
 #    in-flight job is expected; an egress fault that drops the GitHub
-#    connection is what we catch. Short-timeout unauthenticated request.
+#    connection is what we catch. Use a bounded HEAD request instead of the
+#    unauthenticated API rate_limit endpoint so shared-IP API limits cannot
+#    create false unhealthy flaps.
 if [[ "${RUNNER_HEALTH_EGRESS_CHECK}" != "0" ]]; then
-  if ! curl -fsS --max-time 8 -o /dev/null https://github.com/; then
+  if ! curl -fsSI --connect-timeout 3 --max-time 8 -o /dev/null https://github.com/; then
     echo "unhealthy: github.com egress unreachable"
     exit 1
   fi
