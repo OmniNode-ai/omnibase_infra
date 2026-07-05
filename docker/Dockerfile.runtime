@@ -638,12 +638,29 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Install the coding-agent CLIs at the exact Phase 0-proven versions.
 # Exact `@version` pins (NOT ranges) — required for a reproducible runtime image
 # and enforced by scripts/check_dockerfile_pins.py.
+#
+# OMN-13886: the platform-native binary packages are arch-specific. Hardcoding
+# the -linux-x64 variants broke every linux/arm64 build (local Apple Silicon
+# dev lane): npm fails with "notsup Actual cpu: arm64", so the local runtime
+# image could never be rebuilt past OMN-13248 and went stale against the
+# runtime_config schema. Select the platform package via BuildKit TARGETARCH
+# (amd64 → -linux-x64, arm64 → -linux-arm64); versions stay exact pins.
+ARG TARGETARCH
 RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) \
+        CODEX_PLATFORM_SPEC="@openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64"; \
+        CLAUDE_PLATFORM_SPEC="@anthropic-ai/claude-code-linux-x64@2.1.181" ;; \
+      arm64) \
+        CODEX_PLATFORM_SPEC="@openai/codex-linux-arm64@npm:@openai/codex@0.141.0-linux-arm64"; \
+        CLAUDE_PLATFORM_SPEC="@anthropic-ai/claude-code-linux-arm64@2.1.181" ;; \
+      *) echo "Unsupported TARGETARCH='${TARGETARCH}' for coding-agent CLIs (expected amd64 or arm64)" >&2; exit 64 ;; \
+    esac; \
     npm install -g \
         @openai/codex@0.141.0 \
-        @openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64 \
+        "${CODEX_PLATFORM_SPEC}" \
         @anthropic-ai/claude-code@2.1.181 \
-        @anthropic-ai/claude-code-linux-x64@2.1.181; \
+        "${CLAUDE_PLATFORM_SPEC}"; \
     npm cache clean --force
 
 # ============================================================================
