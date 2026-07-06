@@ -16,6 +16,9 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+FRESH_DEPLOY_FITNESS_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "fresh-deploy-fitness.yml"
+)
 RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
@@ -203,6 +206,17 @@ def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
     assert "github.event_name != 'pull_request'" in job["if"]
     assert "github.event.inputs.run_full_tests != 'false'" in job["if"]
     assert job["continue-on-error"] is True
+
+
+def test_short_dependency_gates_have_checkout_budget() -> None:
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    freshness_workflow = _load_yaml(FRESH_DEPLOY_FITNESS_WORKFLOW)
+
+    docker_pin_job = docker_workflow["jobs"]["dockerfile-pin-check"]
+    sibling_lock_job = freshness_workflow["jobs"]["sibling-lock-pins"]
+
+    assert docker_pin_job["timeout-minutes"] >= 15
+    assert sibling_lock_job["timeout-minutes"] >= 20
 
 
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
