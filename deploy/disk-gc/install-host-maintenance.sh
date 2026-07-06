@@ -13,6 +13,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DISK_GC_INSTALLER="${SCRIPT_DIR}/install-disk-gc.sh"
 WORKTREE_REAPER_INSTALLER="${SCRIPT_DIR}/install-worktree-reaper.sh"
+LEGACY_CRON_FILES=(
+  "/etc/cron.d/docker-prune"
+  "/etc/cron.d/omninode-docker-anonymous-volume-prune"
+  "/etc/cron.d/omninode-runner-cleanup"
+)
 
 usage() {
   cat <<'EOF'
@@ -20,12 +25,35 @@ Usage:
   bash deploy/disk-gc/install-host-maintenance.sh
   bash deploy/disk-gc/install-host-maintenance.sh --status
   bash deploy/disk-gc/install-host-maintenance.sh --status --json
+  bash deploy/disk-gc/install-host-maintenance.sh --retire-legacy-cron
   bash deploy/disk-gc/install-host-maintenance.sh --uninstall
 
 Installs or reports both cleanup timers:
   - onex-disk-gc.timer
   - onex-worktree-reaper.timer
+
+Legacy cleanup cron files retired by --retire-legacy-cron:
+  - /etc/cron.d/docker-prune
+  - /etc/cron.d/omninode-docker-anonymous-volume-prune
+  - /etc/cron.d/omninode-runner-cleanup
 EOF
+}
+
+retire_legacy_cron() {
+  local stamp retired_dir file base
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  retired_dir="/etc/cron.d/onex-retired"
+  echo "Retiring legacy host cleanup cron files into ${retired_dir}..."
+  sudo mkdir -p "${retired_dir}"
+  for file in "${LEGACY_CRON_FILES[@]}"; do
+    base="$(basename "${file}")"
+    if [[ -e "${file}" ]]; then
+      sudo mv "${file}" "${retired_dir}/${base}.retired-${stamp}"
+      echo "retired ${file}"
+    else
+      echo "absent ${file}"
+    fi
+  done
 }
 
 status_json() {
@@ -98,6 +126,15 @@ payload = {
     }
     for name, units in UNITS.items()
 }
+legacy_cron_files = [
+    "/etc/cron.d/docker-prune",
+    "/etc/cron.d/omninode-docker-anonymous-volume-prune",
+    "/etc/cron.d/omninode-runner-cleanup",
+]
+payload["legacy_cron"] = {
+    path: {"present": subprocess.run(["test", "-e", path]).returncode == 0}
+    for path in legacy_cron_files
+}
 print(json.dumps(payload, sort_keys=True))
 PY
 }
@@ -122,6 +159,11 @@ fi
 if [[ "${1:-}" == "--uninstall" ]]; then
   bash "${WORKTREE_REAPER_INSTALLER}" --uninstall
   bash "${DISK_GC_INSTALLER}" --uninstall
+  exit 0
+fi
+
+if [[ "${1:-}" == "--retire-legacy-cron" ]]; then
+  retire_legacy_cron
   exit 0
 fi
 

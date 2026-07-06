@@ -9,7 +9,7 @@ worktree GC** model. Neither replaces the other — both are retained.
 | Unit pair | Layer | Cadence | Install |
 |-----------|-------|---------|---------|
 | `onex-worktree-reaper.{timer,service}` | 1 — event-first reaper (reap-on-merge) | every 2 min | `bash install-host-maintenance.sh` |
-| `onex-disk-gc.{timer,service}` | 2 — hourly backstop (worktree GC + docker GC + watermark) | hourly | `bash install-host-maintenance.sh` |
+| `onex-disk-gc.{timer,service}` | 2 — hourly backstop (worktree GC + docker GC + disposable volume GC + watermark) | hourly | `bash install-host-maintenance.sh` |
 
 - **Layer 1** reaps each newly-merged PR's worktree within ~one poll interval by
   reading the `onex.evt.github.pr-merged.v1` projection `?since=<cursor>`.
@@ -21,6 +21,17 @@ Both layers drive the same safety core (`omniclaude/scripts/prune-worktrees.sh`:
 merged + clean + pushed-only; dirty → SKIP). The Mac equivalent of both layers is
 the single `worktree_reaper.py --loop` KeepAlive daemon (Layer 1 fast poll +
 Layer 2 catch-up sweep on start and hourly).
+
+Docker cleanup is repo-owned and conservative:
+
+- `scripts/disk-gc.sh` removes builder cache, stopped containers, and eligible
+  stale images according to `keep-list.yaml`.
+- `scripts/docker-volume-gc.sh` removes only unused disposable volumes:
+  anonymous Docker volumes, `omnibase-infra-boot-*--redpanda-data` volumes, and
+  detached legacy `redpanda_data` volumes. It never removes linked
+  prod/stability-test/judge/dev Redpanda volumes.
+- Legacy host-local cron cleanup can be retired after this installer is active:
+  `bash install-host-maintenance.sh --retire-legacy-cron`.
 
 Full model, convergence proof, and verification commands:
 [`docs/runbooks/worktree-reaper-two-layer-gc.md`](../../docs/runbooks/worktree-reaper-two-layer-gc.md).
