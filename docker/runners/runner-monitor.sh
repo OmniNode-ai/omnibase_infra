@@ -23,12 +23,12 @@
 #      has been queued longer than WEDGE_QUEUE_AGE_SECONDS while the fleet sits
 #      idle (online + not busy), the fleet is wedged.
 #
-#   3. OFFLINE-IDLE-REGISTRATION (OMN-13912): Docker can report
-#      `Up (healthy)` while GitHub reports the runner offline. When GitHub also
-#      says the runner is not busy, the monitor records the named service for
-#      operator remediation. It does not auto-bounce this class because the
-#      org runner API can lag or misreport busy state while a local listener is
-#      still completing an assigned job.
+#   3. OFFLINE-IDLE-REGISTRATION (OMN-13912): GitHub can report a runner
+#      offline while Docker reports `Up (healthy)` and the local listener logs
+#      prove it is still connected/listening or actively running jobs. The host
+#      and listener are the primary truth for this class; GitHub offline is
+#      recorded as degraded/corroborating evidence, not counted unhealthy, until
+#      local evidence also fails.
 #
 #   4. CRASH-LOOP-ON-RESTART (OMN-13109): a blanket `docker restart` crash-loops
 #      these runners — the entrypoint re-runs config.sh, which reports "already
@@ -296,6 +296,20 @@ runner_has_active_job() {
     return 1
 }
 
+runner_has_local_listener_evidence() {
+    local name="${1}"
+    local logs
+
+    logs=$(docker logs --tail "${OFFLINE_IDLE_LOG_TAIL_LINES}" "${name}" 2>&1 || true)
+    if grep -qE 'Listening for Jobs|Runner reconnected|√ Connected to GitHub' <<< "${logs}"; then
+        return 0
+    fi
+    if runner_has_active_job "${name}"; then
+        return 0
+    fi
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Collect current state
 # ---------------------------------------------------------------------------
@@ -313,6 +327,7 @@ wedge_list=()
 crashloop_list=()
 offline_idle_bounce_list=()
 offline_idle_recreate_list=()
+github_degraded_list=()
 # OMN-13947: containers left at Docker Status=created (docker create succeeded,
 # docker start never ran — the signature of a bounce killed mid-batch) matched
 # NONE of crashloop/wedge, so collect_remediation_targets() never re-selected
@@ -357,9 +372,10 @@ else
     ' <<< "${github_json}")
 fi
 
-# Check configured runners against both Docker and GitHub. Docker healthy while
-# GitHub says offline is degraded; that is exactly the state container-only
-# health checks miss.
+# Check configured runners against Docker first. GitHub registration status is
+# useful corroborating evidence, but it is not authoritative during API/status
+# propagation incidents. A Docker-healthy runner with local listener evidence is
+# treated as healthy even if the GitHub org API reports it offline.
 for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     name="${RUNNER_NAME_PREFIX}-${i}"
     total_found=$((total_found + 1))
@@ -405,6 +421,11 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
 
     gh_state="${github_status[$name]:-missing}"
     if [[ "${gh_state}" != "online" ]]; then
+        if runner_has_local_listener_evidence "${name}"; then
+            github_degraded_list+=("${name}: GitHub ${gh_state} ignored; Docker ${docker_state} and local listener evidence present")
+            healthy=$((healthy + 1))
+            continue
+        fi
         if [[ "${github_busy[$name]:-false}" != "true" ]]; then
             first_seen=$(jq -r --arg name "${name}" '.[$name] // empty' <<< "${prev_offline_first_seen_json}" 2>/dev/null || true)
             if [[ ! "${first_seen}" =~ ^[0-9]+$ ]]; then
@@ -700,6 +721,7 @@ jq -n \
     --argjson docker_ok "$docker_ok" \
     --arg timestamp "$(date -Iseconds)" \
     --arg unhealthy_names "$(printf '%s\n' "${unhealthy_list[@]}" 2>/dev/null || echo '')" \
+    --arg github_degraded_names "$(printf '%s\n' "${github_degraded_list[@]}" 2>/dev/null || echo '')" \
     --arg offline_idle_bounce_names "$(printf '%s\n' "${offline_idle_bounce_list[@]}" 2>/dev/null || echo '')" \
     --arg offline_idle_recreate_names "$(printf '%s\n' "${offline_idle_recreate_list[@]}" 2>/dev/null || echo '')" \
     --argjson offline_first_seen "${offline_first_seen_json}" \
@@ -716,6 +738,7 @@ jq -n \
         docker_ok: $docker_ok,
         timestamp: $timestamp,
         unhealthy_names: $unhealthy_names,
+        github_degraded_names: $github_degraded_names,
         offline_idle_bounce_names: $offline_idle_bounce_names,
         offline_idle_recreate_names: $offline_idle_recreate_names,
         offline_first_seen: $offline_first_seen
