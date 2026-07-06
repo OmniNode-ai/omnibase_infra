@@ -215,6 +215,13 @@ def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
     assert "runtime-boot-smoke" not in summary["needs"]
 
 
+def test_compose_required_env_gate_has_checkout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["compose-required-env-coverage"]
+
+    assert job["timeout-minutes"] >= 20
+
+
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
