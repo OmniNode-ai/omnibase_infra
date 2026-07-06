@@ -273,19 +273,9 @@ deploy_runners() {
 # ---------------------------------------------------------------------------
 
 install_prune_cron() {
-    log "Installing docker prune cron on ${RUNNER_HOST} (idempotent tee, not append)..."
-
-    # Two weekly prune jobs (Sunday):
-    #   03:00 — Build cache prune, only when disk > 70%, retain 14 days (336h)
-    #   04:00 — Untagged image prune, retain 14 days (336h)
-    # Weekly (not twice-weekly) to avoid cache thrash from Docker builds.
-    local cron_content
-    cron_content='# Build cache prune (Sunday 03:00) — only when disk > 70%, retain 14 days
-0 3 * * 0 root USAGE=$(df --output=pcent /var/lib/docker | tail -1 | tr -d '"'"' %'"'"'); [ "${USAGE:-0}" -ge 70 ] && docker builder prune -f --filter '"'"'until=336h'"'"'
-# Untagged image prune (Sunday 04:00) — retain 14 days
-0 4 * * 0 root docker image prune -f --filter '"'"'until=336h'"'"''
-
-    run_ssh "echo '${cron_content}' | sudo tee /etc/cron.d/docker-prune > /dev/null && echo '[deploy-runners] Prune cron installed (idempotent).'"
+    log "Skipping legacy docker-prune cron install."
+    log "Host cleanup is owned by deploy/disk-gc/install-host-maintenance.sh."
+    log "Run that installer on ${RUNNER_HOST} to install onex-disk-gc and onex-worktree-reaper timers."
 }
 
 # ---------------------------------------------------------------------------

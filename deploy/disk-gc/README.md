@@ -8,8 +8,8 @@ worktree GC** model. Neither replaces the other — both are retained.
 
 | Unit pair | Layer | Cadence | Install |
 |-----------|-------|---------|---------|
-| `onex-worktree-reaper.{timer,service}` | 1 — event-first reaper (reap-on-merge) | every 2 min | `bash install-worktree-reaper.sh` |
-| `onex-disk-gc.{timer,service}` | 2 — hourly backstop (worktree GC + docker GC + watermark) | hourly | `bash install-disk-gc.sh` |
+| `onex-worktree-reaper.{timer,service}` | 1 — event-first reaper (reap-on-merge) | every 2 min | `bash install-host-maintenance.sh` |
+| `onex-disk-gc.{timer,service}` | 2 — hourly backstop (worktree GC + docker GC + watermark) | hourly | `bash install-host-maintenance.sh` |
 
 - **Layer 1** reaps each newly-merged PR's worktree within ~one poll interval by
   reading the `onex.evt.github.pr-merged.v1` projection `?since=<cursor>`.
@@ -24,3 +24,6 @@ Layer 2 catch-up sweep on start and hourly).
 
 Full model, convergence proof, and verification commands:
 [`docs/runbooks/worktree-reaper-two-layer-gc.md`](../../docs/runbooks/worktree-reaper-two-layer-gc.md).
+
+Use `bash install-host-maintenance.sh --status --json` for closeout evidence
+covering both timers in one machine-readable proof.
