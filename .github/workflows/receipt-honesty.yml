@@ -47,7 +47,10 @@ jobs:
         with:
           fetch-depth: 0
       - name: Clone omnibase_core (provides the receipt-honesty validator)
-        run: git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core
+        run: |
+          set -euo pipefail
+          rm -rf .ci/omnibase_core
+          git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -58,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           uv venv .honesty-venv --python 3.12
-          uv pip install --python .honesty-venv/bin/python ../omnibase_core
+          uv pip install --python .honesty-venv/bin/python .ci/omnibase_core
       - name: Identify changed DoD receipt YAMLs
         id: receipts
         run: |
