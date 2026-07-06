@@ -12,6 +12,14 @@ on:
   merge_group:
   workflow_dispatch:
 
+env:
+  # OMN-14017: this workflow runs a raw `uv sync` (not the hardened
+  # setup-python-uv composite), which otherwise inherits uv's 30s default and
+  # fails HARD on the first PyPI timeout under fleet egress saturation (WS-F).
+  # Match the composite's 600s so downloads ride out contention. Propagates to
+  # every uv invocation in the job.
+  UV_HTTP_TIMEOUT: "600"
+
 concurrency:
   # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
   # entries carry a unique github.ref, so queue entries never cross-cancel.
