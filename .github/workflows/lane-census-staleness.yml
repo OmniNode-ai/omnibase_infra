@@ -41,7 +41,6 @@ on:
       - "scripts/check_lane_census_age.py"
       - "scripts/check_lane_env_drift.py"
       - "scripts/generate_claude_lane_block.py"
-  merge_group:
   workflow_dispatch:
     inputs:
       max_age_days:

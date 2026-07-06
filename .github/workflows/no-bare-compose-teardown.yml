@@ -14,7 +14,6 @@ name: No bare compose teardown (OMN-13886)
 
 on:
   pull_request:
-  merge_group:
   push:
     branches: [dev, main]
 
