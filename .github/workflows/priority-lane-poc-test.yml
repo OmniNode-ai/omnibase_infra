@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# priority-lane-poc-test.yml — OMN-14074
+#
+# Throwaway proof-of-concept: confirms that a job requesting the reserved
+# `omnibase-ci-priority` runner label starts immediately, independent of the
+# general `["self-hosted","omnibase-ci"]` backlog. Not intended to be merged
+# as-is — it exists to prove the mechanism, then gets deleted once the real
+# workflow-level toggle (see OMN-14074) lands.
+
+name: Priority Lane PoC Test (OMN-14074)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  priority-lane-poc:
+    name: Priority lane proof-of-concept
+    runs-on: ["self-hosted", "omnibase-ci-priority"]
+    timeout-minutes: 5
+    steps:
+      - name: Confirm priority-lane pickup
+        run: |
+          echo "Picked up by $(hostname) at $(date -u +%FT%TZ)"
+          echo "This proves a job requesting omnibase-ci-priority bypasses the general backlog."
