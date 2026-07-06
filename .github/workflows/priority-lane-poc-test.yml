@@ -12,7 +12,12 @@
 name: Priority Lane PoC Test (OMN-14074)
 
 on:
-  workflow_dispatch:
+  # workflow_dispatch requires the file to already exist on the default
+  # branch to be API/CLI-dispatchable -- not the case for a throwaway PoC
+  # file on a fresh branch. Use a branch-scoped push trigger instead so the
+  # proof-of-concept can run without merging anything.
+  push:
+    branches: [jonah/omn-14074-ci-priority-runner-lane-poc]
 
 jobs:
   priority-lane-poc:
