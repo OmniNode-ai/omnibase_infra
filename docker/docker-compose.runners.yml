@@ -1,6 +1,6 @@
 # docker-compose.runners.yml
 # OmniNode self-hosted GitHub Actions runners
-# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 56: OMN-14029
+# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029
 #
 # Runs the full steady-state runner fleet. The fleet count is owned by
 # config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
@@ -34,10 +34,10 @@
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
 # Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     - per-runner memory limit (not a reservation); 56 runners
+#   mem_limit: 6g     - per-runner memory limit (not a reservation); 64 runners
 #                       share the host's 91 GB, peak usage ~24 GB observed live
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
-#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 56 runners
+#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 64 runners
 #                       share the host's 32 vCPUs (over-subscription tolerated)
 #   pids_limit: 4096  - prevents fork bombs from runaway test processes
 #
@@ -753,6 +753,102 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-56-creds:/home/runner/.runner-creds
+  omninode-runner-57:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-57
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-57
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-57-creds:/home/runner/.runner-creds
+  omninode-runner-58:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-58
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-58
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-58-creds:/home/runner/.runner-creds
+  omninode-runner-59:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-59
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-59
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-59-creds:/home/runner/.runner-creds
+  omninode-runner-60:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-60
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-60-creds:/home/runner/.runner-creds
+  omninode-runner-61:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-61
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-61
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-61-creds:/home/runner/.runner-creds
+  omninode-runner-62:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-62
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-62
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-62-creds:/home/runner/.runner-creds
+  omninode-runner-63:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-63
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-63
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-63-creds:/home/runner/.runner-creds
+  omninode-runner-64:
+    !!merge <<: *runner-base
+    container_name: omninode-runner-64
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-runner-64
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - runner-64-creds:/home/runner/.runner-creds
 volumes:
   runner-1-creds:
     name: omninode-runner-1-creds
@@ -866,3 +962,19 @@ volumes:
     name: omninode-runner-55-creds
   runner-56-creds:
     name: omninode-runner-56-creds
+  runner-57-creds:
+    name: omninode-runner-57-creds
+  runner-58-creds:
+    name: omninode-runner-58-creds
+  runner-59-creds:
+    name: omninode-runner-59-creds
+  runner-60-creds:
+    name: omninode-runner-60-creds
+  runner-61-creds:
+    name: omninode-runner-61-creds
+  runner-62-creds:
+    name: omninode-runner-62-creds
+  runner-63-creds:
+    name: omninode-runner-63-creds
+  runner-64-creds:
+    name: omninode-runner-64-creds

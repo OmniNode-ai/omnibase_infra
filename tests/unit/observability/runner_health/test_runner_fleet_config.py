@@ -25,10 +25,10 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.runner_host == "omninode-pc.tail75df5e.ts.net"
     assert config.runner_group == "omnibase-ci"
     assert config.runner_name_prefix == "omninode-runner"
-    # OMN-14029: phase-A scale-up to 56 always-on steady-state
+    # OMN-14029: phase-A scale-up to 64 always-on steady-state
     # runners (no burst tier), so burst_count == expected_count.
-    assert config.expected_count == 56
-    assert config.burst_count == 56
+    assert config.expected_count == 64
+    assert config.burst_count == 64
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -188,11 +188,11 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
         assert resolved_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
 
 
-def test_runner_compose_reconciled_to_phase_a_56_fleet() -> None:
-    """OMN-14029: the repo compose must match the Phase-A .201 fleet of 56
+def test_runner_compose_reconciled_to_phase_a_64_fleet() -> None:
+    """OMN-14029: the repo compose must match the Phase-A .201 fleet of 64
     always-on steady-state runners, so `deploy-runners.sh` cannot orphan-remove
     live runners beyond 48 (which would shrink the org CI fleet and trigger an
-    outage). All 56 runners are steady (no burst profiles) and each mounts the
+    outage). All 64 runners are steady (no burst profiles) and each mounts the
     OMN-12433 egress healthcheck script.
     """
     compose = yaml.safe_load(
@@ -206,25 +206,25 @@ def test_runner_compose_reconciled_to_phase_a_56_fleet() -> None:
         for name, definition in compose["services"].items()
         if re.fullmatch(r"omninode-runner-\d+", name)
     }
-    assert len(runner_services) == 56, "expected exactly 56 runner services"
-    # Contiguous runner-1 .. runner-56, no gaps.
+    assert len(runner_services) == 64, "expected exactly 64 runner services"
+    # Contiguous runner-1 .. runner-64, no gaps.
     indices = sorted(int(name.rsplit("-", 1)[1]) for name in runner_services)
-    assert indices == list(range(1, 57))
+    assert indices == list(range(1, 65))
 
     hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     for name, definition in runner_services.items():
-        # All 56 are steady-state: no burst profile gating any runner.
+        # All 64 are steady-state: no burst profile gating any runner.
         assert "profiles" not in definition, f"{name} unexpectedly profile-gated"
         assert hc_mount in definition["volumes"], f"{name} missing healthcheck mount"
         assert definition["volumes"][-1] == (
             f"runner-{name.rsplit('-', 1)[1]}-creds:/home/runner/.runner-creds"
         )
 
-    # A backing named volume exists for each of the 56 runners.
+    # A backing named volume exists for each of the 64 runners.
     volume_names = {
         name for name in compose["volumes"] if re.fullmatch(r"runner-\d+-creds", name)
     }
-    assert len(volume_names) == 56
+    assert len(volume_names) == 64
 
 
 def test_deploy_ships_healthcheck_script_to_host() -> None:
