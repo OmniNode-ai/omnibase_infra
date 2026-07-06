@@ -5,4 +5,4 @@
 -- Drops the verification_receipt_ledger append-only projection table and its
 -- indexes. Indexes are dropped implicitly with the table.
 
-DROP TABLE IF EXISTS verification_receipt_ledger CASCADE;
+DROP TABLE IF EXISTS verification_receipt_ledger;

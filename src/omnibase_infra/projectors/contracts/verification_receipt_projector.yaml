@@ -100,7 +100,6 @@ projection_schema:
     - name: receipt_body
       type: JSONB
       source: payload.receipt_body
-      default: "{}"
       # The entire raw receipt payload, so no on-disk shape is dropped.
   indexes:
     - name: idx_verification_receipt_ledger_ticket_swept

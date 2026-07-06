@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS verification_receipt_ledger (
     overseer_verdict  TEXT,
     idempotent        BOOLEAN,
     phases            JSONB,
-    receipt_body      JSONB NOT NULL DEFAULT '{}',
+    receipt_body      JSONB NOT NULL,
     ingested_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Object-shape guards on the JSONB columns (phases is nullable).
     CONSTRAINT chk_verification_receipt_phases_is_object
