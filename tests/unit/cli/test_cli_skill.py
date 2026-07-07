@@ -56,6 +56,10 @@ _EXPECTED_SKILLS = frozenset(
         "doc_freshness_sweep",
         "dod_verify",
         "duplication_sweep",
+        # OMN-13995: node_dep_cascade_dedup_orchestrator was in the omnimarket
+        # catalog but absent from skill_mapping.yaml, so
+        # `onex skill dep_cascade_dedup` returned "Unknown skill".
+        "dep_cascade_dedup",
         "gap",
         "hostile_reviewer",
         "linear_housekeeping",
@@ -267,6 +271,8 @@ _NODE_BACKED_DOGFOOD_SKILLS: dict[str, str] = {
     "database_sweep": "node_database_sweep",
     "dod_sweep": "node_dod_sweep_orchestrator",
     "coverage_sweep": "node_coverage_sweep",
+    # OMN-13995: post-release dep-bump dedup sweep — node existed, unregistered.
+    "dep_cascade_dedup": "node_dep_cascade_dedup_orchestrator",
 }
 
 
@@ -1104,3 +1110,146 @@ def test_plan_to_tickets_plan_path_is_named_not_positional() -> None:
         "positional CLI arg and causes `--plan-path <file>` to be rejected as "
         "'No such option: --plan-path' (OMN-13718 regression)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# OMN-13995: `dep_cascade_dedup` was documented as a skill and had a real
+# omnimarket backing node (node_dep_cascade_dedup_orchestrator) with request +
+# result models, but skill_mapping.yaml carried no entry, so
+# `onex skill dep_cascade_dedup` returned "Unknown skill" and the post-release
+# dep-bump dedup sweep was unrunnable headless from the canonical infra venv.
+# Same regression class as OMN-13511 / OMN-13712 (node exists, skill unmapped).
+# --------------------------------------------------------------------------- #
+
+
+def test_dep_cascade_dedup_registered_and_wired() -> None:
+    """`dep_cascade_dedup` resolves to the real orchestrator node + result model.
+
+    Reproducing assertion: before this mapping entry existed,
+    ``onex skill dep_cascade_dedup`` returned "Unknown skill". This pins the
+    skill to ``node_dep_cascade_dedup_orchestrator`` and its typed result model
+    so a future rename/removal of either surfaces here at CI time instead of at
+    dispatch time.
+    """
+    registry = load_skill_registry()
+    mapping = registry.get("dep_cascade_dedup")
+    assert mapping is not None, "dep_cascade_dedup absent from skill_mapping.yaml"
+    assert mapping.node_name == "node_dep_cascade_dedup_orchestrator"
+    assert mapping.result_model == (
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_result.ModelDepCascadeDedupResult"
+    )
+
+
+def test_dep_cascade_dedup_payload_validates_against_request_model() -> None:
+    """The OMN-13995 mapping builds a payload ModelDepCascadeDedupRequest accepts.
+
+    ``ModelDepCascadeDedupRequest`` is ``extra="forbid"``, so every CLI arg the
+    mapping surfaces must be a real request-model field. This proves the sweep
+    resolves its roots/repos (``--repos`` → the ``repos`` field it scans), not
+    merely that the skill name is registered. omnimarket is the backing-node
+    package and is not a hard test dependency of omnibase_infra; skip when it is
+    not installed (CI parity with the other omnimarket-optional tests here).
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_request"
+    )
+    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
+
+    registry = load_skill_registry()
+    dedup = registry.get("dep_cascade_dedup")
+    assert dedup is not None
+    assert dedup.node_name == "node_dep_cascade_dedup_orchestrator"
+    payload = _parse_skill_args(
+        dedup,
+        (
+            "--repos",
+            "omnibase_core,omnibase_infra",
+            "--dependency-type",
+            "python",
+            "--label",
+            "dependencies",
+            "--dry-run",
+        ),
+    )
+    request = ModelDepCascadeDedupRequest.model_validate(payload)
+    # repos = the sweep's roots/repos it scans for superseded dep-bump PRs.
+    assert request.repos == ("omnibase_core", "omnibase_infra")
+    assert request.dependency_type == "python"
+    assert request.label == "dependencies"
+    assert request.dry_run is True
+
+
+def test_dep_cascade_dedup_dry_run_omitted_defaults_false() -> None:
+    """Omitting ``--dry-run`` yields a wet-run payload the model accepts.
+
+    Guards the boolean-default wiring: the mapping declares ``dry-run`` with
+    ``default: false`` so an omitted flag produces ``dry_run=False`` rather than
+    dropping the field.
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
+        "model_dep_cascade_dedup_request"
+    )
+    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
+
+    registry = load_skill_registry()
+    dedup = registry.get("dep_cascade_dedup")
+    assert dedup is not None
+    payload = _parse_skill_args(dedup, ())
+    assert payload["dry_run"] is False
+    request = ModelDepCascadeDedupRequest.model_validate(payload)
+    assert request.dry_run is False
+    # repos defaults to the empty tuple → node discovers all OmniNode-ai repos.
+    assert request.repos == ()
+
+
+# --------------------------------------------------------------------------- #
+# OMN-13995 / CLAUDE.md rule #8: the sweep-repo-fallback must FAIL FAST.
+#
+# The dogfood sweeps that resolve a repo-registry root from the environment
+# (integration_sweep, dod_sweep) share a ``_resolve_root`` fallback: when no
+# explicit root is passed AND the repo-registry env var is unset, they must
+# RAISE — never silently default to a wrong path (rule #8: "Fail-fast on
+# missing env, not silent fallback"). This is the exact anti-pattern the rule
+# exists to prevent (a silent default produces cross-machine breakage). We pin
+# BOTH sweeps so a future refactor that swaps the raise for an
+# ``os.environ.get(..., <default>)`` silent fallback is caught here.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("handler_import", "handler_attr"),
+    [
+        (
+            "omnimarket.nodes.node_integration_sweep_orchestrator.handlers."
+            "handler_integration_sweep_orchestrator",
+            "HandlerIntegrationSweepOrchestrator",
+        ),
+        (
+            "omnimarket.nodes.node_dod_sweep_orchestrator.handlers."
+            "handler_dod_sweep_orchestrator",
+            "HandlerDodSweepOrchestrator",
+        ),
+    ],
+)
+def test_sweep_repo_fallback_fails_fast_without_env(
+    monkeypatch: pytest.MonkeyPatch, handler_import: str, handler_attr: str
+) -> None:
+    """`_resolve_root('')` raises when the repo-registry env is unset (rule #8).
+
+    Both integration_sweep and dod_sweep fall back to the ``ONEX_CC_REPO_PATH``
+    repo-registry env when no explicit root is supplied. With it unset and no
+    explicit path, resolution MUST raise rather than silently default — this is
+    the CLAUDE.md rule #8 fail-fast discipline the dep_cascade_dedup work must
+    preserve, not weaken.
+    """
+    module = pytest.importorskip(handler_import)
+    handler_cls = getattr(module, handler_attr)
+
+    # Ensure the fallback env is absent so the no-explicit-root path is exercised.
+    monkeypatch.delenv("ONEX_CC_REPO_PATH", raising=False)
+
+    with pytest.raises(RuntimeError, match="ONEX_CC_REPO_PATH is not set"):
+        handler_cls._resolve_root("")
