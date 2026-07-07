@@ -333,6 +333,7 @@ github_degraded_list=()
 # NONE of crashloop/wedge, so collect_remediation_targets() never re-selected
 # them: a straggler that survived one bounce attempt was orphaned forever.
 stuck_created_list=()
+missing_container_list=()
 github_api_failed=false
 now_epoch=$(date -u +%s)
 offline_first_seen_lines=""
@@ -382,6 +383,7 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
     docker_state="${current_status[$name]:-MISSING (no container)}"
 
     if [[ "${docker_state}" == "MISSING (no container)" ]]; then
+        missing_container_list+=("${name}: MISSING (no container)")
         unhealthy_list+=("${name}: MISSING (no container)")
         continue
     fi
@@ -521,6 +523,12 @@ fi
 collect_remediation_targets() {
     local targets=()
     local entry svc
+    if [[ "${#missing_container_list[@]}" -gt 0 ]]; then
+        for entry in "${missing_container_list[@]}"; do
+            svc="${entry%%:*}"
+            [[ "${svc}" =~ ^${RUNNER_NAME_PREFIX}-[0-9]+$ ]] && targets+=("${svc}")
+        done
+    fi
     if [[ "${#offline_idle_recreate_list[@]}" -gt 0 ]]; then
         for entry in "${offline_idle_recreate_list[@]}"; do
             svc="${entry%%:*}"
