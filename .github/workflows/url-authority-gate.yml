@@ -38,6 +38,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_HTTP_TIMEOUT: "600"
+
 jobs:
   url-authority-gate:
     timeout-minutes: 30

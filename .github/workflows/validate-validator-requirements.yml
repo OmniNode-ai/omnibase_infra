@@ -17,6 +17,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_HTTP_TIMEOUT: "600"
+
 jobs:
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
