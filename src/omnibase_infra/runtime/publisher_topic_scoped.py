@@ -30,7 +30,7 @@ Example Usage:
     # Create topic-scoped publisher from contract
     publisher = PublisherTopicScoped(
         event_bus=kafka_event_bus,
-        allowed_topics={"onex.fsm.state.transitions.v1", "onex.events.v1"},
+        allowed_topics={``onex.fsm.state.transitions.v1``, "onex.events.v1"},
         environment="dev",
     )
 
@@ -38,7 +38,7 @@ Example Usage:
     await publisher.publish(
         event_type="state.transition",
         payload={"from": "pending", "to": "active"},
-        topic="onex.fsm.state.transitions.v1",
+        topic=``onex.fsm.state.transitions.v1``,
         correlation_id="abc-123",
     )
 
