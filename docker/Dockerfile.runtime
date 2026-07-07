@@ -661,14 +661,13 @@ RUN set -eu; \
     npm config set fetch-retry-maxtimeout 120000; \
     npm config set fetch-timeout 300000; \
     for attempt in 1 2 3; do \
-        if npm install -g \
+        npm install -g \
             @openai/codex@0.141.0 \
             "${CODEX_PLATFORM_SPEC}" \
             @anthropic-ai/claude-code@2.1.181 \
-            "${CLAUDE_PLATFORM_SPEC}"; then \
-            break; \
-        fi; \
+            "${CLAUDE_PLATFORM_SPEC}" && break; \
         status="$?"; \
+        echo "npm install attempt ${attempt}/3 failed with exit ${status}" >&2; \
         if [ "$attempt" = "3" ]; then exit "$status"; fi; \
         sleep "$((attempt * 20))"; \
     done; \
