@@ -50,7 +50,18 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .ci/omnibase_core
-          git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core
+          for attempt in 1 2 3 4; do
+            if git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core; then
+              exit 0
+            fi
+            rm -rf .ci/omnibase_core
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::omnibase_core clone failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "::warning::omnibase_core clone failed on attempt ${attempt}; retrying"
+            sleep $((attempt * 10))
+          done
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
