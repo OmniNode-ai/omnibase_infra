@@ -38,6 +38,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_HTTP_TIMEOUT: "600"
+
 jobs:
   url-authority-gate:
     timeout-minutes: 30
@@ -60,7 +63,14 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: |
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
 
       - name: Run url-authority gate (full-repo, against frozen baseline)
         run: |

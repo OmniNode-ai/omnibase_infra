@@ -51,7 +51,13 @@ jobs:
       - name: Enforce validator-requirements.yaml
         run: |
           cd omnibase_core
-          uv sync --all-extras
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
           uv run python -m omnibase_core.validation.validator_requirements_consumer \
             --repo omnibase_infra \
             --repo-root .. \
