@@ -29,7 +29,7 @@ Example Usage:
     >>>
     >>> # Using the preferred field name
     >>> config = ModelProjectorNotificationConfig(
-    ...     expected_topic="onex.fsm.state.transitions.v1",
+    ...     expected_topic=``onex.fsm.state.transitions.v1``,
     ...     state_column="current_state",
     ...     aggregate_id_column="entity_id",
     ...     version_column="version",
@@ -38,7 +38,7 @@ Example Usage:
     >>>
     >>> # Using the backwards-compatible alias
     >>> config = ModelProjectorNotificationConfig(
-    ...     topic="onex.fsm.state.transitions.v1",  # alias for expected_topic
+    ...     topic=``onex.fsm.state.transitions.v1``,  # alias for expected_topic
     ...     state_column="current_state",
     ...     aggregate_id_column="entity_id",
     ... )
@@ -71,7 +71,7 @@ class ModelProjectorNotificationConfig(BaseModel):
             publishing topic is determined by TransitionNotificationPublisher's
             configuration. ProjectorShell will log a warning if this value differs
             from the publisher's configured topic. Example topics:
-            - "onex.fsm.state.transitions.v1"
+            - ``onex.fsm.state.transitions.v1``
             - "registration.state.transitions.v1"
             Accepts "topic" as an alias for backwards compatibility.
         state_column: Name of the column that contains the FSM state value.
@@ -88,7 +88,7 @@ class ModelProjectorNotificationConfig(BaseModel):
 
     Example:
         >>> config = ModelProjectorNotificationConfig(
-        ...     expected_topic="onex.fsm.state.transitions.v1",
+        ...     expected_topic=``onex.fsm.state.transitions.v1``,
         ...     state_column="current_state",
         ...     aggregate_id_column="entity_id",
         ...     version_column="version",
