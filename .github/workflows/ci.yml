@@ -1489,116 +1489,85 @@ jobs:
       mode: compose
 
   ci-summary:
-    timeout-minutes: 30
     name: CI Summary
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
-    # OMN-9120: runtime-boot-smoke runs as an advisory check during the compose-mode
-    # boot stabilization period. It is intentionally NOT in `needs` so a smoke-test
-    # failure does not block CI Summary. A follow-up ticket promotes it to a hard
-    # gate once compose-mode boot is consistently green on main. See CLAUDE.md
-    # "Strict-mode invariants land AFTER all downstream consumers are compliant".
+    # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for
+    # omnibase_infra (OMN-4497), implemented as a NO-`needs`, GitHub-hosted,
+    # FAIL-CLOSED poller. A `needs`-gated job gets no check-run until its `needs`
+    # terminalize, so under self-hosted fleet saturation the old needs-based CI
+    # Summary was ABSENT forever and the PR wedged BLOCKED with 0 failing / 0
+    # pending checks and no auto-recovery. With NO `needs` this job's check-run
+    # instantiates immediately (the required context can never be absent); it
+    # polls the current run's job conclusions and posts a terminal
+    # success/failure within a bounded deadline.
     #
-    # OMN-13867: `test-failure-ratchet` is ADVISORY. It stays in `needs` so CI
-    # Summary still waits for it and surfaces its result, but its result is
-    # intentionally EXCLUDED from the pass/fail condition below — an advisory
-    # ratchet hiccup (or a transient JUnit-artifact download flake) must NOT fail
-    # the required CI Summary aggregate. Real test pass/fail is strictly enforced
-    # by the CI Tests Gate (`tests-gate`), which remains a hard blocking input.
-    needs: [zone-filter, tests-gate, test-failure-ratchet, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-compliance, contract-sync-gate]
+    # DEFAULT-DENY, FAIL-CLOSED: green ONLY when every strict + skippable
+    # aggregate gate is present+good AND no non-allowlisted job failed. The
+    # auditable gating set + soft-allowlist live in scripts/ci/ci_summary_gate.py
+    # (unit-tested in tests/ci/test_ci_summary_gate.py); it reproduces the exact
+    # strictness of the old needs-based condition (13 strict `== success` gates,
+    # 4 `success||skipped` gates) and adds a strictly-stronger default-deny sweep.
+    # Pure hosted GitHub-API polling: ZERO self-hosted/LAN dependency, so it is
+    # immune to fleet saturation. This also supersedes the (unset, no-op)
+    # OMNI_REQUIRED_CI_RUNS_ON_JSON merge_group runner-override that used to sit on
+    # this job's runs-on selector.
+    #
+    # DO NOT rename — the job name IS the required context; a rename re-wedges
+    # every PR.
+    runs-on: ubuntu-latest
     if: always()
-
+    permissions:
+      actions: read
+      contents: read
+    # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
+    # Kept under any run-cancellation window so the required context ALWAYS posts
+    # a terminal state first, and comfortably above the tests-gate 30m budget plus
+    # self-hosted queueing so a slow-but-valid matrix is not failed prematurely.
+    timeout-minutes: 100
     steps:
-      - name: Check test results
+      - name: Checkout (gate script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Poll run jobs and compute fail-closed CI Summary verdict
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          # Bounded poll window (minutes) — kept under the run-cancel window so
+          # the required context always reaches a terminal state first.
+          DEADLINE_MINUTES: "90"
+          POLL_INTERVAL_SECONDS: "45"
         run: |
-          gate="${{ needs.tests-gate.result }}"
-          ratchet="${{ needs.test-failure-ratchet.result }}"
-          lint="${{ needs.lint.result }}"
-          onex="${{ needs.onex-validation.result }}"
-          infrahnd="${{ needs.infra-node-handler-ownership.result }}"
-          migrationfreeze="${{ needs.migration-freeze.result }}"
-          fingerprint="${{ needs.fingerprint-check.result }}"
-          demoloop="${{ needs.demo-loop-gate.result }}"
-          topicenumdrift="${{ needs.topic-enum-drift.result }}"
-          topicnaminglint="${{ needs.topic-naming-lint.result }}"
-          topicdriftcheck="${{ needs.topic-drift-check.result }}"
-          archinvariants="${{ needs.arch-invariants.result }}"
-          schemahandshake="${{ needs.schema-handshake.result }}"
-          migrationintegration="${{ needs.migration-integration.result }}"
-          migrationrequiredcheck="${{ needs.migration-required-check.result }}"
-          compliance="${{ needs.compliance.result }}"
-          contractcompliance="${{ needs.contract-compliance.result }}"
-          contractsync="${{ needs.contract-sync-gate.result }}"
-
-          # OMN-13867: $ratchet is deliberately absent from this condition —
-          # the Test-Failure Ratchet Gate is advisory and must not block merges.
-          if [[ "$gate" == "success" ]] && \
-             [[ "$lint" == "success" ]] && \
-             [[ "$onex" == "success" ]] && \
-             [[ "$infrahnd" == "success" ]] && \
-             [[ "$migrationfreeze" == "success" ]] && \
-             [[ "$fingerprint" == "success" ]] && \
-             [[ "$demoloop" == "success" ]] && \
-             [[ "$topicenumdrift" == "success" ]] && \
-             [[ "$topicnaminglint" == "success" ]] && \
-             [[ "$topicdriftcheck" == "success" ]] && \
-             [[ "$archinvariants" == "success" ]] && \
-             [[ "$schemahandshake" == "success" ]] && \
-             [[ "$migrationintegration" == "success" || "$migrationintegration" == "skipped" ]] && \
-             [[ "$migrationrequiredcheck" == "success" ]] && \
-             [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
-             [[ "$contractcompliance" == "success" || "$contractcompliance" == "skipped" ]] && \
-             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
-            echo "All checks passed successfully"
-            echo "CI Tests Gate (15 splits): Passed"
-            echo "Test-Failure Ratchet Gate (advisory, non-blocking): $ratchet"
-            echo "Code Quality: Passed"
-            echo "ONEX Validators: Passed"
-            echo "Infra Node Handler Ownership: Passed"
-            echo "Migration Freeze: Passed"
-            echo "Fingerprint Check: Passed"
-            echo "Demo Loop Gate: Passed"
-            echo "Topic Enum Drift Check: Passed"
-            echo "Topic Naming Lint: Passed"
-            echo "Topic Drift Check: Passed"
-            echo "Arch Invariants: Passed"
-            echo "Kafka Schema Handshake: Passed"
-            echo "Migration Integration: Passed"
-            echo "Writer-Migration Coupling Check: Passed"
-            echo "Contract Compliance: $compliance"
-            echo "Contract Compliance Check (YAML): $contractcompliance"
-            echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
-            exit 0
-          else
-            echo "Checks failed"
-            echo "CI Tests Gate: $gate"
-            echo "Test-Failure Ratchet Gate (advisory, non-blocking): $ratchet"
-            echo "Lint: $lint"
-            echo "ONEX Validators: $onex"
-            echo "Infra Node Handler Ownership: $infrahnd"
-            echo "Migration Freeze: $migrationfreeze"
-            echo "Fingerprint Check: $fingerprint"
-            echo "Demo Loop Gate: $demoloop"
-            echo "Topic Enum Drift Check: $topicenumdrift"
-            echo "Topic Naming Lint: $topicnaminglint"
-            echo "Topic Drift Check: $topicdriftcheck"
-            echo "Arch Invariants: $archinvariants"
-            echo "Kafka Schema Handshake: $schemahandshake"
-            echo "Migration Integration: $migrationintegration"
-            echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
-            echo "Contract Compliance: $compliance"
-            echo "Contract Compliance Check (YAML): $contractcompliance"
-            echo "Contract Sync Gate (Wave C): $contractsync"
-            echo "Runtime Boot Smoke: advisory (see runtime-boot-smoke job output)"
-            exit 1
-          fi
+          # GitHub invokes this step as `bash -e {0}`; disable errexit because the
+          # gate script's non-zero exit codes are handled explicitly below
+          # (2 = PENDING must NOT terminate the poll loop).
+          set +e
+          set -uo pipefail
+          deadline=$(( $(date +%s) + DEADLINE_MINUTES * 60 ))
+          attempt=0
+          while true; do
+            attempt=$((attempt + 1))
+            if ! gh api --paginate \
+                "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
+                --jq '.jobs[]' | jq -s '.' > jobs.json; then
+              echo "gh api fetch failed (attempt ${attempt}); retrying after ${POLL_INTERVAL_SECONDS}s"
+              sleep "${POLL_INTERVAL_SECONDS}"
+              continue
+            fi
+            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json
+            rc=$?
+            case "${rc}" in
+              0) echo "::notice::CI Summary = SUCCESS (all gating jobs provably passed)"; exit 0 ;;
+              1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job failed/cancelled)"; exit 1 ;;
+              2) : ;;  # PENDING — gating jobs still running; keep polling
+              *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending — failing closed"
+              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --report-only || true
+              exit 1
+            fi
+            sleep "${POLL_INTERVAL_SECONDS}"
+          done
 
   # Cross-repo Kafka boundary compatibility test (OMN-3256)
   # Verifies that producer and consumer Pydantic models can round-trip across
