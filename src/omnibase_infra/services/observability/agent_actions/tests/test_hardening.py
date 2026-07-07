@@ -34,6 +34,11 @@ from omnibase_infra.services.observability.agent_actions.models.model_agent_acti
     MAX_RAW_PAYLOAD_SIZE_BYTES,
     ModelAgentAction,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+)
 
 # =============================================================================
 # Payload Size Limit Tests (Task 1)
@@ -366,17 +371,15 @@ class TestConsumerMetricsEnhancements:
     async def test_per_topic_received_tracking(self) -> None:
         """Per-topic received counters should increment correctly."""
         metrics = ConsumerMetrics()
-        await metrics.record_received(5, topic="onex.evt.omniclaude.agent-actions.v1")
-        await metrics.record_received(
-            3, topic="onex.evt.omniclaude.routing-decision.v1"
-        )
-        await metrics.record_received(2, topic="onex.evt.omniclaude.agent-actions.v1")
+        await metrics.record_received(5, topic=SUFFIX_OMNICLAUDE_AGENT_ACTIONS)
+        await metrics.record_received(3, topic=SUFFIX_OMNICLAUDE_ROUTING_DECISION)
+        await metrics.record_received(2, topic=SUFFIX_OMNICLAUDE_AGENT_ACTIONS)
 
         snapshot = await metrics.snapshot()
         per_topic = snapshot["per_topic_received"]
         assert isinstance(per_topic, dict)
-        assert per_topic["onex.evt.omniclaude.agent-actions.v1"] == 7
-        assert per_topic["onex.evt.omniclaude.routing-decision.v1"] == 3
+        assert per_topic[SUFFIX_OMNICLAUDE_AGENT_ACTIONS] == 7
+        assert per_topic[SUFFIX_OMNICLAUDE_ROUTING_DECISION] == 3
 
     @pytest.mark.asyncio
     async def test_per_topic_processed_tracking(self) -> None:
@@ -491,7 +494,7 @@ class TestDLQConfiguration:
             postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert config.dlq_enabled is True
-        assert config.dlq_topic == "onex.evt.omniclaude.agent-actions-dlq.v1"
+        assert config.dlq_topic == SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ
         assert config.max_retry_count == 3
 
     def test_dlq_disabled(self) -> None:
