@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# onex-topic-sot: canonical registry for cost-snapshot projection topic constants consumed by snapshot_cache callers (OMN-13944)
 """Process-local cache for latest cost projection snapshots."""
 
 from __future__ import annotations

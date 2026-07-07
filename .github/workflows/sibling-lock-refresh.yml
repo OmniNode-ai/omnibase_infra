@@ -47,7 +47,7 @@ concurrency:
 jobs:
   refresh:
     name: Refresh sibling locks
-    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
