@@ -57,7 +57,7 @@ jobs:
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
     # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@main
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@dev
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
