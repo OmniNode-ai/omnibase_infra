@@ -37,7 +37,9 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    # OMN-14017: sibling checkout plus uv sync can consume the default budget
+    # while retrying transient GitHub/PyPI fetch failures.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo
