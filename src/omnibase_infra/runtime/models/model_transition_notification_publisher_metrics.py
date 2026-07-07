@@ -21,7 +21,7 @@ Example:
     >>> from datetime import datetime, UTC
     >>> metrics = ModelTransitionNotificationPublisherMetrics(
     ...     publisher_id="publisher-001",
-    ...     topic="onex.fsm.state.transitions.v1",
+    ...     topic=``onex.fsm.state.transitions.v1``,
     ...     notifications_published=100,
     ...     last_publish_at=datetime.now(UTC),
     ... )
@@ -96,7 +96,7 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         >>> from datetime import datetime, UTC
         >>> metrics = ModelTransitionNotificationPublisherMetrics(
         ...     publisher_id="prod-publisher-001",
-        ...     topic="onex.fsm.state.transitions.v1",
+        ...     topic=``onex.fsm.state.transitions.v1``,
         ...     notifications_published=1000,
         ...     notifications_failed=5,
         ...     average_publish_duration_ms=1.5,

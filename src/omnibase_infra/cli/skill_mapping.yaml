@@ -181,6 +181,20 @@ skills:
     args:
       - {name: omni-home, payload_field: omni_home, arg_type: string}
       - {name: checks, payload_field: checks, arg_type: string_list}
+  # OMN-13995: node_dep_cascade_dedup_orchestrator existed in the omnimarket
+  # catalog with request+result models, but `onex skill dep_cascade_dedup`
+  # returned "Unknown skill" (no mapping row) so the post-release dep-bump
+  # dedup sweep was unrunnable headless. Additive registration only; args
+  # mirror ModelDepCascadeDedupRequest.
+  - skill_name: dep_cascade_dedup
+    node_name: node_dep_cascade_dedup_orchestrator
+    result_model: omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models.model_dep_cascade_dedup_result.ModelDepCascadeDedupResult
+    args:
+      - {name: repos, payload_field: repos, arg_type: string_list}
+      - {name: dependency-type, payload_field: dependency_type, arg_type: string}
+      - {name: label, payload_field: label, arg_type: string}
+      - {name: close-comment, payload_field: close_comment, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: gap
     node_name: node_gap_compute
     result_model: omnimarket.nodes.node_gap_compute.models.model_gap_compute_result.ModelGapComputeResult
