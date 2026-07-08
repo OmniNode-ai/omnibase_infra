@@ -74,6 +74,7 @@ SELF_JOB_NAME = "CI Summary"
 # the ``name:`` display strings the Actions jobs API returns (verified against
 # ci.yml on 2026-07-07).
 STRICT_GATE_JOBS: tuple[str, ...] = (
+    "occ-preflight / eligibility",  # occ-preflight reusable gate
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
     "ONEX Validators",  # onex-validation

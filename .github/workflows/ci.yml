@@ -53,6 +53,19 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # OCC preflight is the first non-OCC CI dependency. If central OCC
+  # evidence is missing or red, no runner-heavy validation jobs fan out.
+  occ-preflight:
+    # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
   # =============================================================================
@@ -61,6 +74,7 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
+    needs: occ-preflight
     uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@35fce1b6ae16a8fefec8996e26c1d66a3fb693c2
     with:
       python-version: "3.12"
@@ -74,6 +88,7 @@ jobs:
   # =============================================================================
 
   lint:
+    needs: occ-preflight
     name: Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -180,6 +195,7 @@ jobs:
 
   # ONEX validation - Infrastructure-specific validators
   onex-validation:
+    needs: occ-preflight
     name: ONEX Validators
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -288,6 +304,7 @@ jobs:
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
   infra-node-handler-ownership:
+    needs: occ-preflight
     name: Infra Node Handler Ownership
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -309,6 +326,7 @@ jobs:
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
+    needs: occ-preflight
     name: Fingerprint Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -341,6 +359,7 @@ jobs:
   # Demo loop assertion gate -- validates canonical event pipeline (OMN-2297)
   # Runs in CI mode (skips live infra checks) as pre-deploy validation
   demo-loop-gate:
+    needs: occ-preflight
     name: Demo Loop Gate
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -374,6 +393,7 @@ jobs:
   # Migration freeze enforcement - blocks new migrations when .migration_freeze exists
   # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
   migration-freeze:
+    needs: occ-preflight
     name: Migration Freeze Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -402,6 +422,7 @@ jobs:
   # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
   # Ensures generated enum files stay in sync with contract.yaml definitions
   topic-enum-drift:
+    needs: occ-preflight
     name: Topic Enum Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -435,6 +456,7 @@ jobs:
   # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
+    needs: occ-preflight
     name: Topic Naming Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -479,6 +501,7 @@ jobs:
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
   topic-drift-check:
+    needs: occ-preflight
     name: Topic Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -549,6 +572,7 @@ jobs:
   # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.
   # Requires sibling repos omniintelligence + omnimemory to be checked out.
   schema-handshake:
+    needs: occ-preflight
     name: Kafka Schema Handshake (OMN-3411)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -661,6 +685,7 @@ jobs:
   # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
   # topic definition files. Pre-existing violations are suppressed via baseline.
   arch-invariants:
+    needs: occ-preflight
     name: Arch Invariants (OMN-3343)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -693,6 +718,7 @@ jobs:
             --baseline scripts/validation/topic_literal_baseline.txt
 
   plugin-env-service-completeness:
+    needs: occ-preflight
     name: "Plugin ENV->Service Completeness (OMN-4313)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -725,6 +751,7 @@ jobs:
           uv run pytest tests/ci/test_plugin_env_service_completeness.py -v
 
   compose-required-env-coverage:
+    needs: occ-preflight
     name: "Compose Required-Env Coverage (OMN-5439)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -758,6 +785,7 @@ jobs:
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
+    needs: occ-preflight
     timeout-minutes: 30
     name: Contract Path Pre-Flight
     runs-on: >-
@@ -805,6 +833,7 @@ jobs:
           fi
 
   contract-sync-gate:
+    needs: occ-preflight
     timeout-minutes: 30
     name: Contract Sync Gate (Wave C) [OMN-8915]
     runs-on: >-
@@ -814,7 +843,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -845,7 +874,7 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
+    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -928,8 +957,8 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
-    if: needs.zone-filter.outputs.docs_only != 'true'
+    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -1013,6 +1042,7 @@ jobs:
   # version matrix defined in omni_home/standards/version-matrix.yaml.
   # Depends on OMN-4803 (check_version_pins.py must exist in omni_home main).
   version-pin-check:
+    needs: occ-preflight
     name: Version Pin Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1082,6 +1112,7 @@ jobs:
   # Conditional: only runs if the `onex compliance` command is available.
   # ============================================================================
   compliance:
+    needs: occ-preflight
     name: Contract Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1151,8 +1182,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [test-parallel, detect-changes]
-    if: always()
+    needs: [occ-preflight, test-parallel, detect-changes]
+    if:  needs.occ-preflight.result == 'success' && (always())
     steps:
       - name: Check test matrix results
         env:
@@ -1175,6 +1206,7 @@ jobs:
   # ============================================================================
 
   migration-conflict-check:
+    needs: occ-preflight
     timeout-minutes: 30
     name: Cross-Repo Migration Conflicts
     runs-on: >-
@@ -1196,6 +1228,7 @@ jobs:
 
 
   contract-compliance:
+    needs: occ-preflight
     name: Contract Compliance Check
     runs-on: >-
       ${{
@@ -1205,7 +1238,7 @@ jobs:
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 20
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push'
+    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Checkout onex_change_control
@@ -1275,10 +1308,10 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [test-parallel, detect-changes]
+    needs: [occ-preflight, test-parallel, detect-changes]
     # Run on PRs and merge_group events whenever there were actual test runs.
     # Also run when docs-only so we detect ratchet-baseline staleness.
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    if:  needs.occ-preflight.result == 'success' && (always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group'))
     timeout-minutes: 10
 
     steps:
@@ -1482,8 +1515,8 @@ jobs:
   # ============================================================================
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
-    needs: [tests-gate]
-    if: needs.tests-gate.result == 'success'
+    needs: [occ-preflight, tests-gate]
+    if: needs.occ-preflight.result == 'success' && (needs.tests-gate.result == 'success')
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose
@@ -1575,6 +1608,7 @@ jobs:
   # Pairs with known drift are marked xfail — they pass as XFAIL until the
   # upstream fix (e.g. OMN-3248) lands, at which point xfail is removed.
   kafka-boundary-compat:
+    needs: occ-preflight
     name: Kafka Boundary Compat (OMN-3256)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1679,6 +1713,7 @@ jobs:
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:
+    needs: occ-preflight
     timeout-minutes: 30
     name: Writer-Migration Coupling Check
     runs-on: >-
@@ -1709,8 +1744,8 @@ jobs:
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
     name: Migration Integration Test
-    needs: zone-filter
-    if: needs.zone-filter.outputs.docs_only != 'true'
+    needs: [occ-preflight, zone-filter]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
@@ -1876,6 +1911,7 @@ jobs:
           echo "All 24 tables present."
 
   ai-slop-check:
+    needs: occ-preflight
     timeout-minutes: 30
     name: AI-Slop Pattern Check (strict, PR diff)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
