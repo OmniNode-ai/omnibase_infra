@@ -212,7 +212,10 @@ def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
 
     assert "github.event_name != 'pull_request'" in job["if"]
     assert "needs.tests-gate.result == 'success'" in job["if"]
-    assert "runtime-boot-smoke" not in summary["needs"]
+    # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
+    # whether it declares `needs`, runtime-boot-smoke must never be a dependency
+    # of it (a PR-skipped advisory job must not wedge the required summary gate).
+    assert "runtime-boot-smoke" not in summary.get("needs", [])
 
 
 def test_compose_required_env_gate_has_checkout_budget() -> None:
