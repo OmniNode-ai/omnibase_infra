@@ -126,12 +126,12 @@ class TestHandlerLedgerAppendInitialization:
     async def test_initialize_raises_when_dsn_not_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """initialize() raises RuntimeHostError when no DSN env var is set.
+        """initialize() raises RuntimeHostError when no DSN is supplied.
 
         The auto-wiring resolver never calls initialize() on constructed
         handlers, so the composed HandlerDb only connects lazily -- and lazily
-        connecting with no configured DSN must fail loudly, not silently
-        no-op (OMN-14140).
+        connecting with no configured DSN must fail loudly, not silently no-op
+        (OMN-14140). Handler-level code does not read environment directly.
         """
         monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
         monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -146,13 +146,12 @@ class TestHandlerLedgerAppendInitialization:
     async def test_initialize_connects_composed_db_handler_when_dsn_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """initialize() connects the composed HandlerDb using the resolved DSN."""
-        monkeypatch.setenv("OMNIBASE_INFRA_DB_URL", "postgresql://test-dsn")
+        """initialize() connects the composed HandlerDb using config DSN."""
         container = make_mock_container()
         handler = HandlerLedgerAppend(container)
         handler._db_handler.initialize = AsyncMock()  # type: ignore[method-assign]
 
-        await handler.initialize({})
+        await handler.initialize({"dsn": "postgresql://test-dsn"})
 
         handler._db_handler.initialize.assert_awaited_once_with(
             {"dsn": "postgresql://test-dsn"}
@@ -165,9 +164,8 @@ class TestHandlerLedgerAppendInitialization:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Repeated _ensure_db_ready calls connect at most once."""
-        monkeypatch.setenv("OMNIBASE_INFRA_DB_URL", "postgresql://test-dsn")
         container = make_mock_container()
-        handler = HandlerLedgerAppend(container)
+        handler = HandlerLedgerAppend(container, db_dsn="postgresql://test-dsn")
         handler._db_handler.initialize = AsyncMock()  # type: ignore[method-assign]
 
         await handler._ensure_db_ready()
@@ -180,7 +178,7 @@ class TestHandlerLedgerAppendInitialization:
     async def test_append_raises_when_dsn_not_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """append() raises RuntimeHostError when no DSN env var is set."""
+        """append() raises RuntimeHostError when no DSN is supplied."""
         monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
         monkeypatch.delenv("DATABASE_URL", raising=False)
         container = make_mock_container()

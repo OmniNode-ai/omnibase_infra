@@ -1724,11 +1724,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.ledger-append",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.ledger-append.v1"
     },
@@ -1739,11 +1741,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.ledger-query",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.ledger-query.v1"
     },

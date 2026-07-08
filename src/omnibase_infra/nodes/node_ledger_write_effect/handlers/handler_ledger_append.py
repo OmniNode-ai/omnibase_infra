@@ -50,7 +50,6 @@ import base64
 import binascii
 import json
 import logging
-import os
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -71,11 +70,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-# Env vars checked (in order) to resolve the ledger's PostgreSQL DSN for the
-# internally-composed HandlerDb. Mirrors the same precedence used elsewhere in
-# the runtime (e.g. runtime_host_process.py "db" handler-type config injection).
-_DSN_ENV_VARS: tuple[str, ...] = ("OMNIBASE_INFRA_DB_URL", "DATABASE_URL")
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_LEDGER_APPEND: str = "ledger-append-handler"
@@ -128,6 +122,7 @@ class HandlerLedgerAppend:
     def __init__(
         self,
         container: ModelONEXContainer,
+        db_dsn: str | None = None,
     ) -> None:
         """Initialize the ledger append handler.
 
@@ -136,9 +131,13 @@ class HandlerLedgerAppend:
                 composed internally from this container (OMN-14140) so the
                 auto-wiring resolver can construct this handler with a
                 single, always-resolvable constructor argument.
+            db_dsn: Optional PostgreSQL DSN supplied by the runtime auto-wiring
+                boundary. Handlers do not read environment directly; runtime
+                composition owns that IO boundary.
         """
         self._container = container
         self._db_handler = HandlerDb(container)
+        self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._initialized: bool = False
         self._db_init_lock = asyncio.Lock()
 
@@ -161,12 +160,15 @@ class HandlerLedgerAppend:
         append() connects lazily via `_ensure_db_ready()` regardless.
 
         Args:
-            config: Configuration dict (currently unused; DSN is resolved
-                from the environment -- see `_ensure_db_ready`).
+            config: Optional configuration dict. A non-empty ``dsn`` value
+                updates the runtime-supplied DSN before connecting.
 
         Raises:
             RuntimeHostError: If no PostgreSQL DSN is configured.
         """
+        config_dsn = config.get("dsn")
+        if isinstance(config_dsn, str) and config_dsn.strip():
+            self._db_dsn = config_dsn.strip()
         await self._ensure_db_ready()
         logger.info(
             "%s initialized successfully",
@@ -191,30 +193,23 @@ class HandlerLedgerAppend:
         lock so concurrent first-dispatches connect exactly once.
 
         Raises:
-            RuntimeHostError: If no PostgreSQL DSN is configured via
-                OMNIBASE_INFRA_DB_URL or DATABASE_URL.
+            RuntimeHostError: If no PostgreSQL DSN was supplied by runtime
+                composition or initialize({"dsn": ...}).
         """
         if self._initialized:
             return
         async with self._db_init_lock:
             if self._initialized:
                 return
-            dsn = next(
-                (
-                    value.strip()
-                    for name in _DSN_ENV_VARS
-                    if (value := os.environ.get(name, "").strip())
-                ),
-                "",
-            )
+            dsn = self._db_dsn
             if not dsn:
                 ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="ledger.append.connect",
                 )
                 raise RuntimeHostError(
-                    "Missing PostgreSQL DSN for ledger persistence -- set "
-                    f"one of {_DSN_ENV_VARS!r}",
+                    "Missing PostgreSQL DSN for ledger persistence -- provide "
+                    "db_dsn at construction or initialize({'dsn': ...})",
                     context=ctx,
                 )
             await self._db_handler.initialize({"dsn": dsn})
