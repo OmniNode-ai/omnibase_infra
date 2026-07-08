@@ -874,6 +874,11 @@ check_sibling_lock_pins() {
     # the build vendors), and --output (where to write the comparison JSON).
     # The consuming repo's uv.lock (omnimarket) is the pin authority.
     local lock_path="${omni_home}/omnimarket/uv.lock"
+    # --build-source workspace: this preflight only runs on the workspace path
+    # (stage_workspace_if_needed short-circuits unless BUILD_SOURCE=workspace), so
+    # a registry-sourced sibling whose clone is FORWARD of the lock (the OMN-13929
+    # disarm-bump steady state) is non-fatal (OMN-13902). Backward / git-sourced
+    # drift stays fatal.
     local guard_args=(
         --lock "${lock_path}"
         --repo "omnibase-infra=${omni_home}/omnibase_infra"
@@ -882,6 +887,7 @@ check_sibling_lock_pins() {
         --repo "omnibase-compat=${omni_home}/omnibase_compat"
         --repo "onex-change-control=${omni_home}/onex_change_control"
         --output "${provenance_out}"
+        --build-source workspace
     )
     # Operator override (OMN-12977): ALLOW_SIBLING_PIN_DRIFT=1 records drift in
     # the provenance artifact and proceeds instead of aborting. Never the default.

@@ -57,8 +57,9 @@ handler_routing:
   default_handler: "omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions:HandlerQueryDecisions"
   handlers:
     - operation: "decision_store.query_decisions"
-      handler_class: "HandlerQueryDecisions"
-      handler_module: "omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions"
+      handler:
+        name: "HandlerQueryDecisions"
+        module: "omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions"
       description: >
         Cursor-paginated SELECT from decision_store with dynamic WHERE clause, scope_services filter (ANY/ALL/EXACT), and COUNT(*) for total_active.
 

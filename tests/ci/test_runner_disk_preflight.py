@@ -72,8 +72,8 @@ def test_preflight_job_has_distinct_name() -> None:
     )
 
 
-def test_preflight_workflow_triggers_on_pr_and_push() -> None:
-    """Preflight must run on every PR and push so it always provides a check.
+def test_preflight_workflow_triggers_on_pr_push_and_manual_only() -> None:
+    """Preflight must run on PR and push, without rejoining merge_group fanout.
 
     Note: PyYAML parses the YAML 'on:' key as Python True (YAML boolean alias).
     We check both the canonical string form and the boolean form for robustness.
@@ -85,7 +85,11 @@ def test_preflight_workflow_triggers_on_pr_and_push() -> None:
     assert isinstance(triggers, dict)
     assert "pull_request" in triggers, "Must trigger on pull_request events"
     assert "push" in triggers, "Must trigger on push events"
-    assert "merge_group" in triggers, "Must trigger on merge_group events"
+    assert "workflow_dispatch" in triggers, "Must support manual dispatch"
+    assert "merge_group" not in triggers, (
+        "runner-disk-preflight is intentionally excluded from merge_group fanout; "
+        "required merge-queue verdicts are handled by the aggregate required checks."
+    )
 
 
 def test_preflight_step_emits_runner_disk_annotation() -> None:

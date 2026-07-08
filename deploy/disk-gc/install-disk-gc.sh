@@ -50,6 +50,7 @@ echo "Installing onex-disk-gc systemd USER timer..."
 
 # Make the GC scripts executable.
 chmod +x "${SCRIPT_DIR}/../../scripts/disk-gc.sh" \
+         "${SCRIPT_DIR}/../../scripts/docker-volume-gc.sh" \
          "${SCRIPT_DIR}/../../scripts/disk-watermark-check.sh" \
          "${SCRIPT_DIR}/../../scripts/worktree-gc.sh" 2>/dev/null || true
 

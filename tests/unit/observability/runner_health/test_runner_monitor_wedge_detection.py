@@ -587,6 +587,33 @@ def test_offline_idle_runner_does_not_auto_bounce_even_when_enabled(
     )
 
 
+def test_github_offline_with_local_listener_evidence_is_not_unhealthy(
+    tmp_path: Path,
+) -> None:
+    """GitHub runner status can flap offline while the local listener is alive.
+
+    Host-local evidence wins for alerting: Docker healthy plus listener logs
+    means the monitor records a GitHub-degraded note without incrementing the
+    unhealthy count or rendering bounce targets.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=True,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        docker_logs="2026-07-06T17:48:56Z: Listening for Jobs",
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == 0, state
+    assert "GitHub offline ignored" in str(state["github_degraded_names"]), state
+    assert "OFFLINE-IDLE" not in str(state["offline_idle_bounce_names"]), state
+
+
 def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
     tmp_path: Path,
 ) -> None:
@@ -664,9 +691,8 @@ def test_persistent_offline_idle_runner_with_active_local_job_does_not_bounce(
         },
     )
 
-    assert "local logs show active job" in str(state["offline_idle_bounce_names"]), (
-        state
-    )
+    assert _int(state, "unhealthy_count") == 0, state
+    assert "GitHub offline ignored" in str(state["github_degraded_names"]), state
     calls = str(state["_docker_calls"])
     assert "compose" not in calls, f"active-job runner was incorrectly bounced: {calls}"
 
