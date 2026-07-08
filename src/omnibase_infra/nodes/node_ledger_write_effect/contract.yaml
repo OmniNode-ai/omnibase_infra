@@ -15,6 +15,9 @@
 # Related Tickets:
 #   - OMN-1646: Event Ledger Schema and Models
 #   - OMN-1647: Ledger Write Effect Node
+#   - OMN-14134: HandlerLedgerAppend gained a handle() auto-wiring adapter so
+#     the operation_match dispatch path (no event_model) can reach append()
+#     instead of binding the _missing_handle sentinel.
 # Contract identifiers
 name: "node_ledger_write_effect"
 contract_name: "node_ledger_write_effect"
@@ -22,11 +25,11 @@ node_name: "node_ledger_write_effect"
 contract_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 2
 node_version:
   major: 0
   minor: 1
-  patch: 1
+  patch: 2
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
