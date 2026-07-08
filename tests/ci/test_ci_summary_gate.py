@@ -159,6 +159,16 @@ class TestCiSummaryGate:
         code, _ = evaluate(jobs)
         assert code == EXIT_SUCCESS
 
+    def test_same_attempt_duplicate_job_names_keep_failure(self) -> None:
+        jobs = _all_gates("success")
+        jobs += [
+            _job("Tests (Split)", "failure", attempt=1),
+            _job("Tests (Split)", "success", attempt=1),
+        ]
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE
+        assert "Tests (Split)" in report
+
     def test_docs_only_snapshot_is_success(self) -> None:
         # Docs-only: skippable gates skip, strict gates still succeed.
         jobs = [_job(g, "success") for g in STRICT_GATE_JOBS]

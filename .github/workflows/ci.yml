@@ -1545,6 +1545,11 @@ jobs:
           deadline=$(( $(date +%s) + DEADLINE_MINUTES * 60 ))
           attempt=0
           while true; do
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending or the jobs API unreachable — failing closed"
+              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --report-only 2>/dev/null || true
+              exit 1
+            fi
             attempt=$((attempt + 1))
             if ! gh api --paginate \
                 "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
@@ -1561,11 +1566,6 @@ jobs:
               2) : ;;  # PENDING — gating jobs still running; keep polling
               *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
             esac
-            if [ "$(date +%s)" -ge "${deadline}" ]; then
-              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending — failing closed"
-              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --report-only || true
-              exit 1
-            fi
             sleep "${POLL_INTERVAL_SECONDS}"
           done
 

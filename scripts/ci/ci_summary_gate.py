@@ -145,13 +145,25 @@ class JobState:
     run_attempt: int
 
 
+def _state_severity(job: JobState) -> int:
+    """Rank same-attempt duplicate jobs by the most blocking state."""
+
+    if job.status != "completed":
+        return 2
+    if job.conclusion not in GOOD_CONCLUSIONS:
+        return 3
+    return 1
+
+
 def dedup_latest(jobs: list[dict[str, object]]) -> dict[str, JobState]:
     """Collapse the raw ``/runs/{id}/jobs`` array to one entry per job name.
 
     Uses the highest ``run_attempt`` so partial re-runs (``gh run rerun
     --failed``, which re-runs a subset in a new attempt) evaluate the freshest
     conclusion for each job while still seeing jobs that passed in an earlier
-    attempt (fetch the endpoint with ``?filter=all``).
+    attempt (fetch the endpoint with ``?filter=all``). Within the same attempt,
+    duplicate display names keep the most blocking state so a failed matrix leg
+    cannot be hidden by a later same-name success.
     """
 
     latest: dict[str, JobState] = {}
@@ -167,12 +179,19 @@ def dedup_latest(jobs: list[dict[str, object]]) -> dict[str, JobState]:
         if prev is not None and attempt < prev.run_attempt:
             continue
         conclusion = raw.get("conclusion")
-        latest[name] = JobState(
+        current = JobState(
             name=name,
             status=str(raw.get("status") or ""),
             conclusion=None if conclusion is None else str(conclusion),
             run_attempt=attempt,
         )
+        if (
+            prev is not None
+            and attempt == prev.run_attempt
+            and _state_severity(current) < _state_severity(prev)
+        ):
+            continue
+        latest[name] = current
     return latest
 
 
