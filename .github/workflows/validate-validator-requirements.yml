@@ -11,6 +11,14 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+env:
+  # OMN-14017: this workflow runs a raw `uv sync` (not the hardened
+  # setup-python-uv composite), which otherwise inherits uv's 30s default and
+  # fails HARD on the first PyPI timeout under fleet egress saturation (WS-F).
+  # Match the composite's 600s so downloads ride out contention. Propagates to
+  # every uv invocation in the job.
+  UV_HTTP_TIMEOUT: "600"
+
 concurrency:
   # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
   # entries carry a unique github.ref, so queue entries never cross-cancel.
@@ -21,7 +29,19 @@ env:
   UV_HTTP_TIMEOUT: "600"
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   validate-validator-requirements:
+    needs: occ-preflight
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
     runs-on: >-
@@ -31,7 +51,9 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    # OMN-14017: sibling checkout plus uv sync can consume the default budget
+    # while retrying transient GitHub/PyPI fetch failures.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo

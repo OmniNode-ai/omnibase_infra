@@ -45,11 +45,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   # ---------------------------------------------------------------------------
   # runner-disk-preflight — named distinctly so logs, PR checks, and the
   # merge-sweep auto-rerun script can identify it unambiguously.
   # ---------------------------------------------------------------------------
   runner-disk-preflight:
+    needs: occ-preflight
     name: Runner Disk Preflight
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
     # public fork PRs use ubuntu-latest (no secrets, disk check still runs).

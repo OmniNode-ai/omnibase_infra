@@ -40,16 +40,6 @@ repos:
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
-  # OMN-13284: Plugin* lifecycle guard relocated to omnibase_core. Consume the
-  # canonical remote hook instead of the deleted infra-local module
-  # (omnibase_infra.validators.no_plugin_daemon_classes, OMN-10123). Rev pins the
-  # core commit carrying the no-plugin-daemon-classes export; it bumps to the
-  # squash-merge SHA once omnibase_core PR for OMN-13284 lands.
-  - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: a509d3fb2777693242fdcd979e5d67bed2bbefeb # pragma: allowlist secret
-    hooks:
-      - id: no-plugin-daemon-classes
-        files: ^src/omnibase_infra/.*\.py$
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
   # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
@@ -182,6 +172,17 @@ repos:
         language: system
         files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
         pass_filenames: false
+        stages: [pre-commit]
+      # OMN-13284: Plugin* lifecycle guard is owned by omnibase_core, but must
+      # run inside this repo's uv-managed CI environment. A remote pre-commit
+      # hook builds a separate pip env and can fail for unrelated resolver/index
+      # reasons before the validator runs.
+      - id: no-plugin-daemon-classes
+        name: Block Plugin* daemon/service/worker classes (OMN-13284)
+        entry: uv run --frozen python -m omnibase_core.validators.no_plugin_daemon_classes
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/.*\.py$
         stages: [pre-commit]
       # OMN-12965: enforce runtime image identity stamping (version + revision).
       # A blank/placeholder identity degrades every proof packet. Guards both the
