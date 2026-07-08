@@ -24,6 +24,11 @@ SRC_PREFIX = "src/omnibase_infra/"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_UNIT_PREFIX = "tests/unit/"
 TEST_INTEGRATION_PREFIX = "tests/integration/"
+CI_PROCESS_TEST_PATHS = (
+    ".github/workflows/",
+    "scripts/ci/",
+    "config/runner_routing_policy.yaml",
+)
 
 FULL_SUITE_BRANCHES = {"main"}
 
@@ -69,6 +74,11 @@ def _resolve(
             parts = path.split("/")
             if len(parts) >= 3:
                 selected.add(f"{TEST_UNIT_PREFIX}{parts[2]}/")
+        elif path.startswith("tests/ci/") or any(
+            path == prefix.rstrip("/") or path.startswith(prefix)
+            for prefix in CI_PROCESS_TEST_PATHS
+        ):
+            selected.add("tests/ci/")
 
     expanded: set[str] = set(direct_modules)
     for module in direct_modules:
