@@ -74,6 +74,7 @@ from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
@@ -480,6 +481,7 @@ class ServiceLlmCostAggregator(MixinConsumerHealth):
                 heartbeat_interval_ms=self._config.heartbeat_interval_ms,
                 max_poll_interval_ms=self._config.max_poll_interval_ms,
                 max_poll_records=self._config.batch_size,
+                **build_aiokafka_auth_kwargs_from_env(),
             )
 
             await self._consumer.start()
@@ -494,6 +496,7 @@ class ServiceLlmCostAggregator(MixinConsumerHealth):
             if ConsumerHealthEmitter.is_enabled():
                 self._health_producer = AIOKafkaProducer(
                     bootstrap_servers=self._config.kafka_bootstrap_servers,
+                    **build_aiokafka_auth_kwargs_from_env(),
                 )
                 await self._health_producer.start()
                 self._init_health_emitter(
