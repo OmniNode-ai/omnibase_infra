@@ -483,14 +483,44 @@ def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:
 
 
 def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
-    """Parse the handler_routing section from a contract YAML dict."""
+    """Parse the handler_routing section from a contract YAML dict.
+
+    Fail-closed (OMN-14141): a ``handlers[]`` entry that cannot be parsed into a
+    dispatcher raises ``ValueError`` instead of being silently skipped. The
+    historical FLAT ``handler_class:`` / ``handler_module:`` string schema — which
+    ``ModelHandlerRoutingEntry`` does not understand — previously fell through the
+    ``continue`` here and produced ``handlers=()`` with NO error. Auto-wiring
+    then reported ``EnumWiringOutcome.WIRED`` with zero dispatchers while still
+    subscribing to and committing Kafka offsets on the topic: silent
+    phantom-wiring (the WI-14 root cause, OMN-14139/OMN-14135). Every routed
+    handler MUST carry a nested ``handler: {name, module}`` mapping.
+
+    The legacy top-level ``handler: {module, class}`` fallback in
+    ``_parse_contract`` is unaffected: those contracts declare an EMPTY / ABSENT
+    ``handlers`` list, so this loop never runs and never raises — the zero-length
+    parse still triggers the fallback.
+    """
     entries: list[ModelHandlerRoutingEntry] = []
-    for h in hr_raw.get("handlers", []):
+    for index, h in enumerate(hr_raw.get("handlers", [])):
         if not isinstance(h, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] must be a mapping, got "
+                f"{type(h).__name__} — cannot be parsed into a dispatcher "
+                "(OMN-14141)."
+            )
         handler_ref_raw = h.get("handler")
         if not isinstance(handler_ref_raw, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] is missing a nested "
+                "'handler: {name, module}' mapping (found keys: "
+                f"{sorted(h.keys())}). The flat 'handler_class'/'handler_module' "
+                "schema is not parseable and silently produces zero dispatchers, "
+                "which then phantom-wires the subscribed topic with no live "
+                "handler (OMN-14141). Use the nested shape:\n"
+                "    handler:\n"
+                "      name: <HandlerClassName>\n"
+                "      module: <module.path>"
+            )
         handler_ref = ModelHandlerRef(
             name=handler_ref_raw.get("name", ""),
             module=handler_ref_raw.get("module", ""),

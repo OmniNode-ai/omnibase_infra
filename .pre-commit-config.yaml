@@ -253,6 +253,20 @@ repos:
         files: (^|/)contract\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-14141: reject flat handler_class/handler_module handler_routing
+      # entries. They silently parse to ZERO dispatchers and phantom-wire the
+      # subscribed topic (WIRED, Kafka offsets committed, no live handler) — the
+      # WI-14 root cause (OMN-14139/OMN-14135). Every routed handler must use the
+      # nested handler:{name,module} shape. Fail-closed companion to the runtime
+      # parse guard in auto_wiring/discovery._parse_handler_routing. SYNC with
+      # ci.yml step "handler_routing flat-schema gate".
+      - id: handler-routing-schema-gate
+        name: handler_routing flat-schema gate (OMN-14141)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_routing_schema
+        language: system
+        files: (^|/)contract\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement

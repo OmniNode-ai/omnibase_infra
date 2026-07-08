@@ -87,36 +87,41 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "session.index.read"
-      handler_class: "HandlerSessionIndexRead"
-      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_read"
+      handler:
+        name: "HandlerSessionIndexRead"
+        module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_read"
       description: "Read session.json index"
       input_model:
         name: "None"
         description: "No input required (reads current session.json from disk)."
     - operation: "session.index.write"
-      handler_class: "HandlerSessionIndexWrite"
-      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_write"
+      handler:
+        name: "HandlerSessionIndexWrite"
+        module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_write"
       description: "Atomic write session.json with flock"
       input_model:
         name: "ModelSessionIndex"
         module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.run.read"
-      handler_class: "HandlerRunContextRead"
-      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read"
+      handler:
+        name: "HandlerRunContextRead"
+        module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read"
       description: "Read run context document"
       input_model:
         name: "str"
         description: "run_id string identifying the run context to read."
     - operation: "session.run.write"
-      handler_class: "HandlerRunContextWrite"
-      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_write"
+      handler:
+        name: "HandlerRunContextWrite"
+        module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_write"
       description: "Atomic write run context document"
       input_model:
         name: "ModelRunContext"
         module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.gc"
-      handler_class: "HandlerStaleRunGC"
-      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_stale_run_gc"
+      handler:
+        name: "HandlerStaleRunGC"
+        module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_stale_run_gc"
       description: "Garbage-collect stale run documents"
       input_model:
         name: "None"

@@ -159,6 +159,17 @@ jobs:
       - name: operation_match operation-field gate (OMN-13530)
         run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
+      # OMN-14141: every handler_routing.handlers[] entry must carry a nested
+      # 'handler: {name, module}' mapping. The flat 'handler_class'/
+      # 'handler_module' schema silently parses to ZERO dispatchers and then
+      # phantom-wires the subscribed topic (WIRED with no live handler, offsets
+      # still committed) — the WI-14 root cause (OMN-14139/OMN-14135). Fail-closed
+      # gate paired with the runtime parse guard in
+      # auto_wiring/discovery._parse_handler_routing. SYNC with pre-commit hook
+      # 'handler-routing-schema-gate'.
+      - name: handler_routing flat-schema gate (OMN-14141)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_routing_schema src/omnibase_infra
+
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 
