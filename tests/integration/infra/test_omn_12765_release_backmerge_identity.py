@@ -20,7 +20,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     OMN-12549 closure: the temporary MixinNodeDispatch-seam git-rev overrides
     (core 2a07385d, spi cdfe1a47) are removed and the pins bumped to the exact
-    released versions (core 0.46.3, spi 0.23.1), keeping a fully PyPI-sourced
+    released versions (core 0.46.5, spi 0.23.1), keeping a fully PyPI-sourced
     reproducible lock.
     """
 
@@ -28,7 +28,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
     # The proven runtime now pins the published PyPI releases (exact versions).
-    assert "omnibase-core==0.46.3" in pyproject
+    assert "omnibase-core==0.46.5" in pyproject
     assert "omnibase-spi==0.23.1" in pyproject
 
     # The retired git-rev overrides must be gone from both manifest and lock:
@@ -54,5 +54,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # binds the full dependency-manifest bytes (binding-not-label), so adding
     # entry-points rebinds it; the new lock is build-proven by the passing
     # runner-image-build-smoke gate on this PR.
-    assert lock["identity_digest"] == "bc29a18863d52c583ed367f709364d4e"
-    assert lock["shared_env_digest"] == "d115872323933b6fe1490d95"
+    assert lock["identity_digest"] == "46676dcff560c6218eb60022adb557a8"
+    assert lock["shared_env_digest"] == "a21bb0fe7ff461ebdfab73b4"
