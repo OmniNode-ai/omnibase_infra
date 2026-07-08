@@ -52,5 +52,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # OMN-13942 / OMN-141xx: identity regenerated after dependency-manifest
     # changes. The identity binds the full manifest bytes (binding-not-label),
     # so dependency-range updates rebind the runner lock.
-    assert lock["identity_digest"] == "93fa480d971fca84df98222a22302c74"
-    assert lock["shared_env_digest"] == "829d0103091fa8b74604ba9d"
+    assert lock["identity_digest"] == "e0748bfb2601b0a607fa9b105bae3fa0"
+    assert lock["shared_env_digest"] == "b70e24f5e8a8b820ed017a61"
