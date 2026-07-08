@@ -147,7 +147,9 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 8
+    # OMN-14017: setup-python-uv may need the full retry budget when GitHub/PyPI
+    # fetches are slow on the shared runner lane.
+    timeout-minutes: 30
     steps:
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
