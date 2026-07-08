@@ -132,6 +132,7 @@ _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
+_LEDGER_DB_DSN_ENV_VARS: tuple[str, ...] = ("OMNIBASE_INFRA_DB_URL", "DATABASE_URL")
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -2185,6 +2186,21 @@ def _materialize_known_handler_dependencies(
         handler_dependencies.setdefault(name, available[name])
     if "dispatch_port" in constructor_params and "dispatch_port" in available:
         handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
+    if "db_dsn" in constructor_params:
+        from omnibase_infra.runtime.overlay.contract_env_ref import (
+            expand_contract_env_refs,
+        )
+
+        db_dsn = next(
+            (
+                resolved.strip()
+                for name in _LEDGER_DB_DSN_ENV_VARS
+                if (resolved := expand_contract_env_refs(f"${{env.{name}:}}").strip())
+            ),
+            "",
+        )
+        if db_dsn:
+            handler_dependencies.setdefault("db_dsn", db_dsn)
     if requires_event_publisher and "event_publisher" in available:
         handler_dependencies.setdefault("event_publisher", available["event_publisher"])
     if requires_event_consumer and "event_consumer" in available:
