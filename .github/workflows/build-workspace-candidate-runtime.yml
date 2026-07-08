@@ -121,6 +121,16 @@ jobs:
           done
           echo "workspace_root=${WORKSPACE_ROOT}" >> "$GITHUB_OUTPUT"
 
+      # stage_workspace.sh runs the OMN-12977 sibling-lock-pin preflight
+      # (scripts/runtime_build/check_sibling_lock_pins.py), which imports pydantic
+      # (BaseModel/ConfigDict/Field). The actions/setup-python interpreter carries
+      # no project deps, so without this install the preflight dies with
+      # ModuleNotFoundError: No module named 'pydantic' and stage_workspace.sh
+      # exits 3 before the docker build ever runs (OMN-13985). Everything else the
+      # script imports is stdlib.
+      - name: Install sibling-lock-pin preflight deps (pydantic)
+        run: python3 -m pip install --upgrade 'pydantic>=2'
+
       - name: Stage workspace sibling trees into the build context
         env:
           OMNI_HOME: ${{ steps.stage-siblings.outputs.workspace_root }}
