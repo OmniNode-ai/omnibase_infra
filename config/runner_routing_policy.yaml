@@ -13,6 +13,8 @@ repositories:
   - omnimarket
   - onex_change_control
 hosted_runner_allowlist:
+  - path: .github/workflows/ci.yml
+    reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
   - path: .github/workflows/build-and-push-runtime.yml
     reason: "OMN-13747: ECR push remains hosted until the self-hosted egress failure is retired."
   - path: .github/workflows/omnigate.yml

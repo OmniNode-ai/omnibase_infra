@@ -45,7 +45,19 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   release-identity:
+    needs: occ-preflight
     name: release-identity
     runs-on: >-
       ${{
@@ -73,6 +85,7 @@ jobs:
           python scripts/check_release_identity.py --base "origin/${BASE}"
 
   terminal-cost-completeness:
+    needs: occ-preflight
     name: terminal-cost-completeness
     runs-on: >-
       ${{
@@ -92,6 +105,7 @@ jobs:
         run: python scripts/check_terminal_cost_completeness.py
 
   context-field-presence:
+    needs: occ-preflight
     name: context-field-presence
     runs-on: >-
       ${{
@@ -113,6 +127,7 @@ jobs:
         run: python scripts/check_context_field_presence.py
 
   sibling-lock-pins:
+    needs: occ-preflight
     name: sibling-lock-pins
     # The workspace-build sibling-pin recurrence ratchet (OMN-12977) is a
     # build-time guard whose blocking direction is "a STALE clone that is BEHIND
@@ -148,6 +163,7 @@ jobs:
           uv run --frozen pytest tests/scripts/test_check_sibling_lock_pins.py -q -p no:cacheprovider
 
   pinned-wheel-skew:
+    needs: occ-preflight
     name: pinned-wheel-skew
     # ADVISORY (continue-on-error) — NOT yet a blocking required gate. A baseline
     # run on origin/dev flags PRE-EXISTING build-provenance drift this PR did not

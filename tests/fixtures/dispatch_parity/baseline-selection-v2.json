@@ -456,6 +456,40 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624": {
+      "category": "command",
+      "contract_name": "node_ledger_write_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
+      "handler_module": "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append",
+      "handler_name": "HandlerLedgerAppend",
+      "message_types": [
+        "onex.cmd.platform.ledger-append.v1",
+        "onex.cmd.platform.ledger-query.v1",
+        "platform.ledger-append",
+        "platform.ledger-query"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6": {
+      "category": "command",
+      "contract_name": "node_ledger_write_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
+      "handler_module": "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query",
+      "handler_name": "HandlerLedgerQuery",
+      "message_types": [
+        "onex.cmd.platform.ledger-append.v1",
+        "onex.cmd.platform.ledger-query.v1",
+        "platform.ledger-append",
+        "platform.ledger-query"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_llm_completion_effect.HandlerLLMCompletion.llm_completion_7f01a31e": {
       "category": "command",
       "contract_name": "node_llm_completion_effect",
@@ -1329,8 +1363,8 @@
       "discovery_errors": 0,
       "distinct_subscribe_topics": 88,
       "probe_count": 326,
-      "registered_dispatchers": 76,
-      "registered_routes": 88,
+      "registered_dispatchers": 78,
+      "registered_routes": 90,
       "type_scoped_dispatchers": 41
     },
     "duplicate_winners": [],
@@ -1371,9 +1405,9 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-05T00:51:57.155636+00:00",
+    "generated_at_utc": "2026-07-08T08:09:52.074484+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.46.3",
+      "omnibase-core": "0.46.5",
       "omnibase-infra": "0.38.4",
       "omniclaude": null,
       "omniintelligence": null,
@@ -1724,11 +1758,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.ledger-append",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.ledger-append.v1"
     },
@@ -1739,11 +1775,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "platform.ledger-query",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.platform.ledger-query.v1"
     },
@@ -7350,6 +7388,26 @@
       "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_intent_platform_runtime_tick_v1",
       "topic": "onex.intent.platform.runtime-tick.v1",
       "topic_pattern": "*.intent.platform.runtime-tick.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_ledger_write_effect",
+      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
+      "message_category": "command",
+      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624.onex_cmd_platform_ledger_append_v1",
+      "topic": "onex.cmd.platform.ledger-append.v1",
+      "topic_pattern": "*.cmd.platform.ledger-append.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_ledger_write_effect",
+      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
+      "message_category": "command",
+      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6.onex_cmd_platform_ledger_query_v1",
+      "topic": "onex.cmd.platform.ledger-query.v1",
+      "topic_pattern": "*.cmd.platform.ledger-query.*",
       "type_scoped": false
     },
     {
