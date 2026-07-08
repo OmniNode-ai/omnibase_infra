@@ -16,6 +16,9 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+REJECT_SKIP_CALLER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "call-reject-skip.yml"
+)
 FRESH_DEPLOY_FITNESS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "fresh-deploy-fitness.yml"
 )
@@ -42,6 +45,7 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "672378418273b5cc102a8ebd36993128d29b5c7d"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -217,6 +221,17 @@ def test_short_dependency_gates_have_checkout_budget() -> None:
 
     assert docker_pin_job["timeout-minutes"] >= 15
     assert sibling_lock_job["timeout-minutes"] >= 20
+
+
+def test_reject_skip_token_gate_uses_no_checkout_reusable() -> None:
+    workflow = _load_yaml(REJECT_SKIP_CALLER_WORKFLOW)
+    job = workflow["jobs"]["call-reject-skip-token"]
+
+    assert (
+        job["uses"]
+        == "OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml"
+        f"@{OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA}"
+    )
 
 
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
