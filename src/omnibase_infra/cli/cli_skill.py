@@ -38,6 +38,10 @@ from omnibase_infra.cli.enum_skill_arg_type import EnumSkillArgType
 from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    OmnimarketDriftError,
+    check_omnimarket_drift,
+)
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
@@ -252,6 +256,11 @@ def run_skill_by_name(
         onex skill dod_verify OMN-1234
         onex skill delegate "summarize this paragraph" --task-type document
     """
+    try:
+        check_omnimarket_drift()
+    except OmnimarketDriftError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     registry = load_skill_registry()
     mapping = registry.get(skill_name)
     if mapping is None:
