@@ -1432,7 +1432,12 @@ def _make_projection_dispatch_callback(
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
-    input_data alongside _event_type derived from the topic name.
+    input_data alongside _event_type and _topic derived from the dispatched
+    envelope (OMN-13992: _topic was computed locally for logging but never
+    injected, so any strict projection handler that requires
+    input_data['_topic'] — e.g. HandlerProjectionLiveEvents — raised a
+    ValueError on every dispatch and the event was dropped, non-fatally but
+    silently, with no DLQ topic declared to catch it).
 
     ``sinks`` carries the bus-side outputs. When ``sinks.event_bus`` and
     ``sinks.terminal_event`` are set, a terminal event envelope is emitted to
@@ -1506,6 +1511,7 @@ def _make_projection_dispatch_callback(
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
+            input_data["_topic"] = topic
 
             def _invoke_projection_handler() -> object:
                 _connect_projection_runner_db_if_needed(handler_instance)
