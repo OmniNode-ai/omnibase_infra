@@ -3126,6 +3126,40 @@ async def _commit_contract_wiring(
             )
         )
 
+    # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
+    # subscribe topics but registered ZERO dispatchers — and quarantined /
+    # resolver-skipped NOTHING — is a silent phantom-wire: the topic would be
+    # consumed and its Kafka offsets committed with no handler ever running.
+    # This is the wiring-side backstop for the flat-schema silent-zero-parse
+    # defect (the parse guard in discovery._parse_handler_routing is the first
+    # line). When all four hold, pcw.prepared_wirings was empty — handler_routing
+    # produced no parseable handlers. Legacy top-level ``handler:`` fallbacks and
+    # resolver-ownership skips always leave a dispatcher, a skipped_handler, or a
+    # quarantine, so this never fires on them. Returned as FAILED (not WIRED) so
+    # total_failed is accurate and ONEX_WIRING_STRICT_MODE crashes boot loudly;
+    # the topic is NOT subscribed either way.
+    if (
+        pcw.subscription_topics
+        and not dispatchers_registered
+        and not skipped_handlers
+        and not quarantined
+    ):
+        return ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.FAILED,
+            reason=(
+                "phantom wiring: contract declares "
+                f"{len(pcw.subscription_topics)} subscribe topic(s) but "
+                "registered zero dispatchers (handler_routing produced no "
+                "parseable handlers). Convert flat handler_class/handler_module "
+                "entries to nested handler:{name,module} (OMN-14141)."
+            ),
+            wirings=tuple(wirings),
+            skipped_handlers=tuple(skipped_handlers),
+            quarantined_handlers=tuple(quarantined),
+        )
+
     if subscribe_immediately and event_bus is not None and pcw.subscription_topics:
         topics_subscribed.extend(
             await _subscribe_contract_topics(
