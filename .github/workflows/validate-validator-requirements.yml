@@ -9,7 +9,6 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-  merge_group:
   workflow_dispatch:
 
 env:
@@ -25,6 +24,9 @@ concurrency:
   # entries carry a unique github.ref, so queue entries never cross-cancel.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  UV_HTTP_TIMEOUT: "600"
 
 jobs:
   occ-preflight:

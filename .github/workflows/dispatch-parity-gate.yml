@@ -36,7 +36,6 @@ on:
       - "tests/fixtures/dispatch_parity/**"
       - "tests/integration/runtime/test_dispatch_selection_parity.py"
       - ".github/workflows/dispatch-parity-gate.yml"
-  merge_group:
   workflow_dispatch:
 
 concurrency:
