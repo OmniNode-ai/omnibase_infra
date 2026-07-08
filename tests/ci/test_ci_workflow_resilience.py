@@ -795,14 +795,22 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
 
     for workflow_path in workflow_paths:
         workflow = _load_yaml(workflow_path)
-        for job in workflow["jobs"].values():
+        for job_name, job in workflow["jobs"].items():
+            if "uses" in job:
+                assert job["uses"].endswith(
+                    "occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf"
+                )
+                continue
+
             steps = job["steps"]
             setup_steps = [
                 step
                 for step in steps
                 if step.get("uses") == "./.github/actions/setup-python-uv"
             ]
-            assert setup_steps, f"{workflow_path.name} must use setup-python-uv"
+            assert setup_steps, (
+                f"{workflow_path.name}:{job_name} must use setup-python-uv"
+            )
             assert all(
                 step["with"]["install-args"] == "--frozen" for step in setup_steps
             )

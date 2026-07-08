@@ -23,10 +23,27 @@ Design Decision - Single Handler with Internal Routing:
     Only split into two handlers if the two modes diverge materially in
     non-shared behavior (different indexes, different auth model, different
     response shape, different pagination contract).
+
+Design Decision - Internally-Composed HandlerDb (OMN-14140):
+    HandlerDb is composed INTERNALLY from `container` rather than accepted as a
+    constructor argument. The contract-driven auto-wiring resolver
+    (runtime/auto_wiring/handler_wiring.py) can only construct handlers whose
+    required constructor parameters are drawn from a small known set
+    (container, event_bus, ownership_query, ...) -- it has no way to resolve an
+    arbitrary `db_handler: HandlerDb` parameter, so a two-arg constructor left
+    this handler permanently unconstructable (quarantined, routed to the no-op
+    skip dispatcher). Composing HandlerDb from `container` matches HandlerDb's
+    own single-argument constructor and is the same shape already used by
+    other auto-wired handlers (e.g. HandlerLedgerProjection, HandlerCheckpointWrite).
+
+    The auto-wiring resolver never calls `initialize()` on constructed
+    handlers, so the composed HandlerDb connects lazily on first real use via
+    `_ensure_db_ready()` rather than requiring an external initialize() call.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -39,6 +56,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.nodes.node_ledger_write_effect.models import (
     ModelLedgerEntry,
     ModelLedgerQuery,
@@ -47,7 +65,6 @@ from omnibase_infra.nodes.node_ledger_write_effect.models import (
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.handlers.handler_db import HandlerDb
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +160,7 @@ class HandlerLedgerQuery:
         handler_category: EnumHandlerTypeCategory.EFFECT
 
     Example:
-        >>> handler = HandlerLedgerQuery(container, db_handler)
+        >>> handler = HandlerLedgerQuery(container)
         >>> await handler.initialize({})
         >>> # Query by correlation_id
         >>> entries = await handler.query_by_correlation_id(corr_id, limit=50)
@@ -154,17 +171,24 @@ class HandlerLedgerQuery:
     def __init__(
         self,
         container: ModelONEXContainer,
-        db_handler: HandlerDb,
+        db_dsn: str | None = None,
     ) -> None:
         """Initialize the ledger query handler.
 
         Args:
-            container: ONEX dependency injection container.
-            db_handler: Initialized HandlerDb instance for PostgreSQL operations.
+            container: ONEX dependency injection container. HandlerDb is
+                composed internally from this container (OMN-14140) so the
+                auto-wiring resolver can construct this handler with a
+                single, always-resolvable constructor argument.
+            db_dsn: Optional PostgreSQL DSN supplied by the runtime auto-wiring
+                boundary. Handlers do not read environment directly; runtime
+                composition owns that IO boundary.
         """
         self._container = container
-        self._db_handler = db_handler
+        self._db_handler = HandlerDb(container)
+        self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._initialized: bool = False
+        self._db_init_lock = asyncio.Lock()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -177,25 +201,24 @@ class HandlerLedgerQuery:
         return EnumHandlerTypeCategory.EFFECT
 
     async def initialize(self, config: dict[str, object]) -> None:
-        """Initialize the handler.
+        """Initialize the handler by connecting its composed HandlerDb.
+
+        The contract-driven auto-wiring resolver never calls initialize() on
+        constructed handlers, so this is an optional eager-connect path for
+        callers that do invoke it explicitly (tests, hand-wired call sites).
+        Public query methods connect lazily via `_ensure_db_ready()` regardless.
 
         Args:
-            config: Configuration dict (currently unused).
+            config: Optional configuration dict. A non-empty ``dsn`` value
+                updates the runtime-supplied DSN before connecting.
 
         Raises:
-            RuntimeHostError: If HandlerDb is not initialized.
+            RuntimeHostError: If no PostgreSQL DSN is configured.
         """
-        if not getattr(self._db_handler, "_initialized", False):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="initialize",
-            )
-            raise RuntimeHostError(
-                "HandlerDb must be initialized before HandlerLedgerQuery",
-                context=ctx,
-            )
-
-        self._initialized = True
+        config_dsn = config.get("dsn")
+        if isinstance(config_dsn, str) and config_dsn.strip():
+            self._db_dsn = config_dsn.strip()
+        await self._ensure_db_ready()
         logger.info(
             "%s initialized successfully",
             self.__class__.__name__,
@@ -203,9 +226,43 @@ class HandlerLedgerQuery:
         )
 
     async def shutdown(self) -> None:
-        """Shutdown the handler."""
+        """Shutdown the handler and its internally-composed HandlerDb."""
+        if self._initialized:
+            await self._db_handler.shutdown()
         self._initialized = False
         logger.info("HandlerLedgerQuery shutdown complete")
+
+    async def _ensure_db_ready(self) -> None:
+        """Lazily connect the composed HandlerDb on first real use.
+
+        The auto-wiring resolver constructs contract-routed handlers from
+        `container` alone and never calls their `initialize()` method
+        (OMN-14140), so this handler owns its HandlerDb connection lifecycle
+        instead of relying on an external initialize() call. Guarded by a
+        lock so concurrent first-dispatches connect exactly once.
+
+        Raises:
+            RuntimeHostError: If no PostgreSQL DSN was supplied by runtime
+                composition or initialize({"dsn": ...}).
+        """
+        if self._initialized:
+            return
+        async with self._db_init_lock:
+            if self._initialized:
+                return
+            dsn = self._db_dsn
+            if not dsn:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="ledger.query.connect",
+                )
+                raise RuntimeHostError(
+                    "Missing PostgreSQL DSN for ledger persistence -- provide "
+                    "db_dsn at construction or initialize({'dsn': ...})",
+                    context=ctx,
+                )
+            await self._db_handler.initialize({"dsn": dsn})
+            self._initialized = True
 
     # =========================================================================
     # Public Query Methods (Typed Interface)
@@ -227,7 +284,7 @@ class HandlerLedgerQuery:
         Returns:
             List of ModelLedgerEntry matching the correlation ID.
         """
-        self._ensure_initialized("ledger.query.by_correlation_id")
+        await self._ensure_db_ready()
         limit = self._normalize_limit(limit)
 
         # Execute query via HandlerDb
@@ -266,7 +323,7 @@ class HandlerLedgerQuery:
         Returns:
             List of ModelLedgerEntry within the time range.
         """
-        self._ensure_initialized("ledger.query.by_time_range")
+        await self._ensure_db_ready()
         limit = self._normalize_limit(limit)
         # Auto-generate correlation_id if not provided
         effective_correlation_id = (
@@ -312,7 +369,7 @@ class HandlerLedgerQuery:
         Returns:
             ModelLedgerQueryResult with entries, total_count, and has_more.
         """
-        self._ensure_initialized("ledger.query")
+        await self._ensure_db_ready()
 
         # Route based on query parameters
         if query.correlation_id is not None:
@@ -411,21 +468,94 @@ class HandlerLedgerQuery:
             result=result,
         )
 
+    async def handle(
+        self,
+        envelope: object,
+    ) -> ModelHandlerOutput[ModelLedgerQueryResult]:
+        """Contract-typed auto-wiring entry point.
+
+        ``node_ledger_write_effect``'s contract declares ``operation_match``
+        routing with no ``event_model``, so the dispatch engine's auto-wiring
+        (``handler_wiring._make_dispatch_callback``) invokes ``handle(envelope)``
+        directly instead of ``execute()``. Without this method the callback binds
+        ``_missing_handle``, which raises on every dispatched ledger-query
+        command -- the same gap ``HandlerLedgerAppend.handle()`` closed for the
+        append side (OMN-14134).
+
+        The value actually delivered here is whatever
+        ``MessageDispatchEngine._materialize_envelope_with_bindings`` produces
+        for the live dispatch path -- a **dict** (``{"payload": ..., ...}``),
+        not an attribute-bearing envelope object. ``_extract_envelope_field``
+        handles both shapes so this method works for the real runtime dispatch
+        path as well as for object-shaped test envelopes.
+
+        Extracts the query payload from the auto-wired envelope, delegates to
+        query(), and wraps the result identically to execute().
+        """
+        payload_raw = self._extract_envelope_field(envelope, "payload")
+        if payload_raw is None:
+            payload_raw = envelope
+        query = (
+            payload_raw
+            if isinstance(payload_raw, ModelLedgerQuery)
+            else ModelLedgerQuery.model_validate(payload_raw)
+        )
+
+        envelope_correlation_id = self._extract_envelope_field(
+            envelope, "correlation_id"
+        )
+        correlation_id = self._safe_correlation_id(
+            envelope_correlation_id or query.correlation_id
+        )
+        input_envelope_id = uuid4()
+
+        result = await self.query(query, correlation_id=correlation_id)
+
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_LEDGER_QUERY,
+            result=result,
+        )
+
+    @staticmethod
+    def _extract_envelope_field(envelope: object, key: str) -> object:
+        """Return `key` from a dict-shaped or attribute-shaped envelope.
+
+        The dispatch engine may deliver either a materialized dict (the real
+        runtime dispatch path, via
+        ``MessageDispatchEngine._materialize_envelope_with_bindings``) or a
+        ``ModelEventEnvelope``-like object (the auto_wiring event-bus callback
+        / test doubles) -- ``handle()`` must accept both shapes. Mirrors
+        ``HandlerBuildLoopProjection._coerce_event_message``'s dict-vs-attribute
+        handling.
+        """
+        if isinstance(envelope, dict):
+            return envelope.get(key)
+        return getattr(envelope, key, None)
+
+    @staticmethod
+    def _safe_correlation_id(raw: object) -> UUID:
+        """Parse a correlation ID from envelope/payload-supplied raw input.
+
+        Returns a fresh UUID if `raw` is missing or unparseable. Mirrors
+        ``HandlerLedgerAppend._safe_correlation_id`` -- ``handle()`` has no
+        envelope validation step to reject a malformed correlation_id before
+        reaching this point, so this degrades to a fresh UUID rather than
+        raising.
+        """
+        if not raw:
+            return uuid4()
+        if isinstance(raw, UUID):
+            return raw
+        try:
+            return UUID(str(raw))
+        except (ValueError, TypeError):
+            return uuid4()
+
     # =========================================================================
     # Private Helpers
     # =========================================================================
-
-    def _ensure_initialized(self, operation: str) -> None:
-        """Ensure handler is initialized."""
-        if not self._initialized:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation=operation,
-            )
-            raise RuntimeHostError(
-                "HandlerLedgerQuery not initialized. Call initialize() first.",
-                context=ctx,
-            )
 
     def _normalize_limit(self, limit: int) -> int:
         """Normalize limit to valid range."""
