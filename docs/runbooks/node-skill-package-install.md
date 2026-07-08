@@ -69,9 +69,13 @@ scripts/install-node-skill-package.sh --execute /path/to/venv/bin/python
 OMNIMARKET_REF=<newer-sha> scripts/install-node-skill-package.sh --execute
 ```
 
-The default pin is **omnimarket@dev `bc516ef5da67a348947fbb0e3c88dc964b2cd541`**
-(dev HEAD as of 2026-07-02, carrying OMN-13836). It is a full 40-hex SHA for
-reproducibility; bump `OMNIMARKET_REF` to advance to a newer compatible rev.
+The ref is **resolved dynamically** (OMN-14060) from omnimarket's live `dev` HEAD
+via `git ls-remote`, falling back to the local canonical clone at
+`$OMNI_HOME/omnimarket` when offline. A hand-edited SHA literal here goes stale
+the moment `omnimarket@dev` advances past it — that staleness was the OMN-13829
+recurrence mechanism (see "Recurrence and the drift guard" below). Set
+`OMNIMARKET_REF=<sha>` to pin an exact rev for reproducibility or offline use;
+that override always wins outright.
 
 ## Before / after (proven in a clean throwaway venv, canonical `.venv` untouched)
 
@@ -88,3 +92,51 @@ OK: N onex.nodes entry points; required nodes resolved:
 $ onex skill merge_sweep --inventory-only   # resolves (no 'Unknown node')
 $ onex skill session --help                 # resolves (no 'Unknown node')
 ```
+
+## Recurrence and the drift guard (OMN-14060)
+
+The co-install above fixed the venv once (OMN-13829, 2026-07-02) and then
+silently drifted back to a stale, non-git install within days (OMN-14060,
+2026-07-06): something re-installed `omnimarket` from PyPI instead of the
+canonical git-source co-install. Two compounding facts make this recur unless
+guarded against:
+
+1. **PyPI is not a fallback path.** omnimarket's last published PyPI release
+   predates fixes that already merged to `dev` by weeks, and the newest
+   published release is outright uninstallable (it pins a sibling package
+   version that was never published — OMN-14064). There is no PyPI version of
+   omnimarket that is ever "correct" here; only the git-source co-install is.
+2. **Nothing re-asserted the venv's install state.** The install script is
+   operator-run once; nothing re-checked that the venv still matched the
+   git-pinned install afterward.
+
+Fact (1) is a separate release-pipeline lane (OMN-14064). This runbook covers
+the venv-side guard for fact (2), split detect/repair per CLAUDE.md's
+"enforcement, not detection" rule:
+
+- **Pre-flight (hot path, every `onex skill` dispatch):**
+  `src/omnibase_infra/cli/omnimarket_drift_guard.py` — cheap and LOCAL ONLY
+  (compares the current interpreter's installed omnimarket commit against the
+  already-checked-out `$OMNI_HOME/omnimarket` clone's HEAD; no network). Fails
+  OPEN (silently, no block) whenever either side can't be determined locally
+  (fresh machine, CI, no canonical clone) so it never blocks environments where
+  the `$OMNI_HOME` convention doesn't apply. On a real mismatch it raises a
+  `click.ClickException` naming both commits and pointing at the repair
+  command below — it never re-installs anything itself.
+- **Repair (session/cron tick, or run by hand):**
+  `scripts/check-omnimarket-venv-drift.sh [--repair] [PYTHON]` — refreshes the
+  canonical clone from `origin/dev` (network), compares against the target
+  venv, and with `--repair` re-runs `install-node-skill-package.sh` pinned to
+  the fresh SHA. Exit 0 = no drift (or repaired); exit 1 = drift found and not
+  repaired.
+
+```bash
+# detect only (safe, no mutation)
+scripts/check-omnimarket-venv-drift.sh /path/to/venv/bin/python
+
+# detect + repair
+scripts/check-omnimarket-venv-drift.sh --repair /path/to/venv/bin/python
+```
+
+Wire the repair invocation to a session/cron tick so drift self-heals instead
+of waiting on the next operator to hit the pre-flight error.

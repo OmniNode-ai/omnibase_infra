@@ -382,6 +382,106 @@ class TestDriftDirection:
 
 
 @pytest.mark.unit
+class TestForwardDriftWorkspaceMode:
+    """OMN-13902/OMN-14138: registry-sourced forward drift is non-fatal in a
+    workspace build (the OMN-13929 disarm-bump steady state), but backward drift,
+    non-comparable versions, git-sourced drift, and every mismatch in release mode
+    stay fatal.
+    """
+
+    def test_registry_forward_drift_passes_in_workspace_mode(self) -> None:
+        # The live blocker shape: core lock=0.46.5 (registry) clone=0.46.6.
+        expected = ModelLockPin(package="omnibase-core", version="0.46.5", git_rev=None)
+        actual = ModelActualPin(
+            package="omnibase-core", version="0.46.6", git_sha="deadbeef"
+        )
+        result = compare_pins(expected, actual, workspace_mode=True)
+        assert result.matches is True
+        assert result.forward_drift_allowed is True
+        assert result.clone_ahead is False
+        assert result.drift_direction == "forward"
+        assert result.mismatch_reason == ""
+        assert "forward-drift allowed" in result.note
+
+    def test_registry_forward_drift_is_fatal_in_release_mode(self) -> None:
+        # Release build installs the published wheel -- forward is a real skew.
+        expected = ModelLockPin(package="omnibase-core", version="0.46.5", git_rev=None)
+        actual = ModelActualPin(
+            package="omnibase-core", version="0.46.6", git_sha="deadbeef"
+        )
+        result = compare_pins(expected, actual, workspace_mode=False)
+        assert result.matches is False
+        assert result.forward_drift_allowed is False
+        assert result.drift_direction == "forward"
+        assert "version drift" in result.mismatch_reason
+
+    def test_registry_forward_drift_default_mode_is_fatal(self) -> None:
+        # workspace_mode defaults to False (fail-closed): forward stays fatal.
+        expected = ModelLockPin(package="omnibase-core", version="0.46.5")
+        actual = ModelActualPin(
+            package="omnibase-core", version="0.46.6", git_sha="deadbeef"
+        )
+        result = compare_pins(expected, actual)
+        assert result.matches is False
+        assert result.forward_drift_allowed is False
+
+    def test_registry_backward_drift_is_fatal_even_in_workspace_mode(self) -> None:
+        # The live real bug: spi lock=0.23.1 (registry) clone=0.23.0 -- stale clone,
+        # the 2026-06-11 crash direction. Fatal regardless of build mode.
+        expected = ModelLockPin(package="omnibase-spi", version="0.23.1", git_rev=None)
+        actual = ModelActualPin(
+            package="omnibase-spi", version="0.23.0", git_sha="cafef00d"
+        )
+        result = compare_pins(expected, actual, workspace_mode=True)
+        assert result.matches is False
+        assert result.forward_drift_allowed is False
+        assert result.drift_direction == "backward"
+        assert "version drift" in result.mismatch_reason
+
+    def test_registry_exact_match_passes_without_forward_note(self) -> None:
+        expected = ModelLockPin(package="omnibase-spi", version="0.23.0", git_rev=None)
+        actual = ModelActualPin(
+            package="omnibase-spi", version="0.23.0", git_sha="anything"
+        )
+        result = compare_pins(expected, actual, workspace_mode=True)
+        assert result.matches is True
+        assert result.forward_drift_allowed is False
+        assert result.drift_direction == "none"
+
+    def test_non_comparable_version_is_fatal_in_workspace_mode(self) -> None:
+        # Garbage / non-numeric mismatch classifies as "unknown", never "forward" --
+        # it must fail even in workspace mode (we cannot prove the clone is ahead).
+        expected = ModelLockPin(package="omnimarket", version="0.4.3", git_rev=None)
+        actual = ModelActualPin(
+            package="omnimarket", version="0.4.6-dev", git_sha="abc123"
+        )
+        result = compare_pins(expected, actual, workspace_mode=True)
+        assert result.matches is False
+        assert result.forward_drift_allowed is False
+        assert result.drift_direction == "unknown"
+
+    def test_git_sourced_forward_drift_stays_fatal_in_workspace_mode(self) -> None:
+        # Git-sourced pins keep the stronger SHA-ancestry proof: a forward VERSION
+        # bump on a git pin means the immutable rev pin is stale (re-bump it), not
+        # steady-state noise. The registry forward-allow never applies here.
+        expected = ModelLockPin(
+            package="omnibase-infra",
+            version="0.38.4",
+            git_rev="7e52d5b0046c394b38454b97157e7a7191e6f008",
+        )
+        actual = ModelActualPin(
+            package="omnibase-infra",
+            version="0.38.5",
+            git_sha="ffffffffffffffffffffffffffffffffffffffff",
+        )
+        result = compare_pins(expected, actual, workspace_mode=True)
+        assert result.matches is False
+        assert result.forward_drift_allowed is False
+        assert result.drift_direction == "forward"
+        assert "version drift" in result.mismatch_reason
+
+
+@pytest.mark.unit
 class TestCheckPins:
     def _write_lock(self, tmp_path: Path) -> Path:
         lock = tmp_path / "uv.lock"
@@ -510,3 +610,70 @@ class TestCheckPins:
         payload = json.loads(out.read_text())
         assert payload["drift_count"] == 1
         assert payload["clone_ahead_count"] == 0
+
+    def _write_registry_lock(self, tmp_path: Path, package: str, version: str) -> Path:
+        # A registry-sourced (no git rev) lock so check_pins exercises the
+        # OMN-13902 forward-drift path (version is the only ordering signal).
+        lock = tmp_path / "uv.lock"
+        lock.write_text(
+            "[[package]]\n"
+            f'name = "{package}"\n'
+            f'version = "{version}"\n'
+            'source = { registry = "https://pypi.org/simple" }\n',
+            encoding="utf-8",
+        )
+        return lock
+
+    def test_registry_forward_drift_passes_in_workspace_mode(
+        self, tmp_path: Path
+    ) -> None:
+        # OMN-13902 real case: core lock=0.46.5 clone=0.46.6, registry-sourced.
+        # A workspace build vendors the newer clone -> rc 0, recorded forward-OK.
+        lock = self._write_registry_lock(tmp_path, "omnibase-core", "0.46.5")
+        clone = self._make_clone(tmp_path, "omnibase-core", "0.46.6")
+        out = tmp_path / "out.json"
+        rc = check_pins(
+            lock, {"omnibase-core": clone}, output_path=out, workspace_mode=True
+        )
+        assert rc == 0
+        payload = json.loads(out.read_text())
+        assert payload["workspace_mode"] is True
+        assert payload["drift_count"] == 0
+        assert payload["forward_drift_allowed_count"] == 1
+        comp = payload["comparisons"][0]
+        assert comp["matches"] is True
+        assert comp["forward_drift_allowed"] is True
+        assert comp["drift_direction"] == "forward"
+
+    def test_registry_forward_drift_aborts_in_release_mode(
+        self, tmp_path: Path
+    ) -> None:
+        # Same core lock=0.46.5 clone=0.46.6, but a release build (default) installs
+        # the published wheel -- forward is a real skew -> rc 1.
+        lock = self._write_registry_lock(tmp_path, "omnibase-core", "0.46.5")
+        clone = self._make_clone(tmp_path, "omnibase-core", "0.46.6")
+        out = tmp_path / "out.json"
+        rc = check_pins(lock, {"omnibase-core": clone}, output_path=out)
+        assert rc == 1
+        payload = json.loads(out.read_text())
+        assert payload["workspace_mode"] is False
+        assert payload["drift_count"] == 1
+        assert payload["forward_drift_allowed_count"] == 0
+        assert payload["comparisons"][0]["drift_direction"] == "forward"
+
+    def test_registry_backward_drift_aborts_in_workspace_mode(
+        self, tmp_path: Path
+    ) -> None:
+        # OMN-13902 real case (the genuine bug): spi lock=0.23.1 clone=0.23.0 --
+        # stale clone, fatal even in workspace mode (rc 1). This is spi#258's case.
+        lock = self._write_registry_lock(tmp_path, "omnibase-spi", "0.23.1")
+        clone = self._make_clone(tmp_path, "omnibase-spi", "0.23.0")
+        out = tmp_path / "out.json"
+        rc = check_pins(
+            lock, {"omnibase-spi": clone}, output_path=out, workspace_mode=True
+        )
+        assert rc == 1
+        payload = json.loads(out.read_text())
+        assert payload["drift_count"] == 1
+        assert payload["forward_drift_allowed_count"] == 0
+        assert payload["comparisons"][0]["drift_direction"] == "backward"

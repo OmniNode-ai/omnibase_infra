@@ -40,16 +40,6 @@ repos:
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
-  # OMN-13284: Plugin* lifecycle guard relocated to omnibase_core. Consume the
-  # canonical remote hook instead of the deleted infra-local module
-  # (omnibase_infra.validators.no_plugin_daemon_classes, OMN-10123). Rev pins the
-  # core commit carrying the no-plugin-daemon-classes export; it bumps to the
-  # squash-merge SHA once omnibase_core PR for OMN-13284 lands.
-  - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: a509d3fb2777693242fdcd979e5d67bed2bbefeb # pragma: allowlist secret
-    hooks:
-      - id: no-plugin-daemon-classes
-        files: ^src/omnibase_infra/.*\.py$
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
   # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
@@ -183,6 +173,17 @@ repos:
         files: ^src/omnibase_infra/nodes/[^/]+/handlers/.*\.py$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-13284: Plugin* lifecycle guard is owned by omnibase_core, but must
+      # run inside this repo's uv-managed CI environment. A remote pre-commit
+      # hook builds a separate pip env and can fail for unrelated resolver/index
+      # reasons before the validator runs.
+      - id: no-plugin-daemon-classes
+        name: Block Plugin* daemon/service/worker classes (OMN-13284)
+        entry: uv run --frozen python -m omnibase_core.validators.no_plugin_daemon_classes
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/.*\.py$
+        stages: [pre-commit]
       # OMN-12965: enforce runtime image identity stamping (version + revision).
       # A blank/placeholder identity degrades every proof packet. Guards both the
       # Dockerfile workspace-mode identity guard and the cmd_up build-arg wiring.
@@ -248,6 +249,20 @@ repos:
       - id: operation-match-requires-operation
         name: operation_match handler operation-field gate (OMN-13530)
         entry: uv run python -m omnibase_core.validators.operation_match_requires_operation
+        language: system
+        files: (^|/)contract\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
+      # OMN-14141: reject flat handler_class/handler_module handler_routing
+      # entries. They silently parse to ZERO dispatchers and phantom-wire the
+      # subscribed topic (WIRED, Kafka offsets committed, no live handler) — the
+      # WI-14 root cause (OMN-14139/OMN-14135). Every routed handler must use the
+      # nested handler:{name,module} shape. Fail-closed companion to the runtime
+      # parse guard in auto_wiring/discovery._parse_handler_routing. SYNC with
+      # ci.yml step "handler_routing flat-schema gate".
+      - id: handler-routing-schema-gate
+        name: handler_routing flat-schema gate (OMN-14141)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_routing_schema
         language: system
         files: (^|/)contract\.yaml$
         pass_filenames: true

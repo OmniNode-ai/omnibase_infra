@@ -33,9 +33,9 @@ depends_on:
 restart: unless-stopped
 resources:
   cpus: '0.5'
-  memory: 256M
+  memory: 768M
   cpus_reservation: '0.1'
-  memory_reservation: 64M
+  memory_reservation: 128M
 stop_grace_period: 30s
 command:
   - uvicorn

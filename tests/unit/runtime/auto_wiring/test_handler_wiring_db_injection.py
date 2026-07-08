@@ -88,7 +88,7 @@ def test_standard_callback_calls_async_handle() -> None:
 
 @pytest.mark.unit
 def test_projection_callback_injects_db_and_event_type() -> None:
-    """Handler receives a dict with _db and _event_type injected."""
+    """Handler receives a dict with _db, _event_type, and _topic injected."""
     received: list[dict] = []
 
     class FakeHandler:
@@ -118,6 +118,47 @@ def test_projection_callback_injects_db_and_event_type() -> None:
     assert len(received) == 1
     assert received[0]["_event_type"] == "heartbeat"
     assert received[0]["_db"] is fake_adapter
+    assert received[0]["_topic"] == "onex.evt.platform.node-heartbeat.v1"
+
+
+@pytest.mark.unit
+def test_projection_callback_injects_topic_for_strict_handlers() -> None:
+    """OMN-13992 regression: a handler that requires a non-empty input_data['_topic']
+    (mirrors HandlerProjectionLiveEvents.handle()) must not raise ValueError.
+
+    Before the fix, ``_make_projection_dispatch_callback`` computed ``topic``
+    locally (for logging only) but never injected it into ``input_data``, so
+    any handler popping ``_topic`` with a required non-empty check raised on
+    every real dispatch and the event was dropped with no DLQ topic declared.
+    """
+
+    class StrictTopicHandler:
+        def handle(self, input_data: dict) -> dict:
+            topic = input_data.pop("_topic", "")
+            if not isinstance(topic, str) or not topic.strip():
+                raise ValueError(
+                    "handle() requires input_data['_topic'] as a non-empty string"
+                )
+            return {"rows_upserted": 1}
+
+    db_tables = [{"name": "live_events", "database": "omnidash_analytics"}]
+    callback = _make_projection_dispatch_callback(
+        StrictTopicHandler(), db_tables, ("onex.evt.platform.node-heartbeat.v1",)
+    )
+
+    envelope = MagicMock()
+    envelope.topic = "onex.evt.platform.node-heartbeat.v1"
+    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+
+    with patch(
+        _PATCH_ENVIRON_GET,
+        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    ):
+        with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
+            # Must not raise: _topic is now injected alongside _db/_event_type.
+            result = asyncio.run(callback(envelope))
+
+    assert result is None
 
 
 @pytest.mark.unit

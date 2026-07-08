@@ -656,11 +656,21 @@ RUN set -eu; \
         CLAUDE_PLATFORM_SPEC="@anthropic-ai/claude-code-linux-arm64@2.1.181" ;; \
       *) echo "Unsupported TARGETARCH='${TARGETARCH}' for coding-agent CLIs (expected amd64 or arm64)" >&2; exit 64 ;; \
     esac; \
-    npm install -g \
-        @openai/codex@0.141.0 \
-        "${CODEX_PLATFORM_SPEC}" \
-        @anthropic-ai/claude-code@2.1.181 \
-        "${CLAUDE_PLATFORM_SPEC}"; \
+    npm config set fetch-retries 5; \
+    npm config set fetch-retry-mintimeout 20000; \
+    npm config set fetch-retry-maxtimeout 120000; \
+    npm config set fetch-timeout 300000; \
+    for attempt in 1 2 3; do \
+        npm install -g \
+            @openai/codex@0.141.0 \
+            "${CODEX_PLATFORM_SPEC}" \
+            @anthropic-ai/claude-code@2.1.181 \
+            "${CLAUDE_PLATFORM_SPEC}" && break; \
+        status="$?"; \
+        echo "npm install attempt ${attempt}/3 failed with exit ${status}" >&2; \
+        if [ "$attempt" = "3" ]; then exit "$status"; fi; \
+        sleep "$((attempt * 20))"; \
+    done; \
     npm cache clean --force
 
 # ============================================================================

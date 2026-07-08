@@ -1432,7 +1432,12 @@ def _make_projection_dispatch_callback(
     """Create a dispatch callback for projection handlers (db_io.db_tables declared).
 
     Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
-    input_data alongside _event_type derived from the topic name.
+    input_data alongside _event_type and _topic derived from the dispatched
+    envelope (OMN-13992: _topic was computed locally for logging but never
+    injected, so any strict projection handler that requires
+    input_data['_topic'] — e.g. HandlerProjectionLiveEvents — raised a
+    ValueError on every dispatch and the event was dropped, non-fatally but
+    silently, with no DLQ topic declared to catch it).
 
     ``sinks`` carries the bus-side outputs. When ``sinks.event_bus`` and
     ``sinks.terminal_event`` are set, a terminal event envelope is emitted to
@@ -1506,6 +1511,7 @@ def _make_projection_dispatch_callback(
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
+            input_data["_topic"] = topic
 
             def _invoke_projection_handler() -> object:
                 _connect_projection_runner_db_if_needed(handler_instance)
@@ -3124,6 +3130,40 @@ async def _commit_contract_wiring(
                 resolution_outcome=prepared.resolution_outcome,
                 skipped_reason=prepared.skip_reason,
             )
+        )
+
+    # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
+    # subscribe topics but registered ZERO dispatchers — and quarantined /
+    # resolver-skipped NOTHING — is a silent phantom-wire: the topic would be
+    # consumed and its Kafka offsets committed with no handler ever running.
+    # This is the wiring-side backstop for the flat-schema silent-zero-parse
+    # defect (the parse guard in discovery._parse_handler_routing is the first
+    # line). When all four hold, pcw.prepared_wirings was empty — handler_routing
+    # produced no parseable handlers. Legacy top-level ``handler:`` fallbacks and
+    # resolver-ownership skips always leave a dispatcher, a skipped_handler, or a
+    # quarantine, so this never fires on them. Returned as FAILED (not WIRED) so
+    # total_failed is accurate and ONEX_WIRING_STRICT_MODE crashes boot loudly;
+    # the topic is NOT subscribed either way.
+    if (
+        pcw.subscription_topics
+        and not dispatchers_registered
+        and not skipped_handlers
+        and not quarantined
+    ):
+        return ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.FAILED,
+            reason=(
+                "phantom wiring: contract declares "
+                f"{len(pcw.subscription_topics)} subscribe topic(s) but "
+                "registered zero dispatchers (handler_routing produced no "
+                "parseable handlers). Convert flat handler_class/handler_module "
+                "entries to nested handler:{name,module} (OMN-14141)."
+            ),
+            wirings=tuple(wirings),
+            skipped_handlers=tuple(skipped_handlers),
+            quarantined_handlers=tuple(quarantined),
         )
 
     if subscribe_immediately and event_bus is not None and pcw.subscription_topics:

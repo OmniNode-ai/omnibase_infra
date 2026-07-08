@@ -31,9 +31,29 @@ steady state for a real runtime sibling like ``onex_change_control`` whose dev
 branch advances on every receipt PR (including the receipt PRs that pin-bump PRs
 themselves require), so an exact lock pin can never durably converge. The
 2026-06-11 crash this guard prevents was the OPPOSITE direction -- a STALE clone
-that was BEHIND the lock with a MISMATCHED version -- which stays FATAL. Run
-BEFORE the docker build (preflight) and again inside the build to enrich
-provenance.
+that was BEHIND the lock with a MISMATCHED version -- which stays FATAL.
+
+Registry-sourced forward-drift exception (OMN-13902 / OMN-14138): a WORKSPACE-mode
+build vendors the sibling *clone*, not the lock-pinned wheel, so a clone that is
+NEWER than the lock is the intended state -- not drift. OMN-13929's post-publish
+release-identity disarm bumps a sibling's DEV ``pyproject`` version to N+1 the
+instant version N is published to PyPI, so every registry-sourced sibling's dev
+clone is PERMANENTLY one version ahead of the last-published pin any consumer's
+``uv.lock`` can carry. Blocking that ``[DRIFT/forward]`` state aborted every
+workspace runtime build from dev. In workspace mode a registry-sourced pin
+(``git_rev`` is None, so there is no SHA to prove ancestry with) whose clone
+version is strictly FORWARD of the lock is therefore recorded as a non-fatal
+``forward_drift_allowed`` note -- ``matches`` stays True, the build proceeds. This
+is the registry-sourced analogue of the git-rev ``clone_ahead`` exemption above;
+version ordering is the only "clone is ahead" signal a registry pin exposes.
+BACKWARD drift (stale clone -- the 2026-06-11 crash shape) and any non-comparable
+("unknown") version stay FATAL, and git-sourced pins keep the stronger SHA-
+ancestry proof (a forward VERSION bump on a git pin stays fatal: it means the
+immutable rev pin is stale and must be re-bumped, not steady-state noise). The
+exception applies ONLY in workspace mode: a RELEASE build (``--build-source
+release``, the strict default) installs the published wheel, so forward drift
+there is a real skew and stays FATAL. Run BEFORE the docker build (preflight) and
+again inside the build to enrich provenance.
 
 Usage:
     uv run python scripts/runtime_build/check_sibling_lock_pins.py \\
@@ -132,6 +152,18 @@ class ModelPinComparison(BaseModel):
             "True (OMN-13403) when the version matches exactly but the clone HEAD "
             "is a strict git DESCENDANT of the locked SHA. This is a non-fatal "
             "note, not drift: ``matches`` stays True and the build proceeds."
+        ),
+    )
+    forward_drift_allowed: bool = Field(
+        default=False,
+        description=(
+            "True (OMN-13902) when a WORKSPACE-mode build sees a REGISTRY-sourced "
+            "pin whose clone version is strictly FORWARD of the lock (the "
+            "OMN-13929 disarm-bump / unreleased-dev steady state). The workspace "
+            "build vendors the newer clone, so this is a non-fatal note, not "
+            "drift: ``matches`` stays True and the build proceeds. Registry-sourced "
+            "analogue of ``clone_ahead``; never set in release mode or for a "
+            "git-sourced pin."
         ),
     )
     note: str = Field(
@@ -285,11 +317,13 @@ def compare_pins(
     expected: ModelLockPin,
     actual: ModelActualPin,
     repo_root: Path | None = None,
+    workspace_mode: bool = False,
 ) -> ModelPinComparison:
     """Compare an expected lock pin against the actual clone pin.
 
-    Version must ALWAYS match -- a version mismatch in any direction is fatal and
-    is never softened (that was the 2026-06-11 stale-sibling crash).
+    A BACKWARD version mismatch (clone older than the lock) is fatal and is never
+    softened (that was the 2026-06-11 stale-sibling crash). A non-comparable
+    ("unknown") version mismatch is also fatal.
 
     When the lock pin is a git source, the resolved rev must be a prefix of the
     clone HEAD (or vice-versa) -- uv records the full rev while a short SHA may
@@ -303,18 +337,45 @@ def compare_pins(
     ancestry can be checked against the actual clone; without it, or when the
     locked SHA is absent / the clone is behind / histories are unrelated, the SHA
     difference stays FATAL.
+
+    OMN-13902 registry forward-drift exception: when ``workspace_mode`` is True
+    and a REGISTRY-sourced pin (``git_rev`` is None) has a clone version strictly
+    FORWARD of the lock, the difference is recorded as a non-fatal
+    ``forward_drift_allowed`` note -- ``matches`` stays True, the build proceeds.
+    A workspace build vendors the newer clone, and the OMN-13929 disarm-bump makes
+    every registry-sourced dev clone permanently one version ahead of the last-
+    published pin, so this forward state is the intended steady state, not drift.
+    The exception applies ONLY in workspace mode (a release build installs the
+    published wheel, so forward drift there is a real skew) and ONLY to registry-
+    sourced pins (git-sourced pins keep the stronger SHA-ancestry proof above).
     """
     reasons: list[str] = []
 
+    drift_direction = _classify_drift(expected.version, actual.version)
     version_matches = expected.version == actual.version
-    if not version_matches:
-        reasons.append(
-            f"version drift: lock pins {expected.version!r} but clone is "
-            f"{actual.version!r}"
-        )
+    forward_drift_allowed = False
 
     clone_ahead = False
     note = ""
+
+    if not version_matches:
+        # Registry-sourced (git_rev is None) forward drift in a workspace build is
+        # the OMN-13929 disarm-bump steady state, not a stale-sibling crash: the
+        # build vendors the newer clone, so allow it. Backward / unknown drift, and
+        # any drift on a git-sourced pin, stay fatal.
+        if workspace_mode and drift_direction == "forward" and expected.git_rev is None:
+            forward_drift_allowed = True
+            note = (
+                f"forward-drift allowed (OMN-13902): workspace build vendors clone "
+                f"{actual.version}, which is forward of the registry-sourced lock "
+                f"pin {expected.version} (OMN-13929 disarm-bump / unreleased-dev "
+                "steady state). Recorded, non-fatal."
+            )
+        else:
+            reasons.append(
+                f"version drift: lock pins {expected.version!r} but clone is "
+                f"{actual.version!r}"
+            )
 
     if expected.git_rev is not None:
         exp = expected.git_rev.lower()
@@ -348,8 +409,9 @@ def compare_pins(
         expected_git_rev=expected.git_rev,
         actual_git_sha=actual.git_sha,
         matches=matches,
-        drift_direction=_classify_drift(expected.version, actual.version),
+        drift_direction=drift_direction,
         clone_ahead=clone_ahead,
+        forward_drift_allowed=forward_drift_allowed,
         note=note,
         mismatch_reason="; ".join(reasons),
     )
@@ -360,8 +422,16 @@ def check_pins(
     repo_roots: dict[str, Path],
     output_path: Path | None,
     allow_drift: bool = False,
+    workspace_mode: bool = False,
 ) -> int:
     """Preflight: compare every requested clone against the lock; fail fast.
+
+    When ``workspace_mode`` is True a registry-sourced pin whose clone version is
+    strictly FORWARD of the lock is a non-fatal ``forward_drift_allowed`` note
+    (OMN-13902): the workspace build vendors the newer clone and the OMN-13929
+    disarm-bump makes that the steady state, so it is not aborting drift. Backward
+    drift and git-sourced drift stay fatal. In release mode (the default) any
+    version mismatch is fatal.
 
     When ``allow_drift`` is True the drift is recorded in the provenance artifact
     and a warning is printed, but the build is not aborted -- reserved for an
@@ -393,11 +463,17 @@ def check_pins(
             )
             return 2
         comparisons.append(
-            compare_pins(expected_pins[package], actual, repo_root=repo_root)
+            compare_pins(
+                expected_pins[package],
+                actual,
+                repo_root=repo_root,
+                workspace_mode=workspace_mode,
+            )
         )
 
     drifted = [c for c in comparisons if not c.matches]
     clone_ahead = [c for c in comparisons if c.clone_ahead]
+    forward_allowed = [c for c in comparisons if c.forward_drift_allowed]
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -405,9 +481,11 @@ def check_pins(
             json.dumps(
                 {
                     "lock_source": str(lock_path),
+                    "workspace_mode": workspace_mode,
                     "allow_drift": allow_drift,
                     "drift_count": len(drifted),
                     "clone_ahead_count": len(clone_ahead),
+                    "forward_drift_allowed_count": len(forward_allowed),
                     "comparisons": [c.model_dump() for c in comparisons],
                 },
                 indent=2,
@@ -421,12 +499,14 @@ def check_pins(
             status = f"DRIFT/{c.drift_direction}"
         elif c.clone_ahead:
             status = "AHEAD"
+        elif c.forward_drift_allowed:
+            status = "FWD-OK"
         else:
             status = "OK"
         line = f"  [{status}] {c.package}: lock={c.expected_version} clone={c.actual_version}"
         if not c.matches:
             print(f"{line}  -- {c.mismatch_reason}", file=sys.stderr)
-        elif c.clone_ahead:
+        elif c.clone_ahead or c.forward_drift_allowed:
             print(f"{line}  -- {c.note}")
         else:
             print(line)
@@ -436,6 +516,14 @@ def check_pins(
             f"\nNOTE: {len(clone_ahead)} sibling pin(s) are clone-AHEAD of "
             f"{lock_path.name} (same version, clone HEAD descends from the locked "
             "SHA); non-fatal, recorded in provenance (OMN-13403).",
+            file=sys.stderr,
+        )
+
+    if forward_allowed:
+        print(
+            f"\nNOTE: {len(forward_allowed)} registry-sourced sibling pin(s) are "
+            f"forward of {lock_path.name} (clone version newer than the lock); "
+            "non-fatal in workspace mode, recorded in provenance (OMN-13902).",
             file=sys.stderr,
         )
 
@@ -503,6 +591,19 @@ def main(argv: list[str] | None = None) -> int:
             "aborting. Explicit operator override only -- never the default."
         ),
     )
+    parser.add_argument(
+        "--build-source",
+        choices=("workspace", "release"),
+        default="release",
+        help=(
+            "Build mode. 'workspace' vendors the sibling clones, so a registry-"
+            "sourced pin whose clone version is FORWARD of the lock is the "
+            "OMN-13929 disarm-bump steady state and is non-fatal (OMN-13902). "
+            "'release' (default, strict) installs the published wheel, so any "
+            "version mismatch stays fatal. Backward / git-sourced drift is fatal "
+            "in both modes."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.repo:
@@ -510,7 +611,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     repo_roots = dict(args.repo)
-    return check_pins(args.lock, repo_roots, args.output, allow_drift=args.allow_drift)
+    return check_pins(
+        args.lock,
+        repo_roots,
+        args.output,
+        allow_drift=args.allow_drift,
+        workspace_mode=(args.build_source == "workspace"),
+    )
 
 
 if __name__ == "__main__":
