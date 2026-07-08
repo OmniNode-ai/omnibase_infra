@@ -329,6 +329,66 @@ class HandlerLedgerAppend:
                 context=ctx,
             ) from e
 
+    async def handle(
+        self,
+        envelope: object,
+    ) -> ModelHandlerOutput[ModelLedgerAppendResult]:
+        """Contract-typed auto-wiring entry point.
+
+        ``node_ledger_write_effect``'s contract declares ``operation_match``
+        routing with no ``event_model``, so the dispatch engine's auto-wiring
+        (``handler_wiring._make_dispatch_callback``) invokes ``handle(envelope)``
+        directly instead of ``execute()``. Without this method the callback binds
+        ``_missing_handle``, which raises on every dispatched ledger-append
+        command (OMN-14134 — WI-14 keystone).
+
+        Extracts the append payload from the auto-wired envelope, delegates to
+        append(), and wraps the result identically to execute().
+        """
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelPayloadLedgerAppend,
+        )
+
+        payload_raw = getattr(envelope, "payload", envelope)
+        payload = (
+            payload_raw
+            if isinstance(payload_raw, ModelPayloadLedgerAppend)
+            else ModelPayloadLedgerAppend.model_validate(payload_raw)
+        )
+
+        correlation_id = self._safe_correlation_id(
+            getattr(envelope, "correlation_id", None) or payload.correlation_id
+        )
+        input_envelope_id = uuid4()
+
+        result = await self.append(payload)
+
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_LEDGER_APPEND,
+            result=result,
+        )
+
+    @staticmethod
+    def _safe_correlation_id(raw: object) -> UUID:
+        """Parse a correlation ID from envelope/payload-supplied raw input.
+
+        Returns a fresh UUID if `raw` is missing or unparseable. Unlike
+        ``execute()``, ``handle()`` has no envelope validation step to reject a
+        malformed correlation_id before reaching this point — the audit ledger
+        must never drop an event over a bad correlation_id, so this degrades to
+        a fresh UUID rather than raising.
+        """
+        if not raw:
+            return uuid4()
+        if isinstance(raw, UUID):
+            return raw
+        try:
+            return UUID(str(raw))
+        except (ValueError, TypeError):
+            return uuid4()
+
     async def execute(
         self,
         envelope: dict[str, object],

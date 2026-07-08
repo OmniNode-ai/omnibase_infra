@@ -24,6 +24,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.models import ModelDbQueryPayload, ModelDbQueryResponse
@@ -396,6 +397,137 @@ class TestHandlerLedgerAppendProtocolCompliance:
 
 
 # =============================================================================
+# handle() Auto-Wiring Adapter Tests (OMN-14134)
+# =============================================================================
+
+
+class TestHandlerLedgerAppendHandle:
+    """Tests for the handle() auto-wiring entry point.
+
+    node_ledger_write_effect's contract declares operation_match routing with
+    no event_model, so handler_wiring._make_dispatch_callback dispatches via
+    handle(envelope) directly rather than execute(). Without handle(), the
+    auto-wiring binds _missing_handle and every dispatched ledger-append
+    command raises.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handle_routes_to_append_and_returns_handler_output(self) -> None:
+        """handle() extracts the payload, calls append(), and wraps the result."""
+        container = make_mock_container()
+        db_handler = make_mock_db_handler(initialized=True)
+
+        ledger_entry_id = uuid4()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(
+                rows=[{"ledger_entry_id": str(ledger_entry_id)}]
+            )
+        )
+
+        handler = HandlerLedgerAppend(container, db_handler)
+        await handler.initialize({})
+
+        payload = make_minimal_payload()
+        envelope = MagicMock()
+        envelope.payload = payload
+        envelope.correlation_id = None
+
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "ledger-append-handler"
+        assert output.result is not None
+        assert output.result.success is True
+        assert output.result.duplicate is False
+        assert output.result.ledger_entry_id == ledger_entry_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handle_coerces_dict_payload(self) -> None:
+        """handle() validates a raw dict payload into ModelPayloadLedgerAppend."""
+        container = make_mock_container()
+        db_handler = make_mock_db_handler(initialized=True)
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
+
+        handler = HandlerLedgerAppend(container, db_handler)
+        await handler.initialize({})
+
+        envelope = MagicMock()
+        envelope.payload = {
+            "topic": "test.events.v1",
+            "partition": 0,
+            "kafka_offset": 42,
+            "event_value": "SGVsbG8gV29ybGQ=",
+        }
+        envelope.correlation_id = None
+
+        output = await handler.handle(envelope)
+
+        assert output.result is not None
+        assert output.result.topic == "test.events.v1"
+        assert output.result.duplicate is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handle_propagates_envelope_correlation_id(self) -> None:
+        """handle() copies correlation_id from the envelope onto the output."""
+        container = make_mock_container()
+        db_handler = make_mock_db_handler(initialized=True)
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
+
+        handler = HandlerLedgerAppend(container, db_handler)
+        await handler.initialize({})
+
+        correlation_id = uuid4()
+        envelope = MagicMock()
+        envelope.payload = make_minimal_payload()
+        envelope.correlation_id = correlation_id
+
+        output = await handler.handle(envelope)
+
+        assert output.correlation_id == correlation_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handle_falls_back_to_fresh_uuid_when_no_correlation_id(
+        self,
+    ) -> None:
+        """handle() never leaves correlation_id unset — it defaults to a fresh UUID."""
+        container = make_mock_container()
+        db_handler = make_mock_db_handler(initialized=True)
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
+
+        handler = HandlerLedgerAppend(container, db_handler)
+        await handler.initialize({})
+
+        envelope = MagicMock()
+        envelope.payload = make_minimal_payload(correlation_id=None)
+        envelope.correlation_id = None
+
+        output = await handler.handle(envelope)
+
+        assert output.correlation_id is not None
+
+    @pytest.mark.unit
+    def test_safe_correlation_id_parses_string_uuid(self) -> None:
+        """_safe_correlation_id parses a string UUID into a UUID instance."""
+        correlation_id = uuid4()
+        assert (
+            HandlerLedgerAppend._safe_correlation_id(str(correlation_id))
+            == correlation_id
+        )
+
+    @pytest.mark.unit
+    def test_safe_correlation_id_falls_back_on_garbage(self) -> None:
+        """_safe_correlation_id never raises — bad input yields a fresh UUID."""
+        from uuid import UUID
+
+        result = HandlerLedgerAppend._safe_correlation_id("not-a-uuid")
+        assert isinstance(result, UUID)
+
+
+# =============================================================================
 # DB Result Guard Tests
 # =============================================================================
 
@@ -430,5 +562,6 @@ __all__ = [
     "TestHandlerLedgerAppendDuplicateDetection",
     "TestHandlerLedgerAppendBase64Errors",
     "TestHandlerLedgerAppendProtocolCompliance",
+    "TestHandlerLedgerAppendHandle",
     "TestHandlerLedgerAppendDbResultGuard",
 ]
