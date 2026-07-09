@@ -56,6 +56,43 @@ x-runner-base: &runner-base
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+    # OMN-14027 C3 — fleet-wide uv download stampede cap.
+    # 64 runners NAT through one home uplink and share one anonymous egress
+    # budget. The hardened setup-python-uv composite serializes downloads to 1 in
+    # its OWN step, but the 18 workflows that bypass it (OMN-14193) run raw
+    # `uv sync` at uv's built-in concurrency default — 64x in parallel — and
+    # stampede the shared uplink, tripping the `uv sync` download timeouts that
+    # OMN-14017 band-aids per-workflow. These fleet defaults give EVERY job
+    # (composite AND raw-uv) a conservative ceiling and the 600s HTTP timeout the
+    # composite already applies, so raw-uv paths inherit the protection too.
+    #
+    # Value is 1 (not the ticket's tuning target of 2) as the deliberate
+    # pre-cache fail-safe: the composite path already pins `${...:-1}` = 1, so a
+    # fleet default of 1 keeps that proven-safe path UNCHANGED while capping the
+    # currently-uncapped raw-uv paths DOWN from uv's default. A fleet default of
+    # 2 would loosen the composite path (1 -> 2) and double its download fan
+    # under the same saturated uplink — a regression in exactly the failure
+    # window this fix targets. Raise to 2 only after the C1 PyPI cache (below) is
+    # active and measured (OMN-14027 rollout step 2 / acceptance metrics).
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: "600"
+    # OMN-14027 C1 — PyPI pull-through cache wiring (INERT until rollout).
+    # DO NOT uncomment here. This block is shovel-ready but deliberately inert:
+    # activating it fleet-wide is a soak-gated rollout action, and pointing the
+    # fleet at a cache host that is not yet up would force every runner onto the
+    # PyPI fallback. Per the OMN-14027 rollout, devpi is stood up first
+    # (docker/docker-compose.pypi-cache.yml) and ONE canary runner is wired via
+    # its own container env, leaving the other 63 on direct egress until the
+    # canary is measured green. PyPI stays as the fallback index so a cache
+    # miss/outage degrades, not fails-closed. Cache endpoint + activation steps:
+    # config/runner_fleet.yaml (pypi_cache:) and
+    # docs/runbooks/pypi-cache-egress-rollout.md.
+    # UV_DEFAULT_INDEX: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+    # UV_INDEX_STRATEGY: "unsafe-best-match"
+    # PIP_INDEX_URL: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+    # PIP_EXTRA_INDEX_URL: "https://pypi.org/simple/"
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro

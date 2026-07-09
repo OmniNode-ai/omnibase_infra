@@ -20,3 +20,22 @@ burst_count: 64
 # network_pool_warn_ratio of capacity so the janitor reclaims before exhaustion.
 network_pool_capacity: 31
 network_pool_warn_ratio: 0.8
+# OMN-14027 C1 — PyPI pull-through cache (devpi) endpoint. Source of truth for the
+# egress cache the fleet points at. STATUS: pending-activation / INERT — the
+# devpi service (docker/docker-compose.pypi-cache.yml) is stood up and wired only
+# at the soak-gated rollout; recording the endpoint here does not activate it. The
+# matching UV_DEFAULT_INDEX / PIP_INDEX_URL wiring is kept commented in
+# docker/docker-compose.runners.yml until then. Runbook:
+# docs/runbooks/pypi-cache-egress-rollout.md.
+pypi_cache:
+  active: false
+  # Tailscale MagicDNS host + published port, matching runner_host above so the
+  # endpoint does not depend on the runner host's current LAN/Tailscale IP.
+  host: omninode-pc.tail75df5e.ts.net
+  port: 3141
+  # devpi's built-in on-demand pull-through mirror index.
+  simple_index_url: http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/
+  # Keep PyPI as the fallback so a cache miss/outage degrades, not fails-closed.
+  fallback_index_url: https://pypi.org/simple/
+  # Acceptance target before fleet-wide rollout (OMN-14027 metrics).
+  target_hit_rate: 0.90

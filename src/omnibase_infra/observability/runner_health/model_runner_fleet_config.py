@@ -11,6 +11,10 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.observability.runner_health.model_pypi_cache_config import (
+    ModelPyPICacheConfig,
+)
+
 
 class ModelRunnerFleetConfig(BaseModel):
     """Authoritative configuration for the self-hosted runner fleet."""
@@ -43,6 +47,14 @@ class ModelRunnerFleetConfig(BaseModel):
         description=(
             "Fraction of network_pool_capacity at which to alert before the "
             "subnet pool is exhausted (OMN-12566)."
+        ),
+    )
+    pypi_cache: ModelPyPICacheConfig | None = Field(
+        default=None,
+        description=(
+            "OMN-14027 C1 — PyPI pull-through cache endpoint (devpi). Optional "
+            "and inert until the soak-gated rollout sets active=True and wires "
+            "the runner env. Absent in configs predating the egress-cache work."
         ),
     )
 
