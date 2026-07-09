@@ -401,6 +401,12 @@ for i in $(seq 1 "$EXPECTED_RUNNERS"); do
         stuck_created_list+=("${name}: Docker Created but never started — orphaned mid-recreate")
     fi
 
+    if [[ "${docker_state}" == Up* ]] && [[ "${docker_state}" != *"(healthy)"* ]] && runner_has_local_listener_evidence "${name}"; then
+        github_degraded_list+=("${name}: Docker health ${docker_state} ignored; local listener evidence present")
+        healthy=$((healthy + 1))
+        continue
+    fi
+
     if [[ "${docker_state}" != *"(healthy)"* ]] || [[ "${docker_state}" != Up* ]]; then
         unhealthy_list+=("${name}: Docker ${docker_state}")
         continue
@@ -693,14 +699,18 @@ auto_bounce() {
 # Compare with previous state and alert on transitions
 # ---------------------------------------------------------------------------
 prev_unhealthy_count=0
+prev_alert_count=0
 if [[ -f "$STATE_FILE" ]]; then
     prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
 fi
 
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
 crashloop_count=${#crashloop_list[@]}
 stuck_created_count=${#stuck_created_list[@]}
+offline_idle_recreate_count=${#offline_idle_recreate_list[@]}
+missing_container_count=${#missing_container_list[@]}
 offline_first_seen_json="{}"
 if [[ -n "${offline_first_seen_lines}" ]]; then
     offline_first_seen_json=$(printf '%s' "${offline_first_seen_lines}" | jq -Rn '
@@ -715,13 +725,30 @@ if [[ -n "${offline_first_seen_lines}" ]]; then
     ')
 fi
 
+remediation_targets="$(collect_remediation_targets)"
+remediation_target_count=0
+if [[ -n "${remediation_targets// /}" ]]; then
+    remediation_target_count=$(wc -w <<< "${remediation_targets}")
+fi
+current_alert_count="${remediation_target_count}"
+if [[ "${github_api_failed}" == true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
+if [[ "${docker_ok}" != true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
+
 # Write current state
 jq -n \
     --argjson healthy "$healthy" \
     --argjson unhealthy_count "$current_unhealthy_count" \
+    --argjson alert_count "$current_alert_count" \
+    --argjson remediation_target_count "$remediation_target_count" \
     --argjson wedge_count "$wedge_count" \
     --argjson crashloop_count "$crashloop_count" \
     --argjson stuck_created_count "$stuck_created_count" \
+    --argjson offline_idle_recreate_count "$offline_idle_recreate_count" \
+    --argjson missing_container_count "$missing_container_count" \
     --argjson online "$online_count" \
     --argjson busy "$busy_count" \
     --argjson queued_age "$queued_age" \
@@ -736,9 +763,13 @@ jq -n \
     '{
         healthy: $healthy,
         unhealthy_count: $unhealthy_count,
+        alert_count: $alert_count,
+        remediation_target_count: $remediation_target_count,
         wedge_count: $wedge_count,
         crashloop_count: $crashloop_count,
         stuck_created_count: $stuck_created_count,
+        offline_idle_recreate_count: $offline_idle_recreate_count,
+        missing_container_count: $missing_container_count,
         online: $online,
         busy: $busy,
         oldest_queued_job_age_seconds: $queued_age,
@@ -756,7 +787,6 @@ jq -n \
 # Alert logic — only on state transitions
 # ---------------------------------------------------------------------------
 
-remediation_targets="$(collect_remediation_targets)"
 safe_bounce_block=""
 if [[ -n "${remediation_targets// /}" ]]; then
     safe_bounce_block="$(render_safe_bounce_cmd "${remediation_targets}")"
@@ -780,10 +810,10 @@ if [[ "${stuck_created_count}" -gt 0 ]]; then
     special_findings+="$(printf '%s\n' "${stuck_created_list[@]}")"$'\n'
 fi
 
-if [[ $current_unhealthy_count -gt 0 ]] && [[ $prev_unhealthy_count -eq 0 ]]; then
-    # Transition: all-good → something broken
+if [[ $current_alert_count -gt 0 ]] && [[ $prev_alert_count -eq 0 ]]; then
+    # Transition: no actionable alert -> actionable repair/monitor failure.
     detail=$(printf '%s\n' "${unhealthy_list[@]}")
-    msg="*[RUNNER ALERT]* ${current_unhealthy_count}/${EXPECTED_RUNNERS} runners unhealthy
+    msg="*[RUNNER ALERT]* ${current_alert_count} actionable runner-fleet issue(s); ${current_unhealthy_count}/${EXPECTED_RUNNERS} raw unhealthy
 
 \`\`\`
 ${detail}
@@ -808,13 +838,14 @@ ${safe_bounce_block}
 \`\`\`"
     fi
     slack_post "${msg}" "danger"
-    log "ALERT: ${current_unhealthy_count} runners unhealthy (was 0). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}. Slack notified."
+    log "ALERT: ${current_alert_count} actionable issue(s), ${current_unhealthy_count} raw unhealthy (previous actionable 0). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack notified."
     auto_bounce "${remediation_targets}"
 
-elif [[ $current_unhealthy_count -gt 0 ]] && [[ $prev_unhealthy_count -gt 0 ]] && [[ $current_unhealthy_count -ne $prev_unhealthy_count ]]; then
-    # Transition: bad → worse or bad → partially recovered
+elif [[ $current_alert_count -gt 0 ]] && [[ $prev_alert_count -gt 0 ]] && [[ $current_alert_count -ne $prev_alert_count ]]; then
+    # Transition: actionable issue count changed. Raw GitHub/Docker drift count
+    # can churn under saturation; do not page on that noise.
     detail=$(printf '%s\n' "${unhealthy_list[@]}")
-    msg="*[RUNNER UPDATE]* ${current_unhealthy_count}/${EXPECTED_RUNNERS} runners unhealthy (was ${prev_unhealthy_count})
+    msg="*[RUNNER UPDATE]* ${current_alert_count} actionable runner-fleet issue(s) (was ${prev_alert_count}); ${current_unhealthy_count}/${EXPECTED_RUNNERS} raw unhealthy
 
 \`\`\`
 ${detail}
@@ -837,20 +868,21 @@ ${safe_bounce_block}
 \`\`\`"
     fi
     slack_post "${msg}" "warning"
-    log "UPDATE: ${current_unhealthy_count} unhealthy (was ${prev_unhealthy_count}). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}. Slack notified."
+    log "UPDATE: ${current_alert_count} actionable issue(s) (was ${prev_alert_count}), ${current_unhealthy_count} raw unhealthy. wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack notified."
     auto_bounce "${remediation_targets}"
 
-elif [[ $current_unhealthy_count -eq 0 ]] && [[ $prev_unhealthy_count -gt 0 ]]; then
-    # Transition: broken → all recovered
-    slack_post "*[RUNNER RECOVERED]* All ${EXPECTED_RUNNERS} runners healthy
+elif [[ $current_alert_count -eq 0 ]] && [[ $prev_alert_count -gt 0 ]]; then
+    # Transition: actionable alert cleared. Raw drift may remain and is logged.
+    slack_post "*[RUNNER RECOVERED]* No actionable runner-fleet issues remain
 
+Healthy: ${healthy}/${EXPECTED_RUNNERS} | Raw unhealthy: ${current_unhealthy_count}
 Online: ${online_count} | Busy: ${busy_count}
 Docker socket: $([ "$docker_ok" = true ] && echo 'OK' || echo 'FAILED')
 Host: ${RUNNER_HOST}" "good"
-    log "RECOVERED: All ${EXPECTED_RUNNERS} runners healthy. Slack notified."
+    log "RECOVERED: actionable alert count cleared; ${current_unhealthy_count} raw unhealthy remain. Slack notified."
 
 else
     # No state change — silent
-    log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} unhealthy (wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count}, no change)."
+    log "OK: ${healthy}/${EXPECTED_RUNNERS} healthy, ${current_unhealthy_count} raw unhealthy, ${current_alert_count} actionable (wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}, no Slack change)."
     auto_bounce "${remediation_targets}"
 fi
