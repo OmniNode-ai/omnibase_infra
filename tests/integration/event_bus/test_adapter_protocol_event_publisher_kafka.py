@@ -39,16 +39,26 @@ import pytest
 
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_spi.protocols.event_bus import ProtocolEventPublisher
+from tests.helpers.util_kafka import check_host_reachability, validate_bootstrap_servers
 
 # =============================================================================
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available based on environment variable
+# Check if Kafka is available based on environment variable and TCP reachability.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None and bool(
-    KAFKA_BOOTSTRAP_SERVERS.strip()
+_kafka_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
+_kafka_reachable, _kafka_reachability_error = (
+    check_host_reachability(
+        _kafka_validation.host,
+        int(_kafka_validation.port),
+        timeout=1.0,
+    )
+    if _kafka_validation
+    else (False, _kafka_validation.skip_reason)
 )
+KAFKA_AVAILABLE = bool(_kafka_validation) and _kafka_reachable
+KAFKA_SKIP_REASON = _kafka_reachability_error or _kafka_validation.skip_reason
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
@@ -56,7 +66,7 @@ pytestmark = [
     pytest.mark.kafka,
     pytest.mark.skipif(
         not KAFKA_AVAILABLE,
-        reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
+        reason=f"Kafka not available ({KAFKA_SKIP_REASON})",
     ),
 ]
 

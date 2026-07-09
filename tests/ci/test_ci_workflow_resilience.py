@@ -16,6 +16,12 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DOCKER_BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-build.yml"
+REJECT_SKIP_CALLER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "call-reject-skip.yml"
+)
+FRESH_DEPLOY_FITNESS_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "fresh-deploy-fitness.yml"
+)
 RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
@@ -39,6 +45,7 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "a677c8f978cd87a8894e3dab9c0291e12c37c545"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -203,6 +210,28 @@ def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
     assert "github.event_name != 'pull_request'" in job["if"]
     assert "github.event.inputs.run_full_tests != 'false'" in job["if"]
     assert job["continue-on-error"] is True
+
+
+def test_short_dependency_gates_have_checkout_budget() -> None:
+    docker_workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
+    freshness_workflow = _load_yaml(FRESH_DEPLOY_FITNESS_WORKFLOW)
+
+    docker_pin_job = docker_workflow["jobs"]["dockerfile-pin-check"]
+    sibling_lock_job = freshness_workflow["jobs"]["sibling-lock-pins"]
+
+    assert docker_pin_job["timeout-minutes"] >= 15
+    assert sibling_lock_job["timeout-minutes"] >= 20
+
+
+def test_reject_skip_token_gate_uses_no_checkout_reusable() -> None:
+    workflow = _load_yaml(REJECT_SKIP_CALLER_WORKFLOW)
+    job = workflow["jobs"]["call-reject-skip-token"]
+
+    assert (
+        job["uses"]
+        == "OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml"
+        f"@{OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA}"
+    )
 
 
 def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:

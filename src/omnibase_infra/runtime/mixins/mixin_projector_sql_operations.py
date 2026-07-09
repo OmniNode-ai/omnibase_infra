@@ -119,6 +119,7 @@ class MixinProjectorSqlOperations:
         self,
         value: object,
         column_name: str | None = None,
+        column_type: str | None = None,
     ) -> object:
         """Normalize a value before SQL persistence.
 
@@ -137,6 +138,8 @@ class MixinProjectorSqlOperations:
             value: The value to normalize. Can be any type.
             column_name: Optional column name for context in warning messages.
                 Helps identify the source of naive datetimes in logs.
+            column_type: Optional contract-declared SQL column type. Used for
+                converting serialized payload values into asyncpg-native types.
 
         Returns:
             The normalized value. For datetimes, returns a timezone-aware
@@ -174,6 +177,26 @@ class MixinProjectorSqlOperations:
             - OMN-1170: Declarative contract projections
             - PR #146: Datetime validation improvements
         """
+        if (
+            isinstance(value, str)
+            and column_type is not None
+            and column_type.upper() == "TIMESTAMPTZ"
+        ):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ProtocolConfigurationError(
+                    f"Invalid TIMESTAMPTZ value for projection column {column_name!r}",
+                    context=ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="normalize_projection_timestamptz",
+                        target_name=column_name,
+                        original_error_type=type(exc).__name__,
+                    ),
+                    column_name=column_name,
+                    column_type=column_type,
+                ) from exc
+
         # Handle datetime timezone validation
         if isinstance(value, datetime):
             return ensure_timezone_aware(
@@ -213,8 +236,16 @@ class MixinProjectorSqlOperations:
             >>> normalized["created_at"].tzinfo is not None  # Now timezone-aware
             True
         """
+        column_types = {
+            column.name: column.type
+            for column in self._contract.projection_schema.columns
+        }
         return {
-            column: self.normalize_value(value, column_name=column)
+            column: self.normalize_value(
+                value,
+                column_name=column,
+                column_type=column_types.get(column),
+            )
             for column, value in values.items()
         }
 

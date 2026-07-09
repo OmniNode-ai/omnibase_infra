@@ -259,7 +259,9 @@ async def test_standard_receipt_projects_with_correct_shape(
     assert by_col["envelope_id"] == envelope_id
     assert by_col["correlation_id"] == correlation_id
     assert by_col["ticket_id"] == "OMN-8606"
-    assert by_col["sweep_timestamp"] == "2026-04-14T22:50:00Z"
+    assert by_col["sweep_timestamp"] == datetime.fromisoformat(
+        payload.sweep_timestamp.replace("Z", "+00:00")
+    )
     assert by_col["overall_status"] == "pass"
     assert by_col["overseer_verdict"] == "PASS"
     assert by_col["idempotent"] is True
