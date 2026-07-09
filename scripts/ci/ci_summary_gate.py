@@ -94,6 +94,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
 # a legitimate skip path in ci.yml (docs-only diff, or event-scoped ``if:``).
 SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
     "Migration Integration Test",  # migration-integration (skips on docs-only)
+    "Integration Silent-Skip Guard (OMN-14172)",  # integration-guard (skips on docs-only)
     "Contract Compliance",  # compliance
     "Contract Compliance Check",  # contract-compliance
     "Contract Sync Gate (Wave C) [OMN-8915]",  # contract-sync-gate (skips on push)
