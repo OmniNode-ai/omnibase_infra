@@ -159,6 +159,20 @@ class TestCiSummaryGate:
         code, _ = evaluate(jobs)
         assert code == EXIT_SUCCESS
 
+    def test_run_attempt_filters_stale_failure_from_previous_attempt(self) -> None:
+        jobs = [_job(j["name"], "failure", attempt=1) for j in _all_gates()]
+        jobs.extend(_job(j["name"], "success", attempt=2) for j in _all_gates())
+        code, _ = evaluate(jobs, run_attempt=2)
+        assert code == EXIT_SUCCESS
+
+    def test_current_attempt_missing_gate_is_pending_not_stale_failure(self) -> None:
+        jobs = [_job(j["name"], "failure", attempt=1) for j in _all_gates()]
+        current_attempt = _all_gates()[:-1]
+        jobs.extend(_job(j["name"], "success", attempt=2) for j in current_attempt)
+        code, report = evaluate(jobs, run_attempt=2)
+        assert code == EXIT_PENDING
+        assert _all_gates()[-1]["name"] in report
+
     def test_same_attempt_duplicate_job_names_keep_failure(self) -> None:
         jobs = _all_gates("success")
         jobs += [
