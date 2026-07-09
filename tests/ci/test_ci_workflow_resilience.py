@@ -45,7 +45,7 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "672378418273b5cc102a8ebd36993128d29b5c7d"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "a677c8f978cd87a8894e3dab9c0291e12c37c545"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -232,6 +232,26 @@ def test_reject_skip_token_gate_uses_no_checkout_reusable() -> None:
         == "OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml"
         f"@{OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA}"
     )
+
+
+def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["runtime-boot-smoke"]
+    summary = workflow["jobs"]["ci-summary"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "needs.tests-gate.result == 'success'" in job["if"]
+    # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
+    # whether it declares `needs`, runtime-boot-smoke must never be a dependency
+    # of it (a PR-skipped advisory job must not wedge the required summary gate).
+    assert "runtime-boot-smoke" not in summary.get("needs", [])
+
+
+def test_compose_required_env_gate_has_checkout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["compose-required-env-coverage"]
+
+    assert job["timeout-minutes"] >= 20
 
 
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:

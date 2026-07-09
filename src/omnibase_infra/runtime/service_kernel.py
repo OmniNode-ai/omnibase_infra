@@ -2202,7 +2202,6 @@ async def bootstrap() -> int:
 
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
         if event_bus is not None and build_loop_dsn:
-            from omnibase_infra.handlers.handler_db import HandlerDb
             from omnibase_infra.nodes.node_build_loop_write_effect.handlers import (
                 HandlerBuildLoopAppend,
             )
@@ -2211,11 +2210,9 @@ async def bootstrap() -> int:
             )
             from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
-            build_loop_db_handler = HandlerDb(container)
-            await build_loop_db_handler.initialize({"dsn": build_loop_dsn})
             build_loop_append_handler = HandlerBuildLoopAppend(
                 container,
-                build_loop_db_handler,
+                build_loop_dsn,
             )
             await build_loop_append_handler.initialize({})
             build_loop_intent_executor = IntentExecutor(container=container)

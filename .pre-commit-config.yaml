@@ -253,6 +253,20 @@ repos:
         files: (^|/)contract\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-14141: reject flat handler_class/handler_module handler_routing
+      # entries. They silently parse to ZERO dispatchers and phantom-wire the
+      # subscribed topic (WIRED, Kafka offsets committed, no live handler) — the
+      # WI-14 root cause (OMN-14139/OMN-14135). Every routed handler must use the
+      # nested handler:{name,module} shape. Fail-closed companion to the runtime
+      # parse guard in auto_wiring/discovery._parse_handler_routing. SYNC with
+      # ci.yml step "handler_routing flat-schema gate".
+      - id: handler-routing-schema-gate
+        name: handler_routing flat-schema gate (OMN-14141)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_routing_schema
+        language: system
+        files: (^|/)contract\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
@@ -791,6 +805,25 @@ repos:
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
         language: system
         files: ^contracts/llm_endpoints\.yaml$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-14172: integration silent-skip false-green gate. An
+      # @pytest.mark.integration real-DB test that self-skips because a
+      # PROVISIONED service (Postgres) is absent is a false-green — the required
+      # Tests job goes green while the real-DB assertion never ran (the exact gap
+      # that let OMN-9041/OMN-14058-class defects reach dev). The --selftest runs
+      # the gate's own logic against synthetic pass/fail JUnit reports (case (a)
+      # provisioned -> PASS, case (b) reintroduced missing-service silent skip ->
+      # RED) so the gate cannot silently regress, and validates the shipped
+      # integration_skip_guard.yaml parses. No DB needed locally — the CI job
+      # 'integration-guard' is the full runtime gate. SYNC with ci.yml job
+      # 'integration-guard' (Operating Rule #5).
+      - id: integration-skip-guard
+        name: Integration silent-skip guard selftest (OMN-14172)
+        language: system
+        entry: uv run python scripts/ci/check_integration_skips.py --selftest
+        files: >-
+          ^(scripts/ci/check_integration_skips\.py|scripts/ci/integration_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/ci\.yml|tests/integration/runtime/db/test_postgres_repository_runtime_integration\.py|tests/integration/handlers/test_registration_storage_postgres_uuid_cast\.py)$
         pass_filenames: false
         stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing

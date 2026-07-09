@@ -47,6 +47,7 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaError
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.services.observability.consumer_health.config import (
     ConfigConsumerHealthProjection,
 )
@@ -151,6 +152,7 @@ class ConsumerHealthProjectionConsumer:
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
             value_deserializer=lambda v: json.loads(v.decode("utf-8")) if v else None,
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await self._consumer.start()
         logger.info(

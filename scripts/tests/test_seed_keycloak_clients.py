@@ -174,6 +174,60 @@ class TestIdempotency:
 
 
 # ---------------------------------------------------------------------------
+# Tests: client attributes
+# ---------------------------------------------------------------------------
+
+
+class TestClientAttributes:
+    def test_create_payload_includes_client_attributes(self) -> None:
+        spec = {
+            "clientId": "omniweb",
+            "publicClient": False,
+            "attributes": {"pkce.code.challenge.method": "S256"},
+        }
+
+        payload = _ensure_mod()._build_create_payload(spec, secret=None)
+
+        assert payload["attributes"] == {"pkce.code.challenge.method": "S256"}
+
+    def test_attribute_drift_updates_client(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        existing = _make_existing_client(
+            "omniweb",
+            publicClient=False,
+            attributes={},
+        )
+        spec = {
+            "clientId": "omniweb",
+            "publicClient": False,
+            "attributes": {"pkce.code.challenge.method": "S256"},
+        }
+        put_payloads: list[dict[str, Any]] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId" in url:
+                return _client_list_response([existing])
+            if method == "PUT" and "/clients/" in url:
+                put_payloads.append(kwargs.get("payload", {}))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
+
+        assert put_payloads == [
+            {
+                **existing,
+                "attributes": {"pkce.code.challenge.method": "S256"},
+            }
+        ]
+        record = json.loads(capsys.readouterr().out.strip())
+        assert record["op"] == "updated"
+        assert record["fields_changed"] == ["attributes"]
+
+
+# ---------------------------------------------------------------------------
 # Tests: missing secret env error
 # ---------------------------------------------------------------------------
 

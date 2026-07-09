@@ -4,10 +4,14 @@
   "clients": [
     {
       "clientId": "omniweb",
-      "publicClient": true,
+      "publicClient": false,
+      "secretEnv": "KEYCLOAK_CLIENT_SECRET",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
       "redirectUris": [
         "https://app.omninode.ai/*",
         "http://localhost:3000/*",

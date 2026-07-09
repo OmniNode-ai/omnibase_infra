@@ -37,8 +37,11 @@ Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 
 # The projection API base URL is sourced from the operator env file (NOT hardcoded
 # here). On .201 the operator sets ONEX_PROJECTION_URL=http://localhost:3002 in
-# ~/.omnibase/.env. If the file or the var is absent the reaper exits 2 and logs
-# the missing config (fail-fast, never a silent localhost default).
+# ~/.omnibase/.env. The script still fails fast on missing config and logs
+# projection fetch failures without advancing the cursor. The systemd unit
+# tolerates that non-zero exit so transient projection API outages do not leave
+# the high-frequency timer in a permanently failed/spammy state; the hourly
+# onex-disk-gc backstop remains the durable cleanup guarantee.
 EnvironmentFile=-%h/.omnibase/.env
 
 ExecStartPre=/bin/mkdir -p %h/.local/log/onex
@@ -46,7 +49,7 @@ ExecStartPre=/bin/mkdir -p %h/.local/log/onex
 # Event-first reap: read the pr-merged projection and drive prune-worktrees.sh
 # against the .201 worktrees root on /data. --execute really prunes + advances the
 # cursor; prune-worktrees.sh keeps all the safety (MERGED+clean+pushed only).
-ExecStart=/usr/bin/env python3 %h/Code/omni_home/omnibase_infra/scripts/worktree_reaper.py --execute --root /data/omninode/omni_worktrees
+ExecStart=-/usr/bin/env python3 %h/Code/omni_home/omnibase_infra/scripts/worktree_reaper.py --execute --root /data/omninode/omni_worktrees
 
 StandardOutput=journal
 StandardError=journal

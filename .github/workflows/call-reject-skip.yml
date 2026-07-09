@@ -42,8 +42,5 @@ jobs:
 
   call-reject-skip-token:
     needs: occ-preflight
-    # OMN-13996: pin the reusable skip-token scanner to the OMN-13934
-    # no-checkout fix. omniclaude@main still performs fetch-depth:0 checkout and
-    # cancels this required check on cold runners before the scanner can run.
-    uses: OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml@672378418273b5cc102a8ebd36993128d29b5c7d
+    uses: OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml@a677c8f978cd87a8894e3dab9c0291e12c37c545
     secrets: inherit

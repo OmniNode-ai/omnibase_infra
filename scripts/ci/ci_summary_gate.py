@@ -94,6 +94,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
 # a legitimate skip path in ci.yml (docs-only diff, or event-scoped ``if:``).
 SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
     "Migration Integration Test",  # migration-integration (skips on docs-only)
+    "Integration Silent-Skip Guard (OMN-14172)",  # integration-guard (skips on docs-only)
     "Contract Compliance",  # compliance
     "Contract Compliance Check",  # contract-compliance
     "Contract Sync Gate (Wave C) [OMN-8915]",  # contract-sync-gate (skips on push)
@@ -156,15 +157,18 @@ def _state_severity(job: JobState) -> int:
     return 1
 
 
-def dedup_latest(jobs: list[dict[str, object]]) -> dict[str, JobState]:
+def dedup_latest(
+    jobs: list[dict[str, object]],
+    *,
+    run_attempt: int | None = None,
+) -> dict[str, JobState]:
     """Collapse the raw ``/runs/{id}/jobs`` array to one entry per job name.
 
-    Uses the highest ``run_attempt`` so partial re-runs (``gh run rerun
-    --failed``, which re-runs a subset in a new attempt) evaluate the freshest
-    conclusion for each job while still seeing jobs that passed in an earlier
-    attempt (fetch the endpoint with ``?filter=all``). Within the same attempt,
-    duplicate display names keep the most blocking state so a failed matrix leg
-    cannot be hidden by a later same-name success.
+    When ``run_attempt`` is provided, only rows from that workflow attempt are
+    considered. This prevents stale failed/cancelled rows from an earlier
+    attempt from becoming authoritative for a current rerun. Within the same
+    attempt, duplicate display names keep the most blocking state so a failed
+    matrix leg cannot be hidden by a later same-name success.
     """
 
     latest: dict[str, JobState] = {}
@@ -176,6 +180,8 @@ def dedup_latest(jobs: list[dict[str, object]]) -> dict[str, JobState]:
             attempt = int(str(raw.get("run_attempt") or 1))
         except (TypeError, ValueError):
             attempt = 1
+        if run_attempt is not None and attempt != run_attempt:
+            continue
         prev = latest.get(name)
         if prev is not None and attempt < prev.run_attempt:
             continue
@@ -213,6 +219,7 @@ def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
 def evaluate(
     jobs: list[dict[str, object]],
     *,
+    run_attempt: int | None = None,
     self_name: str = SELF_JOB_NAME,
     strict_gates: tuple[str, ...] = STRICT_GATE_JOBS,
     skippable_gates: tuple[str, ...] = SKIPPABLE_GATE_JOBS,
@@ -220,7 +227,7 @@ def evaluate(
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot."""
 
-    latest = dedup_latest(jobs)
+    latest = dedup_latest(jobs, run_attempt=run_attempt)
     gate_names = frozenset(strict_gates) | frozenset(skippable_gates)
 
     # (1) Strict aggregate gates: present + completed + conclusion == success.
@@ -367,10 +374,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print the verdict report and exit 0 regardless (diagnostics only).",
     )
+    parser.add_argument(
+        "--run-attempt",
+        type=int,
+        default=None,
+        help="Evaluate only rows for this GitHub Actions run_attempt.",
+    )
     args = parser.parse_args(argv)
 
     jobs = _load_jobs(args.jobs_file)
-    code, report = evaluate(jobs)
+    code, report = evaluate(jobs, run_attempt=args.run_attempt)
     print(report)
     if args.report_only:
         return EXIT_SUCCESS

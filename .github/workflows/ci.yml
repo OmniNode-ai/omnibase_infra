@@ -159,6 +159,17 @@ jobs:
       - name: operation_match operation-field gate (OMN-13530)
         run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
+      # OMN-14141: every handler_routing.handlers[] entry must carry a nested
+      # 'handler: {name, module}' mapping. The flat 'handler_class'/
+      # 'handler_module' schema silently parses to ZERO dispatchers and then
+      # phantom-wires the subscribed topic (WIRED with no live handler, offsets
+      # still committed) — the WI-14 root cause (OMN-14139/OMN-14135). Fail-closed
+      # gate paired with the runtime parse guard in
+      # auto_wiring/discovery._parse_handler_routing. SYNC with pre-commit hook
+      # 'handler-routing-schema-gate'.
+      - name: handler_routing flat-schema gate (OMN-14141)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_routing_schema src/omnibase_infra
+
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 
@@ -761,7 +772,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -1516,7 +1527,7 @@ jobs:
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
     needs: [occ-preflight, tests-gate]
-    if: needs.occ-preflight.result == 'success' && (needs.tests-gate.result == 'success')
+    if: github.event_name != 'pull_request' && needs.occ-preflight.result == 'success' && needs.tests-gate.result == 'success'
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose
@@ -1565,6 +1576,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           # Bounded poll window (minutes) — kept under the run-cancel window so
           # the required context always reaches a terminal state first.
           DEADLINE_MINUTES: "90"
@@ -1580,7 +1592,7 @@ jobs:
           while true; do
             if [ "$(date +%s)" -ge "${deadline}" ]; then
               echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs still pending or the jobs API unreachable — failing closed"
-              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --report-only 2>/dev/null || true
+              python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" --report-only 2>/dev/null || true
               exit 1
             fi
             attempt=$((attempt + 1))
@@ -1591,7 +1603,7 @@ jobs:
               sleep "${POLL_INTERVAL_SECONDS}"
               continue
             fi
-            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json
+            python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}"
             rc=$?
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs provably passed)"; exit 0 ;;
@@ -1909,6 +1921,170 @@ jobs:
           asyncio.run(main())
           PY
           echo "All 24 tables present."
+
+  # ============================================================================
+  # Integration Silent-Skip Guard (OMN-14172)
+  # An @pytest.mark.integration real-DB test that self-skips because Postgres
+  # looks absent is a FALSE-GREEN: the required Tests job goes green while the
+  # real-DB assertion never ran (the exact class of gap that let the omnimarket
+  # OMN-14058 missing-column defect and the OMN-9041 UUID-cast crash reach dev
+  # via a silent skip). Detection-only sweeps get ignored, so this ships as a
+  # mechanical CI gate + pre-commit hook in the same PR (Operating Rule #5).
+  #
+  # This job PROVISIONS Postgres (mirroring migration-integration), applies all
+  # migrations, exports the connection env, and runs a CURATED set of
+  # Postgres-only integration proofs, then asserts via check_integration_skips.py
+  # that (1) none skipped citing a *provisioned* service's absence and (2) at
+  # least one integration test actually executed (zero-collection is itself a
+  # false-green). Legitimately-optional skips (Kafka/Redpanda broker not
+  # provisioned by design, live-LLM opt-in flags, catalog-data conditions) remain
+  # allowed — the gate is keyed to the services this job actually provisions
+  # (scripts/ci/integration_skip_guard.yaml).
+  #
+  # Wired as BLOCKING via the CI Summary umbrella context: this job's display
+  # name is in ci_summary_gate.py SKIPPABLE_GATE_JOBS (present + success/skipped
+  # required, same tier as migration-integration) AND the default-deny sweep
+  # fails CI Summary on any non-success/skipped conclusion. No NEW
+  # branch-protection required context is registered here — that is deferred to
+  # the operator/Codex once the job proves green on real PRs.
+  # SYNC: scripts/ci/check_integration_skips.py + pre-commit hook
+  # 'integration-skip-guard'. Update both when the config changes.
+  # ============================================================================
+  integration-guard:
+    name: Integration Silent-Skip Guard (OMN-14172)
+    needs: [occ-preflight, zone-filter]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    # Same Postgres service block as migration-integration: a real DB so the
+    # @pytest.mark.integration real-DB proofs EXECUTE instead of self-skipping.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: omnibase_infra
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
+
+      - name: Resolve Postgres service host
+        id: postgres_host
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import socket
+
+          port = int(os.environ["POSTGRES_PORT"])
+
+          def can_connect(host: str) -> bool:
+              try:
+                  with socket.create_connection((host, port), timeout=1.0):
+                      return True
+              except OSError:
+                  return False
+
+          if can_connect("127.0.0.1"):
+              print("host=127.0.0.1")
+              raise SystemExit(0)
+
+          with open("/proc/net/route", encoding="utf-8") as routes:
+              for line in routes.readlines()[1:]:
+                  fields = line.split()
+                  if len(fields) >= 3 and fields[1] == "00000000":
+                      gateway_hex = fields[2]
+                      gateway = ".".join(
+                          str(int(gateway_hex[i : i + 2], 16))
+                          for i in (6, 4, 2, 0)
+                      )
+                      if can_connect(gateway):
+                          print(f"host={gateway}")
+                          raise SystemExit(0)
+
+          raise SystemExit(
+              f"could not reach Postgres service on localhost or default gateway port {port}"
+          )
+          PY
+
+      - name: Apply all migrations
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+        run: |
+          uv run python scripts/run-migrations.py
+
+      # Export the connection env the curated integration proofs read. The
+      # canonical PostgresConfig.from_env() reads ONLY OMNIBASE_INFRA_DB_URL (a
+      # full DSN, no POSTGRES_* fallback), so that var is what flips the curated
+      # proofs from "skipped" to "executed"; the POSTGRES_* set is exported too so
+      # the guard stays correct if the curated set broadens to tests that read
+      # discrete vars.
+      - name: Export integration Postgres env
+        env:
+          RESOLVED_HOST: ${{ steps.postgres_host.outputs.host }}
+          RESOLVED_PORT: ${{ job.services.postgres.ports['5432'] }}
+        run: |
+          {
+            echo "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test_password@${RESOLVED_HOST}:${RESOLVED_PORT}/omnibase_infra"
+            echo "POSTGRES_HOST=${RESOLVED_HOST}"
+            echo "POSTGRES_PORT=${RESOLVED_PORT}"
+            echo "POSTGRES_USER=postgres"
+            echo "POSTGRES_PASSWORD=test_password"
+            echo "POSTGRES_DB=omnibase_infra"
+            echo "POSTGRES_DATABASE=omnibase_infra"
+          } >> "$GITHUB_ENV"
+          echo "Exported integration Postgres env (host=${RESOLVED_HOST} port=${RESOLVED_PORT})"
+
+      # Run ONLY the curated Postgres-only integration proofs (kept in sync with
+      # integration_skip_guard.yaml curated_test_paths). The selected proof is
+      # Postgres-only and self-contained against the freshly-migrated DB. Real integration
+      # FAILURES fail this step directly; the silent-skip enforcement below runs
+      # regardless (if: always()).
+      - name: Run curated Postgres integration proofs (Postgres provisioned)
+        run: |
+          uv run pytest \
+            tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
+            -rs -v --tb=short \
+            --junitxml=integration-guard.xml
+
+      # Fail-closed silent-skip enforcement. RED if any integration test skipped
+      # citing a provisioned service's absence, or if zero integration tests ran.
+      - name: Enforce no missing-service silent-skips (OMN-14172)
+        if: always()
+        run: |
+          uv run python scripts/ci/check_integration_skips.py \
+            --junit integration-guard.xml
+
+      - name: Upload integration-guard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-guard-results
+          path: integration-guard.xml
+          retention-days: 7
 
   ai-slop-check:
     needs: occ-preflight
