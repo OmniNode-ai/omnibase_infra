@@ -17,6 +17,7 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.models.projection import ModelSequenceInfo
 from omnibase_infra.nodes.node_kafka_replay_compute.models import (
     ModelKafkaReplayInput,
@@ -49,6 +50,7 @@ def _default_consumer_factory(
         group_id=command.target_consumer_group,
         enable_auto_commit=False,
         auto_offset_reset="earliest",
+        **build_aiokafka_auth_kwargs_from_env(),
     )
     return cast("ProtocolKafkaReplayConsumer", consumer)
 
