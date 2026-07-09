@@ -205,6 +205,26 @@ def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
     assert job["continue-on-error"] is True
 
 
+def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["runtime-boot-smoke"]
+    summary = workflow["jobs"]["ci-summary"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "needs.tests-gate.result == 'success'" in job["if"]
+    # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
+    # whether it declares `needs`, runtime-boot-smoke must never be a dependency
+    # of it (a PR-skipped advisory job must not wedge the required summary gate).
+    assert "runtime-boot-smoke" not in summary.get("needs", [])
+
+
+def test_compose_required_env_gate_has_checkout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["compose-required-env-coverage"]
+
+    assert job["timeout-minutes"] >= 20
+
+
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
