@@ -49,10 +49,8 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13942: identity regenerated after registering the two new
-    # runner-fleet-maintain node entry-points in pyproject.toml. The identity
-    # binds the full dependency-manifest bytes (binding-not-label), so adding
-    # entry-points rebinds it; the new lock is build-proven by the passing
-    # runner-image-build-smoke gate on this PR.
-    assert lock["identity_digest"] == "46676dcff560c6218eb60022adb557a8"
-    assert lock["shared_env_digest"] == "a21bb0fe7ff461ebdfab73b4"
+    # OMN-13942 / OMN-141xx: identity regenerated after dependency-manifest
+    # changes. The identity binds the full manifest bytes (binding-not-label),
+    # so dependency-range updates rebind the runner lock.
+    assert lock["identity_digest"] == "e0748bfb2601b0a607fa9b105bae3fa0"
+    assert lock["shared_env_digest"] == "b70e24f5e8a8b820ed017a61"

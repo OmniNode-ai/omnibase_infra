@@ -1,6 +1,21 @@
 {
   "discovery_errors": [],
   "dispatchers": {
+    "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator": {
+      "category": "command",
+      "contract_name": "compliance_orchestrator",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator",
+      "handler_module": "omnibase_core.nodes.node_compliance_orchestrator.handler",
+      "handler_name": "NodeComplianceOrchestrator",
+      "message_types": [
+        "core.compliance-scan-requested",
+        "onex.cmd.core.compliance-scan-requested.v1"
+      ],
+      "package": "omnibase_core",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_artifact_change_detector_effect.HandlerContractFileWatcher.artifact_watch_contracts_9d4260d0": {
       "category": "event",
       "contract_name": "node_artifact_change_detector_effect",
@@ -1429,8 +1444,8 @@
       "discovery_errors": 0,
       "distinct_subscribe_topics": 88,
       "probe_count": 326,
-      "registered_dispatchers": 82,
-      "registered_routes": 98,
+      "registered_dispatchers": 83,
+      "registered_routes": 99,
       "type_scoped_dispatchers": 41
     },
     "duplicate_winners": [],
@@ -1471,7 +1486,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-08T11:59:50.613983+00:00",
+    "generated_at_utc": "2026-07-09T01:07:03.659145+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.5",
       "omnibase-infra": "0.38.4",
@@ -1549,11 +1564,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.core.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "core.compliance-scan-requested",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
     },
@@ -7071,6 +7088,16 @@
     }
   },
   "routes": [
+    {
+      "contract_name": "compliance_orchestrator",
+      "dispatcher_id": "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator",
+      "handler_id": "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator",
+      "message_category": "command",
+      "route_id": "route.auto.compliance_orchestrator.NodeComplianceOrchestrator.onex_cmd_core_compliance_scan_requested_v1",
+      "topic": "onex.cmd.core.compliance-scan-requested.v1",
+      "topic_pattern": "*.cmd.core.compliance-scan-requested.*",
+      "type_scoped": false
+    },
     {
       "contract_name": "node_artifact_change_detector_effect",
       "dispatcher_id": "dispatcher.auto.node_artifact_change_detector_effect.HandlerContractFileWatcher.artifact_watch_contracts_9d4260d0",
