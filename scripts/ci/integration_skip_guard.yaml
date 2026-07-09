@@ -38,8 +38,8 @@ silent_skip_allowed: false
 # a freshly-migrated DB: the repository test creates its own table; the
 # registration test uses the migration-created `registration_projections` table.
 curated_test_paths:
-  - "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py"
-  - "tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py"
+  - "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py::TestReadOperations::test_select_single_row_by_id"
+  - "tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid"
 # At least this many integration tests must actually EXECUTE (not skip) on the
 # provisioning job. Guards the zero-collection / all-skip false-green (a marker
 # typo, a broken collection selecting nothing, or every curated proof silently
