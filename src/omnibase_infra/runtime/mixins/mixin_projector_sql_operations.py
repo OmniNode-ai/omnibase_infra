@@ -182,7 +182,20 @@ class MixinProjectorSqlOperations:
             and column_type is not None
             and column_type.upper() == "TIMESTAMPTZ"
         ):
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ProtocolConfigurationError(
+                    f"Invalid TIMESTAMPTZ value for projection column {column_name!r}",
+                    context=ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="normalize_projection_timestamptz",
+                        target_name=column_name,
+                        original_error_type=type(exc).__name__,
+                    ),
+                    column_name=column_name,
+                    column_type=column_type,
+                ) from exc
 
         # Handle datetime timezone validation
         if isinstance(value, datetime):
