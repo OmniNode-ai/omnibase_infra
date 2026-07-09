@@ -128,7 +128,7 @@ jobs:
 
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       # OMN-13950 (SAT2 fleet-load): use the docker-container driver so build
       # layers can be shared across the whole self-hosted runner fleet via a GHCR
@@ -173,7 +173,7 @@ jobs:
       # Generate build timestamp for accurate BUILD_DATE
       - name: Generate build timestamp
         id: timestamp
-        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Build runtime image
         id: build
@@ -235,19 +235,21 @@ jobs:
       - name: Verify torch is CPU-only
         if: github.ref != 'refs/heads/main'
         run: |
-          docker run --rm ${{ steps.build.outputs.imageid }} \
+          docker run --rm "${{ steps.build.outputs.imageid }}" \
             python -c "import torch; assert torch.version.cuda is None, f'Expected CPU-only torch but got CUDA {torch.version.cuda}'; print(f'torch {torch.__version__} CPU-only: OK')"
 
       - name: Generate build summary
         if: always()
         run: |
-          echo "# Docker Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Build Info:" >> $GITHUB_STEP_SUMMARY
-          echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Platform: linux/amd64" >> $GITHUB_STEP_SUMMARY
-          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Docker Build Results"
+            echo ""
+            echo "## Build Info:"
+            echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}\`"
+            echo "- Tags: ${{ steps.meta.outputs.tags }}"
+            echo "- Platform: linux/amd64"
+            echo "- SHA: ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Run Docker integration tests
   docker-integration-tests:
@@ -373,7 +375,7 @@ jobs:
 
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Container Registry
         uses: docker/login-action@v4
@@ -428,7 +430,7 @@ jobs:
     steps:
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Container Registry
         uses: docker/login-action@v4
@@ -442,23 +444,26 @@ jobs:
       # with type=raw,value=latest. Previous ${{ github.sha }} was never a valid tag.
       - name: Analyze image size
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest
-          SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest --format='{{.Size}}')
+          image="${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest"
+          docker pull "$image"
+          SIZE=$(docker image inspect "$image" --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "IMAGE_SIZE_MB=$SIZE_MB" >> $GITHUB_ENV
+          echo "IMAGE_SIZE_MB=$SIZE_MB" >> "$GITHUB_ENV"
 
-          echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Image Size Analysis"
+            echo ""
+            echo "- Runtime Image: ${SIZE_MB}MB"
+          } >> "$GITHUB_STEP_SUMMARY"
           # Threshold: 7000MB - temporary ceiling while adaptive-classifier ships CUDA torch.
           # Expected ~5-6GB after CPU-only torch pre-install. Revisit when classifier externalized.
-          if [ ${SIZE_MB} -gt 7000 ]; then
+          if [ "${SIZE_MB}" -gt 7000 ]; then
             echo "::warning::Image size ${SIZE_MB}MB exceeds 7000MB threshold — investigate optimization"
-            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7000MB threshold" >> $GITHUB_STEP_SUMMARY
+            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7000MB threshold" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Image size ${SIZE_MB}MB is within 7000MB threshold" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size ${SIZE_MB}MB is within 7000MB threshold" >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "- Target: <8GB uncompressed after further layer optimization" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: <8GB uncompressed after further layer optimization" >> "$GITHUB_STEP_SUMMARY"
 
   # OMN-9139: Verify RUNTIME_SOURCE_HASH is valid and matches HEAD.
   # This is a REQUIRED status check — no bypass, no skip tokens.
@@ -487,12 +492,14 @@ jobs:
     steps:
       - name: Generate summary
         run: |
-          echo "# Docker Workflow Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Results:" >> $GITHUB_STEP_SUMMARY
-          echo "- Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Source Hash Attestation: ${{ needs.attest-source-hash.result }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Docker Workflow Summary"
+            echo ""
+            echo "## Results:"
+            echo "- Build: ${{ needs.docker-build.result }}"
+            echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}"
+            echo "- Source Hash Attestation: ${{ needs.attest-source-hash.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check overall status
         run: |
