@@ -49,8 +49,9 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-13942 / OMN-141xx: identity regenerated after dependency-manifest
-    # changes. The identity binds the full manifest bytes (binding-not-label),
-    # so dependency-range updates rebind the runner lock.
-    assert lock["identity_digest"] == "e0748bfb2601b0a607fa9b105bae3fa0"
+    # OMN-13946: image_version bumped 5->6 to add the missing libatomic1
+    # package (node-based actions dlopen libatomic.so.1 at load time). The
+    # regenerated identity binds image_version=6 plus the current dev shared
+    # environment digest, not either predecessor's digest in isolation.
+    assert lock["identity_digest"] == "5426a8f631cb029a452dbfaf124a0971"
     assert lock["shared_env_digest"] == "b70e24f5e8a8b820ed017a61"

@@ -232,6 +232,12 @@ def _write_payload(
     default=None,
     help="Unix socket of the emit daemon (default: ~/.claude/emit.sock).",
 )
+@click.option(
+    "--omni-home",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Canonical omni_home workspace root for the local omnimarket drift check.",
+)
 @click.argument("skill_args", nargs=-1, type=click.UNPROCESSED)
 def run_skill_by_name(
     skill_name: str,
@@ -239,6 +245,7 @@ def run_skill_by_name(
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
+    omni_home: Path | None,
     skill_args: tuple[str, ...],
 ) -> None:
     """Dispatch a skill to its backing node and print one typed result.
@@ -257,7 +264,7 @@ def run_skill_by_name(
         onex skill delegate "summarize this paragraph" --task-type document
     """
     try:
-        check_omnimarket_drift()
+        check_omnimarket_drift(omni_home=str(omni_home) if omni_home else None)
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 

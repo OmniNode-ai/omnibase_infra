@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -94,12 +93,9 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     ``pull-all.sh`` / the repair tick (OMN-14060), not every skill dispatch;
     this function only reads whatever is already checked out.
     """
-    resolved_home = (
-        omni_home if omni_home is not None else os.environ.get("OMNI_HOME", "")
-    )
-    if not resolved_home:
+    if not omni_home:
         return None
-    omnimarket_root = Path(resolved_home) / "omnimarket"
+    omnimarket_root = Path(omni_home) / "omnimarket"
     if not (omnimarket_root / ".git").exists():
         return None
     try:
@@ -116,7 +112,7 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
     return sha if len(sha) == 40 else None
 
 
-def check_omnimarket_drift() -> None:
+def check_omnimarket_drift(omni_home: str | None = None) -> None:
     """Fail fast if the current venv's omnimarket has drifted from the
     canonical local clone.
 
@@ -130,7 +126,7 @@ def check_omnimarket_drift() -> None:
     installed = installed_omnimarket_commit()
     if installed is None:
         return
-    canonical = canonical_local_omnimarket_commit()
+    canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         return
     if installed != canonical:
