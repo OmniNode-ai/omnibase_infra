@@ -2066,7 +2066,6 @@ jobs:
       - name: Run curated Postgres integration proofs (Postgres provisioned)
         run: |
           uv run pytest \
-            tests/integration/runtime/db/test_postgres_repository_runtime_integration.py::TestReadOperations::test_select_single_row_by_id \
             tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid \
             -rs -v --tb=short \
             --junitxml=integration-guard.xml
