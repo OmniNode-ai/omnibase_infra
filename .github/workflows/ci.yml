@@ -317,14 +317,9 @@ jobs:
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # Pure repository ownership lint. Keep it hosted so self-hosted saturation
+    # cannot cancel this short job and falsely fail CI Summary.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
