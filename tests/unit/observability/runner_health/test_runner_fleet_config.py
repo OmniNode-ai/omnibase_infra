@@ -70,6 +70,83 @@ def test_runner_compose_resource_limits_match_live_capacity() -> None:
     assert base["pids_limit"] == 4096
 
 
+def test_runner_compose_has_fleet_uv_concurrency_cap() -> None:
+    """OMN-14027 C3: the x-runner-env anchor pins the uv download/build/install
+    concurrency ceiling and the 600s HTTP timeout as FLEET defaults so the raw
+    ``uv sync`` paths that bypass the hardened setup-python-uv composite
+    (OMN-14193) inherit the stampede cap too.
+
+    The value is the deliberate pre-cache fail-safe of 1: the composite already
+    pins ``${...:-1}`` = 1, so a fleet default of 1 keeps that proven-safe path
+    UNCHANGED while capping the currently-uncapped raw-uv paths down from uv's
+    built-in default. A fleet default of 2 would loosen the composite path.
+    """
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    env = compose["x-runner-base"]["environment"]
+    assert env["UV_CONCURRENT_DOWNLOADS"] == "1"
+    assert env["UV_CONCURRENT_BUILDS"] == "1"
+    assert env["UV_CONCURRENT_INSTALLS"] == "1"
+    assert env["UV_HTTP_TIMEOUT"] == "600"
+
+
+def test_runner_compose_pypi_index_wiring_stays_inert() -> None:
+    """OMN-14027 C1: the fleet-wide PyPI cache index wiring must stay INERT
+    (commented out) until the soak-gated rollout. A merged, active
+    ``UV_DEFAULT_INDEX`` would point all 64 runners at a cache host that is not
+    yet stood up. This guards against accidentally activating the egress cache
+    from the design/canary PR.
+    """
+    raw = (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+        encoding="utf-8"
+    )
+    compose = yaml.safe_load(raw)
+    env = compose["x-runner-base"]["environment"]
+    # Not an active env key...
+    assert "UV_DEFAULT_INDEX" not in env
+    assert "PIP_INDEX_URL" not in env
+    # ...but the shovel-ready wiring exists as an inert comment.
+    assert "# UV_DEFAULT_INDEX:" in raw
+
+
+def test_runner_fleet_config_pypi_cache_is_recorded_but_inert() -> None:
+    """OMN-14027 C1: the PyPI pull-through cache endpoint is recorded as fleet
+    source-of-truth but stays inert (active=False) until the soak-gated rollout
+    wires the runner env. Proves the shovel-ready record parses under the
+    strict (extra='forbid') fleet-config model and does not activate the cache.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+
+    assert config.pypi_cache is not None
+    assert config.pypi_cache.active is False
+    assert config.pypi_cache.host == "omninode-pc.tail75df5e.ts.net"
+    assert config.pypi_cache.port == 3141
+    assert config.pypi_cache.simple_index_url.endswith("/root/pypi/+simple/")
+    assert config.pypi_cache.fallback_index_url == "https://pypi.org/simple/"
+
+
+def test_runner_fleet_config_pypi_cache_is_optional(tmp_path: Path) -> None:
+    """A fleet config predating the egress-cache work (no pypi_cache block) must
+    still validate — the field is optional and defaults to None."""
+    minimal = tmp_path / "runner_fleet.yaml"
+    minimal.write_text(
+        "version: '1.0'\n"
+        "github_org: OmniNode-ai\n"
+        "runner_host: example.ts.net\n"
+        "runner_group: omnibase-ci\n"
+        "runner_name_prefix: omninode-runner\n"
+        "expected_count: 64\n",
+        encoding="utf-8",
+    )
+
+    config = load_runner_fleet_config(minimal)
+
+    assert config.pypi_cache is None
+
+
 def test_runner_scripts_do_not_embed_legacy_count() -> None:
     deploy_script = (REPO_ROOT / "scripts" / "deploy-runners.sh").read_text(
         encoding="utf-8"
