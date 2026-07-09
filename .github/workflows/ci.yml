@@ -2059,8 +2059,8 @@ jobs:
           echo "Exported integration Postgres env (host=${RESOLVED_HOST} port=${RESOLVED_PORT})"
 
       # Run ONLY the curated Postgres-only integration proofs (kept in sync with
-      # integration_skip_guard.yaml curated_test_paths). Both are Postgres-only
-      # and self-contained against the freshly-migrated DB. Real integration
+      # integration_skip_guard.yaml curated_test_paths). The selected proof is
+      # Postgres-only and self-contained against the freshly-migrated DB. Real integration
       # FAILURES fail this step directly; the silent-skip enforcement below runs
       # regardless (if: always()).
       - name: Run curated Postgres integration proofs (Postgres provisioned)

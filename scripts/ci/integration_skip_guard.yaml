@@ -34,9 +34,9 @@ silent_skip_allowed: false
 # Curated Postgres-only integration proofs the `integration-guard` job runs.
 # INFORMATIONAL (the gate keys on junit skip reasons, not this list) — kept in
 # sync with the ci.yml `integration-guard` "Run curated Postgres integration
-# proofs" step. Chosen because both are Postgres-only and self-contained against
-# a freshly-migrated DB: the repository test creates its own table; the
-# registration test uses the migration-created `registration_projections` table.
+# proofs" step. Chosen because it is Postgres-only and self-contained against a
+# freshly-migrated DB: the registration test auto-creates its required
+# `node_registrations` schema.
 curated_test_paths:
   - "tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid"
 # At least this many integration tests must actually EXECUTE (not skip) on the
