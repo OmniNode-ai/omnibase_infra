@@ -38,9 +38,27 @@ def test_integration_test_only_change_does_not_select_unit_tests() -> None:
     assert paths == []
 
 
+def test_ci_process_change_selects_ci_tests() -> None:
+    changed_files = [
+        ".github/workflows/ci.yml",
+        "scripts/ci/ci_summary_gate.py",
+        "config/runner_routing_policy.yaml",
+    ]
+    paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
+    assert paths == ["tests/ci/"]
+
+
+def test_ci_test_change_selects_ci_tests() -> None:
+    paths = resolve_test_paths(
+        ["tests/ci/test_ci_summary_gate.py"],
+        adjacency_path=ADJ,
+    )
+    assert paths == ["tests/ci/"]
+
+
 def test_unknown_source_path_produces_no_selection() -> None:
     # Files outside src/ and tests/unit/ — no unit-test mapping.
-    changed_files = ["docs/README.md", ".github/workflows/foo.yml"]
+    changed_files = ["docs/README.md"]
     paths = resolve_test_paths(changed_files, adjacency_path=ADJ)
     assert paths == []
 

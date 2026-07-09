@@ -68,6 +68,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 from pydantic import ValidationError
 
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.models.github.model_pr_merged_event import ModelPRMergedEvent
 from omnibase_infra.services.post_merge.checks import (
     run_contract_sweep,
@@ -160,12 +161,14 @@ class PostMergeConsumer:
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=False,
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await self._consumer.start()
 
         self._producer = AIOKafkaProducer(
             bootstrap_servers=self._config.kafka_bootstrap_servers,
             value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+            **build_aiokafka_auth_kwargs_from_env(),
         )
         await self._producer.start()
 

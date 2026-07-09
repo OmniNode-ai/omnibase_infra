@@ -83,10 +83,15 @@ fi
 
 if [[ -f "${CONSUMER_LOCK}" ]]; then
     mkdir -p "$(dirname "${PIN_COMPARISON_OUT}")"
+    # --build-source workspace: this IS the workspace staging step, so a registry-
+    # sourced sibling whose clone is FORWARD of the lock (the OMN-13929 disarm-bump
+    # steady state) is non-fatal (OMN-13902). Backward / git-sourced drift stays
+    # fatal.
     if ! python3 "${SCRIPT_DIR}/check_sibling_lock_pins.py" \
         --lock "${CONSUMER_LOCK}" \
         "${PREFLIGHT_REPO_ARGS[@]}" \
         --output "${PIN_COMPARISON_OUT}" \
+        --build-source workspace \
         "${preflight_extra[@]}"; then
         echo "ERROR: sibling-pin preflight failed against ${CONSUMER_LOCK}" >&2
         echo "       canonical clones drift from the lock; sync clones to the" >&2

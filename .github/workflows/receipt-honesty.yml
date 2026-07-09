@@ -32,7 +32,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   receipt-honesty:
+    needs: occ-preflight
     timeout-minutes: 30
     # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
     runs-on: >-
@@ -49,8 +61,19 @@ jobs:
       - name: Clone omnibase_core (provides the receipt-honesty validator)
         run: |
           set -euo pipefail
-          rm -rf ../omnibase_core
-          git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core
+          rm -rf .ci/omnibase_core
+          for attempt in 1 2 3 4; do
+            if git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core; then
+              exit 0
+            fi
+            rm -rf .ci/omnibase_core
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::omnibase_core clone failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "::warning::omnibase_core clone failed on attempt ${attempt}; retrying"
+            sleep $((attempt * 10))
+          done
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -61,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           uv venv .honesty-venv --python 3.12
-          uv pip install --python .honesty-venv/bin/python ../omnibase_core
+          uv pip install --python .honesty-venv/bin/python .ci/omnibase_core
       - name: Identify changed DoD receipt YAMLs
         id: receipts
         run: |

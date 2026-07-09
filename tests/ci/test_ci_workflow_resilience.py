@@ -205,6 +205,26 @@ def test_docker_integration_tests_do_not_run_on_pull_requests() -> None:
     assert job["continue-on-error"] is True
 
 
+def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["runtime-boot-smoke"]
+    summary = workflow["jobs"]["ci-summary"]
+
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "needs.tests-gate.result == 'success'" in job["if"]
+    # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
+    # whether it declares `needs`, runtime-boot-smoke must never be a dependency
+    # of it (a PR-skipped advisory job must not wedge the required summary gate).
+    assert "runtime-boot-smoke" not in summary.get("needs", [])
+
+
+def test_compose_required_env_gate_has_checkout_budget() -> None:
+    workflow = _load_yaml(CI_WORKFLOW)
+    job = workflow["jobs"]["compose-required-env-coverage"]
+
+    assert job["timeout-minutes"] >= 20
+
+
 def test_docker_integration_installs_compose_plugin_before_tests() -> None:
     workflow = _load_yaml(DOCKER_BUILD_WORKFLOW)
     assert workflow["env"]["DOCKER_COMPOSE_VERSION"] == "v2.40.3"
@@ -781,14 +801,22 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
 
     for workflow_path in workflow_paths:
         workflow = _load_yaml(workflow_path)
-        for job in workflow["jobs"].values():
+        for job_name, job in workflow["jobs"].items():
+            if "uses" in job:
+                assert job["uses"].endswith(
+                    "occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf"
+                )
+                continue
+
             steps = job["steps"]
             setup_steps = [
                 step
                 for step in steps
                 if step.get("uses") == "./.github/actions/setup-python-uv"
             ]
-            assert setup_steps, f"{workflow_path.name} must use setup-python-uv"
+            assert setup_steps, (
+                f"{workflow_path.name}:{job_name} must use setup-python-uv"
+            )
             assert all(
                 step["with"]["install-args"] == "--frozen" for step in setup_steps
             )

@@ -43,11 +43,23 @@ env:
   IMAGE_NAME: omnibase-infra-runtime
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   # Validate Dockerfile plugin pin ranges before building.
   # Catches exact-pin-without-no-deps issues and stale range upper bounds early,
   # without waiting for the full Docker build (which can take 3-5 minutes).
   # See: scripts/check_dockerfile_pins.py
   dockerfile-pin-check:
+    needs: occ-preflight
     name: Validate Dockerfile Plugin Pins
     runs-on: >-
       ${{
@@ -76,7 +88,7 @@ jobs:
   # Build and validate Docker image
   docker-build:
     name: Build Runtime Image
-    needs: dockerfile-pin-check
+    needs: [occ-preflight, dockerfile-pin-check]
     # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -116,21 +128,26 @@ jobs:
 
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      # Set up Docker Buildx with native docker driver (self-hosted runners
-      # have persistent local cache, so GHA cache export is unnecessary)
+      # OMN-13950 (SAT2 fleet-load): use the docker-container driver so build
+      # layers can be shared across the whole self-hosted runner fleet via a GHCR
+      # registry cache. The native `docker` driver only keeps a cache LOCAL to one
+      # runner, so a build landing on a cold runner re-ran the full (~40-89 min)
+      # torch + uv-sync install; the previous ~8 min figure only held when the
+      # same runner had a warm local cache. A shared registry cache lets any cold
+      # runner import unchanged layers instead of rebuilding them.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
-          driver: docker
+          driver: docker-container
 
       - name: Verify Buildx driver
         run: |
           DRIVER=$(docker buildx inspect --bootstrap 2>/dev/null | grep -oP 'Driver:\s+\K\S+' || echo "unknown")
           echo "Buildx driver: ${DRIVER}"
-          if [[ "${DRIVER}" != "docker" ]]; then
-            echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
+          if [[ "${DRIVER}" != "docker-container" ]]; then
+            echo "::warning::Expected Buildx driver 'docker-container', got '${DRIVER}'"
           fi
 
       # Authenticate for registry access (pulls and pushes)
@@ -156,7 +173,7 @@ jobs:
       # Generate build timestamp for accurate BUILD_DATE
       - name: Generate build timestamp
         id: timestamp
-        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Build runtime image
         id: build
@@ -173,6 +190,17 @@ jobs:
           load: ${{ github.ref != 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # OMN-13950 (SAT2 fleet-load): shared GHCR registry layer cache.
+          #   cache-from (always): a cold runner imports unchanged layers instead
+          #     of re-running the ~40-89 min torch + uv-sync install. A missing
+          #     :buildcache ref on the first run is a tolerated cache miss, not an
+          #     error.
+          #   cache-to (main only): the post-merge main build writes the shared
+          #     cache with mode=max (all intermediate layers). PRs never write, so
+          #     fork/PR builds cannot poison the cache and PR wall-clock is not
+          #     charged the export cost.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=registry,ref={0}/{1}/{2}:buildcache,mode=max', env.REGISTRY, steps.repo.outputs.owner, env.IMAGE_NAME) || '' }}
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
@@ -207,19 +235,21 @@ jobs:
       - name: Verify torch is CPU-only
         if: github.ref != 'refs/heads/main'
         run: |
-          docker run --rm ${{ steps.build.outputs.imageid }} \
+          docker run --rm "${{ steps.build.outputs.imageid }}" \
             python -c "import torch; assert torch.version.cuda is None, f'Expected CPU-only torch but got CUDA {torch.version.cuda}'; print(f'torch {torch.__version__} CPU-only: OK')"
 
       - name: Generate build summary
         if: always()
         run: |
-          echo "# Docker Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Build Info:" >> $GITHUB_STEP_SUMMARY
-          echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Platform: linux/amd64" >> $GITHUB_STEP_SUMMARY
-          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Docker Build Results"
+            echo ""
+            echo "## Build Info:"
+            echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}\`"
+            echo "- Tags: ${{ steps.meta.outputs.tags }}"
+            echo "- Platform: linux/amd64"
+            echo "- SHA: ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Run Docker integration tests
   docker-integration-tests:
@@ -232,12 +262,14 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: docker-build
+    needs: [occ-preflight, docker-build]
     timeout-minutes: 30
-    # OMN-13949 merge-sweep unblock: this informational job can hold a
-    # self-hosted runner for 30 minutes on every docker-touching PR. Keep it on
-    # post-merge push/manual runs, while the required docker-build and source
-    # attestation checks continue to gate PRs.
+    # OMN-13950 (SAT2 fleet-load): this job is informational (continue-on-error)
+    # and never gates merge, yet it held a self-hosted runner for up to 30 min on
+    # EVERY docker-touching PR (rebuilding images inside pytest). Restrict it to
+    # post-merge push events (main/develop) + manual dispatch so PRs stop paying
+    # the fleet cost for a non-blocking signal. Merge safety is unchanged — the
+    # required gate is the docker-build job, which still runs on PRs.
     if: >-
       (github.event_name != 'pull_request') &&
       (github.event.inputs.run_full_tests != 'false')
@@ -329,8 +361,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: docker-build
-    if: github.ref == 'refs/heads/main'
+    needs: [occ-preflight, docker-build]
+    if: needs.occ-preflight.result == 'success' && (github.ref == 'refs/heads/main')
     permissions:
       contents: read
       packages: read
@@ -343,7 +375,7 @@ jobs:
 
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Container Registry
         uses: docker/login-action@v4
@@ -391,14 +423,14 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: docker-build
-    if: github.ref == 'refs/heads/main'
+    needs: [occ-preflight, docker-build]
+    if: needs.occ-preflight.result == 'success' && (github.ref == 'refs/heads/main')
     timeout-minutes: 10
 
     steps:
       - name: Set lowercase repository owner
         id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Container Registry
         uses: docker/login-action@v4
@@ -412,29 +444,32 @@ jobs:
       # with type=raw,value=latest. Previous ${{ github.sha }} was never a valid tag.
       - name: Analyze image size
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest
-          SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest --format='{{.Size}}')
+          image="${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:latest"
+          docker pull "$image"
+          SIZE=$(docker image inspect "$image" --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "IMAGE_SIZE_MB=$SIZE_MB" >> $GITHUB_ENV
+          echo "IMAGE_SIZE_MB=$SIZE_MB" >> "$GITHUB_ENV"
 
-          echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Image Size Analysis"
+            echo ""
+            echo "- Runtime Image: ${SIZE_MB}MB"
+          } >> "$GITHUB_STEP_SUMMARY"
           # Threshold: 7000MB - temporary ceiling while adaptive-classifier ships CUDA torch.
           # Expected ~5-6GB after CPU-only torch pre-install. Revisit when classifier externalized.
-          if [ ${SIZE_MB} -gt 7000 ]; then
+          if [ "${SIZE_MB}" -gt 7000 ]; then
             echo "::warning::Image size ${SIZE_MB}MB exceeds 7000MB threshold — investigate optimization"
-            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7000MB threshold" >> $GITHUB_STEP_SUMMARY
+            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7000MB threshold" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Image size ${SIZE_MB}MB is within 7000MB threshold" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size ${SIZE_MB}MB is within 7000MB threshold" >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "- Target: <8GB uncompressed after further layer optimization" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: <8GB uncompressed after further layer optimization" >> "$GITHUB_STEP_SUMMARY"
 
   # OMN-9139: Verify RUNTIME_SOURCE_HASH is valid and matches HEAD.
   # This is a REQUIRED status check — no bypass, no skip tokens.
   attest-source-hash:
     name: Attest Source Hash (OMN-9139)
-    needs: docker-build
+    needs: [occ-preflight, docker-build]
     uses: ./.github/workflows/attest-source-hash.yml
     with:
       runtime_source_hash: ${{ github.sha }}
@@ -451,18 +486,20 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [docker-build, docker-integration-tests, attest-source-hash]
-    if: always()
+    needs: [occ-preflight, docker-build, docker-integration-tests, attest-source-hash]
+    if: needs.occ-preflight.result == 'success' && (always())
 
     steps:
       - name: Generate summary
         run: |
-          echo "# Docker Workflow Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Results:" >> $GITHUB_STEP_SUMMARY
-          echo "- Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Source Hash Attestation: ${{ needs.attest-source-hash.result }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# Docker Workflow Summary"
+            echo ""
+            echo "## Results:"
+            echo "- Build: ${{ needs.docker-build.result }}"
+            echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}"
+            echo "- Source Hash Attestation: ${{ needs.attest-source-hash.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check overall status
         run: |

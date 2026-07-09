@@ -423,7 +423,11 @@ def _parse_contract(
     hr_raw = raw.get("handler_routing")
     h_raw = raw.get("handler")
     if isinstance(hr_raw, dict):
-        handler_routing = _parse_handler_routing(hr_raw)
+        handler_routing = _parse_handler_routing(
+            hr_raw,
+            contract_path=contract_path,
+            parse_default_handler=not isinstance(h_raw, dict),
+        )
         if not handler_routing.handlers and isinstance(h_raw, dict):
             handler_routing = _parse_legacy_handler(h_raw)
     elif isinstance(h_raw, dict):
@@ -482,15 +486,70 @@ def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:
     return tuple(dict.fromkeys(profiles))
 
 
-def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
-    """Parse the handler_routing section from a contract YAML dict."""
+def _parse_handler_routing(
+    hr_raw: dict,
+    *,
+    contract_path: Path | None = None,
+    parse_default_handler: bool = True,
+) -> ModelHandlerRouting:
+    """Parse the handler_routing section from a contract YAML dict.
+
+    Fail-closed (OMN-14141): a ``handlers[]`` entry that cannot be parsed into a
+    dispatcher raises ``ValueError`` instead of being silently skipped. The
+    historical FLAT ``handler_class:`` / ``handler_module:`` string schema — which
+    ``ModelHandlerRoutingEntry`` does not understand — previously fell through the
+    ``continue`` here and produced ``handlers=()`` with NO error. Auto-wiring
+    then reported ``EnumWiringOutcome.WIRED`` with zero dispatchers while still
+    subscribing to and committing Kafka offsets on the topic: silent
+    phantom-wiring (the WI-14 root cause, OMN-14139/OMN-14135). Every routed
+    handler MUST carry a nested ``handler: {name, module}`` mapping.
+
+    The legacy top-level ``handler: {module, class}`` fallback in
+    ``_parse_contract`` is unaffected: those contracts declare an EMPTY / ABSENT
+    ``handlers`` list, so this loop never runs and never raises — the zero-length
+    parse still triggers the fallback.
+    """
     entries: list[ModelHandlerRoutingEntry] = []
-    for h in hr_raw.get("handlers", []):
+    handlers_raw = hr_raw.get("handlers")
+    if parse_default_handler and not isinstance(handlers_raw, list):
+        default_handler = hr_raw.get("default_handler")
+        if (
+            isinstance(default_handler, str)
+            and default_handler
+            and ":" in default_handler
+        ):
+            module_ref, class_name = default_handler.rsplit(":", 1)
+            entries.append(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name=class_name.strip(),
+                        module=_resolve_default_handler_module(
+                            module_ref.strip(), contract_path
+                        ),
+                    ),
+                )
+            )
+    handlers_iter = handlers_raw if isinstance(handlers_raw, list) else []
+    for index, h in enumerate(handlers_iter):
         if not isinstance(h, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] must be a mapping, got "
+                f"{type(h).__name__} — cannot be parsed into a dispatcher "
+                "(OMN-14141)."
+            )
         handler_ref_raw = h.get("handler")
         if not isinstance(handler_ref_raw, dict):
-            continue
+            raise ValueError(
+                f"handler_routing.handlers[{index}] is missing a nested "
+                "'handler: {name, module}' mapping (found keys: "
+                f"{sorted(h.keys())}). The flat 'handler_class'/'handler_module' "
+                "schema is not parseable and silently produces zero dispatchers, "
+                "which then phantom-wires the subscribed topic with no live "
+                "handler (OMN-14141). Use the nested shape:\n"
+                "    handler:\n"
+                "      name: <HandlerClassName>\n"
+                "      module: <module.path>"
+            )
         handler_ref = ModelHandlerRef(
             name=handler_ref_raw.get("name", ""),
             module=handler_ref_raw.get("module", ""),
@@ -516,6 +575,26 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
         routing_strategy=hr_raw.get("routing_strategy", "unknown"),
         handlers=tuple(entries),
     )
+
+
+def _resolve_default_handler_module(module_ref: str, contract_path: Path | None) -> str:
+    """Resolve ``default_handler`` module shorthand for package-discovered contracts."""
+    if not module_ref or "." in module_ref or contract_path is None:
+        return module_ref
+
+    contract_dir = contract_path.parent
+    if not (contract_dir / f"{module_ref}.py").exists():
+        return module_ref
+
+    package_parts: list[str] = []
+    current = contract_dir
+    while (current / "__init__.py").exists():
+        package_parts.append(current.name)
+        current = current.parent
+    package_parts.reverse()
+    if not package_parts:
+        return module_ref
+    return ".".join((*package_parts, module_ref))
 
 
 def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:

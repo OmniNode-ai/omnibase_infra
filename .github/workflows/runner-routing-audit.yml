@@ -11,7 +11,6 @@ on:
       - "config/runner_routing_policy.yaml"
       - "scripts/audit-runner-routing.py"
       - ".github/workflows/runner-routing-audit.yml"
-  merge_group:
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
@@ -21,7 +20,19 @@ permissions:
   actions: read
 
 jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
   audit:
+    needs: occ-preflight
     name: Runner Routing Audit
     # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
     runs-on: >-

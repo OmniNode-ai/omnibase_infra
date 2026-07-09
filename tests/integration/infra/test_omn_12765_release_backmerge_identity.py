@@ -50,10 +50,8 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     )
 
     # OMN-13946: image_version bumped 5->6 to add the missing libatomic1
-    # package (node-based actions dlopen libatomic.so.1 at load time), rebased
-    # on top of the OMN-14130 core 0.46.5 backmerge (shared_env_digest
-    # a21bb0fe...) and the OMN-13942 runner-fleet-maintain entry-points. The
-    # regenerated identity therefore binds image_version=6 PLUS the current
-    # shared env digest (not either predecessor's digest in isolation).
-    assert lock["identity_digest"] == "630c5b83c324c7232f960abd89ec5a57"
-    assert lock["shared_env_digest"] == "a21bb0fe7ff461ebdfab73b4"
+    # package (node-based actions dlopen libatomic.so.1 at load time). The
+    # regenerated identity binds image_version=6 plus the current dev shared
+    # environment digest, not either predecessor's digest in isolation.
+    assert lock["identity_digest"] == "5426a8f631cb029a452dbfaf124a0971"
+    assert lock["shared_env_digest"] == "b70e24f5e8a8b820ed017a61"
