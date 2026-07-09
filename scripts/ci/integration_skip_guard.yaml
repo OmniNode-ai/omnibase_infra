@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-14172 — silent-skip false-green prevention gate config (omnibase_infra).
+#
+# WHY THIS EXISTS
+# ---------------
+# `@pytest.mark.integration` real-service tests self-skip (pytest.skip / skipif)
+# when their DB/service/env is absent. On a merge-gating job that ACTUALLY
+# provisions that service, such a skip is a *false-green*: the required Tests job
+# reports success while the real-DB assertion never ran. This recurred across
+# repos (OMN-10330 omninode_infra, OMN-14167 omnimarket) and each time it hid a
+# genuine latent defect. In omnibase_infra the analogous real-DB proof is the
+# OMN-9041 UUID-cast regression guard
+# (tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py) —
+# a production crash that a silent Postgres-absent skip would have hidden.
+#
+# `silent_skip_allowed: false` is the OMN-13575 anchor — a required-integration
+# test that self-skips because a PROVISIONED service is missing is NOT allowed to
+# pass silently. This gate makes that class mechanically RED.
+#
+# HOW IT STAYS LOW-FALSE-POSITIVE
+# -------------------------------
+# The gate is keyed to the services the merge-gating guard job actually
+# PROVISIONS (see `required_services`). The `integration-guard` job in ci.yml
+# provisions Postgres (postgres:16-alpine), applies all migrations, exports the
+# connection env, and runs a CURATED set of Postgres-only integration proofs
+# (see `curated_test_paths`). A skip only fails the gate when its reason names a
+# *provisioned* service's absence — i.e. Postgres is right there and the test
+# SHOULD have run. Legitimately-optional skips (Kafka/Redpanda broker, Consul,
+# Vault, Qdrant, live-LLM / live-e2e opt-in flags, catalog-data conditions) are
+# NOT provisioned by this job and are never treated as false-greens.
+silent_skip_allowed: false
+# Curated Postgres-only integration proofs the `integration-guard` job runs.
+# INFORMATIONAL (the gate keys on junit skip reasons, not this list) — kept in
+# sync with the ci.yml `integration-guard` "Run curated Postgres integration
+# proofs" step. Chosen because it is Postgres-only and self-contained against a
+# freshly-migrated DB: the registration test auto-creates its required
+# `node_registrations` schema.
+curated_test_paths:
+  - "tests/integration/handlers/test_registration_storage_postgres_uuid_cast.py::TestRegistrationStoragePostgresUuidCast::test_query_round_trip_produces_stdlib_uuid"
+# At least this many integration tests must actually EXECUTE (not skip) on the
+# provisioning job. Guards the zero-collection / all-skip false-green (a marker
+# typo, a broken collection selecting nothing, or every curated proof silently
+# skipping because Postgres looked absent).
+require_executed_min: 1
+# Services the merge-gating guard job PROVISIONS. A skip whose reason matches one
+# of these absence patterns is a false-green -> FAIL. Patterns are Python regex,
+# matched case-insensitively against the pytest skip reason (message + location).
+# The patterns cover the full omnibase_infra Postgres-absence skip vocabulary
+# (grepped from tests/) so the gate stays correct if the curated set broadens.
+required_services:
+  postgres:
+    provisioned_by: "ci.yml `integration-guard` job (postgres:16-alpine service, migrations applied, OMNIBASE_INFRA_DB_URL + POSTGRES_* exported)"
+    missing_skip_patterns:
+      # test_postgres_repository_runtime_integration.py db_pool fixture
+      - "PostgreSQL integration tests skipped"
+      - "Missing OMNIBASE_INFRA_DB_URL"
+      - "PostgreSQL configured but not reachable"
+      # test_registration_storage_postgres_uuid_cast.py / dlq / snapshot skipif
+      - "PostgreSQL not available"
+      # ledger / injection_effectiveness conftests
+      - "PostgreSQL not configured"
+      - "PostgreSQL not reachable"
+      # snapshot db_pool fixture
+      - "PostgreSQL DSN not available"
+      # projector_shell / snapshot generic-DB skips
+      - "Database not configured"
+      - 'Database not reachable'
+      # registration_contract_verify
+      - "No database URL configured"
+# Skip reasons that are legitimately optional even for an integration-marked test.
+# These name resources the merge-gating job deliberately does NOT provision, so a
+# skip on them is expected, not a false-green. Used by `--strict` to assert every
+# observed skip is classified (so a NEW, unrecognised skip reason gets a human
+# look instead of silently passing). The default (non-strict) gate never fails on
+# these — it only fails on `required_services` patterns above.
+allowed_optional_skip_patterns:
+  - "Redpanda broker not reachable" # Kafka/Redpanda broker not provisioned
+  - "Kafka not reachable" # Kafka/Redpanda broker not provisioned
+  - "Kafka broker" # Kafka/Redpanda broker not provisioned
+  - "Consul" # Consul not provisioned in the guard job
+  - "Vault" # Vault not provisioned in the guard job
+  - "Qdrant" # Qdrant not provisioned in the guard job
+  - "Valkey" # Valkey not provisioned in the guard job
+  - "manifest not found in catalog" # catalog-data condition, not a service absence
+  - "not reachable at http" # live LLM endpoint SLO probes (opt-in)
+  - "OMNI_ALLOW" # generic live opt-in flag phrasing
+  - "set OMN_ALLOW" # generic live opt-in flag phrasing
+  - "requires @pytest.mark.integration" # conftest guard for opt-in bus fixtures
+  - "Docker" # docker-in-docker integration tests (opt-in)
