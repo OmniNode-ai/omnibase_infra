@@ -195,6 +195,7 @@ JSON
 {_queued_jobs_json(created_at=queued_job_created_at)}
 JSON
         elif [[ "${{url}}" == *"slack.com"* ]]; then
+          echo "slack $*" >> "${{MOCK_SLACK_CALLLOG:-/dev/null}}"
           echo '{{"ok":true}}'
         else
           echo ""
@@ -274,6 +275,7 @@ def _run_monitor(
     fleet_config = tmp_path / "runner_fleet.yaml"
     _write_fleet_config(fleet_config)
     call_log = tmp_path / "docker-calls.log"
+    slack_log = tmp_path / "slack-calls.log"
     if previous_state is not None:
         state_file.write_text(json.dumps(previous_state), encoding="utf-8")
 
@@ -287,6 +289,7 @@ def _run_monitor(
         "SLACK_CHANNEL_ID": "C-test",
         "RUNNER_GITHUB_TOKEN": "ghp-test",
         "MOCK_DOCKER_CALLLOG": str(call_log),
+        "MOCK_SLACK_CALLLOG": str(slack_log),
         # Wedge threshold low enough that the controlled queued-age trips it.
         "WEDGE_QUEUE_AGE_SECONDS": "600",
         "WEDGE_WATCH_REPOS": "OmniNode-ai/omnibase_infra",
@@ -335,6 +338,9 @@ def _run_monitor(
     # Attach the call log so callers can assert on bounce behavior.
     state["_docker_calls"] = (
         call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    )
+    state["_slack_calls"] = (
+        slack_log.read_text(encoding="utf-8") if slack_log.exists() else ""
     )
     return state
 
@@ -612,6 +618,68 @@ def test_github_offline_with_local_listener_evidence_is_not_unhealthy(
     assert _int(state, "unhealthy_count") == 0, state
     assert "GitHub offline ignored" in str(state["github_degraded_names"]), state
     assert "OFFLINE-IDLE" not in str(state["offline_idle_bounce_names"]), state
+
+
+def test_docker_unhealthy_with_local_listener_evidence_is_degraded_not_alerted(
+    tmp_path: Path,
+) -> None:
+    """Docker health can lag while the runner listener is still processing jobs.
+
+    A locally live listener is degraded evidence, not an actionable fleet page.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="online",
+        busy=True,
+        docker_status="Up 6 hours (unhealthy)",
+        restart_count=0,
+        docker_logs="2026-07-09T16:20:28Z: Running job: still-active",
+        queued=False,
+    )
+    state = _run_monitor(tmp_path, bindir)
+
+    assert _int(state, "unhealthy_count") == 0, state
+    assert _int(state, "alert_count") == 0, state
+    assert "Docker health Up 6 hours (unhealthy) ignored" in str(
+        state["github_degraded_names"]
+    ), state
+    assert state["_slack_calls"] == "", state
+
+
+def test_raw_github_offline_churn_does_not_send_slack_without_actionable_target(
+    tmp_path: Path,
+) -> None:
+    """Raw unhealthy count can churn when GitHub reports offline-idle runners.
+
+    The monitor should keep recording the drift while suppressing Slack until a
+    runner becomes an actionable remediation target.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir,
+        status="offline",
+        busy=False,
+        docker_status="Up 6 hours (healthy)",
+        restart_count=0,
+        queued=False,
+    )
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        previous_state={
+            "unhealthy_count": 1,
+            "alert_count": 0,
+            "offline_first_seen": {},
+        },
+    )
+
+    assert _int(state, "unhealthy_count") == TEST_FLEET_COUNT, state
+    assert _int(state, "alert_count") == 0, state
+    assert "OFFLINE-IDLE" in str(state["offline_idle_bounce_names"]), state
+    assert state["_slack_calls"] == "", state
 
 
 def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(

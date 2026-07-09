@@ -65,6 +65,10 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
+    env:
+      # Avoid reusing a corrupted self-hosted uv wheel cache; this gate has hit
+      # repeat grpcio hash mismatches from runner-local cache state.
+      UV_NO_CACHE: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -86,13 +90,20 @@ jobs:
 
       - name: Run url-authority gate (full-repo, against frozen baseline)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
-            python -m omnibase_core.validation.validator_url_authority \
-            --all --repo omnibase_infra --repo-root .
+          for attempt in 1 2 3; do
+            uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
+              python -m omnibase_core.validation.validator_url_authority \
+              --all --repo omnibase_infra --repo-root . && break
+            status=$?
+            if [ "$attempt" = "3" ]; then
+              exit "$status"
+            fi
+            sleep "$((attempt * 15))"
+          done
 
       - name: Assert baseline did not grow (anti-gaming)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" python - <<'PY'
+          cat > /tmp/url_authority_baseline_check.py <<'PY'
           import json
           import subprocess
           import sys
@@ -141,3 +152,12 @@ jobs:
               f"omnibase_infra subset {len(head_repo)} (<= prior {len(prior_repo)})."
           )
           PY
+          for attempt in 1 2 3; do
+            uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df" \
+              python /tmp/url_authority_baseline_check.py && break
+            status=$?
+            if [ "$attempt" = "3" ]; then
+              exit "$status"
+            fi
+            sleep "$((attempt * 15))"
+          done
