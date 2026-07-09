@@ -1,6 +1,21 @@
 {
   "discovery_errors": [],
   "dispatchers": {
+    "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator": {
+      "category": "command",
+      "contract_name": "compliance_orchestrator",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator",
+      "handler_module": "omnibase_core.nodes.node_compliance_orchestrator.handler",
+      "handler_name": "NodeComplianceOrchestrator",
+      "message_types": [
+        "core.compliance-scan-requested",
+        "onex.cmd.core.compliance-scan-requested.v1"
+      ],
+      "package": "omnibase_core",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_artifact_change_detector_effect.HandlerContractFileWatcher.artifact_watch_contracts_9d4260d0": {
       "category": "event",
       "contract_name": "node_artifact_change_detector_effect",
@@ -1549,11 +1564,13 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.core.v1",
+        "dispatcher_ids": [
+          "dispatcher.auto.compliance_orchestrator.NodeComplianceOrchestrator"
+        ],
+        "dlq_topic": null,
         "message_category": "command",
         "message_type": "core.compliance-scan-requested",
-        "status": "no_dispatcher"
+        "status": "success"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
     },
