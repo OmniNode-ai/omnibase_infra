@@ -117,6 +117,7 @@ def _die(_msg: str) -> NoReturn:
 # ---------------------------------------------------------------------------
 
 BASE_FIELDS = {
+    "attributes",
     "publicClient",
     "bearerOnly",
     "serviceAccountsEnabled",
@@ -163,6 +164,7 @@ def _build_create_payload(spec: dict[str, Any], secret: str | None) -> dict[str,
         "standardFlowEnabled",
         "directAccessGrantsEnabled",
         "redirectUris",
+        "attributes",
     ):
         if field in spec:
             payload[field] = spec[field]
