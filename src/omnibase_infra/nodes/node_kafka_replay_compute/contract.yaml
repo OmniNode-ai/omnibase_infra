@@ -8,10 +8,10 @@ node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
+  patch: 2
+node_version: "1.0.2"
 description: >
-  Compute node that replays Kafka event-bus envelopes from an explicitly injected target Kafka/Redpanda bootstrap for deterministic projection-equality proofs. The node never reads production bootstrap configuration or mutates runtime .201. Contract patch 1 records handler-internal dataclass annotations only; replay command, output, and transport semantics are unchanged.
+  Compute node that replays Kafka event-bus envelopes from an explicitly injected target Kafka/Redpanda bootstrap for deterministic projection-equality proofs. The node never reads production bootstrap configuration or mutates runtime .201. Contract patch 1 records handler-internal dataclass annotations only; replay command, output, and transport semantics are unchanged. Contract patch 2 records that the default replay consumer spreads the shared aiokafka auth kwargs builder into direct AIOKafkaConsumer construction so MSK-IAM env settings are honored during cloud cutover while remaining a no-op under plaintext local defaults.
 
 input_model:
   name: "ModelKafkaReplayInput"
