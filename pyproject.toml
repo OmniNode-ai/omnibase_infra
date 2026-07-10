@@ -31,6 +31,8 @@ dependencies = [
     #
     "omnibase-core==0.46.5",
     "omnibase-spi==0.23.1",
+    # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
+    "omnibase-compat==0.5.6",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -133,6 +135,7 @@ verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:ma
 delegate = "omnibase_infra.cli.cli_delegate:delegate_command"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
+occ = "omnibase_infra.cli.cli_occ:occ"
 run = "omnibase_infra.cli.cli_node:run_node_by_name"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
@@ -176,6 +179,7 @@ dev = [
 override-dependencies = [
     "omnibase-core==0.46.5",
     "omnibase-spi==0.23.1",
+    "omnibase-compat==0.5.6",
 ]
 
 [tool.uv.sources]
