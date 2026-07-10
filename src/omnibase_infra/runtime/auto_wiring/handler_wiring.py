@@ -1749,12 +1749,18 @@ def _make_stateful_dispatch_callback(
        omnimarket-side workflow-state proxy).
     3. Run the inner (unwrapped) dispatch callback — identical to what a
        non-stateful contract's dispatch would do.
-    4. Read back the ContextVar's value for cid — the handler-side proxy is
-       expected to have left the mutated, re-encoded payload there if it
-       wrote anything — and persist: ``seed()`` if no row existed yet, else
+    4. Call ``codec.flush(cid)`` on the contract-resolved codec instance — the
+       explicit bridge to whatever the handler-side proxy decoded and mutated
+       during step 3 (OMN-14208 pair-verify M1). ``None`` means the proxy
+       never touched this correlation_id this dispatch (nothing to persist);
+       a real payload means it did. This replaced an earlier implementation
+       that expected the proxy to write its mutated payload back into
+       :data:`CONTEXTVAR_STATE_IO_ROWS` itself — the ContextVar is a
+       load-time input only, never a write-back channel.
+    5. Persist the flushed payload: ``seed()`` if no row existed yet, else
        ``cas_update()``. A no-op dispatch (payload unchanged, or never
        populated) skips persistence entirely.
-    5. The whole load -> handle -> persist unit is wrapped in
+    6. The whole load -> handle -> persist unit is wrapped in
        ``retry_on_optimistic_conflict`` so a losing CAS/seed reloads the
        winning row and re-runs ``handle()`` against it — replay-safe because
        the FSM's synchronous in-flight dedup guard observes the freshly
@@ -1798,17 +1804,37 @@ def _make_stateful_dispatch_callback(
             "seam (OMN-14208) — unlike the optional db_io projection path, "
             "it fails closed at wiring time rather than degrading silently."
         )
-    # Fail loud on a broken codec reference once, at wiring time, not on
-    # every dispatch. The resolved class is not otherwise used by this
-    # module: omnibase_infra never decodes the opaque payload. The codec is
-    # consumed by the omnimarket-side ContextVar-backed workflow-state proxy
-    # that reads/writes CONTEXTVAR_STATE_IO_ROWS — resolving it here just
-    # validates the contract's dotted reference is real (same trust model as
-    # a handler module ref), same fail-fast intent as _import_handler_class
-    # everywhere else in this module.
-    _import_handler_class(str(codec_ref["module"]), str(codec_ref["name"]))
+    # Resolved once, at wiring time, not on every dispatch — mirrors the
+    # fail-fast intent of every other _import_handler_class call in this
+    # module. Unlike the handler class (imported but never used directly),
+    # the codec IS used directly here: instantiated and called as the
+    # explicit post-handle bridge (``codec.flush``) to whatever the
+    # omnimarket-side ContextVar-backed workflow-state proxy decoded and
+    # mutated during ``inner_callback`` (OMN-14208 pair-verify M0/M1).
+    codec_cls = _import_handler_class(str(codec_ref["module"]), str(codec_ref["name"]))
+    codec = codec_cls()
 
     adapter = StateStoreAdapter(db_url, table=table)
+    _recovery_ran = False
+    _recovery_lock = asyncio.Lock()
+
+    async def _ensure_stale_rows_recovered() -> None:
+        """Run ``recover_stale_rows`` exactly once per adapter (OMN-14208 G1).
+
+        Wiring is synchronous, so this cannot run at wiring time; the first
+        live dispatch is the deterministic async point to fail closed on rows
+        abandoned by a prior process crash/redeploy before any further leg
+        touches them. Lock-guarded so concurrent first-dispatches (different
+        correlation_ids racing in) don't double-run the recovery sweep.
+        """
+        nonlocal _recovery_ran
+        if _recovery_ran:
+            return
+        async with _recovery_lock:
+            if _recovery_ran:
+                return
+            await adapter.recover_stale_rows()
+            _recovery_ran = True
 
     async def _load_handle_persist(
         envelope: ModelEventEnvelope[object],
@@ -1819,9 +1845,11 @@ def _make_stateful_dispatch_callback(
         token = CONTEXTVAR_STATE_IO_ROWS.set({cid: (payload_json, version)})
         try:
             result = await inner_callback(envelope)
-            flushed = CONTEXTVAR_STATE_IO_ROWS.get() or {}
-            new_payload_json, _flushed_version = flushed.get(
-                cid, (payload_json, version)
+            flushed_payload_json = codec.flush(cid)
+            new_payload_json = (
+                flushed_payload_json
+                if flushed_payload_json is not None
+                else payload_json
             )
         finally:
             CONTEXTVAR_STATE_IO_ROWS.reset(token)
@@ -1872,6 +1900,8 @@ def _make_stateful_dispatch_callback(
                 "correlation_id (the state_io read key)."
             )
         cid = str(correlation_id)
+
+        await _ensure_stale_rows_recovered()
 
         _row_count, result = await retry_on_optimistic_conflict(
             lambda: _load_handle_persist(envelope, cid),

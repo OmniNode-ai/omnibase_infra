@@ -17,10 +17,13 @@ top-level keys on the opaque payload so staleness sweeps can filter/index
 without decoding it.
 
 ``CONTEXTVAR_STATE_IO_ROWS`` is the cross-repo seam: the omnimarket-side
-workflow-state proxy imports this SAME ContextVar object to read the row the
-wiring loaded before ``handle()`` and to hand back the mutated payload after.
-Do not rename or re-instantiate it — a second ``ContextVar`` instance with the
-same name is a different object and breaks the seam silently.
+workflow-state proxy imports this SAME ContextVar object (via a lazy,
+ImportError-tolerant import) to read the row the wiring loaded before
+``handle()`` runs. It is a load-time input only — the mutated payload is
+handed back via the contract-declared codec's ``flush(cid)`` bridge
+(OMN-14208 pair-verify M1), not by writing back into this ContextVar. Do not
+rename or re-instantiate it — a second ``ContextVar`` instance with the same
+name is a different object and breaks the seam silently.
 """
 
 from __future__ import annotations

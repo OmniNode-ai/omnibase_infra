@@ -108,6 +108,28 @@ class _FakeSharedAdapter:
         row["version"] = expected_version + 1
         return 1
 
+    async def recover_stale_rows(self, ttl_seconds: int | None = None) -> int:
+        return 0
+
+
+class _FakeCodec:
+    """Stand-in state_io codec exercising the ``flush()`` bridge (OMN-14208
+    pair-verify M1). ``_load_handle_persist`` no longer reads
+    ``CONTEXTVAR_STATE_IO_ROWS`` back itself post-handle — it calls
+    ``codec.flush(cid)`` on the contract-resolved codec instance. This fake
+    reads the SAME ContextVar ``_DedupGuardHandler`` mutates: asyncio's
+    contextvars are copied per-Task at creation, so each concurrent
+    dispatch's mutation is visible only to that SAME task's ``flush()`` call
+    — exactly mirroring the production ``StateIoCodec`` /
+    ``DelegationWorkflowStateProxy`` split without needing the real
+    omnimarket proxy in this infra-only test.
+    """
+
+    def flush(self, cid: str) -> str | None:
+        current = CONTEXTVAR_STATE_IO_ROWS.get() or {}
+        entry = current.get(cid)
+        return entry[0] if entry is not None else None
+
 
 class _DedupGuardHandler:
     """Mimics HandlerDelegationWorkflow's synchronous in-flight dedup guard
@@ -143,7 +165,7 @@ def test_concurrent_same_correlation_id_dispatch_emits_exactly_one_intent() -> N
         patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=object,
+            return_value=_FakeCodec,
         ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring.StateStoreAdapter",
@@ -206,7 +228,7 @@ def test_sequential_dispatch_after_completion_also_folds() -> None:
         patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=object,
+            return_value=_FakeCodec,
         ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring.StateStoreAdapter",

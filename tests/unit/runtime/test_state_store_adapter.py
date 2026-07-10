@@ -324,11 +324,18 @@ def test_stateful_callback_sets_contextvar_for_missing_row() -> None:
         async def load(self, cid: str) -> None:
             return None
 
+        async def recover_stale_rows(self, ttl_seconds: int | None = None) -> int:
+            return 0
+
+    class _FakeCodec:
+        def flush(self, cid: str) -> str | None:
+            return None
+
     with (
         patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=object,
+            return_value=_FakeCodec,
         ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring.StateStoreAdapter",
