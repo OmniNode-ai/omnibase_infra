@@ -1,12 +1,12 @@
 {
   "base_image_digest": "sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751",
   "gh_version": "2.67.0",
-  "identity_digest": "5426a8f631cb029a452dbfaf124a0971",
+  "identity_digest": "a34afa5f15ffe47290da6284f6bdc0e3",
   "image_version": 6,
   "kubectl_version": "1.32.1",
   "python_version": "3.12",
   "runner_version": "2.334.0",
-  "shared_env_digest": "b70e24f5e8a8b820ed017a61",
+  "shared_env_digest": "fcd4dc225052c31673090f29",
   "shared_env_install_args": "--frozen --all-extras --all-groups --no-install-project",
   "uv_version": "0.6.14"
 }
