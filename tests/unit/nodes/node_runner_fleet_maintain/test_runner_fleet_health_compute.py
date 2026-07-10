@@ -301,3 +301,137 @@ class TestRunnerFleetHealthComputeDeterminism:
         assert [a.state for a in verdict_a.assessments] == [
             a.state for a in verdict_b.assessments
         ]
+
+
+@pytest.mark.unit
+class TestRunnerFleetHealthComputeDeterminacy:
+    """OMN-14228 Slice A: precondition fail-open -> fail-closed.
+
+    These tests prove the source-outage information the EFFECT already
+    gathers (``github_source_ok``/``docker_source_ok``) is no longer dropped
+    on the floor -- it is threaded onto every assessment and the verdict so a
+    future remediation gate can actually fail closed. No test here asserts a
+    SUPPRESS/ALLOW decision -- that gate is Slice B/C, operator-gated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_default_sources_ok_are_determinate(self):
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1"),),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.github_source_ok is True
+        assert verdict.docker_source_ok is True
+        assert all(a.is_determinate is True for a in verdict.assessments)
+
+    @pytest.mark.asyncio
+    async def test_docker_source_failure_marks_every_assessment_indeterminate(self):
+        """A docker-outage-masked-HEALTHY runner must NOT be silently trusted.
+
+        Previously, a failed SSH/Docker probe defaulted docker_restart_count
+        to 0 upstream, and this handler had no way to tell the difference
+        between "confirmed 0 restarts" and "docker probe never ran." Now the
+        assessment is flagged indeterminate instead of asserted HEALTHY.
+        """
+        snapshot = _snapshot(
+            expected_count=2,
+            runners=(
+                _fact("omninode-runner-1"),
+                _fact("omninode-runner-2"),
+            ),
+            docker_source_ok=False,
+            source_errors=("SSH/Docker exit code 255: connection refused",),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.docker_source_ok is False
+        assert all(a.is_determinate is False for a in verdict.assessments)
+        assert all("INDETERMINATE" in a.detail for a in verdict.assessments)
+        assert all("docker_source_ok=False" in a.detail for a in verdict.assessments)
+
+    @pytest.mark.asyncio
+    async def test_github_source_failure_marks_every_assessment_indeterminate(self):
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1"),),
+            github_source_ok=False,
+            source_errors=("GitHub runners API exit code 1: rate limited",),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.github_source_ok is False
+        assert all(a.is_determinate is False for a in verdict.assessments)
+        assert all("github_source_ok=False" in a.detail for a in verdict.assessments)
+
+    @pytest.mark.asyncio
+    async def test_typed_rearm_signals_survive_as_fields_not_just_free_text(self):
+        """The re-arm signal a future write-ahead key would use must be typed,
+        not something a consumer has to regex out of `detail`."""
+        snapshot = _snapshot(
+            expected_count=2,
+            runners=(
+                _fact("omninode-runner-1", docker_restart_count=9),
+                _fact("omninode-runner-2", diag_heartbeat_age_seconds=1200.0),
+            ),
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        by_name = {a.name: a for a in verdict.assessments}
+        assert by_name["omninode-runner-1"].docker_restart_count == 9
+        assert by_name["omninode-runner-2"].diag_heartbeat_age_seconds == 1200.0
+
+    @pytest.mark.asyncio
+    async def test_buildx_none_is_not_collapsed_into_confirmed_available(self):
+        """buildx_available=None (probe failure) must be distinguishable from
+        buildx_available=True (confirmed) -- both previously read as
+        buildx_unavailable=False with no way to tell them apart."""
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1"),),
+            buildx_available=None,
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.buildx_unavailable is False
+        assert verdict.buildx_determinate is False
+
+    @pytest.mark.asyncio
+    async def test_buildx_confirmed_available_is_determinate(self):
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1"),),
+            buildx_available=True,
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.buildx_unavailable is False
+        assert verdict.buildx_determinate is True
+
+    @pytest.mark.asyncio
+    async def test_buildx_confirmed_unavailable_is_determinate(self):
+        """Existing behavior (verdict.buildx_unavailable is True) must be unchanged."""
+        snapshot = _snapshot(
+            expected_count=1,
+            runners=(_fact("omninode-runner-1"),),
+            buildx_available=False,
+        )
+        handler = HandlerRunnerFleetHealthEvaluate()
+        verdict = await handler.handle(
+            correlation_id=snapshot.correlation_id, snapshot=snapshot
+        )
+        assert verdict.buildx_unavailable is True
+        assert verdict.buildx_determinate is True

@@ -14,6 +14,21 @@ Classification precedence (most severe first) ports:
     THRESHOLD heuristics (WEDGED)
   - NEW (OMN-13932): BUILDX_UNAVAILABLE, CODELOAD_THROTTLED
   - NEW: SATURATED (the 2026-07-04 zero-idle incident this ticket responds to)
+
+OMN-14228 Slice A precondition fix: this handler used to classify every
+runner as if the upstream GitHub/Docker sources always succeeded, silently
+defaulting a failed source's facts (e.g. ``docker_restart_count=0`` when the
+SSH probe failed entirely) into a confident classification -- fail OPEN. A
+docker-source outage meant CRASH_LOOPING/LISTENER_ZOMBIE (the two
+highest-confidence recommended actions) could never fire even when the
+runner really was crash-looping, because the missing fact silently read as
+"no restarts." This handler now threads ``github_source_ok``/
+``docker_source_ok`` onto every assessment and the verdict, and preserves the
+buildx probe's tri-state (unknown vs. confirmed-available) instead of
+collapsing ``None`` into ``False``, so a downstream remediation gate can fail
+CLOSED on indeterminate health instead of treating a source outage as
+verified-healthy. No gate/executor logic is added here -- it is precondition
+data only.
 """
 
 from __future__ import annotations
@@ -105,6 +120,27 @@ def _classify_runner(
             "fleet-wide: zero idle runners (saturation_ratio >= 1.0)",
         )
     return _EnumState.HEALTHY, ""
+
+
+def _annotate_indeterminate(
+    detail: str, *, github_source_ok: bool, docker_source_ok: bool
+) -> str:
+    """Append an honest indeterminacy note when a classification source failed.
+
+    Pure string annotation -- does NOT change ``state``. A future remediation
+    gate reads ``ModelRunnerHealthAssessment.is_determinate`` to decide
+    ALLOW/SUPPRESS; this note keeps the human-readable ``detail`` from
+    silently implying a source-outage classification was verified.
+    """
+    failed = []
+    if not github_source_ok:
+        failed.append("github_source_ok=False")
+    if not docker_source_ok:
+        failed.append("docker_source_ok=False")
+    if not failed:
+        return detail
+    note = f"INDETERMINATE ({', '.join(failed)}): classification unreliable"
+    return f"{detail}; {note}" if detail else note
 
 
 def _recommend_for_assessment(
@@ -200,6 +236,15 @@ class HandlerRunnerFleetHealthEvaluate:
         saturation_ratio = (busy_count / online_count) if online_count else 0.0
         codeload_throttled = snapshot.codeload_throttle_signal_count > 0
         buildx_unavailable = snapshot.buildx_available is False
+        # Preserve the tri-state instead of collapsing None -> False: None
+        # means the probe could not determine availability, which must not
+        # read the same as "confirmed available."
+        buildx_determinate = snapshot.buildx_available is not None
+        # Source failure is fleet-wide today (one `gh api` call, one `ssh`
+        # call cover every runner) -- every assessment gets the same
+        # determinacy value. The field is per-runner so Slice B/C can narrow
+        # this once per-runner probes exist without another model change.
+        is_determinate = snapshot.github_source_ok and snapshot.docker_source_ok
 
         fleet_wedged = (
             snapshot.oldest_queued_job_age_seconds is not None
@@ -224,7 +269,16 @@ class HandlerRunnerFleetHealthEvaluate:
                 codeload_throttled=codeload_throttled,
             )
             assessment = ModelRunnerHealthAssessment(
-                name=fact.name, state=state, detail=detail
+                name=fact.name,
+                state=state,
+                detail=_annotate_indeterminate(
+                    detail,
+                    github_source_ok=snapshot.github_source_ok,
+                    docker_source_ok=snapshot.docker_source_ok,
+                ),
+                is_determinate=is_determinate,
+                docker_restart_count=fact.docker_restart_count,
+                diag_heartbeat_age_seconds=fact.diag_heartbeat_age_seconds,
             )
             assessments.append(assessment)
             if state == _EnumState.CRASH_LOOPING:
@@ -266,9 +320,12 @@ class HandlerRunnerFleetHealthEvaluate:
             listener_zombie_count=listener_zombie_count,
             wedged_count=wedged_count,
             buildx_unavailable=buildx_unavailable,
+            buildx_determinate=buildx_determinate,
             codeload_throttle_signal_count=snapshot.codeload_throttle_signal_count,
             recommended_actions=tuple(recommended_actions),
             source_errors=snapshot.source_errors,
+            github_source_ok=snapshot.github_source_ok,
+            docker_source_ok=snapshot.docker_source_ok,
         )
         logger.info(
             "Runner-fleet health verdict: %d/%d online, saturation=%.2f, %d recommended "
