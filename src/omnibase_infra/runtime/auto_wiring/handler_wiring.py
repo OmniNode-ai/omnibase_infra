@@ -27,6 +27,7 @@ import concurrent.futures
 import hashlib
 import importlib
 import inspect
+import json
 import logging
 import math
 import os
@@ -101,11 +102,19 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
+from omnibase_infra.runtime.state_io.state_store_adapter import (
+    CONTEXTVAR_STATE_IO_ROWS,
+    StateIoUnconfiguredError,
+    StateStoreAdapter,
+)
+from omnibase_infra.utils.util_retry_optimistic import retry_on_optimistic_conflict
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.enums import EnumMessageCategory
@@ -1142,6 +1151,43 @@ def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_db_io_tables(contract.contract_path))
 
 
+def _read_state_io(contract_path: Path) -> dict[str, object]:
+    """Read the top-level ``state_io`` block from a contract YAML.
+
+    Returns ``{}`` if ``state_io`` is absent. Raises on YAML parse errors or
+    unexpected file I/O failures — same fail-loud contract as
+    ``_read_db_io_tables`` — so a malformed contract is surfaced as a broken
+    contract rather than silently treated as "no state_io".
+
+    Shape (OMN-14208 opt-in runtime dispatch seam)::
+
+        state_io:
+          database: omnibase_infra   # _DB_URL_ENV_MAP key
+          table: delegation_workflow_state
+          key: correlation_id        # documented; correlation_id is the
+                                      # only supported read key today
+          codec:
+            module: <dotted module path resolved via importlib>
+            name: <class name>
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    state_io = raw.get("state_io") or {}
+    return state_io if isinstance(state_io, dict) else {}
+
+
+def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
+    return bool(_read_state_io(contract.contract_path))
+
+
 def _build_sync_db_adapter(db_url: str) -> object:
     """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
 
@@ -1641,6 +1687,200 @@ async def _emit_projection_terminal_event(
             type(exc).__name__,
             _sanitize_exc(exc),
         )
+
+
+@dataclass(
+    frozen=True
+)  # internal-dataclass-ok: plain scalar extraction result, no runtime state
+class StateIoMetadata:
+    """Denormalized top-level columns extracted from an opaque state_io payload."""
+
+    tenant_id: str
+    state: str
+    in_flight: bool
+
+
+def _extract_state_io_metadata(payload_json: str) -> StateIoMetadata:
+    """Extract the 3 denormalized top-level columns from an opaque state_io payload.
+
+    omnibase_infra never decodes a state_io payload's business shape, but the
+    contract-level convention (OMN-14208) is that every state_io payload
+    exposes ``tenant_id`` / ``state`` / ``in_flight`` as well-known top-level
+    JSON keys so this seam can populate the durable row's indexed columns
+    (used by staleness sweeps) without understanding anything else about the
+    payload. Missing/malformed keys degrade to safe defaults rather than
+    raising — validating the payload's full business shape is the
+    omnimarket-side codec's job, not a reason to fail the whole dispatch.
+    """
+    try:
+        parsed = json.loads(payload_json)
+    except (TypeError, ValueError):
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    return StateIoMetadata(
+        tenant_id=str(parsed.get("tenant_id") or ""),
+        state=str(parsed.get("state") or ""),
+        in_flight=bool(parsed.get("in_flight", False)),
+    )
+
+
+def _make_stateful_dispatch_callback(
+    handler_instance: ProtocolHandleable,
+    event_model: ModelHandlerRef | None,
+    state_io: dict[str, object],
+) -> DispatcherFunc:
+    """Create a dispatch callback for contracts that declare ``state_io``.
+
+    WRAPS (never replaces) :func:`_make_dispatch_callback` — this is a
+    load-before / CAS-persist-after boundary hook around the exact same
+    callback a non-stateful contract would get, preserving the OMN-13247
+    envelope-coercion fallback and the ``payload_type_matcher`` scoping that
+    multi-leg orchestrator contracts depend on untouched (OMN-14208).
+
+    Per-dispatch sequence:
+
+    1. Load the correlation_id's current ``(payload_json, version)`` — ``None``
+       if no row exists yet (e.g. this is the workflow's first leg).
+    2. Set :data:`CONTEXTVAR_STATE_IO_ROWS` to ``{cid: (payload_json, version)}``
+       UNCONDITIONALLY — a ``None`` payload_json for a missing row is still a
+       *set* value, distinguishing "state_io active, no row yet" from
+       "state_io inactive" for the ContextVar's cross-repo consumer (the
+       omnimarket-side workflow-state proxy).
+    3. Run the inner (unwrapped) dispatch callback — identical to what a
+       non-stateful contract's dispatch would do.
+    4. Read back the ContextVar's value for cid — the handler-side proxy is
+       expected to have left the mutated, re-encoded payload there if it
+       wrote anything — and persist: ``seed()`` if no row existed yet, else
+       ``cas_update()``. A no-op dispatch (payload unchanged, or never
+       populated) skips persistence entirely.
+    5. The whole load -> handle -> persist unit is wrapped in
+       ``retry_on_optimistic_conflict`` so a losing CAS/seed reloads the
+       winning row and re-runs ``handle()`` against it — replay-safe because
+       the FSM's synchronous in-flight dedup guard observes the freshly
+       persisted flag on the retried attempt and folds without re-emitting.
+
+    Fail-closed: an exhausted retry raises ``OptimisticConflictError``
+    (propagates — no offset commit, message redelivers) rather than
+    swallowing; a resolvable-but-unresolved race is never reported as a
+    successful dispatch.
+    """
+    inner_callback = _make_dispatch_callback(handler_instance, event_model)
+
+    database = str(state_io.get("database") or "omnibase_infra")
+    table = str(state_io.get("table") or "")
+    codec_ref = state_io.get("codec")
+    if not table:
+        raise ModelOnexError(
+            "handler_wiring: state_io.table is required when a contract "
+            "declares state_io."
+        )
+    if (
+        not isinstance(codec_ref, dict)
+        or not codec_ref.get("module")
+        or not codec_ref.get("name")
+    ):
+        raise ModelOnexError(
+            "handler_wiring: state_io.codec must declare {module, name} — "
+            f"got {codec_ref!r}."
+        )
+    if database not in _DB_URL_ENV_MAP:
+        raise ModelOnexError(
+            f"handler_wiring: state_io.database {database!r} is unknown — "
+            f"must be one of {sorted(_DB_URL_ENV_MAP)!r}."
+        )
+    db_url_env = _DB_URL_ENV_MAP[database]
+    db_url = os.environ.get(db_url_env, "")
+    if not db_url:
+        raise StateIoUnconfiguredError(
+            f"handler_wiring: contract declares state_io (table={table!r}) "
+            f"but {db_url_env} is unset. state_io is a REQUIRED durability "
+            "seam (OMN-14208) — unlike the optional db_io projection path, "
+            "it fails closed at wiring time rather than degrading silently."
+        )
+    # Fail loud on a broken codec reference once, at wiring time, not on
+    # every dispatch. The resolved class is not otherwise used by this
+    # module: omnibase_infra never decodes the opaque payload. The codec is
+    # consumed by the omnimarket-side ContextVar-backed workflow-state proxy
+    # that reads/writes CONTEXTVAR_STATE_IO_ROWS — resolving it here just
+    # validates the contract's dotted reference is real (same trust model as
+    # a handler module ref), same fail-fast intent as _import_handler_class
+    # everywhere else in this module.
+    _import_handler_class(str(codec_ref["module"]), str(codec_ref["name"]))
+
+    adapter = StateStoreAdapter(db_url, table=table)
+
+    async def _load_handle_persist(
+        envelope: ModelEventEnvelope[object],
+        cid: str,
+    ) -> tuple[int, ModelDispatchResult | None]:
+        loaded = await adapter.load(cid)
+        payload_json, version = loaded if loaded is not None else (None, 0)
+        token = CONTEXTVAR_STATE_IO_ROWS.set({cid: (payload_json, version)})
+        try:
+            result = await inner_callback(envelope)
+            flushed = CONTEXTVAR_STATE_IO_ROWS.get() or {}
+            new_payload_json, _flushed_version = flushed.get(
+                cid, (payload_json, version)
+            )
+        finally:
+            CONTEXTVAR_STATE_IO_ROWS.reset(token)
+
+        if new_payload_json is None or (
+            loaded is not None and new_payload_json == payload_json
+        ):
+            # Nothing changed (a no-op leg, e.g. the in-flight dedup guard
+            # rejecting a duplicate without touching state) — skip
+            # persistence entirely rather than bump version on a byte-
+            # identical write. Reported as a successful (non-conflict) attempt.
+            return 1, result
+
+        if loaded is None:
+            metadata = _extract_state_io_metadata(new_payload_json)
+            won = await adapter.seed(
+                cid,
+                tenant_id=metadata.tenant_id,
+                state=metadata.state,
+                in_flight=metadata.in_flight,
+                payload_json=new_payload_json,
+            )
+            return (1 if won else 0), result
+
+        metadata = _extract_state_io_metadata(new_payload_json)
+        row_count = await adapter.cas_update(
+            cid,
+            tenant_id=metadata.tenant_id,
+            state=metadata.state,
+            in_flight=metadata.in_flight,
+            payload_json=new_payload_json,
+            expected_version=version,
+        )
+        return row_count, result
+
+    async def _callback(
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None:
+        payload = _extract_dispatch_payload(envelope)
+        correlation_id = _coerce_uuid_or_none(
+            _extract_dispatch_correlation_id(envelope, payload)
+        )
+        if correlation_id is None:
+            raise ModelOnexError(
+                "handler_wiring: state_io dispatch requires a correlation_id "
+                "on every leg — got none. Legs 2-5 of a multi-leg "
+                "orchestrator carry no tenant_id on the wire but MUST carry "
+                "correlation_id (the state_io read key)."
+            )
+        cid = str(correlation_id)
+
+        _row_count, result = await retry_on_optimistic_conflict(
+            lambda: _load_handle_persist(envelope, cid),
+            check_conflict=lambda outcome: outcome[0] == 0,
+            correlation_id=cast("UUID", correlation_id),
+        )
+        return result
+
+    return _callback
 
 
 def _make_event_bus_callback(
@@ -3646,10 +3886,22 @@ def _prepare_handler_wiring(
     # a constructed handler.
     handler_instance = cast("ProtocolHandleable", resolution.handler_instance)
 
-    # Use projection callback when contract declares db_io.db_tables.
-    # Projection handlers implement handle(input_data: dict) with _db injected
-    # rather than the standard async handle(envelope) protocol.
+    # Use projection callback when contract declares db_io.db_tables, or the
+    # opt-in stateful callback when it declares state_io (OMN-14208). These
+    # two wiring arms are disjoint by construction: db_io projection handlers
+    # own their own persistence and terminal-event emission, while state_io
+    # wraps the standard dispatch callback with a load-before/CAS-persist-
+    # after boundary hook and returns a normal ModelDispatchResult through
+    # the standard result-applier path. A contract declaring both is a
+    # wiring-time contract defect, not a case to silently prioritize one arm.
     db_tables = _read_db_io_tables(contract.contract_path)
+    state_io = _read_state_io(contract.contract_path)
+    if db_tables and state_io:
+        raise ModelOnexError(
+            f"handler_wiring: contract {contract.name!r} declares BOTH "
+            "db_io and state_io — these are disjoint wiring arms "
+            "(OMN-14208); a contract must declare exactly one."
+        )
     if db_tables:
         subscribe_topics = (
             contract.event_bus.subscribe_topics if contract.event_bus else ()
@@ -3687,6 +3939,25 @@ def _prepare_handler_wiring(
         # Projection handlers route by topic/db_io, not event_model; leave
         # them untyped so the projection dispatch path is unchanged.
         payload_type_matcher: Callable[[object], bool] | None = None
+    elif state_io:
+        callback = _make_stateful_dispatch_callback(
+            handler_instance, entry.event_model, state_io
+        )
+        logger.info(
+            "Auto-wired stateful handler with state_io load-before/"
+            "CAS-persist-after: handler=%s table=%s",
+            handler_ref.name,
+            state_io.get("table"),
+        )
+        # state_io wraps the standard dispatch callback, so the same
+        # event_model type-scoping applies as the non-stateful path
+        # (OMN-12416) — a multi-leg orchestrator's sibling handler entries
+        # still route by their own declared event_model.
+        payload_type_matcher = (
+            _make_payload_type_matcher(entry.event_model)
+            if entry.event_model is not None
+            else None
+        )
     else:
         callback = _make_dispatch_callback(handler_instance, entry.event_model)
         # Type-scope the dispatcher on its declared event_model so a

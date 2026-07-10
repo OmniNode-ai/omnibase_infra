@@ -30,6 +30,16 @@ APPROVED_INFIX_PATTERNS=(
     # injection seam, so the boundary must publish the resolved default to the
     # environment — same class of boundary as service_kernel/config_prefetcher.
     "/cli/receipt_mode.py"
+    # OMN-14208: the state_io opt-in dispatch seam resolves its REQUIRED DSN
+    # (per-service *_DB_URL, keyed via _DB_URL_ENV_MAP) at wiring time — the
+    # exact same env-var-DSN-resolution boundary the pre-existing (pre-gate)
+    # db_io projection path in this same file already reads (_DB_URL_ENV_MAP
+    # / os.environ.get(db_url_env, "")). Formalizing the allowlist entry
+    # rather than duplicating that read through a new indirection layer.
+    "/runtime/auto_wiring/handler_wiring.py"
+    # OMN-14208: state_io's stale-in-flight-row TTL (DELEGATION_STALE_TTL_SECONDS)
+    # is a narrowly-scoped, single-purpose module dedicated to this seam.
+    "/runtime/state_io/"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'
