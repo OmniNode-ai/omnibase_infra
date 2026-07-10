@@ -1053,6 +1053,21 @@ bash scripts/audit-branch-protection.sh --repo <repo> --dry-run
 
 The script checks two invariants: (A) `required_approving_review_count` must be 0 (solo-dev workflow), and (B) every required status check context must match a check-run name seen on the last 5 commits. A periodic CI job (`.github/workflows/branch-protection-audit.yml`, schedule `23 */4 * * *`) runs this automatically and fails the workflow on any violation.
 
+### Enforcement + merge-policy parity ratchet (OMN-14288, REPORT-ONLY)
+
+The two checks above only cover the **ORPHANED** direction (a required context that no longer reports). They do **not** catch the **MISSING** direction — a load-bearing gate that `CLAUDE.md`/doctrine *claims* is enforced but is absent from live `required_status_checks` (the exact hole that left `deploy-gate` + `reject-skip` unenforced on omnimarket/omniclaude `dev`) — nor **merge-policy drift** (a live merge-queue/strict setting that diverges from the decided policy). The parity ratchet closes both:
+
+```bash
+uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
+```
+
+It reads the single, machine-asserted `scripts/enforcement_parity_manifest.yaml` — one `{repo → branch → {load_bearing_gates[], merge_policy}}` file encoding the **full** deterministic branch-protection policy as config-as-data — fetches live branch-protection + aggregator-workflow + merge-queue state, and reports:
+
+- **Enforcement dimension** (`load_bearing_gates[]`, each `coverage: direct | needs_child`): **MISSING** (declared direct gate absent from `required_status_checks`), **NEEDS_CLOSURE** (a `needs_child` gate not in its aggregator's transitive `needs:` closure), **UNPROTECTED** (declared branch with no protection object).
+- **Merge-policy dimension** (`merge_policy: {queue: enabled|disabled, strict: bool}`): **QUEUE_DRIFT** (live merge-queue state ≠ declared) and **STRICT_DRIFT** (live require-branches-up-to-date ≠ declared). The decided policy is **queue disabled on all dev branches** (a merge queue's only unique value is the `merge_group` re-test-against-latest-base, which wedges the saturated self-hosted fleet; required contexts fire on `pull_request`, so disabling loses no enforcement) with **strict on the two dashboards** as the lighter combine-breakage guard.
+
+The assertion logic lives in `audit_branch_protection_lib.py` (pure, unit-tested); the CLI is the thin `gh`/YAML I/O shell. It runs as a **non-blocking, report-only** step in `branch-protection-audit.yml` — it never mutates branch protection and always exits 0 (report-then-enforce rollout; the enforcing per-PR gate lands separately). This manifest is the machine-checked replacement for the per-repo, honor-system `.github/required-checks.yaml` prose manifests **and** the recurring manual "re-verify branch protection after merges" ritual.
+
 ---
 
 **Python**: 3.12+ | **Ready?** → Check `docs/patterns/` for implementation guides

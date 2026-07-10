@@ -62,3 +62,16 @@ jobs:
           GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/audit-branch-protection.sh --owner OmniNode-ai --dry-run
+
+      # OMN-14288 — required-context parity ratchet, REPORT-ONLY.
+      # Checks the MISSING direction (a claimed load-bearing gate absent from
+      # required_status_checks) and needs:-closure coverage — the hole the
+      # branch-protection auditor above does NOT cover (it only checks the
+      # ORPHANED direction). Non-blocking: report-then-enforce rollout; the
+      # enforcing per-PR gate lands separately. NEVER mutates branch protection.
+      - name: Required-context parity report (REPORT-ONLY, non-blocking)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
