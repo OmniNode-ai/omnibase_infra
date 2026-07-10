@@ -235,8 +235,19 @@ PARITY_NEEDS_CLOSURE = (
     "NEEDS_CLOSURE"  # gate not covered by its aggregator's needs-closure
 )
 PARITY_UNPROTECTED = "UNPROTECTED"  # branch has no protection object at all
-PARITY_INDETERMINATE = "INDETERMINATE"  # aggregator workflow could not be resolved
-PARITY_INVALID_MANIFEST = "INVALID_MANIFEST"  # unknown coverage mode in manifest
+PARITY_INDETERMINATE = "INDETERMINATE"  # live state could not be resolved
+PARITY_INVALID_MANIFEST = (
+    "INVALID_MANIFEST"  # unknown coverage / policy value in manifest
+)
+# Merge-policy dimension (OMN-14288 scope extension): the manifest records the
+# DECIDED per-repo/branch merge policy (queue on/off + strict "require branches
+# up to date"), and the ratchet flags live drift from it. Same config-as-data
+# principle as required contexts — one manifest asserts enforcement AND merge
+# policy. REPORT-ONLY: findings never mutate branch protection.
+PARITY_QUEUE_DRIFT = "QUEUE_DRIFT"  # live merge-queue state != declared policy
+PARITY_STRICT_DRIFT = (
+    "STRICT_DRIFT"  # live strict (branch-up-to-date) != declared policy
+)
 
 
 def normalize_context_forms(ctx: str) -> set[str]:
@@ -368,6 +379,103 @@ def evaluate_gate_parity(
     return finding(PARITY_INVALID_MANIFEST, f"unknown coverage mode '{coverage}'")
 
 
+def evaluate_merge_policy_parity(
+    repo: str,
+    branch: str,
+    policy: dict[str, Any],
+    live_queue_enabled: bool | None,
+    live_strict: bool | None,
+) -> list[dict[str, Any]]:
+    """Evaluate ONE branch's declared merge policy against live state. Pure.
+
+    ``policy`` is the manifest's ``merge_policy`` block: ``{queue: enabled|disabled,
+    strict: bool}``. Either key may be omitted (then that dimension is not asserted).
+    Returns a list of findings (0, 1, or 2). A merge queue's only unique value is the
+    ``merge_group`` re-test-against-latest-base; ``strict`` is the lighter
+    "require-branches-up-to-date" combine-breakage guard. This records the DECIDED
+    policy and flags live drift from it. REPORT-ONLY.
+    """
+    findings: list[dict[str, Any]] = []
+
+    def finding(cls: str, detail: str, declared: Any, observed: Any) -> dict[str, Any]:
+        return {
+            "repo": repo,
+            "branch": branch,
+            "gate": "merge_policy",
+            "coverage": "merge_policy",
+            "class": cls,
+            "rule": str(policy.get("rule", "")),
+            "detail": detail,
+            "declared": declared,
+            "observed": observed,
+        }
+
+    if "queue" in policy:
+        declared_queue = str(policy["queue"])
+        if declared_queue not in {"enabled", "disabled"}:
+            findings.append(
+                finding(
+                    PARITY_INVALID_MANIFEST,
+                    f"merge_policy.queue must be 'enabled' or 'disabled', got '{declared_queue}'",
+                    declared_queue,
+                    None,
+                )
+            )
+        elif live_queue_enabled is None:
+            findings.append(
+                finding(
+                    PARITY_INDETERMINATE,
+                    "could not resolve live merge-queue state",
+                    declared_queue,
+                    None,
+                )
+            )
+        else:
+            declared_enabled = declared_queue == "enabled"
+            if live_queue_enabled != declared_enabled:
+                observed = "enabled" if live_queue_enabled else "disabled"
+                findings.append(
+                    finding(
+                        PARITY_QUEUE_DRIFT,
+                        f"declared merge queue '{declared_queue}' but live queue is '{observed}'",
+                        declared_queue,
+                        observed,
+                    )
+                )
+
+    if "strict" in policy:
+        declared_strict = policy["strict"]
+        if not isinstance(declared_strict, bool):
+            findings.append(
+                finding(
+                    PARITY_INVALID_MANIFEST,
+                    f"merge_policy.strict must be a bool, got {declared_strict!r}",
+                    declared_strict,
+                    None,
+                )
+            )
+        elif live_strict is None:
+            findings.append(
+                finding(
+                    PARITY_INDETERMINATE,
+                    "could not resolve live strict (require-branches-up-to-date) state",
+                    declared_strict,
+                    None,
+                )
+            )
+        elif live_strict != declared_strict:
+            findings.append(
+                finding(
+                    PARITY_STRICT_DRIFT,
+                    f"declared strict={declared_strict} but live strict={live_strict}",
+                    declared_strict,
+                    live_strict,
+                )
+            )
+
+    return findings
+
+
 def evaluate_manifest_parity(
     manifest: dict[str, Any],
     live: dict[str, Any],
@@ -379,9 +487,11 @@ def evaluate_manifest_parity(
         live: maps ``f"{repo}:{branch}"`` → {
             "required": list[str] | None,   # required_status_checks.contexts, None if unprotected
             "aggregator_jobs": {aggregator_context: jobs_dict, ...},  # for needs_child gates
+            "queue_enabled": bool | None,   # live merge-queue state (for merge_policy)
+            "strict": bool | None,          # live require-branches-up-to-date (for merge_policy)
         }
 
-    Returns findings in manifest declaration order (repo, branch, gate).
+    Returns findings in manifest declaration order (repo, branch; gates then merge_policy).
     """
     findings: list[dict[str, Any]] = []
     repos = manifest.get("repos", {}) or {}
@@ -401,4 +511,15 @@ def evaluate_manifest_parity(
                 )
                 if result is not None:
                     findings.append(result)
+            policy = (spec or {}).get("merge_policy")
+            if policy:
+                findings.extend(
+                    evaluate_merge_policy_parity(
+                        repo,
+                        branch,
+                        policy,
+                        live_entry.get("queue_enabled"),
+                        live_entry.get("strict"),
+                    )
+                )
     return findings

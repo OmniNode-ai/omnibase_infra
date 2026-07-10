@@ -43,9 +43,21 @@ from typing import Any
 import yaml
 from audit_branch_protection_lib import (
     PARITY_MISSING,
-    PARITY_NEEDS_CLOSURE,
-    PARITY_UNPROTECTED,
+    PARITY_QUEUE_DRIFT,
+    PARITY_STRICT_DRIFT,
     evaluate_manifest_parity,
+)
+
+# Finding classes that count as real (non-informational) drift for the reserved
+# --fail-on-findings mode.
+_BLOCKING_CLASSES = frozenset(
+    {
+        "MISSING",
+        "NEEDS_CLOSURE",
+        "UNPROTECTED",
+        PARITY_QUEUE_DRIFT,
+        PARITY_STRICT_DRIFT,
+    }
 )
 
 _DEFAULT_MANIFEST = Path(__file__).resolve().parent / "enforcement_parity_manifest.yaml"
@@ -59,13 +71,15 @@ def real_gh(args: list[str]) -> tuple[int, str]:
     return proc.returncode, proc.stdout
 
 
-def fetch_required_contexts(
+def fetch_protection(
     owner: str, repo: str, branch: str, gh: Any
-) -> list[str] | None:
-    """Fetch live required_status_checks.contexts for a repo+branch.
+) -> tuple[list[str] | None, bool | None]:
+    """Fetch live required_status_checks for a repo+branch: (contexts, strict).
 
-    Returns the contexts list, or None when the branch has no protection object
-    (HTTP 404 "Branch not protected") — which the evaluator maps to UNPROTECTED.
+    Returns ``(contexts, strict)``. ``contexts`` is None (and strict None) when the
+    branch has no protection object (HTTP 404 "Branch not protected") — which the
+    evaluator maps to UNPROTECTED for the gate dimension. ``strict`` is the
+    require-branches-up-to-date flag used by the merge_policy dimension.
     """
     rc, out = gh(
         [
@@ -74,13 +88,52 @@ def fetch_required_contexts(
         ]
     )
     if rc != 0:
+        return None, None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None, None
+    contexts = data.get("contexts", [])
+    ctx_list = [str(c) for c in contexts] if isinstance(contexts, list) else []
+    strict = data.get("strict")
+    return ctx_list, (bool(strict) if isinstance(strict, bool) else None)
+
+
+def fetch_queue_enabled(owner: str, repo: str, branch: str, gh: Any) -> bool | None:
+    """Return True/False for whether a merge queue exists on the branch, or None
+    if the state cannot be resolved. A non-null mergeQueue id means enabled."""
+    # Parameterized GraphQL (values passed as typed vars, not interpolated into
+    # the query string) — avoids injection and printf-style formatting.
+    query = (
+        "query($owner:String!,$name:String!,$branch:String!)"
+        "{ repository(owner:$owner,name:$name)"
+        "{ mergeQueue(branch:$branch){ id } } }"
+    )
+    rc, out = gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={repo}",
+            "-f",
+            f"branch={branch}",
+            "-f",
+            f"query={query}",
+        ]
+    )
+    if rc != 0 or not out.strip():
         return None
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
         return None
-    contexts = data.get("contexts", [])
-    return [str(c) for c in contexts] if isinstance(contexts, list) else []
+    try:
+        mq = data["data"]["repository"]["mergeQueue"]
+    except (KeyError, TypeError):
+        return None
+    return bool(mq and mq.get("id"))
 
 
 def fetch_workflow_jobs(
@@ -117,13 +170,17 @@ def fetch_workflow_jobs(
 
 
 def collect_live_state(manifest: dict[str, Any], owner: str, gh: Any) -> dict[str, Any]:
-    """Fetch all live state the manifest references: required contexts per
-    repo+branch, plus aggregator workflow-job graphs for needs_child gates."""
+    """Fetch all live state the manifest references: required contexts + strict
+    per repo+branch, live merge-queue state (for merge_policy), plus aggregator
+    workflow-job graphs for needs_child gates."""
     live: dict[str, Any] = {}
     for repo, branches in (manifest.get("repos", {}) or {}).items():
         for branch, spec in (branches or {}).items():
             key = f"{repo}:{branch}"
-            required = fetch_required_contexts(owner, repo, branch, gh)
+            required, strict = fetch_protection(owner, repo, branch, gh)
+            queue_enabled = None
+            if (spec or {}).get("merge_policy"):
+                queue_enabled = fetch_queue_enabled(owner, repo, branch, gh)
             aggregator_jobs: dict[str, Any] = {}
             for gate in (spec or {}).get("load_bearing_gates", []) or []:
                 if str(gate.get("coverage", "direct")) != "needs_child":
@@ -135,7 +192,12 @@ def collect_live_state(manifest: dict[str, Any], owner: str, gh: Any) -> dict[st
                 jobs = fetch_workflow_jobs(owner, repo, workflow_file, gh)
                 if jobs is not None:
                     aggregator_jobs[aggregator] = jobs
-            live[key] = {"required": required, "aggregator_jobs": aggregator_jobs}
+            live[key] = {
+                "required": required,
+                "strict": strict,
+                "queue_enabled": queue_enabled,
+                "aggregator_jobs": aggregator_jobs,
+            }
     return live
 
 
@@ -146,20 +208,24 @@ def _render_human(manifest: dict[str, Any], findings: list[dict[str, Any]]) -> N
         by_key.setdefault(f"{f['repo']}:{f['branch']}", []).append(f)
 
     print(
-        "=== required-context parity report (REPORT-ONLY — no enforcement, no mutation) ==="
+        "=== enforcement + merge-policy parity report "
+        "(REPORT-ONLY — no enforcement, no mutation) ==="
     )
     print(
-        f"manifest gates declared across {len(manifest.get('repos', {}) or {})} repo(s)"
+        f"policy declared across {len(manifest.get('repos', {}) or {})} repo(s) "
+        "(load_bearing_gates + merge_policy)"
     )
     print("")
     for repo, branches in (manifest.get("repos", {}) or {}).items():
         for branch, spec in (branches or {}).items():
             key = f"{repo}:{branch}"
             gate_count = len((spec or {}).get("load_bearing_gates", []) or [])
+            has_policy = bool((spec or {}).get("merge_policy"))
             repo_findings = by_key.get(key, [])
-            print(f"--- {key}  ({gate_count} declared gate(s))")
+            dims = f"{gate_count} gate(s)" + (" + merge_policy" if has_policy else "")
+            print(f"--- {key}  ({dims})")
             if not repo_findings:
-                print(f"  [OK]   all {gate_count} declared gate(s) enforced")
+                print(f"  [OK]   {dims} match declared policy")
             for f in repo_findings:
                 print(f"  [{f['class']}]  {f['gate']}  (rule: {f['rule']})")
                 print(f"      {f['detail']}")
@@ -179,6 +245,17 @@ def _render_human(manifest: dict[str, Any], findings: list[dict[str, Any]]) -> N
         print("MISSING gates (claimed-enforced but NOT in required_status_checks):")
         for f in missing:
             print(f"  - {f['repo']}:{f['branch']}  {f['gate']}  ({f['rule']})")
+    drift = [
+        f for f in findings if f["class"] in (PARITY_QUEUE_DRIFT, PARITY_STRICT_DRIFT)
+    ]
+    if drift:
+        print("")
+        print("MERGE-POLICY drift (live branch protection != declared policy):")
+        for f in drift:
+            print(
+                f"  - {f['repo']}:{f['branch']}  {f['class']}  "
+                f"declared={f.get('declared')!r} observed={f.get('observed')!r}"
+            )
     print("")
     print(
         "REPORT-ONLY: exit 0 regardless of findings "
@@ -203,11 +280,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
     # REPORT-ONLY by default. --fail-on-findings is reserved for the future
     # enforcing follow-up and is OFF unless explicitly requested.
-    blocking = [
-        f
-        for f in findings
-        if f["class"] in {PARITY_MISSING, PARITY_NEEDS_CLOSURE, PARITY_UNPROTECTED}
-    ]
+    blocking = [f for f in findings if f["class"] in _BLOCKING_CLASSES]
     if args.fail_on_findings and blocking:
         return 1
     return 0

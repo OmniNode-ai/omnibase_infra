@@ -322,3 +322,89 @@ class TestReproducesConfirmedFindings:
         findings = lib.evaluate_manifest_parity(self._manifest(), self._live())
         assert len(findings) == 4
         assert all(f["class"] == lib.PARITY_MISSING for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# evaluate_merge_policy_parity — merge-policy dimension (OMN-14288 extension)
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateMergePolicyParity:
+    def test_matching_policy_no_findings(self) -> None:
+        policy = {"queue": "disabled", "strict": False}
+        assert lib.evaluate_merge_policy_parity("r", "dev", policy, False, False) == []
+
+    def test_queue_drift_flagged(self) -> None:
+        # declared disabled but live queue present
+        policy = {"queue": "disabled", "strict": False}
+        findings = lib.evaluate_merge_policy_parity("r", "dev", policy, True, False)
+        assert len(findings) == 1
+        assert findings[0]["class"] == lib.PARITY_QUEUE_DRIFT
+        assert findings[0]["observed"] == "enabled"
+        assert findings[0]["declared"] == "disabled"
+
+    def test_strict_drift_flagged(self) -> None:
+        policy = {"queue": "disabled", "strict": True}
+        findings = lib.evaluate_merge_policy_parity("r", "dev", policy, False, False)
+        assert len(findings) == 1
+        assert findings[0]["class"] == lib.PARITY_STRICT_DRIFT
+        assert findings[0]["declared"] is True
+        assert findings[0]["observed"] is False
+
+    def test_both_dimensions_drift(self) -> None:
+        policy = {"queue": "disabled", "strict": True}
+        findings = lib.evaluate_merge_policy_parity("r", "dev", policy, True, False)
+        classes = {f["class"] for f in findings}
+        assert classes == {lib.PARITY_QUEUE_DRIFT, lib.PARITY_STRICT_DRIFT}
+
+    def test_indeterminate_when_live_unresolved(self) -> None:
+        policy = {"queue": "disabled", "strict": False}
+        findings = lib.evaluate_merge_policy_parity("r", "dev", policy, None, None)
+        assert {f["class"] for f in findings} == {lib.PARITY_INDETERMINATE}
+        assert len(findings) == 2
+
+    def test_partial_policy_only_asserts_declared_keys(self) -> None:
+        # only queue declared -> strict is not asserted even if live strict is True
+        policy = {"queue": "disabled"}
+        assert lib.evaluate_merge_policy_parity("r", "dev", policy, False, True) == []
+
+    def test_invalid_queue_value_flagged(self) -> None:
+        policy = {"queue": "sometimes"}
+        findings = lib.evaluate_merge_policy_parity("r", "dev", policy, False, False)
+        assert findings[0]["class"] == lib.PARITY_INVALID_MANIFEST
+
+
+class TestManifestMergePolicyIntegration:
+    """Pin the live-verified spi QUEUE_DRIFT finding (spi dev still has a queue
+    against the decided queue=disabled policy) alongside a clean control repo."""
+
+    def _manifest(self) -> dict:
+        return {
+            "repos": {
+                "omnibase_core": {
+                    "dev": {"merge_policy": {"queue": "disabled", "strict": False}}
+                },
+                "omnidash": {
+                    "dev": {"merge_policy": {"queue": "disabled", "strict": True}}
+                },
+                "omnibase_spi": {
+                    "dev": {"merge_policy": {"queue": "disabled", "strict": False}}
+                },
+            }
+        }
+
+    def _live(self) -> dict:
+        # Verified 2026-07-10: spi dev still has a live merge queue.
+        return {
+            "omnibase_core:dev": {"queue_enabled": False, "strict": False},
+            "omnidash:dev": {"queue_enabled": False, "strict": True},
+            "omnibase_spi:dev": {"queue_enabled": True, "strict": False},
+        }
+
+    def test_reproduces_spi_queue_drift_only(self) -> None:
+        findings = lib.evaluate_manifest_parity(self._manifest(), self._live())
+        assert len(findings) == 1
+        f = findings[0]
+        assert (f["repo"], f["class"]) == ("omnibase_spi", lib.PARITY_QUEUE_DRIFT)
+        # core (queue off, strict off) + omnidash (queue off, strict on) match -> clean.
+        assert not [x for x in findings if x["repo"] in {"omnibase_core", "omnidash"}]

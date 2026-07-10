@@ -1,38 +1,57 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# Required-Context Parity Manifest (OMN-14288)
+# Enforcement + Merge-Policy Parity Manifest (OMN-14288)
 #
-# Single, org-wide, machine-asserted declaration of the load-bearing safety
-# gates that CLAUDE.md / doctrine CLAIM are enforced per repo+branch. The
-# report-only parity ratchet (scripts/audit_required_context_parity_cli.py)
-# reads this file, fetches live branch-protection + workflow state, and reports
-# where a claimed gate is NOT actually enforced.
+# Single, org-wide, machine-asserted declaration of the DETERMINISTIC
+# branch-protection policy per repo+branch — expressed as config-as-data, the
+# same way the rest of the architecture is. Two dimensions:
+#
+#   1. load_bearing_gates[] -- the safety gates CLAUDE.md / doctrine CLAIM are
+#      enforced (deploy-gate, reject-skip, CI Summary, ...).
+#   2. merge_policy         -- the DECIDED merge policy: whether a dev merge
+#      queue is enabled, and whether `strict` (require-branches-up-to-date) is on.
+#
+# The report-only parity ratchet (scripts/audit_required_context_parity_cli.py)
+# reads this file, fetches live branch-protection + workflow + merge-queue state,
+# and reports where LIVE state drifts from this DECLARED policy. REPORT-ONLY: it
+# never mutates branch protection.
 #
 # This REPLACES the honor-system, per-repo, main-scoped `.github/required-checks.yaml`
-# prose manifests ("If you rename a CI job, you MUST update both this file and
-# the branch protection settings") with one machine-checked source of truth.
+# prose manifests AND the recurring human "re-verify branch protection after
+# merges" ritual with one machine-checked source of truth.
 #
-# Coverage modes:
+# Coverage modes (load_bearing_gates):
 #   direct       -- the gate MUST appear literally in required_status_checks
-#                   (with reusable-context fuzzy-leaf normalization). This is the
-#                   only correct pattern for a gate that lives in its OWN
-#                   workflow file (deploy-gate, reject-skip, ...), because a
-#                   `needs:` closure is intra-workflow only and can never reach it.
-#   needs_child  -- the gate is enforced transitively: its emitting job is in the
-#                   `needs:` closure of a required aggregator job (e.g. occ-preflight
+#                   (with reusable-context fuzzy-leaf normalization). The only
+#                   correct pattern for a gate that lives in its OWN workflow file
+#                   (deploy-gate, reject-skip, ...), because a `needs:` closure is
+#                   intra-workflow only and can never reach it.
+#   needs_child  -- enforced transitively: its emitting job is in the `needs:`
+#                   closure of a required aggregator job (e.g. occ-preflight
 #                   feeding "CI Summary"). Verified structurally, not assumed.
 #
-# Motivating finding (spec §2, re-verified live 2026-07-10): on omnimarket and
-# omniclaude `dev`, required_status_checks = ["CI Summary"] only, and deploy-gate
-# + reject-skip live in SEPARATE workflow files, so they are unenforced. This
-# manifest declares them as `direct` so the ratchet reports them MISSING.
+# merge_policy:
+#   queue: enabled|disabled  -- DECIDED policy: as of 2026-07-10 the merge queue
+#                   is DISABLED on ALL OmniNode dev branches. A merge queue's only
+#                   unique value is the `merge_group` re-test-against-latest-base,
+#                   which wedges the saturated self-hosted fleet; required contexts
+#                   fire on `pull_request`, so disabling loses no enforcement.
+#   strict: bool  -- require-branches-up-to-date, the lighter combine-breakage
+#                   guard. DECIDED true on the two dashboards (omnidash,
+#                   omnibase_compat); recorded as-is for the rest.
+#
+# Live values verified 2026-07-10 via gh api + gh api graphql mergeQueue(branch:"dev").
 version: 1
 owner: OmniNode-ai
 repos:
   # --- The two repos that wired the cross-workflow gates CORRECTLY (control) ---
   omnibase_core:
     dev:
+      merge_policy:
+        queue: disabled
+        strict: false
+        rule: "queue disabled org-wide (OMN-14077 precedent); strict recorded as-is"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -45,6 +64,10 @@ repos:
           rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
   omnibase_infra:
     dev:
+      merge_policy:
+        queue: disabled
+        strict: false
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -58,6 +81,10 @@ repos:
   # --- The two repos the audit CONFIRMED are missing the gates (M1-M4) ---
   omnimarket:
     dev:
+      merge_policy:
+        queue: disabled
+        strict: false
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -80,6 +107,10 @@ repos:
           rule: "reference_occ_receipt_gate_flow (transitive via CI Summary)"
   omniclaude:
     dev:
+      merge_policy:
+        queue: disabled
+        strict: false
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         # omniclaude runs deploy-gate inline (single-segment context), unlike the
         # reusable-workflow "deploy-gate / deploy-gate" on core/infra/market.
@@ -92,12 +123,40 @@ repos:
         - context: "CI Summary"
           coverage: direct
           rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+  # --- Merge-policy-only repos (no deploy-gate.yml; not in the gate scope) ---
+  # These have no runtime contracts, so deploy-gate/reject-skip parity gates do
+  # not apply. The merge_policy dimension still does.
+  onex_change_control:
+    dev:
+      merge_policy:
+        queue: disabled # OMN-14077: dev "Merge Queue" ruleset disabled 2026-07-06
+        strict: false
+        rule: "OMN-14077 (dev queue disabled, zero enforcement lost); strict as-is"
+  omnidash:
+    dev:
+      merge_policy:
+        queue: disabled # last two dev queues disabled 2026-07-10
+        strict: true # DECIDED: lighter combine-breakage guard replaces the queue
+        rule: "2026-07-10 dashboard policy: queue off, strict on (app_id-15368 preserved)"
+  omnibase_compat:
+    dev:
+      merge_policy:
+        queue: disabled # last two dev queues disabled 2026-07-10
+        strict: true # DECIDED: lighter combine-breakage guard replaces the queue
+        rule: "2026-07-10 dashboard policy: queue off, strict on (app_id-15368 preserved)"
+  omnibase_spi:
+    dev:
+      merge_policy:
+        queue: disabled # DECIDED policy: queue disabled org-wide
+        strict: false # recorded as-is
+        rule: "queue disabled org-wide (decided); strict recorded as-is"
+      # NOTE (verified 2026-07-10): omnibase_spi dev still has a LIVE merge queue
+      # (mergeQueue id present) against the decided queue=disabled policy, so the
+      # ratchet reports QUEUE_DRIFT here. This is real drift surfaced by the
+      # merge-policy dimension, not a manifest error — disabling it is a separate,
+      # operator/admin branch-protection action (this ratchet does not mutate).
 
 # omniweb is DELIBERATELY omitted. Its `dev` branch has no protection object
 # (spec M5), but omniweb deploys from `main` (not dev), so dev protection may be
 # intentionally absent. Flagged in the audit spec for confirmation, NOT asserted
 # as a defect here. Add it once the intent is confirmed.
-#
-# onex_change_control / omnibase_spi / omnibase_compat have no deploy-gate.yml
-# (no runtime contracts), so deploy-gate is intentionally not required there; they
-# are out of scope for the deploy-gate/reject-skip parity gates and are not listed.
