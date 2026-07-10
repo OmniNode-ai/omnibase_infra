@@ -332,7 +332,10 @@ def test_stateful_callback_sets_contextvar_for_missing_row() -> None:
             return None
 
     with (
-        patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
+        patch.dict(
+            "os.environ",
+            {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432/db"},
+        ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=_FakeCodec,

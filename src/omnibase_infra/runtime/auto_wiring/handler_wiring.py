@@ -102,6 +102,10 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
+from omnibase_infra.runtime.providers.provider_postgres_pool import ProviderPostgresPool
 from omnibase_infra.runtime.state_io.state_store_adapter import (
     CONTEXTVAR_STATE_IO_ROWS,
     StateIoUnconfiguredError,
@@ -1814,7 +1818,13 @@ def _make_stateful_dispatch_callback(
     codec_cls = _import_handler_class(str(codec_ref["module"]), str(codec_ref["name"]))
     codec = codec_cls()
 
-    adapter = StateStoreAdapter(db_url, table=table)
+    pool_config = ModelPostgresPoolConfig.from_dsn(db_url, min_size=1, max_size=5)
+    pool_provider = ProviderPostgresPool(pool_config)
+    adapter = StateStoreAdapter(
+        db_url,
+        table=table,
+        pool_factory=pool_provider.create,
+    )
     _recovery_ran = False
     _recovery_lock = asyncio.Lock()
 

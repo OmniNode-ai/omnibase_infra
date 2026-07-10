@@ -32,6 +32,7 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from uuid import UUID
 
@@ -45,6 +46,7 @@ from omnibase_infra.errors.repository import (
 )
 
 logger = logging.getLogger(__name__)
+PoolFactory = Callable[[], Awaitable[asyncpg.Pool]]
 
 # Defense-in-depth: table name comes from contract YAML (state_io.table), not
 # user input, but is still interpolated into SQL — validate it the same way
@@ -79,14 +81,21 @@ class StateStoreAdapter:
         version        INTEGER NOT NULL DEFAULT 0
         created_at / updated_at TIMESTAMPTZ
 
-    The asyncpg pool is created lazily on first use (guarded by an
+    The asyncpg pool is created lazily on first use through an injected
+    pool factory (guarded by an
     ``asyncio.Lock`` so concurrent first-dispatches don't race to open two
     pools) rather than eagerly at wiring time, matching the opt-in nature of
     the seam — no connection is attempted until a state_io-declaring contract
     actually dispatches.
     """
 
-    def __init__(self, dsn: str, *, table: str) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        table: str,
+        pool_factory: PoolFactory | None = None,
+    ) -> None:
         """Initialize the adapter.
 
         Args:
@@ -95,6 +104,9 @@ class StateStoreAdapter:
                 here; a missing DSN is a wiring-time fail-closed error, not
                 an adapter-level concern).
             table: Table name (contract-declared ``state_io.table``).
+            pool_factory: Injected coroutine factory that constructs the
+                asyncpg pool. This keeps connection construction owned by the
+                runtime provider layer instead of the adapter.
 
         Raises:
             RepositoryContractError: If ``table`` is not a valid identifier.
@@ -108,6 +120,7 @@ class StateStoreAdapter:
             )
         self._dsn = dsn
         self._table = table
+        self._pool_factory = pool_factory
         self._pool: asyncpg.Pool | None = None
         self._pool_lock = asyncio.Lock()
 
@@ -116,9 +129,20 @@ class StateStoreAdapter:
             return self._pool
         async with self._pool_lock:
             if self._pool is None:
-                self._pool = await asyncpg.create_pool(
-                    dsn=self._dsn, min_size=1, max_size=5
-                )
+                if self._pool_factory is None:
+                    raise RepositoryContractError(
+                        "StateStoreAdapter requires an injected pool_factory",
+                        op_name="_get_pool",
+                        table=self._table,
+                    )
+                self._pool = await self._pool_factory()
+                if self._pool is None:
+                    raise RepositoryExecutionError(
+                        "state_io pool factory returned None",
+                        op_name="_get_pool",
+                        table=self._table,
+                        context=self._context("_get_pool", None),
+                    )
         return self._pool
 
     async def close(self) -> None:
