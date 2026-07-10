@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.46.5",
+    "omnibase-core==0.46.7",
     "omnibase-spi==0.23.1",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.6",
@@ -177,7 +177,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.46.5",
+    "omnibase-core==0.46.7",
     "omnibase-spi==0.23.1",
     "omnibase-compat==0.5.6",
 ]
