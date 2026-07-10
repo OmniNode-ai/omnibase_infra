@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCloudBusConfig,
     ModelGatewayEnvelope,
@@ -198,6 +199,121 @@ async def test_inbound_cloud_message_is_published_to_local_canonical_topic() -> 
     assert forwarded.canonical_topic == INBOUND_TOPIC
     assert forwarded.correlation_id == CORRELATION_ID
     assert forwarded.event_type == "DelegationInferenceRequest"
+
+
+async def test_inbound_payload_gets_verified_tenant_id_not_forged_or_missing() -> None:
+    """OMN-14345: the verified tenant identity must reach the payload, not just the envelope shell.
+
+    ``ModelGatewayForwarderConfig.tenant_identity`` is config-bound per forwarder
+    instance -- that binding IS the trust anchor (OMN-12908/12911 per-tenant
+    OAuth cloud-broker credentials). A payload-supplied tenant_id (forged or
+    absent) must never survive into the republished message; the config-bound
+    identity always wins and is never a self-asserted fallback.
+
+    This also proves the republished message is actually consumable by the
+    REAL ``omnibase_core.ModelEventEnvelope`` the local runtime dispatcher and
+    every downstream node (e.g. ``node_llm_delegation_call_effect``) use to
+    parse inbound bus messages -- not just a round-trip through the gateway's
+    own ``ModelGatewayEnvelope``, which no consumer outside this node imports.
+    Pre-fix this test fails: the raw ``ModelGatewayEnvelope`` JSON parses
+    successfully as ``ModelEventEnvelope[dict]`` (no ``extra="forbid"``
+    there), but ``consumer_view.payload`` is the FORGED/unstamped payload --
+    the outer envelope's verified tenant_id is silently dropped as an
+    ignored extra field rather than merged in.
+    """
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    service = ServiceGatewayForwarder(
+        config=_config(),
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+    await service.start()
+
+    forged_payload = {"prompt": "steal tenant data", "tenant_id": "evil-tenant-forged"}
+    await cloud_bus.emit(
+        WIRE_INBOUND_TOPIC,
+        _envelope(
+            event_type="DelegationInferenceRequest",
+            source_topic=WIRE_INBOUND_TOPIC,
+            wire_topic=WIRE_INBOUND_TOPIC,
+            canonical_topic=INBOUND_TOPIC,
+            payload=forged_payload,
+        ),
+    )
+
+    assert len(local_bus.published) == 1
+    published = local_bus.published[0]
+    # The REAL consumer-side parse -- every local subscriber deserializes
+    # inbound bus bytes as omnibase_core.ModelEventEnvelope[T], not the
+    # gateway's own ModelGatewayEnvelope.
+    consumer_view = ModelEventEnvelope[dict].model_validate_json(published.value)
+    assert consumer_view.payload["tenant_id"] == str(TENANT_ID)
+    assert consumer_view.payload["tenant_id"] != "evil-tenant-forged"
+    assert consumer_view.payload["prompt"] == "steal tenant data"
+
+
+async def test_inbound_payload_gets_tenant_slug_stamped_when_absent() -> None:
+    """The gateway stamps tenant_slug into the payload too, not just tenant_id."""
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    service = ServiceGatewayForwarder(
+        config=_config(),
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+    await service.start()
+
+    await cloud_bus.emit(
+        WIRE_INBOUND_TOPIC,
+        _envelope(
+            event_type="DelegationInferenceRequest",
+            source_topic=WIRE_INBOUND_TOPIC,
+            wire_topic=WIRE_INBOUND_TOPIC,
+            canonical_topic=INBOUND_TOPIC,
+            payload={"prompt": "hi"},
+        ),
+    )
+
+    published = local_bus.published[0]
+    consumer_view = ModelEventEnvelope[dict].model_validate_json(published.value)
+    assert consumer_view.payload["tenant_slug"] == "acme"
+
+
+async def test_inbound_cross_tenant_forged_envelope_is_rejected_not_republished() -> (
+    None
+):
+    """Regression pin: the existing outer-envelope tenant check still fires through the full service path.
+
+    A message whose outer envelope claims a different tenant_id than the one
+    this forwarder instance is config-bound to must be rejected before it
+    ever reaches ``local_bus.publish`` -- the negative isolation proof this
+    ticket's fix must not weaken.
+    """
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    service = ServiceGatewayForwarder(
+        config=_config(),
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+    await service.start()
+
+    other_tenant_id = uuid4()
+    with pytest.raises(ValueError, match="tenant_id does not match"):
+        await cloud_bus.emit(
+            WIRE_INBOUND_TOPIC,
+            _envelope(
+                tenant_id=other_tenant_id,
+                event_type="DelegationInferenceRequest",
+                source_topic=WIRE_INBOUND_TOPIC,
+                wire_topic=WIRE_INBOUND_TOPIC,
+                canonical_topic=INBOUND_TOPIC,
+                payload={"prompt": "cross-tenant forgery"},
+            ),
+        )
+
+    assert local_bus.published == []
 
 
 async def test_outbound_rejects_undeclared_topic_before_cloud_publish() -> None:
