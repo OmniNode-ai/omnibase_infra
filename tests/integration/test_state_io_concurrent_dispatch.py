@@ -162,7 +162,10 @@ def test_concurrent_same_correlation_id_dispatch_emits_exactly_one_intent() -> N
     shared_adapter = _FakeSharedAdapter()
 
     with (
-        patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
+        patch.dict(
+            "os.environ",
+            {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432/db"},
+        ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=_FakeCodec,
@@ -225,7 +228,10 @@ def test_sequential_dispatch_after_completion_also_folds() -> None:
     }
 
     with (
-        patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x"}),
+        patch.dict(
+            "os.environ",
+            {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432/db"},
+        ),
         patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=_FakeCodec,
