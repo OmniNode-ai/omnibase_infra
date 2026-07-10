@@ -5,6 +5,11 @@
 Read-only: this model carries the classified per-runner states, fleet
 aggregates, and recommended actions. Nothing consumes ``recommended_actions``
 to mutate the fleet in Increment 1 -- they are recorded/surfaced only.
+
+OMN-14228 Slice A adds ``github_source_ok``/``docker_source_ok``/
+``buildx_determinate`` so a future remediation gate can fail CLOSED on
+indeterminate health instead of silently treating a source outage as a
+verified HEALTHY fleet.
 """
 
 from __future__ import annotations
@@ -54,6 +59,15 @@ class ModelRunnerFleetHealthVerdict(BaseModel):
         default=False,
         description="Whether the OMN-13932 buildx probe reported unavailable.",
     )
+    buildx_determinate: bool = Field(
+        default=True,
+        description=(
+            "False when the buildx probe could not determine availability "
+            "(snapshot.buildx_available was None). `buildx_unavailable=False` "
+            "with `buildx_determinate=False` means UNKNOWN, not confirmed "
+            "available -- consumers must not collapse the two."
+        ),
+    )
     codeload_throttle_signal_count: int = Field(
         default=0, ge=0, description="Codeload-throttle failure signatures observed."
     )
@@ -64,6 +78,24 @@ class ModelRunnerFleetHealthVerdict(BaseModel):
     source_errors: tuple[str, ...] = Field(
         default_factory=tuple,
         description="Upstream snapshot source errors, passed through.",
+    )
+    github_source_ok: bool = Field(
+        default=True,
+        description=(
+            "Passed through from ModelRunnerFleetSnapshot.github_source_ok. "
+            "False means the GitHub API source failed fleet-wide for this "
+            "tick -- online/offline/busy classifications below are unreliable."
+        ),
+    )
+    docker_source_ok: bool = Field(
+        default=True,
+        description=(
+            "Passed through from ModelRunnerFleetSnapshot.docker_source_ok. "
+            "False means the SSH/Docker inspection source failed fleet-wide "
+            "for this tick -- CRASH_LOOPING/LISTENER_ZOMBIE classifications "
+            "below are unreliable (a real crash loop can be masked as HEALTHY "
+            "when the source that would reveal it is down)."
+        ),
     )
 
 
