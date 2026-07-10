@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Required-Context Parity Manifest (OMN-14288)
+#
+# Single, org-wide, machine-asserted declaration of the load-bearing safety
+# gates that CLAUDE.md / doctrine CLAIM are enforced per repo+branch. The
+# report-only parity ratchet (scripts/audit_required_context_parity_cli.py)
+# reads this file, fetches live branch-protection + workflow state, and reports
+# where a claimed gate is NOT actually enforced.
+#
+# This REPLACES the honor-system, per-repo, main-scoped `.github/required-checks.yaml`
+# prose manifests ("If you rename a CI job, you MUST update both this file and
+# the branch protection settings") with one machine-checked source of truth.
+#
+# Coverage modes:
+#   direct       -- the gate MUST appear literally in required_status_checks
+#                   (with reusable-context fuzzy-leaf normalization). This is the
+#                   only correct pattern for a gate that lives in its OWN
+#                   workflow file (deploy-gate, reject-skip, ...), because a
+#                   `needs:` closure is intra-workflow only and can never reach it.
+#   needs_child  -- the gate is enforced transitively: its emitting job is in the
+#                   `needs:` closure of a required aggregator job (e.g. occ-preflight
+#                   feeding "CI Summary"). Verified structurally, not assumed.
+#
+# Motivating finding (spec §2, re-verified live 2026-07-10): on omnimarket and
+# omniclaude `dev`, required_status_checks = ["CI Summary"] only, and deploy-gate
+# + reject-skip live in SEPARATE workflow files, so they are unenforced. This
+# manifest declares them as `direct` so the ratchet reports them MISSING.
+version: 1
+owner: OmniNode-ai
+repos:
+  # --- The two repos that wired the cross-workflow gates CORRECTLY (control) ---
+  omnibase_core:
+    dev:
+      load_bearing_gates:
+        - context: "deploy-gate / deploy-gate"
+          coverage: direct
+          rule: "CLAUDE.md #4 / PR-CI-Req #4 (deploy-gate)"
+        - context: "call-reject-skip-token / scan / reject-skip-gate-token"
+          coverage: direct
+          rule: "CLAUDE.md #10 (reject-deploy-gate-skip)"
+        - context: "CI Summary"
+          coverage: direct
+          rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+  omnibase_infra:
+    dev:
+      load_bearing_gates:
+        - context: "deploy-gate / deploy-gate"
+          coverage: direct
+          rule: "CLAUDE.md #4 / PR-CI-Req #4 (deploy-gate)"
+        - context: "call-reject-skip-token / scan / reject-skip-gate-token"
+          coverage: direct
+          rule: "CLAUDE.md #10 (reject-deploy-gate-skip)"
+        - context: "CI Summary"
+          coverage: direct
+          rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+  # --- The two repos the audit CONFIRMED are missing the gates (M1-M4) ---
+  omnimarket:
+    dev:
+      load_bearing_gates:
+        - context: "deploy-gate / deploy-gate"
+          coverage: direct
+          rule: "CLAUDE.md #4 / PR-CI-Req #4 (deploy-gate) -- spec M1"
+        - context: "call-reject-skip-token / scan / reject-skip-gate-token"
+          coverage: direct
+          rule: "CLAUDE.md #10 (reject-deploy-gate-skip) -- spec M2"
+        - context: "CI Summary"
+          coverage: direct
+          rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+        # occ-preflight IS transitively enforced via CI Summary's needs-closure
+        # on omnimarket (spec §2 note). Declared needs_child to exercise + prove
+        # the closure check reports it COVERED (not a false MISSING).
+        - context: "occ-preflight"
+          coverage: needs_child
+          aggregator: "CI Summary"
+          aggregator_workflow: "ci.yml"
+          aggregator_job_id: "ci-summary"
+          gate_job_id: "occ-preflight"
+          rule: "reference_occ_receipt_gate_flow (transitive via CI Summary)"
+  omniclaude:
+    dev:
+      load_bearing_gates:
+        # omniclaude runs deploy-gate inline (single-segment context), unlike the
+        # reusable-workflow "deploy-gate / deploy-gate" on core/infra/market.
+        - context: "deploy-gate"
+          coverage: direct
+          rule: "CLAUDE.md #4 / PR-CI-Req #4 (deploy-gate) -- spec M3"
+        - context: "scan / reject-skip-gate-token"
+          coverage: direct
+          rule: "CLAUDE.md #10 (reject-deploy-gate-skip) -- spec M4"
+        - context: "CI Summary"
+          coverage: direct
+          rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+
+# omniweb is DELIBERATELY omitted. Its `dev` branch has no protection object
+# (spec M5), but omniweb deploys from `main` (not dev), so dev protection may be
+# intentionally absent. Flagged in the audit spec for confirmation, NOT asserted
+# as a defect here. Add it once the intent is confirmed.
+#
+# onex_change_control / omnibase_spi / omnibase_compat have no deploy-gate.yml
+# (no runtime contracts), so deploy-gate is intentionally not required there; they
+# are out of scope for the deploy-gate/reject-skip parity gates and are not listed.
