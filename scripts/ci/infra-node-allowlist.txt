@@ -258,3 +258,5 @@ src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/__init__.
 src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py  # infra-only topic-migration executor (Kafka topic provisioning + drain-proof gating), not business-domain.
 src/omnibase_infra/nodes/node_topic_migration_projection/handlers/__init__.py  # infra-only topic-migration FSM projection handler, not business-domain.
 src/omnibase_infra/nodes/node_topic_migration_projection/handlers/handler_topic_migration_projection.py  # infra-only topic-migration FSM projection handler, not business-domain.
+src/omnibase_infra/nodes/node_tenant_ingress_effect/handlers/__init__.py  # infra-owned tenant-ingress trust boundary (OMN-14349, OMN-14208 Path A); enforces the transport-layer tenant stamp, not business-domain logic.
+src/omnibase_infra/nodes/node_tenant_ingress_effect/handlers/handler_stamp_tenant_id.py  # infra-owned tenant-ingress trust boundary; overwrites payload tenant_id with the identity derived from the tenant-prefixed subscription topic, never business-domain logic.

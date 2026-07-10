@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_tenant_ingress_effect"
+contract_name: "node_tenant_ingress_effect"
+node_name: "node_tenant_ingress_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+description: >
+  Trust-boundary effect node (OMN-14208 Path A) that subscribes to a tenant-prefixed variant of a canonical topic per provisioned tenant, stamps a verified tenant_id derived from the subscribed topic into the inbound payload -- overwriting any client-supplied value -- and republishes onto the bare canonical topic. The node owns all publishes; the handler only transforms.
+
+runtime_profiles:
+  - effects
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+  description: >
+    Canonical ONEX event envelope with an opaque payload dict. Production traffic is normalized by ServiceTenantIngress before this envelope reaches a handler; the contract-driven dispatch path (test/validation only) requires metadata.tags["tenant_slug"] to be present.
+
+output_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+  description: "The same envelope with payload.tenant_id stamped/overwritten."
+config:
+  name: "ModelTenantIngressConfig"
+  module: "omnibase_infra.nodes.node_tenant_ingress_effect.models.model_tenant_ingress_config"
+  description: "Frozen config: provisioned tenant slugs + the target canonical topic."
+  tenant_ingress:
+    # Static per-tenant list, current dogfood/early-beta scale (OMN-14349).
+    # Dynamic per-tenant provisioning at scale is Daniyal's forward
+    # AWS/MSK work (OMN-14110).
+    tenants:
+      - "omninode"
+    canonical_topic: "onex.cmd.omnimarket.delegate-skill.v1"
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnimarket.delegate-skill.v1"
+  publish_topics:
+    - "onex.cmd.omnimarket.delegate-skill.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "tenant_ingress.stamp"
+      handler:
+        name: "HandlerStampTenantId"
+        module: "omnibase_infra.nodes.node_tenant_ingress_effect.handlers.handler_stamp_tenant_id"
+        handler_type: "COMPUTE"
+      description: >
+        Overwrites payload["tenant_id"] with the config-bound, verified tenant slug. Never reads a client-supplied tenant_id as authoritative.
+
+capabilities:
+  - name: "tenant_topic_prefix_stamp"
+    description: >
+      Derives a verified tenant_id from the tenant-<slug>. wire prefix a message structurally arrived on and stamps it into the payload, overwriting any client-supplied value.
+
+  - name: "node_owned_publish"
+    description: "The handler never publishes; the service owns the republish."
+metadata:
+  description: "Tenant-ingress trust-boundary stamp for the delegate-skill entry hop"
+  author: "OmniNode Team"
+  created: "2026-07-10"
+  updated: "2026-07-10"
+  tags:
+    - tenant-isolation
+    - trust-boundary
+    - ingress
