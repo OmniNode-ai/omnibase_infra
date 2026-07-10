@@ -331,6 +331,17 @@ ARG OMNIMARKET_REF=dev
 # cache for all other packages. The result: every rebuild always installs the
 # current HEAD of the tracked branch. omnibase_compat is a SHA-pinned immutable
 # tarball, so it needs no refresh.
+#
+# OMN-14262: compat / onex_change_control / omnimarket workspace installs ALSO use
+# the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
+# form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
+# ("Audited 1 package") whenever the staged dev-tree version already equals the
+# version `uv sync` installed from omnimarket/uv.lock — so no file:// direct_url is
+# recorded and compute_workspace_provenance.py rejects the build ("Package '<pkg>'
+# not found in installed distributions. Expected a local-path install"). This is a
+# convergence-triggered failure (OMN-13403 same-version family): it only fires once
+# the staged version and the lock pin coincide. The forced reinstall always records
+# the local-path direct_url regardless of version equality.
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
@@ -345,9 +356,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnibase_compat; \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/onex_change_control; \
-        uv-with-retry pip install --no-deps /workspace/sibling-repos/omnimarket; \
+        uv-with-retry pip uninstall omnibase-compat; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnibase-compat \
+            "omnibase-compat @ file:///workspace/sibling-repos/omnibase_compat" ); \
+        uv-with-retry pip uninstall onex-change-control; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package onex-change-control \
+            "onex-change-control @ file:///workspace/sibling-repos/onex_change_control" ); \
+        uv-with-retry pip uninstall omnimarket; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omnimarket \
+            "omnimarket @ file:///workspace/sibling-repos/omnimarket" ); \
     else \
         uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
