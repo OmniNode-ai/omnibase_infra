@@ -18,6 +18,14 @@
 #   - OMN-13932: motivating gap; this node adds BUILDX_UNAVAILABLE and
 #     CODELOAD_THROTTLED, which close a live blind spot in the current
 #     bash/CLI substrate
+#   - OMN-14228 (Slice A): precondition fail-open -> fail-closed. The verdict now
+#     threads the upstream source-determinacy facts (github_source_ok /
+#     docker_source_ok, plus a per-runner is_determinate and a buildx_determinate
+#     flag) so a probe-source outage is no longer silently classified as healthy;
+#     the detail is annotated INDETERMINATE when a relevant source failed. Typed
+#     re-arm signal fields (docker_restart_count, diag_heartbeat_age_seconds) are
+#     surfaced on the assessment. Additive only -- no fleet mutation, no new state
+#     member, no change to the input command or published topics.
 name: "node_runner_fleet_health_compute"
 contract_version:
   major: 1
@@ -35,7 +43,8 @@ input_model:
 output_model:
   name: "ModelRunnerFleetHealthVerdict"
   module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict"
-  description: "Per-runner + fleet-level health verdict with recommended actions."
+  description: >-
+    Per-runner + fleet-level health verdict with recommended actions, carrying source-determinacy flags (github_source_ok / docker_source_ok / buildx_determinate) so a probe-source outage is distinguishable from a confirmed-healthy fleet (OMN-14228 Slice A).
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
