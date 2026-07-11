@@ -43,6 +43,9 @@ handler_routing:
       supported_operations:
         - "rrh.collect.runtime_target"
       description: "Collect deployment target context (env, Kafka, k8s)."
+      input_model:
+        name: "ModelRuntimeTargetCollectRequest"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.models.model_runtime_target_collect_request"
     - operation: rrh.collect.toolchain
       handler_type: "toolchain"
       handler:
