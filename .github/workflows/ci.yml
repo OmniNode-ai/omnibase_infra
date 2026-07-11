@@ -1542,6 +1542,36 @@ jobs:
     with:
       mode: compose
 
+  no-noncanonical-lifecycle-classes:
+    name: no-noncanonical-lifecycle-classes
+    # OMN-14350: non-canonical lifecycle-class ratchet — a STRICT CI Summary gate
+    # (registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS). Unconditional
+    # (no needs/if) so CI Summary always WAITS for it and requires success — a red
+    # ratchet fails the required "CI Summary" check (no default-deny race). Installs
+    # the omnibase_core validator from the pinned core dev SHA and ratchets
+    # src/omnibase_infra's frozen allowlist DOWN toward zero.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Ratchet non-canonical lifecycle-word classes against frozen allowlist (OMN-14350)
+        run: |
+          uv run --no-project \
+            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@63635097705d832e0ee9c4811093efb31349105c' \
+            python -m omnibase_core.validators.no_noncanonical_lifecycle_classes \
+            --check-stale \
+            --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
+            src/omnibase_infra
+
   ci-summary:
     name: CI Summary
     # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for
