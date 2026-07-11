@@ -1,19 +1,25 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for HandlerPrStateProjection (OMN-14375).
+"""Unit tests for HandlerPrStateProjection (OMN-14375, OMN-14394).
 
 Pure-logic tests for the COMPUTE handler that projects GitHub PR status
 events into ModelPayloadPrStateUpsert intents. No Kafka or Postgres needed.
 
 Test coverage:
-    - Round-trips repo, pr_number, triage_state, title, correlation_id
+    - Round-trips repo, pr_number, triage_state, title, is_draft, correlation_id
     - Raises RuntimeHostError when repo/pr_number is missing (identity is
       required -- unlike build_loop's audit-semantics fallback)
     - Unwraps ModelEventEnvelope-style wrappers when payload is nested
     - Raises RuntimeHostError on unparseable JSON and non-object root
     - Emits ModelIntent with intent_type='pr_state.upsert' and a postgres:// target
     - handle() drives the real dispatch-shaped entry point (ModelHandlerOutput)
+    - handle() also accepts a raw DICT-shaped envelope (not just a typed
+      ModelEventMessage) -- the actual shape MessageDispatchEngine delivers
+      for a no-event_model/operation_match dispatch path (OMN-14139 lesson;
+      OMN-14394 closes the test gap for this handler's handle()).
+    - is_draft always resolves to a concrete bool (never None), matching
+      omnimarket's ModelOpenPrSummary.is_draft field-for-field (OMN-14394).
 """
 
 from __future__ import annotations
@@ -88,6 +94,8 @@ def test_project_extracts_canonical_fields(
     assert payload.title == "fix(OMN-14375): pr_state projection"
     assert payload.as_of == datetime.fromisoformat(ts)
     assert payload.correlation_id == UUID(cid)
+    # is_draft was absent from `body`; it still resolves to a concrete bool.
+    assert payload.is_draft is False
     # Reserved columns are None until a richer producer lands.
     assert payload.ci_status is None
     assert payload.review_decision is None
@@ -123,6 +131,55 @@ def test_project_falls_back_when_triage_state_missing(
     assert payload.title == ""
     # as_of falls back to "now"; we don't pin an exact value.
     assert payload.as_of.tzinfo is not None
+
+
+def test_project_extracts_is_draft_true(
+    handler: HandlerPrStateProjection,
+) -> None:
+    """OMN-14394: is_draft round-trips from the poller event body."""
+    intent = handler.project(
+        _from_dict(
+            {
+                "repo": "OmniNode-ai/omnimarket",
+                "pr_number": 5,
+                "triage_state": "draft",
+                "is_draft": True,
+            }
+        )
+    )
+
+    payload = intent.payload
+    assert isinstance(payload, ModelPayloadPrStateUpsert)
+    assert payload.is_draft is True
+
+
+def test_project_defaults_is_draft_false_when_missing(
+    handler: HandlerPrStateProjection,
+) -> None:
+    """OMN-14394: unlike ci_status/review_decision (None = "not yet
+    populated"), is_draft always resolves to a concrete bool -- it mirrors
+    ModelOpenPrSummary.is_draft (omnimarket reader), a non-nullable field."""
+    intent = handler.project(
+        _from_dict({"repo": "OmniNode-ai/omnimarket", "pr_number": 6})
+    )
+
+    payload = intent.payload
+    assert isinstance(payload, ModelPayloadPrStateUpsert)
+    assert payload.is_draft is False
+
+
+def test_is_draft_field_type_matches_reader_contract() -> None:
+    """OMN-14208 seam discipline: ModelPayloadPrStateUpsert.is_draft must stay
+    a non-nullable bool defaulting to False, matching omnimarket's
+    ModelOpenPrSummary.is_draft (node_github_repo_gateway_effect)
+    field-for-field. The reader lives in a separate repo (omnimarket), so a
+    live cross-repo runtime round-trip isn't possible from here -- this pins
+    the producer's half of the contract so a type change on this side (e.g.
+    widening to bool | None, which the reader's required bool would reject)
+    fails loudly in THIS repo's suite rather than silently at the seam."""
+    field = ModelPayloadPrStateUpsert.model_fields["is_draft"]
+    assert field.annotation is bool
+    assert field.default is False
 
 
 def test_project_raises_when_repo_missing(
@@ -180,3 +237,52 @@ async def test_handle_drives_dispatch_shaped_entry_point(
     assert output.result.intent_type == "pr_state.upsert"
     assert output.result.payload.repo == "OmniNode-ai/omnibase_infra"
     assert output.result.payload.pr_number == 99
+
+
+@pytest.mark.asyncio
+async def test_handle_accepts_dict_shaped_envelope(
+    handler: HandlerPrStateProjection,
+) -> None:
+    """OMN-14394: MessageDispatchEngine delivers a DICT envelope (not an
+    already-typed ModelEventMessage) for a no-event_model/operation_match
+    dispatch path -- the same input shape that caused the OMN-14139
+    production bug on the ledger pipeline. `_coerce_event_message` already
+    handles this (both a `getattr(raw, "payload", raw)` branch and an
+    `isinstance(raw, dict)` branch), but until this test, no test exercised
+    the dict branch for THIS handler -- only the typed-message path was
+    covered (test_handle_drives_dispatch_shaped_entry_point above).
+
+    This also exercises the full producer-side seam for is_draft: dict
+    envelope -> _coerce_event_message -> project() -> _extract_payload ->
+    ModelPayloadPrStateUpsert.is_draft.
+    """
+    body = {
+        "repo": "OmniNode-ai/omnibase_infra",
+        "pr_number": 2262,
+        "triage_state": "draft",
+        "title": "feat(OMN-14375): pr_state projection",
+        "is_draft": True,
+    }
+    raw_event_message: dict[str, Any] = {
+        "topic": "onex.evt.github.pr-status.v1",
+        "partition": 0,
+        "offset": "0",
+        "key": None,
+        "value": json.dumps(body).encode("utf-8"),
+        "headers": {
+            "timestamp": datetime.now(UTC),
+            "source": "test-pr-poller",
+            "event_type": "github.pr-status",
+        },
+    }
+    dict_envelope: dict[str, Any] = {"payload": raw_event_message}
+
+    output = await handler.handle(dict_envelope)
+
+    assert output.result is not None
+    assert output.result.intent_type == "pr_state.upsert"
+    payload = output.result.payload
+    assert isinstance(payload, ModelPayloadPrStateUpsert)
+    assert payload.repo == "OmniNode-ai/omnibase_infra"
+    assert payload.pr_number == 2262
+    assert payload.is_draft is True

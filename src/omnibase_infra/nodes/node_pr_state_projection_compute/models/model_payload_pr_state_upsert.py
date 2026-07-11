@@ -10,9 +10,30 @@ row into pr_state, keyed by (repo, pr_number).
 SEAM (shared with the OMN-14374 structured-only read skill): this payload's
 fields mirror the public.pr_state columns 1:1 -- see migration
 091_pr_state.sql for the full target schema and the interim-producer caveat
-(only triage_state/title are populated by the current poller producer;
-ci_status/review_decision/mergeable/merge_state_status/merge_queue_state stay
-None until a richer producer lands).
+(only triage_state/title/is_draft are populated by the current poller
+producer; ci_status/review_decision/mergeable/merge_state_status/
+merge_queue_state stay None until a richer producer lands).
+
+SEAM MATCH (OMN-14394): ``is_draft`` is a non-nullable bool, matching
+omnimarket's ``ModelOpenPrSummary.is_draft: bool`` (node_github_repo_gateway_
+effect) field-for-field -- unlike the reserved columns above, the poller can
+always determine draft status from GitHub's ``pr["draft"]`` today, so this
+field defaults to ``False`` rather than ``None`` (see
+092_pr_state_add_is_draft.sql).
+
+CI_STATUS -> OVERALL MAPPING (documented, not yet implemented): when a future
+producer populates ``ci_status``, the OMN-14374 reader's normalized
+``_OverallState`` enum (``"green" | "red" | "pending"``) is the target shape.
+The intended transform, so a future cutover has a specified mapping instead
+of an implicit assumption:
+    - GitHub check-run conclusion ``success`` -> ``green``
+    - ``failure`` | ``cancelled`` | ``timed_out`` | ``action_required`` ->
+      ``red``
+    - ``neutral`` | ``skipped`` | ``stale`` | in-progress/queued/``None`` ->
+      ``pending``
+This is a raw-string passthrough today (``ci_status: str | None``); the
+mapping above is the reader-side transform a consumer must apply, not
+something this payload performs.
 """
 
 from __future__ import annotations
@@ -33,6 +54,9 @@ class ModelPayloadPrStateUpsert(BaseModel):
         pr_number: Pull request number.
         triage_state: Current triage classification (from the poller).
         title: Pull request title.
+        is_draft: GitHub PR draft status. Always populated by the poller
+            (unlike the reserved columns below) -- matches
+            ModelOpenPrSummary.is_draft (omnimarket reader) 1:1.
         ci_status: Overall CI conclusion, when known. None if not yet
             populated by any producer (see module docstring).
         review_decision: GitHub reviewDecision (APPROVED, CHANGES_REQUESTED,
@@ -73,6 +97,10 @@ class ModelPayloadPrStateUpsert(BaseModel):
     title: str = Field(
         default="",
         description="Pull request title.",
+    )
+    is_draft: bool = Field(
+        default=False,
+        description="GitHub PR draft status, mirrored from pr['draft'].",
     )
     ci_status: str | None = Field(
         default=None,

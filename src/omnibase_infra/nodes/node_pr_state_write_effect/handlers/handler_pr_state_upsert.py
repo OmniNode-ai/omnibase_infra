@@ -64,9 +64,10 @@ INSERT INTO public.pr_state (
     source,
     correlation_id,
     as_of,
+    is_draft,
     projected_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
 )
 ON CONFLICT (repo, pr_number) DO UPDATE SET
     triage_state        = EXCLUDED.triage_state,
@@ -81,6 +82,7 @@ ON CONFLICT (repo, pr_number) DO UPDATE SET
     source               = EXCLUDED.source,
     correlation_id       = EXCLUDED.correlation_id,
     as_of                = EXCLUDED.as_of,
+    is_draft             = EXCLUDED.is_draft,
     projected_at         = NOW()
 RETURNING (xmax = 0) AS was_insert
 """
@@ -210,6 +212,7 @@ class HandlerPrStateUpsert:
             payload.source,  # $12
             str(payload.correlation_id) if payload.correlation_id else None,  # $13
             payload.as_of,  # $14
+            payload.is_draft,  # $15
         ]
 
         envelope: dict[str, object] = {
