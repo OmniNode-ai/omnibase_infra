@@ -27,7 +27,10 @@ receipt envelope are all real.
 from __future__ import annotations
 
 import json
+import signal
 import tempfile
+import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -40,6 +43,7 @@ from omnibase_infra.cli.cli_delegate import (
     DEFAULT_BUS,
     DEFAULT_TASK_TYPE,
     DELEGATE_SOURCE,
+    DelegateTimeoutExceededError,
     build_backend_overrides,
     classify_task_type,
     delegate_command,
@@ -161,11 +165,13 @@ class TestPayloadScratch:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         # With an EXPLICIT --max-tokens override the payload carries exactly the
         # fields the delegate node's input model (ModelDelegateSkillRequest)
-        # requires from a consumer: prompt, task_type, source, max_tokens.
-        # omnibase_infra does NOT depend on omnimarket (layering), so the node
-        # owns model validation at dispatch; the CLI's contract here is the
-        # payload shape. (When no override is supplied, max_tokens is omitted —
-        # see test_payload_written_under_state_root_tmp_not_slash_tmp, OMN-13161.)
+        # requires from a consumer: prompt, task_type, source, correlation_id,
+        # max_tokens. omnibase_infra does NOT depend on omnimarket (layering),
+        # so the node owns model validation at dispatch; the CLI's contract
+        # here is the payload shape. (When no override is supplied, max_tokens
+        # is omitted — see test_payload_written_under_state_root_tmp_not_slash_tmp,
+        # OMN-13161. ``correlation_id`` is always present — OMN-14397.)
+        assert uuid.UUID(str(payload.pop("correlation_id")))
         assert payload == {
             "prompt": "refactor the loop",
             "task_type": "refactor",
@@ -447,3 +453,122 @@ class TestBusSelection:
         assert result.exit_code != 0
         assert "Error:" in result.output
         assert "only valid with --bus kafka" in result.output
+
+
+class TestCorrelationId:
+    """OMN-14397: correlation_id must be fresh per invocation, never reused.
+
+    Two consecutive ``onex delegate`` calls from the same working
+    directory/state-root previously returned the SAME ``correlation_id`` (and
+    stale response content) on the second call. The CLI now mints and writes
+    ``correlation_id`` explicitly per invocation instead of leaving it to an
+    implicit downstream default.
+    """
+
+    def test_two_runs_get_distinct_correlation_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured.append(payload["correlation_id"])
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        # Same working directory / state-root for both runs — the exact
+        # OMN-14397 reproduction shape.
+        for _ in range(2):
+            run_delegate(
+                prompt="research the routing architecture",
+                task_type=None,
+                max_tokens=None,
+                state_root=tmp_path / "state",
+                timeout=60,
+                verbose=False,
+                emit_socket=tmp_path / "no-daemon.sock",
+            )
+
+        assert len(captured) == 2
+        # Each is a real UUID and the two are distinct.
+        for raw in captured:
+            uuid.UUID(raw)
+        assert captured[0] != captured[1]
+
+
+class TestHardTimeoutBackstop:
+    """OMN-14397: ``--timeout`` must abort a hung call, not just RuntimeLocal's
+    cooperative ``asyncio.wait_for``.
+
+    ``RuntimeLocal``'s internal timeout only preempts at an ``await`` point; a
+    call stuck in synchronous, non-cooperative blocking I/O never yields
+    control back, so that timeout silently never fires — the defect that left
+    an orphaned process on ``.201`` requiring a manual ``kill``. These tests
+    drive a genuinely blocking stub (``time.sleep``, not an
+    asyncio-cancelable coroutine) to prove the ``SIGALRM``-based hard backstop
+    aborts it anyway.
+    """
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_hard_timeout_aborts_blocking_call(self) -> None:
+        started = time.monotonic()
+        with pytest.raises(DelegateTimeoutExceededError):
+            with cli_delegate._hard_timeout(1):
+                # Real blocking sleep, not asyncio-cooperative — proves
+                # SIGALRM preempts even non-cooperative blocking I/O.
+                time.sleep(5)
+        elapsed = time.monotonic() - started
+        assert elapsed < 3, f"hard timeout did not abort promptly: {elapsed}s"
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_hard_timeout_cancels_alarm_on_clean_exit(self) -> None:
+        # A call that finishes well inside the window must not leave a
+        # dangling SIGALRM armed for later, unrelated code to trip over.
+        with cli_delegate._hard_timeout(5):
+            pass
+        # signal.alarm(0) returns the seconds remaining on any previously
+        # scheduled alarm (0 if none is armed).
+        assert signal.alarm(0) == 0
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
+    def test_run_delegate_aborts_hung_dispatch_within_bound(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A hung stub standing in for a delegation call stuck in synchronous
+        # blocking I/O (the exact OMN-14397 scenario) — a raw time.sleep well
+        # past the declared timeout, not an asyncio-cancelable coroutine.
+        def _hung_run_receipt_mode(**_kwargs: object) -> int:
+            time.sleep(10)
+            return 0  # pragma: no cover - never reached within the bound
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _hung_run_receipt_mode)
+        # Shrink the grace window so the test doesn't wait out the full sleep.
+        monkeypatch.setattr(cli_delegate, "_HARD_TIMEOUT_GRACE_SECONDS", 1)
+
+        started = time.monotonic()
+        exit_code = run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=tmp_path / "state",
+            timeout=1,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        elapsed = time.monotonic() - started
+
+        assert exit_code == 1
+        assert elapsed < 5, f"hung call was not aborted within bound: {elapsed}s"

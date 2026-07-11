@@ -40,14 +40,32 @@ This replaces the multi-step ``omniclaude`` delegate shim
 (payload temp file + ``cd omnimarket`` + ``onex node`` log flood +
 ``cat workflow_result.json``) with one command, one typed result.
 
+Correlation identity and hard timeout (OMN-14397). Two invocations issued back
+to back from the same working directory/state-root were observed sharing a
+``correlation_id`` and a hung Kafka-bus call outliving its own ``--timeout``,
+requiring a manual ``kill`` on ``.201``. This CLI now mints ``correlation_id``
+fresh per invocation and writes it explicitly into the payload rather than
+leaving it to an implicit downstream default, and wraps the receipt-mode
+dispatch in a ``SIGALRM``-based hard backstop: ``RuntimeLocal``'s own
+``asyncio.wait_for`` timeout only preempts at an ``await`` point, so a
+response-listener stuck in a synchronous, non-cooperative blocking call never
+yields control back and that timeout silently never fires. ``SIGALRM``
+interrupts blocking syscalls too, so it aborts the call (and reports a clear
+error) even when the hang is not asyncio-cooperative.
+
 .. versionadded:: OMN-13096
+.. versionchanged:: OMN-14397
+   Fresh ``correlation_id`` per invocation; hard ``SIGALRM`` timeout backstop.
 """
 
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import click
@@ -65,6 +83,7 @@ __all__ = [
     "TASK_TYPE_CHOICES",
     "BUS_CHOICES",
     "DEFAULT_BUS",
+    "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
     "run_delegate",
@@ -167,6 +186,7 @@ def _write_payload(
     max_tokens: int | None,
     state_root: Path,
     run_id: uuid.UUID,
+    correlation_id: uuid.UUID,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -179,6 +199,12 @@ def _write_payload(
     key is omitted from the payload entirely, so the delegate node resolves the
     response budget per-backend from its routing contract rather than from a
     CLI-side default.
+
+    ``correlation_id`` (OMN-14397) is written explicitly rather than left for
+    the request model's ``default_factory`` to decide implicitly: the CLI is
+    the one place guaranteed to mint a fresh identity per invocation (a new
+    OS process every time), so it owns this run's tracing identity end to end
+    instead of delegating that responsibility downstream.
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -187,6 +213,7 @@ def _write_payload(
         "prompt": prompt,
         "task_type": task_type,
         "source": DELEGATE_SOURCE,
+        "correlation_id": str(correlation_id),
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
@@ -195,6 +222,59 @@ def _write_payload(
         encoding="utf-8",
     )
     return payload_path
+
+
+class DelegateTimeoutExceededError(RuntimeError):
+    """The CLI-level hard timeout backstop fired (OMN-14397).
+
+    ``RuntimeLocal`` enforces its own timeout cooperatively via
+    ``asyncio.wait_for`` (``omnibase_core.runtime.runtime_local``), which only
+    preempts at an ``await`` point. A response-listener stuck in a
+    synchronous, non-cooperative blocking call (e.g. a raw blocking socket
+    read on the Kafka path) never yields control back to the event loop, so
+    that timeout silently never fires and the CLI process hangs past its own
+    declared ``--timeout``, requiring a manual ``kill`` (observed on
+    ``.201``). This exception signals the ``SIGALRM``-based backstop below,
+    which fires unconditionally after the grace window regardless of what the
+    process is doing — including inside a blocking syscall.
+    """
+
+
+# Grace window added on top of the caller's declared --timeout before the
+# hard SIGALRM backstop fires. Gives RuntimeLocal's own cooperative
+# asyncio.wait_for timeout the first chance to exit cleanly with a proper
+# TIMEOUT receipt; the backstop only fires when that path itself failed to
+# preempt — the exact defect this guards against.
+_HARD_TIMEOUT_GRACE_SECONDS = 10
+
+
+@contextmanager
+def _hard_timeout(seconds: int) -> Iterator[None]:
+    """Enforce a hard wall-clock timeout via ``SIGALRM`` (POSIX only).
+
+    Unlike ``asyncio.wait_for``, ``SIGALRM`` interrupts blocking syscalls, so
+    it aborts a hung delegation call even when the hang is inside
+    non-cooperative blocking I/O (OMN-14397). No-ops on platforms without
+    ``SIGALRM`` (e.g. Windows) — timeout enforcement there is best-effort via
+    ``RuntimeLocal``'s internal ``asyncio.wait_for`` only.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _on_alarm(signum: int, frame: object) -> None:
+        raise DelegateTimeoutExceededError(
+            f"onex delegate: exceeded hard timeout of {seconds}s "
+            "(declared --timeout plus grace window) — aborting hung call."
+        )
+
+    previous_handler = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 @click.command("delegate")
@@ -341,27 +421,46 @@ def run_delegate(
     when ``bus="kafka"``. Both flow through ``backend_overrides`` to
     ``RuntimeLocal`` — the runtime is the single source of truth for the bus
     (``feedback_bus_is_the_transport``).
+
+    ``timeout`` is enforced twice (OMN-14397): cooperatively inside
+    ``RuntimeLocal`` via ``asyncio.wait_for``, and again here as a hard
+    ``SIGALRM`` backstop (``timeout`` plus a fixed grace window) that fires
+    even if the inner call is stuck in non-cooperative blocking I/O. A
+    backstop trip returns exit code 1 with a clear stderr message instead of
+    hanging indefinitely.
     """
     resolved_task_type = task_type or classify_task_type(prompt)
     backend_overrides = build_backend_overrides(
         bus=bus, kafka_bootstrap=kafka_bootstrap
     )
     run_id = uuid.uuid4()
+    # OMN-14397: minted fresh per invocation — never reused/cached across runs
+    # sharing a working directory or state-root — and threaded explicitly into
+    # the payload so it becomes the delegate request's correlation_id rather
+    # than an implicit default decided downstream. Kept a UUID object here;
+    # only stringified at the JSON payload boundary in _write_payload.
+    correlation_id = uuid.uuid4()
     payload_path = _write_payload(
         prompt=prompt,
         task_type=resolved_task_type,
         max_tokens=max_tokens,
         state_root=state_root,
         run_id=run_id,
+        correlation_id=correlation_id,
     )
     contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
-    return run_receipt_mode(
-        node_name=DELEGATE_NODE_NAME,
-        contract_path=contract_path,
-        input_path=payload_path,
-        state_root=state_root,
-        backend_overrides=backend_overrides,
-        timeout=timeout,
-        verbose=verbose,
-        emit_socket=emit_socket or default_emit_socket_path(),
-    )
+    try:
+        with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
+            return run_receipt_mode(
+                node_name=DELEGATE_NODE_NAME,
+                contract_path=contract_path,
+                input_path=payload_path,
+                state_root=state_root,
+                backend_overrides=backend_overrides,
+                timeout=timeout,
+                verbose=verbose,
+                emit_socket=emit_socket or default_emit_socket_path(),
+            )
+    except DelegateTimeoutExceededError as exc:
+        click.echo(str(exc), err=True)
+        return 1
