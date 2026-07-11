@@ -1253,3 +1253,48 @@ def test_sweep_repo_fallback_fails_fast_without_env(
 
     with pytest.raises(RuntimeError, match="ONEX_CC_REPO_PATH is not set"):
         handler_cls._resolve_root("")
+
+
+def test_pr_state_payload_validates_against_request_model() -> None:
+    """OMN-14374: the pr_state mapping builds a payload node_github_repo_gateway_effect accepts.
+
+    Wires the EXISTING read-only status reader (OMN-14307) so `onex skill
+    pr_state` returns one small typed row per operation instead of a raw
+    `gh pr view/checks --json ...` dump. --pr is required only for the 5
+    PR-scoped operations; the request model's own validator enforces that
+    (not the CLI mapping), so this proves both the scoped and unscoped shape.
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_github_repo_gateway_effect.models.model_gateway_io"
+    )
+    ModelGithubGatewayRequest = request_module.ModelGithubGatewayRequest
+
+    registry = load_skill_registry()
+    pr_state = registry.get("pr_state")
+    assert pr_state is not None
+    assert pr_state.node_name == "node_github_repo_gateway_effect"
+
+    # PR-scoped operation.
+    payload = _parse_skill_args(
+        pr_state,
+        (
+            "--operation",
+            "pr_status",
+            "--repo",
+            "OmniNode-ai/omnimarket",
+            "--pr",
+            "1704",
+        ),
+    )
+    request = ModelGithubGatewayRequest.model_validate(payload)
+    assert request.operation.value == "pr_status"
+    assert request.repo == "OmniNode-ai/omnimarket"
+    assert request.pr_number == 1704
+
+    # Repo-scoped operation — --pr omitted, still validates.
+    payload = _parse_skill_args(
+        pr_state, ("--operation", "open_prs_list", "--repo", "OmniNode-ai/omnimarket")
+    )
+    request = ModelGithubGatewayRequest.model_validate(payload)
+    assert request.operation.value == "open_prs_list"
+    assert request.pr_number is None
