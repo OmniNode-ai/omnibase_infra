@@ -1,0 +1,133 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodePrStateWriteEffect
+#
+# EFFECT node that consumes ModelPayloadPrStateUpsert intents emitted by
+# NodePrStateProjectionCompute and UPSERTs them into the pr_state
+# latest-known-state table via HandlerDb.
+#
+# Related Tickets:
+#   - OMN-14375: GitHub-state projection (webhook/poller -> local pr_state
+#     projection) — WS-L fan-in producer.
+name: "node_pr_state_write_effect"
+node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - effects
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+description: >
+  Capability-oriented EFFECT node for pr_state persistence. Consumes ModelPayloadPrStateUpsert intents and UPSERTs one row per (repo, pr_number) into the public.pr_state latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently projected state per PR.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPayloadPrStateUpsert"
+  module: "omnibase_infra.nodes.node_pr_state_projection_compute.models"
+  description: "Input payload describing one PR's latest known state to persist."
+output_model:
+  name: "ModelPrStateUpsertResult"
+  module: "omnibase_infra.nodes.node_pr_state_write_effect.models"
+  description: "Outcome of one pr_state upsert."
+# Event bus configuration
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.pr-state-upsert.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.pr-state-upserted.v1"
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "pr_state.upsert"
+      handler:
+        name: "HandlerPrStateUpsert"
+        module: "omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert"
+      topic: "onex.cmd.omnibase-infra.pr-state-upsert.v1"
+      description: "Upsert latest known state into pr_state"
+capabilities:
+  - name: "pr_state.write"
+    description: "Upsert a PR's latest known state into pr_state"
+    version: "0.1.0"
+  - name: "pr_state.write.upsert"
+    description: "Upsert a single row into pr_state, keyed by (repo, pr_number)"
+node_capabilities:
+  postgres: true
+  write: true
+  database: true
+io_operations:
+  - operation: "pr_state.upsert"
+    description: "Upsert a single PR's latest known state"
+    input_fields:
+      - repo: "str"
+      - pr_number: "int"
+      - triage_state: "str"
+      - title: "str"
+      - ci_status: "str | None"
+      - review_decision: "str | None"
+      - mergeable: "str | None"
+      - merge_state_status: "str | None"
+      - merge_queue_state: "str | None"
+      - base_ref: "str | None"
+      - head_ref: "str | None"
+      - source: "str"
+      - correlation_id: "UUID | None"
+      - as_of: "datetime"
+    output_fields:
+      - success: "bool"
+      - repo: "str"
+      - pr_number: "int"
+      - was_insert: "bool"
+    idempotent: true
+dependencies:
+  - name: "handler_pr_state_upsert"
+    type: "handler"
+    class_name: "HandlerPrStateUpsert"
+    module: "omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert"
+    description: "Upsert handler that lazily composes HandlerDb from the runtime container and writes to pr_state"
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "PostgreSQL database handler (composed by the pr_state upsert handler)"
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "database_backend"
+      type: "connection"
+      critical: true
+metadata:
+  description: >
+    Capability-oriented EFFECT node that persists PR status projections into the latest-known-state public.pr_state table. HandlerPrStateUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-07-11"
+  updated: "2026-07-11"
+  ticket: "OMN-14375"
+  tags:
+    - effect
+    - github
+    - pr_state
+    - storage
+    - postgresql

@@ -2239,6 +2239,50 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+        # pr_state.upsert intents (from node_pr_state_projection_compute) route
+        # to HandlerPrStateUpsert the same way build_loop.append intents route
+        # to HandlerBuildLoopAppend above -- reuses build_loop_dsn since pr_state
+        # lives in the same omnibase_infra Postgres instance (OMN-14375).
+        if event_bus is not None and build_loop_dsn:
+            from omnibase_infra.nodes.node_pr_state_write_effect.handlers import (
+                HandlerPrStateUpsert,
+            )
+            from omnibase_infra.runtime.intent_effects import (
+                IntentEffectPrStateUpsert,
+            )
+            from omnibase_infra.runtime.service_intent_executor import (
+                IntentExecutor,
+            )
+
+            pr_state_upsert_handler = HandlerPrStateUpsert(
+                container,
+                build_loop_dsn,
+            )
+            await pr_state_upsert_handler.initialize({})
+            pr_state_intent_executor = IntentExecutor(container=container)
+            pr_state_intent_executor.register_handler(
+                "pr_state.upsert",
+                IntentEffectPrStateUpsert(pr_state_upsert_handler),
+            )
+            auto_wiring_result_appliers["node_pr_state_projection_compute"] = (
+                DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=config.output_topic,
+                    intent_executor=pr_state_intent_executor,
+                )
+            )
+            logger.info(
+                "pr_state projection result applier registered "
+                "(contract=node_pr_state_projection_compute, correlation_id=%s)",
+                correlation_id,
+            )
+        elif event_bus is not None:
+            logger.warning(
+                "pr_state projection result applier not registered: "
+                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
+                correlation_id,
+            )
+
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
         # plugin registry loop. It is always activated first.

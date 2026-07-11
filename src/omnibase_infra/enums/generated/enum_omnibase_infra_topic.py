@@ -31,6 +31,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
     CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
     CMD_PATTERN_B_DISPATCH_V1 = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex.cmd.omnibase-infra.pattern-b-dispatch.v1
+    CMD_PR_STATE_UPSERT_V1 = "onex.cmd.omnibase-infra.pr-state-upsert.v1"  # onex.cmd.omnibase-infra.pr-state-upsert.v1
     CMD_REMOTE_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"  # onex.cmd.omnibase-infra.remote-agent-invoke.v1
     CMD_RUNNER_FLEET_HEALTH_EVALUATE_V1 = "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"  # onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1
     CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
@@ -74,6 +75,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
+    EVT_PR_STATE_UPSERTED_V1 = "onex.evt.omnibase-infra.pr-state-upserted.v1"  # onex.evt.omnibase-infra.pr-state-upserted.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
     EVT_RUNNER_FLEET_HEALTH_VERDICT_V1 = "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"  # onex.evt.omnibase-infra.runner-fleet-health-verdict.v1
     EVT_RUNNER_FLEET_MAINTAIN_COMPLETED_V1 = "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"  # onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1

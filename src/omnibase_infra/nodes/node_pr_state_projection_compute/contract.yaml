@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodePrStateProjectionCompute
+#
+# COMPUTE node that subscribes to the GitHub PR status event topic (produced
+# by node_github_pr_poller_effect) and emits ModelIntent payloads for the
+# EFFECT layer to persist into pr_state. Mirrors the canonical
+# node_build_loop_projection_compute pattern.
+#
+# Related Tickets:
+#   - OMN-14375: GitHub-state projection (webhook/poller -> local pr_state
+#     projection) — WS-L fan-in producer. This is the interim producer path
+#     (drives node_github_pr_poller_effect's existing output); the webhook
+#     receiver is tracked under the same epic, not built here.
+#   - OMN-14374: structured-only pr_state read skill (consumer of this
+#     projection; its interim path uses batched `gh`, not this table yet).
+name: "node_pr_state_projection_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+description: >
+  Subscribes to onex.evt.github.pr-status.v1 and projects each PR status event into a ModelPayloadPrStateUpsert intent for NodePrStateWriteEffect to persist into the pr_state latest-known-state table. Mirrors the canonical node_build_loop_projection_compute pattern.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.github.pr-status.v1"
+  consumer_purpose: "audit"
+  auto_offset_reset: "earliest"
+  consumer_group: "onex-pr-state-projection-compute"
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: >
+    Kafka event message containing raw bytes payload and headers for the GitHub PR status event.
+
+output_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+  description: >
+    ModelIntent wrapping ModelPayloadPrStateUpsert, routed to NodePrStateWriteEffect for persistence.
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: pr_state.project
+      handler_type: "pr_state_projection"
+      handler:
+        name: "HandlerPrStateProjection"
+        module: "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection"
+      supported_operations:
+        - "pr_state.project"
+capabilities:
+  - name: "pr_state.projection"
+    description: "Project the GitHub PR status event into a write intent"
+    version: "0.1.0"
+  - name: "pr_state.projection.audit"
+    description: "Read-only, latest-state consumption of PR status events"
+dependencies:
+  - name: "node_pr_state_write_effect"
+    type: "node"
+    class_name: "NodePrStateWriteEffect"
+    module: "omnibase_infra.nodes.node_pr_state_write_effect"
+    description: "Effect node that persists projected intents into pr_state"
+metadata:
+  description: >
+    Subscribes to the GitHub PR status event topic and projects each event into a ModelPayloadPrStateUpsert intent for the EFFECT layer to persist into the pr_state latest-known-state table.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-07-11"
+  updated: "2026-07-11"
+  ticket: "OMN-14375"
+  tags:
+    - compute
+    - github
+    - pr_state
+    - projection
