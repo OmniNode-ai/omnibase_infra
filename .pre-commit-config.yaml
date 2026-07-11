@@ -70,8 +70,9 @@ repos:
   # DOWN toward zero — blocks any NEW Service/Engine/Adapter/Router/Daemon/Manager/
   # Runner/Registry/Controller/Server/Client class outside the frozen baseline. rev
   # is pinned to a specific core dev SHA (never a moving ref, per the deterministic-
-  # truth doctrine). CI merge-gating is via the dedicated
-  # .github/workflows/noncanonical-lifecycle-gate.yml job; this local hook is dev-ergonomics.
+  # truth doctrine). CI merge-gating is via the no-noncanonical-lifecycle-classes
+  # job in .github/workflows/ci.yml (registered in scripts/ci/ci_summary_gate.py
+  # STRICT_GATE_JOBS); this local hook is dev-ergonomics.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 63635097705d832e0ee9c4811093efb31349105c # pragma: allowlist secret
     hooks:
