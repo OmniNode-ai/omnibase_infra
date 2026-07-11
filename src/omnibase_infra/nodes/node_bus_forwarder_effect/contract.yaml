@@ -85,7 +85,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_bus_forwarder_effect.handlers.handler_consume_inbound"
         handler_type: "COMPUTE"
       description: >
-        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the tenant-prefixed cloud topic, and delegates to the bare local-topic transform.
+        Canonical handle() dispatch entrypoint accepts a typed or serialized outer event envelope, normalizes it, validates the tenant-prefixed cloud topic, strips it to the bare local topic, and stamps the verified gateway tenant_id and tenant_slug into the republished payload.
 
 capabilities:
   - name: "tenant_prefix_transform"
@@ -96,11 +96,13 @@ capabilities:
     description: "Handlers never publish; the effect node owns both bus legs."
   - name: "raw_dispatch_envelope_normalization"
     description: "Handlers deserialize serialized outer event envelopes before reading payload."
+  - name: "verified_inbound_payload_tenant_stamp"
+    description: "Inbound gateway consumption overwrites payload tenant_id and tenant_slug with the config-bound gateway tenant identity before local republish."
 metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-06-24"
+  updated: "2026-07-11"
   tags:
     - gateway
     - event-bus
