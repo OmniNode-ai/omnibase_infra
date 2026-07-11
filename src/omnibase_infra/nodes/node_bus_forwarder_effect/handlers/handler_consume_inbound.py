@@ -72,10 +72,26 @@ class HandlerConsumeInbound:
         if envelope.wire_topic != expected_wire_topic:
             raise ValueError("wire_topic does not match canonical tenant prefix")
 
+        # OMN-14345: the outer envelope's tenant_id/tenant_slug is validated
+        # above but was never propagated into the inner payload -- downstream
+        # consumers (e.g. node_llm_delegation_call_effect) read the payload,
+        # not the gateway envelope shell, so the verified identity was
+        # silently discarded at this hop. Stamp the config-bound identity
+        # into the payload here, OVERWRITING any payload-supplied value: the
+        # forwarder's tenant_identity is config-bound at deploy time (the
+        # trust anchor), never client-writable, so it always wins over
+        # whatever the inbound payload happens to carry.
+        verified_payload: dict[str, object] = {
+            **envelope.payload,
+            "tenant_id": str(identity.tenant_id),
+            "tenant_slug": identity.tenant_slug,
+        }
+
         return envelope.model_copy(
             update={
                 "source_topic": envelope.wire_topic,
                 "canonical_topic": canonical_topic,
+                "payload": verified_payload,
             }
         )
 
