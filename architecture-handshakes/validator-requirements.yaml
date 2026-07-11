@@ -465,6 +465,30 @@ required_validators:
     applies_to_repos:
       - omnibase_infra
       - omninode_infra
+  tenant-scoped-ingress:
+    description: |
+      Fail-closed gate on the event_bus.tenant_scoped_ingress opt-in (OMN-14360,
+      OMN-14208 Path A). A flag-true contract must bind ONLY tenant-<slug>.-
+      prefixed subscribe_topics (a bare/mixed topic leaves a client tenant_id
+      unstamped and unverified) AND be named in
+      config/validation/tenant_scoped_ingress_allowlist.yaml with a proving
+      cross-boundary seam test (no opt-in flip until a real seam test exists).
+    central_source: "omnibase_infra.validators.tenant_scoped_ingress_schema"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "tenant-scoped-ingress-gate"
+      - "tenant-scoped-ingress"
+    ci_workflow_keywords:
+      - "tenant_scoped_ingress_schema"
+      - "tenant_scoped_ingress opt-in gate"
+    excludes:
+      allowed: []
+      forbidden: []
+    applies_to_repos:
+      - omnibase_infra
 # Handshake metadata
 metadata:
   generated_by: "manually authored (OMN-9051); consumer added OMN-9115"

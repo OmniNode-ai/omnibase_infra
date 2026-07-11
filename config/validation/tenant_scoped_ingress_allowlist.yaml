@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-14360 (OMN-14208 Path A): seam-test attestation allowlist for the
+# tenant_scoped_ingress opt-in.
+#
+# The tenant_scoped_ingress gate
+# (omnibase_infra.validators.tenant_scoped_ingress_schema) FAILS CLOSED: any
+# contract that sets `event_bus.tenant_scoped_ingress: true` must appear here
+# with a NON-EMPTY `seam_test` path proving the stamp->consumer boundary is
+# driven by a real cross-boundary test. This mechanizes "no opt-in flip until a
+# real seam test exists" — the OMN-14208 near-miss was two individually-green
+# PRs that were a silent 100% runtime no-op because no test drove the seam.
+#
+# ValidatorTenantScopedIngress receives this repo-local path explicitly from the
+# pre-commit hook + CI step; keep it under config/ so clean-root stays green.
+#
+# Schema:
+#   allowlist:
+#     - node_id: <contract `name`>          # the node this attests
+#       seam_test: <path to the seam test>  # the proving cross-boundary test
+#       ticket: OMN-XXXX                     # attestation provenance
+#       reason: <why the opt-in is proven safe>
+#
+# EMPTY by design today: no contract sets the flag yet. The first opt-in must
+# add its entry here (and land its seam test) in the same change, or the gate
+# blocks it.
+allowlist: []
