@@ -320,6 +320,22 @@ skills:
       - {name: severity-threshold, payload_field: severity_threshold, arg_type: string}
       - {name: max-findings-per-pr, payload_field: max_findings_per_pr, arg_type: integer}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # OMN-14374: structured-only GitHub PR/repo state probe. Wires the EXISTING
+  # node_github_repo_gateway_effect (OMN-14307, merged same-cycle) — a
+  # read-only typed status reader built exactly for this follow-on ("wire
+  # into onex skill" per its PR body). No new node/handler/model code: one
+  # additive mapping entry. Returns ONE small typed object per operation
+  # (pr_status/ci_checks/open_prs_list/branch_protection/review_gate/
+  # merge_commit_sha/ticket_ref) over the existing GraphQL/REST transport —
+  # never a raw `gh pr view/checks --json ...` dump. --pr is required only
+  # for the 5 PR-scoped operations (validated by the node's request model).
+  - skill_name: pr_state
+    node_name: node_github_repo_gateway_effect
+    result_model: omnimarket.nodes.node_github_repo_gateway_effect.models.model_gateway_io.ModelGithubGatewayResponse
+    args:
+      - {name: operation, payload_field: operation, arg_type: string, required: true}
+      - {name: repo, payload_field: repo, arg_type: string, required: true}
+      - {name: pr, payload_field: pr_number, arg_type: integer}
   - skill_name: session
     node_name: node_session_orchestrator
     result_model: omnimarket.nodes.node_session_orchestrator.handlers.handler_session_orchestrator.ModelSessionOrchestratorResult
