@@ -267,6 +267,22 @@ repos:
         files: (^|/)contract\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-14360 (OMN-14208 Path A): fail-closed gate on the
+      # event_bus.tenant_scoped_ingress opt-in. A flag-true contract must bind
+      # ONLY tenant-<slug>.-prefixed subscribe_topics (so the OMN-14349 stamp
+      # covers every topic — a bare/mixed topic lets a client tenant_id survive
+      # unverified) AND be named in
+      # config/validation/tenant_scoped_ingress_allowlist.yaml with a proving
+      # seam test (no opt-in flip until a real cross-boundary test exists — the
+      # OMN-14208 silent-no-op near-miss). SYNC with ci.yml step
+      # "tenant_scoped_ingress opt-in gate".
+      - id: tenant-scoped-ingress-gate
+        name: tenant_scoped_ingress opt-in gate (OMN-14360)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.tenant_scoped_ingress_schema
+        language: system
+        files: (^|/)contract\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement

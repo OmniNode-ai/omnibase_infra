@@ -1927,12 +1927,25 @@ def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    *,
+    tenant_scoped: bool = False,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
     Mirrors EventBusSubcontractWiring._create_dispatch_callback but stripped of
     DLQ/idempotency concerns. When a result applier is supplied, dispatcher
     outputs are applied on the same auto-wired path that owns the subscription.
+
+    ``tenant_scoped`` (OMN-14349, OMN-14208 Path A): when True, derives a
+    verified tenant_id from this topic's ``tenant-<slug>.`` wire prefix and
+    stamps it into the payload before ``dispatch_engine.dispatch()`` is ever
+    called -- overwriting any client-supplied value. This is the layer where
+    ``topic`` is genuinely in scope with the envelope still mutable (proven:
+    it already derives ``event_type`` from ``topic`` below); the per-handler
+    dispatch callback further downstream (``_make_dispatch_callback``) never
+    sees ``topic`` at all, so the stamp cannot happen there. A topic with no
+    ``tenant-<slug>.`` prefix is left completely unstamped -- never given a
+    defaulted or guessed tenant (Stage-1 warn semantics, OMN-14208 §5.1).
     """
     import json
 
@@ -1987,6 +2000,8 @@ def _make_event_bus_callback(
                         envelope = envelope.model_copy(
                             update={"event_type": derived_event_type}
                         )
+                if tenant_scoped:
+                    envelope = _stamp_tenant_id_from_topic_prefix(topic, envelope)
             else:
                 if not isinstance(message, ModelEventEnvelope):
                     logger.warning(
@@ -2011,6 +2026,32 @@ def _make_event_bus_callback(
             )
 
     return callback
+
+
+_TENANT_WIRE_PREFIX_RE = re.compile(r"^tenant-([a-z][a-z0-9-]{1,61}[a-z0-9])\.")
+
+
+def _stamp_tenant_id_from_topic_prefix(
+    topic: str,
+    envelope: ModelEventEnvelope[object],
+) -> ModelEventEnvelope[object]:
+    """Overwrite payload["tenant_id"] with the slug from a tenant-<slug>. wire prefix.
+
+    OMN-14349 (OMN-14208 Path A). The config-bound identity always wins: this
+    overwrites any client-supplied ``tenant_id``, it never merges-if-absent
+    and never falls back to one. A topic with no matching prefix leaves the
+    payload completely untouched -- never a defaulted or guessed tenant
+    (Stage-1 warn semantics; a missing/self-reported value is handled by the
+    existing OMN-14058 flow downstream, not masked here).
+    """
+    match = _TENANT_WIRE_PREFIX_RE.match(topic)
+    if match is None:
+        return envelope
+    if not isinstance(envelope.payload, dict):
+        return envelope
+    slug = match.group(1)
+    stamped_payload = {**envelope.payload, "tenant_id": slug}
+    return envelope.model_copy(update={"payload": stamped_payload})
 
 
 def _make_raw_event_projection_callback(
@@ -3579,6 +3620,7 @@ async def _subscribe_contract_topics(
                 # Why: Runtime wiring validates and narrows this payload shape before use.
                 dispatch_engine,  # type: ignore[arg-type]
                 result_applier=effective_result_applier,
+                tenant_scoped=contract.event_bus.tenant_scoped_ingress,
             )
         topic_callbacks.append((topic, callback))
 
