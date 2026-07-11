@@ -111,6 +111,7 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     StateIoUnconfiguredError,
     StateStoreAdapter,
 )
+from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
 from omnibase_infra.utils.util_retry_optimistic import retry_on_optimistic_conflict
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
@@ -2050,7 +2051,9 @@ def _stamp_tenant_id_from_topic_prefix(
     if not isinstance(envelope.payload, dict):
         return envelope
     slug = match.group(1)
-    stamped_payload = {**envelope.payload, "tenant_id": slug}
+    # OMN-14367: route through the single canonical stamp so this producer and
+    # the gateway forwarder's consume_inbound cannot diverge on the shape again.
+    stamped_payload = stamp_verified_tenant_slug(envelope.payload, slug)
     return envelope.model_copy(update={"payload": stamped_payload})
 
 
