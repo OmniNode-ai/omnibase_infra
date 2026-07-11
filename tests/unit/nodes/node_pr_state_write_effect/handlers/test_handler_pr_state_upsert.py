@@ -167,6 +167,42 @@ class TestHandlerPrStateUpsertInsertVsUpdate:
             await handler.upsert(payload)
 
 
+class TestHandlerPrStateUpsertIsDraft:
+    """OMN-14394: is_draft must reach the UPSERT SQL parameters -- the seam
+    gap this ticket closes was is_draft silently dropped between the
+    producer payload and the persisted row."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_sends_is_draft_as_final_sql_parameter(self) -> None:
+        handler, db_handler = make_handler_with_mock_db()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(rows=[{"was_insert": True}])
+        )
+        payload = make_minimal_payload(is_draft=True)
+
+        await handler.upsert(payload)
+
+        db_handler.execute.assert_awaited_once()
+        (envelope,), _ = db_handler.execute.call_args
+        parameters = envelope["payload"]["parameters"]
+        assert parameters[-1] is True
+
+    @pytest.mark.asyncio
+    async def test_upsert_defaults_is_draft_false(self) -> None:
+        handler, db_handler = make_handler_with_mock_db()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(rows=[{"was_insert": True}])
+        )
+        payload = make_minimal_payload()
+        assert payload.is_draft is False
+
+        await handler.upsert(payload)
+
+        (envelope,), _ = db_handler.execute.call_args
+        parameters = envelope["payload"]["parameters"]
+        assert parameters[-1] is False
+
+
 class TestHandlerPrStateUpsertHandle:
     """handle() is the auto-wiring entry point the real dispatch path calls."""
 
