@@ -88,6 +88,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Arch Invariants (OMN-3343)",  # arch-invariants
     "Kafka Schema Handshake (OMN-3411)",  # schema-handshake
     "Writer-Migration Coupling Check",  # migration-required-check
+    "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
