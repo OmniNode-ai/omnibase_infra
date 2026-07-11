@@ -2,17 +2,35 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Standalone CI script: duplication sweep.
+"""Standalone CI script: duplication sweep (OMN-14086: wired as a CI gate).
 
 Checks:
   D1 — Drizzle table name duplication across omnidash schema files
   D2 — Topic registration conflicts between omniclaude/topics.py and kafka_boundaries.yaml
 
+Both are BUCKET-2 relational checks (per
+docs/analyses/2026-07-06-validator-diff-scope-and-test-load-audit.md §1): a
+colliding file may not be in the diff, so the comparison set stays whole-tree
+by design — ``--changed-files`` only narrows the TRIGGER (skip a check whose
+relevant sibling paths definitely didn't change), it never narrows what a
+running check reads.
+
 Usage:
     python run_duplication_sweep.py [--omni-home /path/to/omni_home]
                                     [--checks D1,D2]
                                     [--fail-on-severity error|warning]
+                                    [--changed-files PATH [PATH ...]]
                                     [--json]
+
+``--changed-files`` (OMN-14086): optional trigger-narrowing. Omit it (the
+default) to run every requested check unconditionally — this is what
+omnibase_infra's own CI/pre-commit wiring does, since a check comparing
+*sibling* repos (omnidash/omniclaude/onex_change_control) has no meaningful
+signal in omnibase_infra's own diff. Pass it when this script is invoked from
+a context where the changed-file list DOES cover the relevant sibling paths
+(e.g. a future wiring inside omnidash's or omniclaude's own CI) — a check is
+skipped only when none of the supplied paths touch its relevant path
+substrings; the check's own comparison logic never changes.
 
 Exit codes:
     0 — no findings at or above --fail-on-severity
@@ -28,9 +46,35 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 ALL_CHECKS = ["D1", "D2"]
 _SEVERITY_ORDER = {"error": 2, "warning": 1}
+
+# OMN-14086: path substrings that make a --changed-files entry "relevant" to a
+# given check. Substring (not exact-prefix) match so this stays correct
+# whether the caller passes omni_home-relative paths, sibling-repo-relative
+# paths, or an absolute sparse-checkout path.
+_RELEVANT_SUBSTRINGS: dict[str, tuple[str, ...]] = {
+    "D1": ("omnidash/shared/",),
+    "D2": (
+        "omniclaude/src/omniclaude/hooks/topics.py",
+        "onex_change_control/src/onex_change_control/boundaries/kafka_boundaries.yaml",
+    ),
+}
+
+
+def _check_is_relevant(check_id: str, changed_files: list[str] | None) -> bool:
+    """True if ``check_id`` should run given ``changed_files`` (OMN-14086).
+
+    ``changed_files is None`` means "no trigger-narrowing requested" — always
+    relevant (unconditional mode, the default). ``changed_files == []`` means
+    "narrowing requested and genuinely nothing changed" — never relevant.
+    """
+    if changed_files is None:
+        return True
+    substrings = _RELEVANT_SUBSTRINGS.get(check_id, ())
+    return any(sub in f for f in changed_files for sub in substrings)
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +280,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Minimum severity to fail on (default: error)",
     )
     parser.add_argument(
+        "--changed-files",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help=(
+            "OMN-14086: optional trigger-narrowing. Omit to run every "
+            "requested check unconditionally (the default — used by "
+            "omnibase_infra's own CI/pre-commit wiring). When supplied, a "
+            "check is skipped unless a listed path is relevant to it; the "
+            "comparison logic itself always stays whole-tree."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output JSON instead of human-readable text",
@@ -259,9 +316,24 @@ def main(argv: list[str] | None = None) -> int:
         "D2": check_d2_topic_conflicts,
     }
 
-    results = []
+    results: list[dict[str, Any]] = []
     for check_id in ALL_CHECKS:
         if check_id not in checks:
+            continue
+        if not _check_is_relevant(check_id, args.changed_files):
+            results.append(
+                {
+                    "check_id": check_id,
+                    "status": "SKIP",
+                    "finding_count": 0,
+                    "severity": "warning",
+                    "detail": (
+                        "skipped — none of the supplied --changed-files "
+                        f"touch {check_id}'s relevant paths"
+                    ),
+                    "findings": [],
+                }
+            )
             continue
         fn = check_map.get(check_id)
         if fn:

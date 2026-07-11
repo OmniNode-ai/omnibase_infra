@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-14086: wire scripts/ci/run_duplication_sweep.py as a REQUIRED CI gate.
+#
+# D1 — Drizzle table name duplication across omnidash schema files.
+# D2 — Topic registration conflicts between omniclaude/topics.py and
+#      onex_change_control's kafka_boundaries.yaml.
+#
+# Rule-5 gap this closes: the script has a full pytest fixture suite
+# (scripts/ci/tests/test_sweep_clis.py::TestDuplicationSweep) but, until this
+# PR, ZERO CI or pre-commit caller — verified via
+# `git log --all -S "run_duplication_sweep" -- .github/workflows/` returning
+# no hits across the full history of omnibase_infra AND omnimarket. The
+# OMN-8624/OMN-8625 "wire duplication_sweep as pre-merge gate" tickets were
+# marked Done in 2026-04-13 without this ever landing — detection without
+# enforcement is advisory theater (CLAUDE.md Rule #5), and this closes it.
+#
+# Both checks are BUCKET-2 relational (per
+# docs/analyses/2026-07-06-validator-diff-scope-and-test-load-audit.md §1): a
+# colliding file may live in a DIFFERENT sibling repo than the one whose diff
+# triggered the run, so the comparison set stays whole-tree by design — this
+# job runs unconditionally on every PR (same precedent as
+# node-migration-sync.yml, which compares against the omnimarket sibling on
+# every infra PR for the identical reason). The script's own --changed-files
+# flag exists for a FUTURE narrowing use inside a sibling repo's own CI (see
+# the script's module docstring) — it is deliberately NOT passed here, since
+# omnibase_infra's own diff never touches the sibling paths D1/D2 read.
+#
+# This job is a REQUIRED STATUS CHECK. The job name "Duplication Sweep" must
+# match branch protection rules.
+
+name: Duplication Sweep
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main, dev]
+  merge_group:
+
+concurrency:
+  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
+  # entries carry a unique github.ref, so queue entries never cross-cancel.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
+  duplication-sweep:
+    needs: occ-preflight
+    name: Duplication Sweep
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # OMN-14017: sparse sibling checkouts can be slow when GitHub fetches stall
+    # under fleet egress saturation; keep the gate strict but allow retries.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Checkout omnidash (sibling — D1 Drizzle schema source)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnidash
+          ref: dev
+          path: sweep-home/omnidash
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          sparse-checkout: |
+            shared
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omniclaude (sibling — D2 topic-claim source)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: dev
+          path: sweep-home/omniclaude
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          sparse-checkout: |
+            src/omniclaude/hooks
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout onex_change_control (sibling — D2 boundary source)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/onex_change_control
+          ref: dev
+          path: sweep-home/onex_change_control
+          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
+          sparse-checkout: |
+            src/onex_change_control/boundaries
+          sparse-checkout-cone-mode: false
+
+      - name: Run duplication sweep (D1 + D2, whole cross-repo comparison set)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::duplication sweep (D1 + D2)"
+          if python3 scripts/ci/run_duplication_sweep.py \
+              --omni-home "${{ github.workspace }}/sweep-home" \
+              --fail-on-severity error; then
+            echo "::endgroup::"
+            echo "::notice::duplication sweep clean — no D1/D2 findings."
+          else
+            rc=$?
+            echo "::endgroup::"
+            if [[ "${rc}" -eq 2 ]]; then
+              echo "::error::duplication sweep configuration error (exit 2) — sibling checkout paths may be wrong."
+            else
+              echo "::error::Duplication sweep found D1 (duplicate Drizzle table) and/or D2 (conflicting topic producer_repo) violations. Re-run locally: OMNI_HOME=\$OMNI_HOME python3 scripts/ci/run_duplication_sweep.py --json"
+            fi
+            exit "${rc}"
+          fi
