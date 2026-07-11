@@ -64,6 +64,22 @@ repos:
       - id: check-url-authority
         args: [--repo, omnibase_infra, --repo-root, .]
         exclude: ^(tests/|archived/|archive/).*\.py$
+  # OMN-14350: non-canonical lifecycle-class ratchet (fan-out from the omnibase_core
+  # canary #1430). Consumes the canonical omnibase_core remote hook and ratchets
+  # infra's frozen residual set (.onex_ratchets/noncanonical_class_allowlist.yaml)
+  # DOWN toward zero — blocks any NEW Service/Engine/Adapter/Router/Daemon/Manager/
+  # Runner/Registry/Controller/Server/Client class outside the frozen baseline. rev
+  # MUST be a specific core SHA carrying the validator + its .pre-commit-hooks.yaml
+  # export (core dev HEAD after #1430 squash-merges) — never a moving ref like @dev,
+  # since this is a required gate under the deterministic-truth doctrine. The token
+  # below is a HOLD placeholder; this PR stays unopened until it is replaced with the
+  # real post-#1430-merge SHA.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 63635097705d832e0ee9c4811093efb31349105c # pragma: allowlist secret
+    hooks:
+      - id: no-noncanonical-lifecycle-classes
+        args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
+        files: ^src/omnibase_infra/.*\.py$
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
