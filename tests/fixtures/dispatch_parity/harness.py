@@ -736,6 +736,38 @@ def _header(
     }
 
 
+# ---------------------------------------------------------------------------
+# Volatile header fields — stripped before the CI staleness byte-comparison.
+# ---------------------------------------------------------------------------
+
+# Header fields that vary with the wall clock or the CI venv's installed
+# dependency VERSIONS but do NOT reflect any change to the actual dispatch corpus
+# (contracts / dispatchers / routes / topics / probes). The dispatch-parity-gate
+# staleness check pops these before diffing so a routine omnibase_core (or any
+# tracked package) release does not re-break the committed baseline for every open
+# PR (OMN-14361). Everything NOT listed here — corpus counts,
+# required_missing_packages, exclusions[].installed, and every dispatcher / route /
+# probe tuple — is still byte-compared, so a genuine corpus drift still fails.
+VOLATILE_HEADER_FIELDS: tuple[str, ...] = (
+    "generated_at_utc",
+    "installed_package_versions",
+)
+
+
+def strip_volatile_header_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Pop the volatile header fields from ``snapshot`` in place and return it.
+
+    Used by the dispatch-parity-gate staleness check so that wall-clock and
+    installed-dependency-version metadata never gate the parity oracle — only the
+    actual dispatch corpus does (OMN-14361). See :data:`VOLATILE_HEADER_FIELDS`.
+    """
+    header = snapshot.get("header")
+    if isinstance(header, dict):
+        for field in VOLATILE_HEADER_FIELDS:
+            header.pop(field, None)
+    return snapshot
+
+
 def build_snapshot() -> dict[str, Any]:
     """Build the canonical Mode-A fixture (sorted registration order, design D3)."""
     contracts, discovery_errors, duplicate_winners = _corpus_from_discovery()

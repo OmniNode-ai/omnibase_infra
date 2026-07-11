@@ -114,15 +114,19 @@ jobs:
         run: |
           set -euo pipefail
           # Regenerate the fixture into a temp file and diff against the committed
-          # one (ignoring the volatile generated_at_utc timestamp). A drift here
-          # means someone changed selection logic without regenerating the oracle.
+          # one, ignoring the VOLATILE header fields (wall-clock generated_at_utc +
+          # installed_package_versions). Those vary with the CI venv/clock but not
+          # with the dispatch corpus, so leaving them in re-broke the baseline on
+          # every tracked-package release (OMN-14361). A drift in anything else means
+          # someone changed selection logic without regenerating the oracle.
           uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-live.json
           uv run python - <<'PY'
           import json, sys
-          committed = json.load(open("tests/fixtures/dispatch_parity/baseline-selection-v2.json"))
-          live = json.load(open("/tmp/parity-live.json"))
-          for d in (committed, live):
-              d["header"].pop("generated_at_utc", None)
+          from tests.fixtures.dispatch_parity.harness import strip_volatile_header_fields
+          committed = strip_volatile_header_fields(
+              json.load(open("tests/fixtures/dispatch_parity/baseline-selection-v2.json"))
+          )
+          live = strip_volatile_header_fields(json.load(open("/tmp/parity-live.json")))
           if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
               print(
                   "::error::Committed baseline-selection-v2.json is STALE vs the live "
@@ -132,5 +136,5 @@ jobs:
                   file=sys.stderr,
               )
               sys.exit(1)
-          print("Committed fixture matches live engine (ex-timestamp).")
+          print("Committed fixture matches live engine (ex-volatile-header-fields).")
           PY
