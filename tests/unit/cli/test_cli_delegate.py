@@ -27,6 +27,7 @@ receipt envelope are all real.
 from __future__ import annotations
 
 import json
+import logging
 import signal
 import tempfile
 import time
@@ -539,22 +540,46 @@ class TestHardTimeoutBackstop:
         assert signal.alarm(0) == 0
 
     @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is POSIX-only")
-    def test_run_delegate_aborts_hung_dispatch_within_bound(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_run_delegate_aborts_hung_dispatch_despite_receipt_mode_broad_except(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # A hung stub standing in for a delegation call stuck in synchronous
-        # blocking I/O (the exact OMN-14397 scenario) — a raw time.sleep well
-        # past the declared timeout, not an asyncio-cancelable coroutine.
-        def _hung_run_receipt_mode(**_kwargs: object) -> int:
-            time.sleep(10)
-            return 0  # pragma: no cover - never reached within the bound
+        """OMN-14397 round 2: the real ``run_receipt_mode`` wraps the exact
+        call that hangs (``RuntimeLocal(...); runtime.run()``) in a broad
+        ``except Exception as exc:`` that logs and continues rather than
+        re-raising (``receipt_mode.py`` ~509-526). A plain ``time.sleep``
+        stub with no surrounding except does not replicate that collaborator
+        shape and proves nothing beyond what
+        ``test_hard_timeout_aborts_blocking_call`` already proves in
+        isolation — this stub reproduces the real try/except-Exception shape
+        so the test proves the timeout signal survives it and still reaches
+        ``run_delegate``'s own handler (clear stderr message, not just an
+        accidental exit code from the swallowed exception).
+        """
+
+        def _swallowing_run_receipt_mode(**_kwargs: object) -> int:
+            exit_code = 1  # pre-initialized, exactly like receipt_mode.py:505
+            try:
+                time.sleep(10)  # stands in for the hanging runtime.run() call
+                exit_code = 0  # pragma: no cover - never reached within the bound
+            except Exception:
+                # Mirrors receipt_mode.py's real shape exactly (including the
+                # logger.exception call): logs and continues rather than
+                # re-raising. A RuntimeError-based timeout signal would die
+                # right here, silently.
+                logging.getLogger(__name__).exception("receipt_mode: runtime raised")
+            return exit_code
 
         monkeypatch.setattr(
             cli_delegate,
             "_resolve_packaged_contract",
             lambda _name: tmp_path / "contract.yaml",
         )
-        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _hung_run_receipt_mode)
+        monkeypatch.setattr(
+            cli_delegate, "run_receipt_mode", _swallowing_run_receipt_mode
+        )
         # Shrink the grace window so the test doesn't wait out the full sleep.
         monkeypatch.setattr(cli_delegate, "_HARD_TIMEOUT_GRACE_SECONDS", 1)
 
@@ -569,6 +594,14 @@ class TestHardTimeoutBackstop:
             emit_socket=tmp_path / "no-daemon.sock",
         )
         elapsed = time.monotonic() - started
+        captured = capsys.readouterr()
 
         assert exit_code == 1
         assert elapsed < 5, f"hung call was not aborted within bound: {elapsed}s"
+        # The clear-error contract must fire from run_delegate's own
+        # DelegateTimeoutExceededError handler — not an accidental exit code
+        # falling out of the stub's own pre-initialized `exit_code = 1` after
+        # the exception was silently swallowed by its broad except.
+        assert "exceeded hard timeout" in captured.err, (
+            f"timeout signal did not survive the broad except — stderr: {captured.err!r}"
+        )

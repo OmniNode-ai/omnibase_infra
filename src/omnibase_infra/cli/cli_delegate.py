@@ -224,7 +224,7 @@ def _write_payload(
     return payload_path
 
 
-class DelegateTimeoutExceededError(RuntimeError):
+class DelegateTimeoutExceededError(BaseException):
     """The CLI-level hard timeout backstop fired (OMN-14397).
 
     ``RuntimeLocal`` enforces its own timeout cooperatively via
@@ -237,6 +237,24 @@ class DelegateTimeoutExceededError(RuntimeError):
     ``.201``). This exception signals the ``SIGALRM``-based backstop below,
     which fires unconditionally after the grace window regardless of what the
     process is doing — including inside a blocking syscall.
+
+    Deliberately subclasses :class:`BaseException`, not :class:`Exception`
+    (round-2 fix, OMN-14397). ``run_receipt_mode`` wraps the exact call that
+    hangs in a broad ``except Exception as exc:`` (``receipt_mode.py`` — logs
+    and continues rather than re-raising, by design, for genuine runtime
+    failures); an ``Exception``-based timeout signal fired mid-call would be
+    silently swallowed there, and the CLI's ``except
+    DelegateTimeoutExceededError`` in :func:`run_delegate` would never see
+    it — the exact same reason :class:`KeyboardInterrupt` and
+    :class:`SystemExit` are direct ``BaseException`` subclasses rather than
+    ``Exception`` subclasses. A signal-driven abort must not be catchable by
+    ordinary application error handling anywhere on the call path, including
+    inside ``RuntimeLocal`` (``omnibase_core.runtime.runtime_local``, which
+    has its own ``except Exception`` blocks around the hang) and inside
+    ``run_receipt_mode``'s own follow-on artifact/telemetry I/O
+    (``receipt_mode.py`` lines ~600-732, which run after the guarded call and
+    would otherwise have zero timeout coverage once the one-shot
+    ``signal.alarm`` had already fired and been swallowed once).
     """
 
 
