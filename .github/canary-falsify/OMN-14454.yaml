@@ -1,0 +1,24 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-14454"
+title: "FALSIFICATION FIXTURE — temporary, reverted in the next commit"
+summary: >
+  Deliberately-failing contract used for ONE CI run to prove two things at once: (1) the revived DoD runner can actually BLOCK a merge, and (2) a BLOCK no longer SKIPS THE TEST PIPELINE. Reverted immediately after the run is captured.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-falsify-must-block"
+    description: >-
+      A product-observing check that CANNOT pass — it asserts a symbol that does not exist in omnibase_infra's ci.yml at this PR's head. Non-inert (it reads the product, not a receipt), and OMN-14454 is post-cutoff so it is NOT grandfathered. Therefore it must BLOCK.
+    source: "manual"
+    status: "verified"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          test "$(gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/ci.yml?ref=dev" --jq .content | base64 -d | grep -c 'THIS_SYMBOL_CANNOT_EXIST_OMN_14454')" -ge 1

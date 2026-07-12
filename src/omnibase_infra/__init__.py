@@ -105,3 +105,4 @@ __all__: list[str] = [
     "nodes",
     "utils",
 ]
+# OMN-14454 canary falsification run — reverted in the next commit
