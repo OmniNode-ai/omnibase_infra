@@ -45,7 +45,8 @@ _EXPECTED_SKILLS = frozenset(
     {
         "aislop_sweep",
         "data_flow_sweep",
-        "auto_merge",
+        # OMN-14151: auto_merge's legacy node_auto_merge_effect backing node is
+        # deregistered; the active path is the merge-queue governor.
         "build_loop",
         "coderabbit_triage",
         "compliance_sweep",
