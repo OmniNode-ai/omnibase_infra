@@ -51,5 +51,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # package (node-based actions dlopen libatomic.so.1 at load time). The
     # regenerated identity binds image_version=6 plus the current dev shared
     # environment digest, not either predecessor's digest in isolation.
-    assert lock["identity_digest"] == "9b2063b8bd9861a7950f834bcae8b74d"
-    assert lock["shared_env_digest"] == "e7183a5dde7fc81eaac48656"
+    assert lock["identity_digest"] == "14d3bfd2012ba88c0ab04c490a1b1e26"
+    assert lock["shared_env_digest"] == "dcf0be991c9e14135924629a"

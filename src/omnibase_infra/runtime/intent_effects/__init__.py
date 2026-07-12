@@ -31,9 +31,13 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import 
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import (
     IntentEffectPostgresUpsert,
 )
+from omnibase_infra.runtime.intent_effects.intent_effect_pr_state_upsert import (
+    IntentEffectPrStateUpsert,
+)
 
 __all__: list[str] = [
     "IntentEffectBuildLoopAppend",
     "IntentEffectPostgresUpdate",
     "IntentEffectPostgresUpsert",
+    "IntentEffectPrStateUpsert",
 ]
