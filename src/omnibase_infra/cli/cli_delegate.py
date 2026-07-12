@@ -17,16 +17,28 @@ the CLI entrypoint:
 4. dispatch through the OMN-13094 receipt-mode path
    (:func:`omnibase_infra.cli.receipt_mode.run_receipt_mode`).
 
-Bus target (OMN-13532). By default the CLI runs the orchestrator in-process on
-``EventBusInmemory`` — fully self-contained, no broker required. When a live
-delegation must reach a running runtime, ``--bus kafka --kafka-bootstrap
-host:port`` selects the Kafka event bus so the typed
-``ModelDelegateSkillRequest`` command is published to the delegate-skill
-command topic declared in the contract's ``event_bus.publish_topics``, where the
-deployed ``node_delegate_skill_orchestrator`` consumer picks it up
-(``feedback_bus_is_the_transport`` — the bus is THE transport). The bus
-selection and bootstrap override flow straight through ``backend_overrides`` to
-``RuntimeLocal``; the CLI never hardcodes the broker.
+Bus target (OMN-13532, default flipped under OMN-14376). ``--bus`` is
+OPTIONAL, never required for a delegation to reach the shared platform
+substrate. When omitted, :func:`resolve_default_bus` mirrors the SAME
+probe-then-select precedence the runtime kernel's ``select_event_bus``
+already applies (``service_kernel.py`` / ``backends/auto_configure.py``):
+``KAFKA_BOOTSTRAP_SERVERS`` unset -> ``inmemory``; set and the broker probes
+HEALTHY/AUTHORITATIVE (``backends/backend_probe.py::probe_kafka``, a bounded
+TCP + topic-list check) -> ``kafka``; set but unreachable/unhealthy (e.g. the
+OMN-14380 advertised-listener gap for an off-box caller) -> graceful fallback
+to ``inmemory`` with a WARNING logged (stderr / capture, never stdout) so the
+silent-local-SQLite failure mode is never repeated. This makes delegation use
+"the same event bus the rest of the system is configured with" BY DEFAULT — no
+``--bus kafka`` flag required. When resolved (or explicitly passed) to
+``kafka``, the typed ``ModelDelegateSkillRequest`` command is published to the
+delegate-skill command topic declared in the contract's
+``event_bus.publish_topics``, where the deployed
+``node_delegate_skill_orchestrator`` consumer picks it up
+(``feedback_bus_is_the_transport`` — the bus is THE transport) and its
+projection lands in the shared ``delegation_events`` table, not per-machine
+SQLite. ``--bus``/``--kafka-bootstrap`` remain explicit OVERRIDES for forcing a
+specific bus; both flow straight through ``backend_overrides`` to
+``RuntimeLocal``, which never hardcodes the broker.
 
 stdout receives exactly ONE
 :class:`~omnibase_core.models.dispatch.model_skill_result.ModelSkillResult`
@@ -61,6 +73,7 @@ error) even when the hang is not asyncio-cooperative.
 from __future__ import annotations
 
 import json
+import logging
 import signal
 import sys
 import uuid
@@ -70,11 +83,15 @@ from pathlib import Path
 
 import click
 
+from omnibase_infra.backends.backend_probe import probe_kafka
+from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DELEGATE_NODE_NAME",
@@ -86,6 +103,7 @@ __all__ = [
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "classify_task_type",
+    "resolve_default_bus",
     "run_delegate",
 ]
 
@@ -121,8 +139,54 @@ TASK_TYPE_CHOICES = (
 # source of truth and rejects anything outside that set.
 BUS_CHOICES = ("inmemory", "kafka")
 
-# Default bus when ``--bus`` is omitted: in-process, fully self-contained.
+# Fallback bus when auto-resolution cannot select ``kafka`` (no broker
+# configured, or a configured broker that fails the health probe): in-process,
+# fully self-contained. This is the SAME value ``resolve_default_bus`` returns
+# for both of those cases — it is not merely a historical default anymore, but
+# the fail-safe floor auto-resolution always lands on when the shared bus is
+# not provably reachable.
 DEFAULT_BUS = "inmemory"
+
+
+def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
+    """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-14376).
+
+    Mirrors the SAME probe-then-select precedence the runtime kernel already
+    applies (``service_kernel.py`` lines ~1013-1120,
+    ``backends/auto_configure.py::select_event_bus``) so delegation defaults to
+    "the event bus the rest of the system is configured with" instead of a
+    source-hardcoded ``inmemory`` — the OMN-14376 root cause.
+
+    Delegates entirely to :func:`omnibase_infra.backends.backend_probe.probe_kafka`
+    for both the ``KAFKA_BOOTSTRAP_SERVERS`` resolution AND the health check —
+    this module never reads the environment variable itself (the
+    ``check-env-reads`` CI gate blocks raw environment reads outside the
+    approved overlay-resolved config surfaces; ``probe_kafka`` is the existing,
+    already-approved boundary for this exact lookup).
+
+    Precedence:
+      1. No ``kafka_bootstrap`` override and ``KAFKA_BOOTSTRAP_SERVERS`` unset
+         -> ``probe_kafka`` short-circuits to ``DISCOVERED`` with no network
+         call -> ``("inmemory", <reason>)``. The steady state for a truly
+         bus-less local dev box.
+      2. A bootstrap IS configured (override or env) and ``probe_kafka``
+         reports ``HEALTHY``/``AUTHORITATIVE`` -> ``("kafka", <reason>)``.
+      3. A bootstrap IS configured but the probe reports anything weaker
+         (``DISCOVERED``/``REACHABLE`` — e.g. TCP connects but the broker's
+         advertised listener does not route back to this caller, the
+         OMN-14380 off-box gap) -> graceful fallback to
+         ``("inmemory", <reason>)``. The caller is expected to log this at
+         WARNING so a stale/unhealthy configured broker degrades loudly to
+         the safe local default rather than hanging ``onex delegate`` on an
+         unreachable broker.
+
+    Only called when ``--bus`` is NOT explicitly supplied — an explicit
+    ``--bus`` (kafka or inmemory) is never second-guessed by this probe.
+    """
+    probe = probe_kafka(bootstrap_servers=kafka_bootstrap)
+    if probe.state in (EnumProbeState.HEALTHY, EnumProbeState.AUTHORITATIVE):
+        return "kafka", probe.reason
+    return DEFAULT_BUS, f"{probe.state.name}: {probe.reason}"
 
 
 def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[str, str]:
@@ -322,12 +386,16 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     "--bus",
     "bus",
     type=click.Choice(BUS_CHOICES),
-    default=DEFAULT_BUS,
-    show_default=True,
+    default=None,
     help=(
-        "Event-bus backend. 'inmemory' runs the orchestrator in-process (no "
-        "broker). 'kafka' publishes the typed delegate-skill command to the "
-        "broker so a deployed runtime consumer dispatches it (live path)."
+        "Event-bus backend. Omit to auto-resolve (OMN-14376): 'kafka' when "
+        "KAFKA_BOOTSTRAP_SERVERS is configured and the broker probes healthy "
+        "— the SAME bus the rest of the system is configured with, so the "
+        "delegation lands in the shared delegation_events projection — else "
+        "'inmemory'. Pass explicitly to force a specific bus regardless of "
+        "the probe: 'inmemory' runs the orchestrator in-process (no broker); "
+        "'kafka' publishes the typed delegate-skill command to the broker so "
+        "a deployed runtime consumer dispatches it."
     ),
 )
 @click.option(
@@ -377,7 +445,7 @@ def delegate_command(
     prompt: str,
     task_type: str | None,
     max_tokens: int | None,
-    bus: str,
+    bus: str | None,
     kafka_bootstrap: str | None,
     state_root: Path,
     timeout: int,
@@ -421,7 +489,7 @@ def run_delegate(
     prompt: str,
     task_type: str | None,
     max_tokens: int | None,
-    bus: str = DEFAULT_BUS,
+    bus: str | None = None,
     kafka_bootstrap: str | None = None,
     state_root: Path,
     timeout: int,
@@ -434,9 +502,16 @@ def run_delegate(
     result extraction are all internal — the caller supplies a prompt and
     receives one typed receipt on stdout.
 
-    ``bus`` selects the event-bus backend (``inmemory`` default, ``kafka`` for
-    the live broker path); ``kafka_bootstrap`` optionally overrides the broker
-    when ``bus="kafka"``. Both flow through ``backend_overrides`` to
+    ``bus`` selects the event-bus backend. ``None`` (the CLI default, OMN-14376)
+    auto-resolves via :func:`resolve_default_bus` — ``kafka`` when
+    ``KAFKA_BOOTSTRAP_SERVERS`` is configured and probes healthy, else
+    ``inmemory`` — so delegation reaches the shared platform substrate BY
+    DEFAULT, with no ``--bus kafka`` flag required. An explicit ``"inmemory"``
+    or ``"kafka"`` is never second-guessed. ``kafka_bootstrap`` optionally
+    overrides the broker when the resolved/explicit bus is ``"kafka"`` — it is
+    a usage error to supply it without also explicitly requesting
+    ``--bus kafka`` (a bare ``--kafka-bootstrap`` is never silently absorbed
+    into the auto-resolved default). Both flow through ``backend_overrides`` to
     ``RuntimeLocal`` — the runtime is the single source of truth for the bus
     (``feedback_bus_is_the_transport``).
 
@@ -448,6 +523,31 @@ def run_delegate(
     hanging indefinitely.
     """
     resolved_task_type = task_type or classify_task_type(prompt)
+    if bus is None:
+        if kafka_bootstrap is not None:
+            raise ValueError(
+                "--kafka-bootstrap is only valid with --bus kafka "
+                "(got --bus unset; the auto-resolved default never accepts "
+                "an explicit bootstrap override — pass --bus kafka too)."
+            )
+        bus, reason = resolve_default_bus()
+        if bus == "kafka":
+            logger.info("onex delegate: auto-resolved event bus -> kafka (%s)", reason)
+        else:
+            # Covers BOTH "no broker configured" and "configured but not
+            # healthy" (the OMN-14380 off-box-caller / stale-broker symptom)
+            # — ``reason`` (from ``resolve_default_bus``/``probe_kafka``)
+            # already distinguishes the two in text. Warn unconditionally
+            # (mirrors ``service_kernel.py``'s own precedent of warning when
+            # KAFKA_BOOTSTRAP_SERVERS is unset) rather than silently repeating
+            # the OMN-14376 data-loss default. stderr / capture log only —
+            # the receipt stream on stdout stays clean.
+            logger.warning(
+                "onex delegate: using inmemory event bus (%s) — this "
+                "delegation's evidence will land in the local SQLite fallback, "
+                "NOT the shared delegation_events projection",
+                reason,
+            )
     backend_overrides = build_backend_overrides(
         bus=bus, kafka_bootstrap=kafka_bootstrap
     )
