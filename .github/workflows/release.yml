@@ -90,9 +90,16 @@ jobs:
             exit 1
           }
 
-      - name: Publish to PyPI
+      - name: Publish to PyPI (retry on transient 5xx, idempotent on re-publish)
+        # v0.37.2 died here on a bare PyPI HTTP 500 with no retry, stalling PyPI
+        # at 0.36.1 for six weeks. publish_with_retry.py retries transient
+        # 5xx/429/network failures with exponential backoff and treats an
+        # already-present artifact as success (--check-url skips uploaded files),
+        # so a re-run of the release is idempotent. The token is read from
+        # UV_PUBLISH_TOKEN by uv itself — never placed on the command line.
+        # See OMN-14468.
         run: |
-          uv publish --token "$UV_PUBLISH_TOKEN" dist/*.whl dist/*.tar.gz
+          python3 scripts/ci/publish_with_retry.py dist/*.whl dist/*.tar.gz
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
