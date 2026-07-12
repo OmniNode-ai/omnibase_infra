@@ -514,6 +514,74 @@ def test_sync_db_adapter_json_adapts_unsuffixed_jsonb_list_column() -> None:
     assert params["corpus_passed"] is False
 
 
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
+    """OMN-14487: recent_responses (JSONB array of objects) must be JSON-adapted.
+
+    projection_delegation_inference_response_text.recent_responses is a JSONB
+    column (``CHECK (jsonb_typeof(recent_responses) = 'array')``) named without the
+    _json/_jsonb suffix, holding a list of objects. Before this fix the adapter
+    only wrapped a list for a suffixed key or a _JSONB_LIST_COLUMNS allowlist
+    member, so HandlerProjectionDelegationInferenceResponse's raw list[dict] was
+    sent to psycopg2 un-wrapped — psycopg2 tried to adapt the inner dicts and
+    raised ``ProgrammingError: can't adapt type 'dict'``, crashing the
+    inference-response projection write (live cid a7edc49a on the stability lane).
+    recent_responses is now in _JSONB_LIST_COLUMNS and is JSON-adapted.
+    """
+    import psycopg2  # type: ignore[import-untyped]
+    import psycopg2.extensions  # type: ignore[import-untyped]
+    import psycopg2.extras
+
+    recent_responses = [
+        {
+            "correlation_id": "a7edc49a-6eda-41a3-b14c-dfeb7e0483f7",
+            "model_name": "Qwen3.6-27B-MT",
+            "task_type": "test",
+            "generated_text": "ok",
+            "prompt_tokens": 10,
+            "completion_tokens": 3,
+            "latency_ms": 42,
+            "captured_at": "2026-07-12T22:00:00+00:00",
+        }
+    ]
+
+    # The exact live failure mode: a raw list-of-objects cannot be adapted by
+    # psycopg2 (this is the ``can't adapt type 'dict'`` crash the un-wrapped path
+    # produced). Wrapping in Json is what makes the write succeed.
+    with pytest.raises(psycopg2.Error):
+        psycopg2.extensions.adapt(recent_responses).getquoted()
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "projection_delegation_inference_response_text",
+            "singleton_key",
+            {
+                "singleton_key": "inference_response_singleton",
+                "latest_correlation_id": "a7edc49a-6eda-41a3-b14c-dfeb7e0483f7",
+                "latest_model_name": "Qwen3.6-27B-MT",
+                "provisioned": True,
+                "recent_responses": recent_responses,
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    # GREEN: the JSONB array-of-objects is wrapped in Json (RED before the fix:
+    # the raw list would be sent un-wrapped and crash on the inner dicts).
+    assert isinstance(params["recent_responses"], psycopg2.extras.Json)
+    # Scalar columns pass through unchanged.
+    assert params["provisioned"] is True
+    assert params["latest_model_name"] == "Qwen3.6-27B-MT"
+
+
 # ---------------------------------------------------------------------------
 # Tests: terminal event emission (OMN-11187)
 # ---------------------------------------------------------------------------
