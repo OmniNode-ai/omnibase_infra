@@ -330,6 +330,28 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
+      # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
+      # it had a full pytest fixture suite but zero CI/pre-commit caller,
+      # verified by `git log --all -S "run_duplication_sweep" --
+      # .github/workflows/` returning no hits in omnibase_infra OR omnimarket
+      # history (the OMN-8624/OMN-8625 "wire as pre-merge gate" tickets were
+      # marked Done without this ever landing). MUST always_run for the same
+      # reason as the migration-sync hook above: D1/D2 compare state ACROSS
+      # sibling repos (omnidash, omniclaude, onex_change_control), so a
+      # files:-scoped trigger on omnibase_infra's own diff would never fire —
+      # this repo's diff never touches those sibling paths. Degrades to WARN
+      # (not FAIL) when $OMNI_HOME or a sibling repo isn't present locally —
+      # see run_duplication_sweep.py's own WARN-on-missing-sibling behavior.
+      # SYNC with .github/workflows/duplication-sweep.yml, which runs the
+      # same script unconditionally via sparse sibling checkouts.
+      - id: onex-check-duplication-sweep
+        name: ONEX Duplication Sweep (D1/D2, OMN-14086)
+        entry: python3 scripts/ci/run_duplication_sweep.py --fail-on-severity error
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
       # .env_local, .env_production, .env-secret, etc. (dot-separated, underscore-separated, and
