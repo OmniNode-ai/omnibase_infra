@@ -80,6 +80,10 @@ dependencies = [
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
     "cryptography>=46.0.3,<50.0.0",
     "sigstore>=4.0.0,<5.0.0",
+    # packaging: PEP 440 version parsing/comparison for the release-identity
+    # fitness node (node_release_identity_compute, OMN-14471). Previously a
+    # transitive dependency; now a direct src import, so it is declared here.
+    "packaging>=23.0,<27.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<26.0.0",
     "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
@@ -544,6 +548,7 @@ node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"
 node_registration_storage_effect = "omnibase_infra.nodes.node_registration_storage_effect"
 node_registry_api_effect = "omnibase_infra.nodes.node_registry_api_effect"
 node_registry_effect = "omnibase_infra.nodes.node_registry_effect"
+node_release_identity_compute = "omnibase_infra.nodes.node_release_identity_compute"
 node_remote_agent_invoke_effect = "omnibase_infra.nodes.node_remote_agent_invoke_effect"
 node_reward_binder_effect = "omnibase_infra.nodes.node_reward_binder_effect"
 node_routing_orchestrator = "omnibase_infra.nodes.node_routing_orchestrator"
