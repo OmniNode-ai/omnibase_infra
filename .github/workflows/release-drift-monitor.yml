@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# RT-7 fail-loud release/deploy drift monitor (OMN-14466).
+#
+# Scheduled, same-day surfacing of every silent release/deploy failure across
+# the OmniNode repos: PyPI-published version vs latest v* tag vs main/dev
+# pyproject version, [tool.uv.sources] git-override drift (main vs dev), and the
+# health of the last release.yml / runtime-rebuild-trigger.yml run.
+#
+# On divergence the monitor exits non-zero -> this workflow goes RED (the
+# durable, observable, same-day signal) AND writes friction records into the
+# existing friction registry (.onex_state/friction/, consumed by
+# node_friction_triage_orchestrator -> Linear). It builds no new store.
+#
+# This is what would have caught "PyPI omnibase-infra stuck at 0.36.1 for six
+# weeks" (main is at 0.38.4) on day one instead of after six weeks of silence.
+#
+# Token: uses CROSS_REPO_PAT when configured (needed to read the sibling repos
+# via the GitHub API). With only GITHUB_TOKEN, sibling probes fail and the
+# monitor exits 2 (BLIND) rather than a false green -- a visibility gap is never
+# reported as clean. Design: docs/plans/2026-07-12-mechanical-release-trains.md §4.
+
+name: Release Drift Monitor
+
+on:
+  schedule:
+    # Every 6 hours at minute 17 (offset to avoid thundering herd).
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+# Never overlap runs; the newest schedule/dispatch wins.
+concurrency:
+  group: release-drift-monitor
+  cancel-in-progress: true
+
+jobs:
+  drift-monitor:
+    name: Release / Deploy Drift Monitor
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Check CROSS_REPO_PAT is configured
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          if [ -z "$CROSS_REPO_PAT" ]; then
+            echo "::warning::CROSS_REPO_PAT is not set — sibling-repo probes will"
+            echo "::warning::fail and the monitor will exit 2 (BLIND), not a false green."
+          fi
+
+      - name: Run release/deploy drift monitor (fail-loud)
+        id: monitor
+        env:
+          # CROSS_REPO_PAT has org read scope; GITHUB_TOKEN is this-repo-only and
+          # will make sibling probes fail (surfaced as BLIND, never silent-green).
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          uv run --no-project --with packaging --with pyyaml \
+            python scripts/release_drift_monitor.py --json | tee drift-report.json
+          code=${PIPESTATUS[0]}
+          {
+            echo "## RT-7 release/deploy drift monitor"
+            echo ""
+            if [ "$code" = "0" ]; then
+              echo "**Result:** clean — PyPI/tag/main/dev aligned, workflows healthy."
+            elif [ "$code" = "1" ]; then
+              echo "**Result:** :red_circle: DRIFT DETECTED (exit 1)."
+            else
+              echo "**Result:** :warning: BLIND — could not gather some facts (exit $code)."
+            fi
+            echo ""
+            echo '```json'
+            cat drift-report.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+      - name: Upload drift report + friction records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-drift-report
+          path: |
+            drift-report.json
+            .onex_state/friction/release-drift-*.yaml
+          if-no-files-found: ignore
+          retention-days: 30
