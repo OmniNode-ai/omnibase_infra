@@ -835,7 +835,6 @@ class TestResolveDefaultBus:
         assert bus == "inmemory"
         assert state.name in reason
         assert "broker.example:9092" in reason
-        assert "broker.example:9092" in reason
 
     def test_explicit_kafka_bootstrap_override_takes_precedence_over_env(
         self, monkeypatch: pytest.MonkeyPatch
