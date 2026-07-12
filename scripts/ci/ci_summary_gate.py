@@ -89,6 +89,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Kafka Schema Handshake (OMN-3411)",  # schema-handshake
     "Writer-Migration Coupling Check",  # migration-required-check
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
+    "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

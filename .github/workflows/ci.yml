@@ -219,6 +219,65 @@ jobs:
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 
+  # RT-5 (OMN-14467): the deploy-trigger producer must fail closed on zero
+  # output. Its RED-on-zero acceptance test and the anti-regression policy gate
+  # live in tests/scripts/, which the change-aware selector does NOT pick for a
+  # scripts/ change (empty reverse_deps) — so "CI Tests Gate" would green WITHOUT
+  # running them, leaving enforcement only at the dev->main full suite. This
+  # dedicated gate runs them IN-PR whenever the producer or the shared assertion
+  # changes. It is registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS,
+  # so a red result fails the required "CI Summary" context (fail-closed, in-PR).
+  # The job always runs (present+success) to satisfy the strict completeness
+  # anchor; the expensive setup+pytest runs only when the guarded files change
+  # (or on non-PR events), keeping the everyday-PR cost near zero.
+  effect-assertion-gate:
+    needs: occ-preflight
+    name: "Effect-Assertion Gate (RT-5)"
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Detect deploy-trigger / effect-assertion changes
+        id: changed
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            scripts/trigger_rebuild_on_merge.py
+            src/omnibase_infra/utils/util_producer_effect_assertion.py
+            tests/scripts/test_trigger_producer_effect_assertion.py
+            tests/unit/utils/test_util_producer_effect_assertion.py
+
+      - name: Setup Python and uv
+        if: steps.changed.outputs.any_changed == 'true' || github.event_name != 'pull_request'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run RT-5 effect-assertion acceptance + policy tests
+        if: steps.changed.outputs.any_changed == 'true' || github.event_name != 'pull_request'
+        run: |
+          uv run pytest \
+            tests/scripts/test_trigger_producer_effect_assertion.py \
+            tests/unit/utils/test_util_producer_effect_assertion.py \
+            -v --tb=short
+
+      - name: RT-5 gate not exercised (no producer/assertion change)
+        if: steps.changed.outputs.any_changed != 'true' && github.event_name == 'pull_request'
+        run: echo "No change to the deploy-trigger producer or the shared effect-assertion; RT-5 gate not exercised (present+green)."
+
   # ONEX validation - Infrastructure-specific validators
   onex-validation:
     needs: occ-preflight

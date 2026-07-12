@@ -162,8 +162,11 @@ def test_cli_publishes_redeploy_start_with_main_lane(
 
     captured: dict[str, Any] = {}
 
-    def _fake_publish(**kwargs: Any) -> None:
+    def _fake_publish(**kwargs: Any) -> int:
         captured.update(kwargs)
+        # publish_redeploy_start_event returns the delivered count; the caller
+        # asserts it is >=1 (RT-5 fail-closed on zero output).
+        return 1
 
     monkeypatch.setattr(trigger_module, "publish_redeploy_start_event", _fake_publish)
 

@@ -189,3 +189,19 @@ class TestCiSummaryGate:
         jobs += [_job(g, "skipped") for g in SKIPPABLE_GATE_JOBS]
         code, _ = evaluate(jobs)
         assert code == EXIT_SUCCESS
+
+    def test_effect_assertion_gate_is_strict_and_fails_closed(self) -> None:
+        # RT-5 (OMN-14467): the deploy-trigger effect-assertion gate must be a
+        # STRICT CI Summary gate so a reintroduced silent-skip cannot merge to
+        # dev green. Assert it is registered STRICT AND that a red result fails
+        # the required "CI Summary" context (fail-closed, in-PR).
+        assert "Effect-Assertion Gate (RT-5)" in STRICT_GATE_JOBS
+        jobs = [
+            j
+            for j in _all_gates("success")
+            if j["name"] != "Effect-Assertion Gate (RT-5)"
+        ]
+        jobs.append(_job("Effect-Assertion Gate (RT-5)", "failure"))
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE
+        assert "Effect-Assertion Gate (RT-5)" in report

@@ -12,6 +12,7 @@ This package provides common utilities used across the infrastructure:
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
     - util_env_parsing: Type-safe environment variable parsing with validation
     - util_error_sanitization: Error message sanitization for secure logging and DLQ
+    - util_producer_effect_assertion: Fail-closed assertions for artifact-producing jobs (RT-5)
     - util_pydantic_validators: Shared Pydantic field validator utilities
     - util_retry_optimistic: Optimistic locking retry helper with exponential backoff
     - util_semver: Semantic versioning validation utilities
@@ -72,6 +73,11 @@ from omnibase_infra.utils.util_llm_response_redaction import (
     MAX_RAW_BLOB_BYTES,
     redact_llm_response,
 )
+from omnibase_infra.utils.util_producer_effect_assertion import (
+    ProducerZeroOutputError,
+    assert_producer_emitted,
+    require_producer_preconditions,
+)
 from omnibase_infra.utils.util_pydantic_validators import (
     validate_contract_type_value,
     validate_endpoint_urls_dict,
@@ -96,12 +102,14 @@ __all__: list[str] = [
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
     "MAX_RAW_BLOB_BYTES",
     "OptimisticConflictError",
+    "ProducerZeroOutputError",
     # Note: ProtocolCircuitBreakerFailureRecorder and db_operation_error_context are NOT exported
     # here to avoid circular imports. Import directly from util_db_error_context.
     "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
     "apply_instance_discriminator",
+    "assert_producer_emitted",
     "clear_correlation_id",
     "compute_consumer_group_id",
     "ensure_timezone_aware",
@@ -113,6 +121,7 @@ __all__: list[str] = [
     "parse_env_float",
     "parse_env_int",
     "redact_llm_response",
+    "require_producer_preconditions",
     "retry_on_optimistic_conflict",
     "run_with_restart",
     "sanitize_backend_error",
