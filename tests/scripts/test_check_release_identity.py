@@ -51,8 +51,8 @@ _LEGACY_FIXTURE = (
     / "legacy_check_release_identity.py.txt"
 )
 
-# A clean env with PYTHONPATH stripped so a subprocess imports omnibase_infra from the
-# installed venv, not an ambient shadow (reference_pythonpath_shadows_worktree_source).
+# A clean env with PYTHONPATH stripped by default so in-process tests do not depend
+# on an ambient shadow (reference_pythonpath_shadows_worktree_source).
 _CLEAN_ENV = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
 
 
@@ -248,7 +248,7 @@ def test_real_shim_subprocess_fail_emits_two_guidance_lines(tmp_path: Path) -> N
         cwd=root,
         capture_output=True,
         text=True,
-        env=_CLEAN_ENV,
+        env={**_CLEAN_ENV, "PYTHONPATH": str(_REPO_ROOT / "src")},
         check=False,
     )
     assert proc.returncode == 1

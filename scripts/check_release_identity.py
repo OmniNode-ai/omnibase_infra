@@ -56,13 +56,16 @@ import sys
 import tomllib
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_PYPROJECT = _REPO_ROOT / "pyproject.toml"
+_SRC_DIR = _REPO_ROOT / "src"
+if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 from omnibase_infra.nodes.node_release_identity_compute import (
     HandlerReleaseIdentity,
     ModelReleaseIdentityRequest,
 )
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
 
 def _git(args: list[str]) -> str:
