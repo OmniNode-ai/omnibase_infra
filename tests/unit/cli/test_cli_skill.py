@@ -45,7 +45,6 @@ _EXPECTED_SKILLS = frozenset(
     {
         "aislop_sweep",
         "data_flow_sweep",
-        "auto_merge",
         "build_loop",
         "coderabbit_triage",
         "compliance_sweep",
