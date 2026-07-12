@@ -152,18 +152,39 @@ jobs:
         run: |
           git checkout -b "${{ steps.vars.outputs.branch }}"
 
+          PKG_HYPHEN="${{ steps.vars.outputs.pkg_hyphen }}"
+          VER="${{ steps.vars.outputs.version }}"
+
+          # PyPI's upload -> public-index propagation can lag several minutes.
+          # The old 12x10s (=120s) retry ceiling was too short and silently
+          # failed the cascade (OMN-14468). Poll the PyPI JSON API until the
+          # released version is actually visible, with a REAL ceiling
+          # (default 15 min), before attempting the lock.
+          CEILING="${CASCADE_PROPAGATION_CEILING_SECONDS:-900}"
+          POLL="${CASCADE_PROPAGATION_POLL_SECONDS:-15}"
+          deadline=$(( $(date +%s) + CEILING ))
+          until curl -fsSL "https://pypi.org/pypi/${PKG_HYPHEN}/${VER}/json" -o /dev/null; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::${PKG_HYPHEN}==${VER} not visible on PyPI after ${CEILING}s"
+              exit 1
+            fi
+            echo "Waiting for ${PKG_HYPHEN}==${VER} to appear on PyPI (poll ${POLL}s, ceiling ${CEILING}s)..."
+            sleep "$POLL"
+          done
+          echo "${PKG_HYPHEN}==${VER} is visible on PyPI; upgrading lockfile."
+
           # Upgrade the lockfile to the released version. Passing the explicit
           # package spec prevents uv from selecting a different latest version.
-          # PyPI's simple index can lag just after publish, so refresh and retry.
-          SPEC="${{ steps.vars.outputs.pkg_hyphen }}==${{ steps.vars.outputs.version }}"
-          for attempt in $(seq 1 12); do
+          # A short retry absorbs simple-index CDN lag after JSON visibility.
+          SPEC="${PKG_HYPHEN}==${VER}"
+          for attempt in $(seq 1 6); do
             if uv lock \
-              --refresh-package "${{ steps.vars.outputs.pkg_hyphen }}" \
+              --refresh-package "${PKG_HYPHEN}" \
               --upgrade-package "$SPEC"; then
               break
             fi
-            if [ "$attempt" -eq 12 ]; then
-              echo "ERROR: failed to resolve $SPEC after $attempt attempts"
+            if [ "$attempt" -eq 6 ]; then
+              echo "::error::failed to resolve $SPEC after $attempt attempts (post-visibility)"
               exit 1
             fi
             sleep 10

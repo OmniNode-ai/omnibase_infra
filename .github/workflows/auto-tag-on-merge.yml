@@ -1,8 +1,33 @@
 name: Auto-Tag on Merge
 
+# When a `chore: release vX.Y.Z` PR merges, tag the release commit AND trigger
+# release.yml. This workflow was previously a thin caller of
+# omnibase_core/.github/workflows/auto-tag-reusable.yml, which pushes the tag
+# using the default GITHUB_TOKEN. GitHub deliberately suppresses new workflow
+# runs from events created by the built-in GITHUB_TOKEN (recursive-workflow
+# prevention), so the pushed tag NEVER triggered release.yml (on: push: tags).
+# That silently broke publishing after v0.37.2 (the last manually-pushed tag):
+# v0.38.0-v0.38.3 were tagged by github-actions[bot] but never published, and
+# PyPI omnibase-infra stalled at 0.36.1 for six weeks. See OMN-14468.
+#
+# Fix: after pushing the tag, dispatch release.yml explicitly via
+# workflow_dispatch — the documented EXCEPTION to the GITHUB_TOKEN suppression
+# rule (workflow_dispatch/repository_dispatch DO create runs from GITHUB_TOKEN).
+# release.yml already exposes a workflow_dispatch `tag` input, so this reuses the
+# existing publish path rather than adding a new one.
+
 on:
   pull_request:
     types: [closed]
+
+permissions:
+  contents: write # push the release tag
+  actions: write # dispatch release.yml (workflow_dispatch)
+
+concurrency:
+  # One tag+dispatch per merged release PR; never cancel an in-flight publish.
+  group: auto-tag-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   auto-tag:
@@ -12,6 +37,73 @@ jobs:
        startsWith(github.event.pull_request.title, 'release:') ||
        startsWith(github.event.pull_request.title, 'chore: release') ||
        startsWith(github.event.pull_request.title, 'chore(release)'))
-    uses: OmniNode-ai/omnibase_core/.github/workflows/auto-tag-reusable.yml@main
-    permissions:
-      contents: write
+    timeout-minutes: 15
+    # OMNI_RUNNER_SELECTOR_V1 — a lightweight git tag + workflow dispatch; run on
+    # the public/GitHub-hosted pool so it is not blocked by self-hosted fleet
+    # saturation (this is the pool the prior reusable already used for
+    # pull_request events).
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Extract version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read [project].version from pyproject.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $VERSION (tag: v$VERSION)"
+
+      - name: Create and push release tag (idempotent)
+        id: tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin — not re-pushing"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}" -m "Release ${TAG}"
+            git push origin "${TAG}"
+            echo "Pushed tag ${TAG}"
+          fi
+
+      - name: Dispatch release.yml (GITHUB_TOKEN-pushed tags do not trigger it)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A tag pushed with the built-in GITHUB_TOKEN does NOT fire
+          # release.yml's `on: push: tags` trigger. workflow_dispatch is the
+          # documented exception, so we dispatch release.yml at the tag ref and
+          # pass the tag as the workflow input. This is the load-bearing fix for
+          # the six-week publish gap (OMN-14468).
+          #
+          # Idempotency: skip if release.yml already has a run for this tag, so a
+          # re-run of this job (or a future restoration of the push trigger) does
+          # not double-publish. release.yml is itself idempotent (publish retry
+          # treats "already exists" as success), so a race here is safe.
+          existing=$(gh run list \
+            --workflow=release.yml \
+            --repo "${REPO}" \
+            --branch "${TAG}" \
+            --json databaseId \
+            --jq 'length' 2>/dev/null || echo 0)
+          if [ "${existing:-0}" -gt 0 ]; then
+            echo "release.yml already has ${existing} run(s) for ${TAG} — not dispatching again"
+            exit 0
+          fi
+          echo "Dispatching release.yml for ${TAG}"
+          gh workflow run release.yml --repo "${REPO}" --ref "${TAG}" -f tag="${TAG}"
+          echo "Dispatched release.yml for ${TAG}"
