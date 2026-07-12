@@ -895,7 +895,7 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
+    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -978,7 +978,7 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1266,6 +1266,11 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/onex_change_control
+          # OMN-14436: PINNED. The unpinned default-branch clone is what caused the
+          # original incident (the executor was "missing" only because the repo's
+          # default branch lagged behind the branch that had it). An unpinned OCC
+          # checkout makes this gate a function of whatever OCC's dev happens to be.
+          ref: 7352cb2dc634a7223877bfbbf3498303c9662700
           path: onex_change_control
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
@@ -1292,17 +1297,34 @@ jobs:
             attempt=$((attempt + 1))
           done
 
-      - name: Validate contract YAML files
+      # OMN-14436: EXECUTE the DoD check_values against the PRODUCT tree.
+      #
+      # What was here before -- `uv run validate-yaml $CONTRACTS` -- never ran a single
+      # check_value. It only parsed OCC's YAML, so a green "Contract Compliance Check"
+      # meant exactly "OCC's 6,900 files are valid YAML" and nothing about this PR.
+      # The DoD gate has been dead platform-wide for ~3 months behind that green check.
+      #
+      # --workspace is the load-bearing argument. It must be the PRODUCT checkout
+      # ($GITHUB_WORKSPACE), not the OCC clone. Pointing it at OCC is the original
+      # defect: a check_value's cwd became the receipt store, so the only file an author
+      # could reach was their own receipt -- which is why ~32% of the corpus greps itself.
+      - name: Run DoD contract compliance against the product tree (OMN-14436)
         working-directory: onex_change_control
         run: |
-          CONTRACTS=$(find "$GITHUB_WORKSPACE/onex_change_control/contracts" -name "OMN-*.yaml" 2>/dev/null)
-          if [ -z "$CONTRACTS" ]; then
-            echo "No contract YAML files found — skipping validation"
+          set -euo pipefail
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "::notice::No PR number (event=${{ github.event_name }}); DoD check_values are PR-scoped. Skipping."
             exit 0
           fi
-          uv run validate-yaml $CONTRACTS
+          uv run python scripts/ci/run_contract_compliance_check.py \
+            --pr "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --contracts-dir "$GITHUB_WORKSPACE/onex_change_control/contracts" \
+            --workspace "$GITHUB_WORKSPACE" \
+            --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt"
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
   # ============================================================================
   # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
