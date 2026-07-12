@@ -15,8 +15,8 @@ distinguish them.
 Canonical shape (definition B, OMN-14355/OMN-14407): the handler core is
 ``handle(request: ModelReleaseIdentityRequest) -> ModelReleaseIdentityDecision``,
 a single BaseModel-typed positional the shared runtime adapter can bind. The core
-does NOT reference ``ModelEventEnvelope`` (the envelope boundary lives in the
-runtime adapter, never a per-node wrapper).
+does NOT reference the runtime event-envelope type (that boundary lives in the
+shared runtime adapter, never a per-node wrapper).
 
 Pure vs I/O split (OMN-14471): version parsing, latest-tag selection, ``src/**``
 detection and the bump invariant are pure and live here. All I/O — reading
