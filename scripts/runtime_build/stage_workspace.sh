@@ -31,11 +31,22 @@
 #   explicit operator decision (e.g. an intentional forward rebuild ahead of a
 #   lock bump); the override is recorded in the provenance artifact, never silent.
 #
+# Clean-ref deploy source (RT-1, OMN-14438):
+#   Before staging, when DEPLOY_REF is set (or DEPLOY_HOTPATCH=1) each sibling
+#   clone under OMNI_HOME is brought to a CLEAN CHECKOUT of that ref via
+#   deploy_source_ref.py, and AFTER staging the vendored-SHA manifest is
+#   HARD-ASSERTED to equal that ref for every sibling. This kills the
+#   unreliable-narrator build (rsync of an ambient detached/behind/dirty tree).
+#   Unset DEPLOY_REF => the legacy ambient-tree build, loudly stamped unpinned.
+#   DEPLOY_HOTPATCH=1 deploys the dirty tree deliberately (labelled, not laundered).
+#
 # Exit codes:
 #   0  all sibling repos staged successfully
 #   1  OMNI_HOME not set
 #   2  one or more sibling repos missing from OMNI_HOME
 #   3  sibling pin drift from the consuming lock (preflight abort)
+#   4  RT-1 clean-ref checkout failed, or the vendored-SHA manifest did not equal
+#      the intended ref for every sibling (deploy-source assertion abort)
 set -euo pipefail
 
 # OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
@@ -58,6 +69,55 @@ if [[ -z "${OMNI_HOME:-}" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------------------------------------------------------------------------
+# RT-1 (OMN-14438): clean-ref checkout of every sibling BEFORE staging.
+#
+# The disease this fixes: the staging below rsyncs each sibling from the AMBIENT
+# ${OMNI_HOME}/<repo> working copy on the .201 host -- routinely detached, behind,
+# and dirty -- so merging a PR does not change what gets built and every
+# "deployed" claim is unfalsifiable. When DEPLOY_REF is set (the cut-lab-ref
+# wrapper always sets it), bring each sibling to a clean checkout of that ref
+# (fetch --prune + checkout + reset --hard + clean -ffdx) so the tree that gets
+# rsync'd is provably the intended commit. The expected-refs manifest emitted
+# here is asserted against the vendored-SHA manifest at the end of staging.
+#
+# DEPLOY_HOTPATCH=1 deploys the current (possibly dirty) tree deliberately: no
+# reset/clean (that would destroy the patch), labelled hotpatch in the manifest.
+# Unset DEPLOY_REF => legacy ambient-tree build, loudly stamped unpinned (the
+# vendored SHA is NOT asserted -- callers wanting a pinned build set DEPLOY_REF).
+# ---------------------------------------------------------------------------
+DEPLOY_SOURCE_REF_SCRIPT="${SCRIPT_DIR}/deploy_source_ref.py"
+EXPECTED_REFS_OUT="workspace/deploy-source-refs.json"
+DEPLOY_REF="${DEPLOY_REF:-}"
+DEPLOY_HOTPATCH="${DEPLOY_HOTPATCH:-0}"
+# Explicit "did RT-1 run THIS invocation" flag so the end-of-staging assertion
+# never fires on a stale expected-refs manifest left by a prior pinned run.
+RT1_ENGAGED=false
+
+if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
+    RT1_ENGAGED=true
+    mkdir -p "$(dirname "${EXPECTED_REFS_OUT}")"
+    checkout_args=(checkout --output "${EXPECTED_REFS_OUT}")
+    for repo in "${SIBLING_REPOS[@]}"; do
+        checkout_args+=(--repo "${repo}=${OMNI_HOME}/${repo}")
+    done
+    if [[ -n "${DEPLOY_REF}" ]]; then
+        checkout_args+=(--ref "${DEPLOY_REF}")
+    fi
+    if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
+        checkout_args+=(--hotpatch)
+    fi
+    echo "RT-1: clean-checkout siblings to ref '${DEPLOY_REF:-<hotpatch:HEAD>}' before staging (OMN-14438)" >&2
+    if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" "${checkout_args[@]}"; then
+        echo "ERROR: RT-1 clean-ref checkout failed; refusing to build from an unpinned tree (OMN-14438)" >&2
+        exit 4
+    fi
+else
+    echo "WARNING: DEPLOY_REF unset -- staging the AMBIENT host tree (unreliable narrator)." >&2
+    echo "         The vendored SHA is NOT asserted against any intended ref (OMN-14438)." >&2
+    echo "         Set DEPLOY_REF=<branch|tag|sha> (or use cut-lab-ref) for a pinned, asserted build." >&2
+fi
 
 # ---------------------------------------------------------------------------
 # Sibling-pin preflight (OMN-12977): the consuming repo's uv.lock is authority.
@@ -231,3 +291,22 @@ done
 
 echo "workspace staging complete: ${#SIBLING_REPOS[@]} repos staged to ${STAGING_DIR}"
 echo "per-repo VCS provenance written to ${VCS_PROVENANCE_OUT}"
+
+# ---------------------------------------------------------------------------
+# RT-1 (OMN-14438): HARD-ASSERT the vendored-SHA manifest equals the intended ref
+# for every sibling. This is the load-bearing gate: a behind/dirty clone that
+# leaked a stale SHA into the staged tree fails the build here (exit 4), never a
+# silent pass. Only runs when RT-1 was engaged this run (expected-refs manifest
+# present); the unpinned ambient path skips it (and is warned above).
+# ---------------------------------------------------------------------------
+if [[ "${RT1_ENGAGED}" == true ]]; then
+    echo "RT-1: asserting vendored SHAs == intended ref for every sibling (OMN-14438)" >&2
+    if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" assert \
+        --vcs-provenance "${VCS_PROVENANCE_OUT}" \
+        --expected-refs "${EXPECTED_REFS_OUT}"; then
+        echo "ERROR: RT-1 manifest assertion FAILED -- vendored siblings do not match the intended ref (OMN-14438)." >&2
+        echo "       This build would ship a tree that is NOT the ref you asked for. Refusing." >&2
+        exit 4
+    fi
+    echo "RT-1: manifest assertion passed -- every sibling vendored at its intended ref." >&2
+fi
