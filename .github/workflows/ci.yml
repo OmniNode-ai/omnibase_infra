@@ -1270,7 +1270,7 @@ jobs:
           # original incident (the executor was "missing" only because the repo's
           # default branch lagged behind the branch that had it). An unpinned OCC
           # checkout makes this gate a function of whatever OCC's dev happens to be.
-          ref: 2b318ba454ddeba519b7a9f0c4bdc38ce61129d2
+          ref: 7352cb2dc634a7223877bfbbf3498303c9662700
           path: onex_change_control
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
