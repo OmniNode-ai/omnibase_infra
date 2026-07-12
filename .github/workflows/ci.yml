@@ -895,7 +895,16 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
+    # OMN-14436: contract-compliance is deliberately NOT in this needs: list.
+    # Merge-blocking and test-suppressing are two different powers; a gate gets
+    # only the first. As a needs: predecessor, a BLOCK here did not fail one job
+    # -- it SKIPPED detect-changes and with it the entire test matrix, so
+    # hardening the evidence layer would have silently disabled the test layer
+    # (the OMN-14415 item-5 pathology, caught live on 3 PRs on 2026-07-12 where
+    # "35 red checks" were 35 refusals to start). It still gates MERGE: "Contract
+    # Compliance Check" is in SKIPPABLE_GATE_JOBS in scripts/ci/ci_summary_gate.py
+    # and the fail-closed CI Summary poller reds on a failure conclusion.
+    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -978,7 +987,9 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate, detect-changes]
+    # OMN-14436: contract-compliance removed from needs: -- see detect-changes.
+    # An evidence gate must never be able to suppress the test matrix.
+    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1267,6 +1278,15 @@ jobs:
         with:
           repository: OmniNode-ai/onex_change_control
           path: onex_change_control
+          # OMN-14436: PIN the ref. This checkout was unpinned, so it tracked
+          # OCC's default branch -- and an unpinned depth-1 clone of a moving
+          # default is the root cause of this entire incident: in 2026-04 the
+          # runner existed on OCC dev but not on the then-default branch, the
+          # clone came back without it, and the "missing" script was deleted from
+          # every repo (omnibase_spi e2b8ba1) rather than ref-pinned.
+          # BLOCKING before merge: re-pin to the dev SHA of the OCC PR carrying
+          # the runner + allowlist once it lands. This SHA is that PR's head.
+          ref: d572d871b06b3b8775913af4d38c9263cd1f081c
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - uses: astral-sh/setup-uv@v7
@@ -1292,16 +1312,47 @@ jobs:
             attempt=$((attempt + 1))
           done
 
-      - name: Validate contract YAML files
+      # OMN-14436. This step used to be `uv run validate-yaml <all 6,919 OCC
+      # contracts>` -- a schema lint over every contract in the platform,
+      # identical on every PR in every repo. It is a constant function of OCC's
+      # dev branch: it never executed a single check_value and could not express
+      # anything about the code under test. A green "Contract Compliance Check"
+      # meant only "OCC's YAML parses". It replaced the real executor in
+      # OMN-8808 on the false premise that the runner "does not exist" (it did;
+      # it just had not reached OCC's default branch yet -- a branch mismatch).
+      #
+      # Now we run the actual DoD runner, and --workspace is bound to the
+      # PRODUCT checkout. That is the whole fix: check_values previously ran with
+      # cwd = the OCC clone, so the only files an author could reach were the
+      # receipt and the contract themselves. Pointing it at $GITHUB_WORKSPACE is
+      # what makes a DoD check able to observe omnibase_infra at all.
+      - name: Resolve PR number
+        id: pr_num
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "pr=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "merge_group" ]]; then
+            # refs/heads/gh-readonly-queue/<base>/pr-<NUM>-<sha>
+            echo "pr=$(echo '${{ github.event.merge_group.head_ref }}' \
+              | sed -nE 's@.*pr-([0-9]+)-[0-9a-f]+.*@\1@p')" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run DoD contract compliance check
+        if: steps.pr_num.outputs.pr != ''
         working-directory: onex_change_control
         run: |
-          CONTRACTS=$(find "$GITHUB_WORKSPACE/onex_change_control/contracts" -name "OMN-*.yaml" 2>/dev/null)
-          if [ -z "$CONTRACTS" ]; then
-            echo "No contract YAML files found — skipping validation"
-            exit 0
-          fi
-          uv run validate-yaml $CONTRACTS
+          set -euo pipefail
+          uv run python scripts/ci/run_contract_compliance_check.py \
+            --pr "${{ steps.pr_num.outputs.pr }}" \
+            --repo "${{ github.repository }}" \
+            --contracts-dir "$GITHUB_WORKSPACE/onex_change_control/contracts" \
+            --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt" \
+            --workspace "$GITHUB_WORKSPACE"
         env:
+          EMERGENCY_BYPASS: ${{ secrets.EMERGENCY_BYPASS || '' }}
           GH_TOKEN: ${{ github.token }}
 
   # ============================================================================
