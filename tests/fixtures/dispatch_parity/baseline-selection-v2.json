@@ -745,6 +745,36 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a": {
+      "category": "event",
+      "contract_name": "node_pr_state_projection_compute",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
+      "handler_module": "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection",
+      "handler_name": "HandlerPrStateProjection",
+      "message_types": [
+        "github.pr-status",
+        "onex.evt.github.pr-status.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51": {
+      "category": "command",
+      "contract_name": "node_pr_state_write_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
+      "handler_module": "omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert",
+      "handler_name": "HandlerPrStateUpsert",
+      "message_types": [
+        "omnibase-infra.pr-state-upsert",
+        "onex.cmd.omnibase-infra.pr-state-upsert.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_registration_orchestrator.HandlerCatalogRequest": {
       "category": "command",
       "contract_name": "node_registration_orchestrator",
@@ -1437,15 +1467,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 7,
-        "omnibase_infra": 108,
+        "omnibase_infra": 110,
         "onex-change-control": 4
       },
-      "contracts_discovered": 119,
+      "contracts_discovered": 121,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 88,
-      "probe_count": 326,
-      "registered_dispatchers": 83,
-      "registered_routes": 99,
+      "distinct_subscribe_topics": 90,
+      "probe_count": 330,
+      "registered_dispatchers": 85,
+      "registered_routes": 101,
       "type_scoped_dispatchers": 41
     },
     "duplicate_winners": [],
@@ -1486,7 +1516,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-11T03:37:50.324115+00:00",
+    "generated_at_utc": "2026-07-12T07:58:09.290927+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.7",
       "omnibase-infra": "0.38.4",
@@ -1738,6 +1768,23 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.pr-state-upsert.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.pr-state-upsert",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.pr-state-upsert",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1"
     },
     "P1a::onex.cmd.omnibase-infra.remote-agent-invoke.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -2070,6 +2117,23 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.artifact.update-plan-created.v1"
+    },
+    "P1a::onex.evt.github.pr-status.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "github.pr-status",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "github.pr-status",
+        "status": "success"
+      },
+      "topic": "onex.evt.github.pr-status.v1"
     },
     "P1a::onex.evt.github.pr-webhook.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -3133,6 +3197,21 @@
       },
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1"
     },
+    "P1b::onex.cmd.omnibase-infra.pr-state-upsert.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1"
+    },
     "P1b::onex.cmd.omnibase-infra.remote-agent-invoke.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -3447,6 +3526,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.artifact.update-plan-created.v1"
+    },
+    "P1b::onex.evt.github.pr-status.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.github.pr-status.v1"
     },
     "P1b::onex.evt.github.pr-webhook.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7657,6 +7751,26 @@
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1",
       "topic_pattern": "*.cmd.omnibase-infra.onboarding-start.*",
       "type_scoped": true
+    },
+    {
+      "contract_name": "node_pr_state_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
+      "handler_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
+      "message_category": "event",
+      "route_id": "route.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a.onex_evt_github_pr_status_v1",
+      "topic": "onex.evt.github.pr-status.v1",
+      "topic_pattern": "*.evt.github.pr-status.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_pr_state_write_effect",
+      "dispatcher_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
+      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
+      "message_category": "command",
+      "route_id": "route.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51.onex_cmd_omnibase_infra_pr_state_upsert_v1",
+      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.pr-state-upsert.*",
+      "type_scoped": false
     },
     {
       "contract_name": "node_registration_orchestrator",
