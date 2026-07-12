@@ -71,11 +71,21 @@ class TestNodeRemoteAgentInvokeEffectScaffold:
         assert handlers[0]["operation"] == "agent.a2a_task"
         assert handlers[0]["handler"]["name"] == "HandlerA2ATask"
 
-    def test_input_output_models_use_local_module(self) -> None:
+    def test_input_output_models_use_canonical_core_module(self) -> None:
+        # OMN-14489: the contract must declare the CANONICAL omnibase_core classes
+        # the producer (delegation orchestrator) and HandlerA2ATask actually use —
+        # not the removed local stub models (which required agent_id / forbade the
+        # rich fields, so the runtime input_model validation dropped the real
+        # payload: remote-agent-invoke.v1 HW=19 IN / agent-task-lifecycle.v1 HW=0 OUT).
         data = _load_contract()
-        expected_module = "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
-        assert data["input_model"]["module"] == expected_module
-        assert data["output_model"]["module"] == expected_module
+        assert (
+            data["input_model"]["module"]
+            == "omnibase_core.models.delegation.model_invocation_command"
+        )
+        assert (
+            data["output_model"]["module"]
+            == "omnibase_core.models.delegation.model_agent_task_lifecycle_event"
+        )
 
     def test_consumer_group_id_matches_expected_shape(self) -> None:
         identity = ModelNodeIdentity(

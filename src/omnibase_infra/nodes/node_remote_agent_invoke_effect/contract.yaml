@@ -25,12 +25,12 @@ runtime_profiles:
   - workers
 input_model:
   name: "ModelInvocationCommand"
-  module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
-  description: "Invocation command selected by delegation routing."
+  module: "omnibase_core.models.delegation.model_invocation_command"
+  description: "Invocation command selected by delegation routing (canonical omnibase_core class used by the producer + HandlerA2ATask)."
 output_model:
   name: "ModelAgentTaskLifecycleEvent"
-  module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
-  description: "Lifecycle event emitted while watching a remote agent task."
+  module: "omnibase_core.models.delegation.model_agent_task_lifecycle_event"
+  description: "Lifecycle event emitted while watching a remote agent task (canonical omnibase_core class emitted by HandlerA2ATask)."
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
