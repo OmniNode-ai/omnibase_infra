@@ -2384,8 +2384,10 @@ verify_deployment() {
         log_warn "  Expected: ${git_sha}"
         log_warn "  Found:    ${label}"
         log_warn "The running container may be from a previous build."
+        log_warn "The fail-closed deploy readback (RT-6) below will reject this deploy."
     else
         log_warn "Could not read image label (container may not exist yet)."
+        log_warn "The fail-closed deploy readback (RT-6) below will reject this deploy."
     fi
 
     # OMN-12965: verify org.opencontainers.image.version is a real version, not
@@ -2413,6 +2415,90 @@ verify_deployment() {
         log_warn "Sentinel not found: 'Schema fingerprint stamped'"
         log_warn "The entrypoint may not have completed yet."
     fi
+}
+
+# =============================================================================
+# Deploy readback -- RT-6 (OMN-14469): fail-closed Class-3 mechanism
+# =============================================================================
+
+readback_deployed_ref() {
+    # TERMINAL deploy readback: read a fact only the freshly-built image could
+    # carry off the RUNNING container and assert it equals the intended ref
+    # (docs/plans/2026-07-12-mechanical-release-trains.md §4, RT-6).
+    #
+    # The fact is the org.opencontainers.image.revision label, stamped from
+    # VCS_REF at build time (docker/Dockerfile.runtime). verify_deployment()
+    # above reads the same label but only *warns* on a mismatch and returns 0 --
+    # so a stale / mis-targeted container (deployed code != intended ref) passes
+    # today. This step makes that FAIL-CLOSED: it delegates to the previously
+    # dead scripts/verify_deployed_versions.py (OMN-5608), which reads the label
+    # (and, when release versions are declared, the installed package versions)
+    # and exits non-zero on any mismatch. It is NOT an optional flag -- it runs
+    # unconditionally after every restart / cold bring-up. Without it,
+    # "deployed" / "live-readback" proof classes are unfalsifiable.
+    local git_sha="$1"
+    local version="$2"
+    local compose_project="$3"
+    local repo_root="$4"
+
+    log_step "Deploy Readback (RT-6, fail-closed) [OMN-14469]"
+
+    # An unresolvable intended SHA means a stale-image readback cannot be proven.
+    # Fail closed rather than certify a deploy whose target ref is 'unknown'.
+    if [[ "${git_sha}" == "unknown" ]]; then
+        log_error "Cannot read back deploy identity: intended git SHA is 'unknown'."
+        log_error "A stale-image readback is unprovable without the intended ref. Refusing to certify (RT-6)."
+        exit 1
+    fi
+
+    local runtime_container_name
+    runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
+
+    # The readback script lives next to this script (sync_files does NOT copy
+    # scripts/ into the deploy target), so resolve it from the repo root.
+    local readback="${repo_root}/scripts/verify_deployed_versions.py"
+    if [[ ! -f "${readback}" ]]; then
+        log_error "Deploy readback script not found: ${readback}"
+        log_error "Cannot certify the deploy without the readback. Aborting (RT-6)."
+        exit 1
+    fi
+
+    # verify_deployed_versions.py is pure-stdlib; prefer the repo venv, then a
+    # bare python3. (No uv needed -- keep the terminal step fast and dep-free.)
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the deploy readback."
+        exit 1
+    fi
+
+    # Always assert the running container's revision == the intended git SHA.
+    # Also assert the runtime package version inside the container matches the
+    # built version (always true on every lane); operators can declare extra
+    # sibling versions to assert via READBACK_EXPECTED_VERSIONS.
+    local expected_versions="omnibase-infra=${version}"
+    if [[ -n "${READBACK_EXPECTED_VERSIONS:-}" ]]; then
+        expected_versions="${expected_versions},${READBACK_EXPECTED_VERSIONS}"
+    fi
+
+    local readback_args=(
+        --container "${runtime_container_name}"
+        --expected-revision "${git_sha}"
+        --versions "${expected_versions}"
+    )
+
+    log_cmd "${python_bin} ${readback} ${readback_args[*]}"
+    if ! "${python_bin}" "${readback}" "${readback_args[@]}"; then
+        log_error "Deploy readback FAILED (RT-6): the running container is NOT the intended ref ${git_sha}."
+        log_error "Deployed code != intended ref (stale / mis-targeted image, or version drift)."
+        log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
+        exit 1
+    fi
+
+    log_info "Deploy readback passed: ${runtime_container_name} revision == ${git_sha}, runtime version == ${version} (RT-6)."
 }
 
 # =============================================================================
@@ -2754,6 +2840,11 @@ main() {
     # Phase 12: Verify (after a cold bring-up or a warm --restart)
     if [[ "${COLD_FULL_BRINGUP}" == true || "${RESTART}" == true ]]; then
         verify_deployment "${git_sha}" "${compose_project}"
+        # Phase 12b: TERMINAL fail-closed deploy readback (RT-6, OMN-14469). Runs
+        # only when this invocation actually started containers (there is nothing
+        # to read back otherwise). A stale / mis-targeted running container is
+        # rejected here instead of passing with only verify_deployment's warning.
+        readback_deployed_ref "${git_sha}" "${version}" "${compose_project}" "${repo_root}"
     fi
 
     # All phases completed successfully. Mark deployment as complete so that
