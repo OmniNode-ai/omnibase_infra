@@ -22,7 +22,7 @@ contract_version:
   patch: 0
 node_version: "0.1.0"
 description: >
-  Capability-oriented EFFECT node for pr_state persistence. Consumes ModelPayloadPrStateUpsert intents and UPSERTs one row per (repo, pr_number) into the public.pr_state latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently projected state per PR.
+  Capability-oriented EFFECT node for pr_state persistence. Consumes ModelPayloadPrStateUpsert intents and UPSERTs one row per (repo, pr_number), including the non-null is_draft field, into the public.pr_state latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently projected state per PR.
 
 # Strongly typed I/O models
 input_model:
@@ -77,6 +77,7 @@ io_operations:
       - source: "str"
       - correlation_id: "UUID | None"
       - as_of: "datetime"
+      - is_draft: "bool"
     output_fields:
       - success: "bool"
       - repo: "str"
@@ -118,13 +119,13 @@ health_check:
       critical: true
 metadata:
   description: >
-    Capability-oriented EFFECT node that persists PR status projections into the latest-known-state public.pr_state table. HandlerPrStateUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
+    Capability-oriented EFFECT node that persists PR status projections, including is_draft, into the latest-known-state public.pr_state table. HandlerPrStateUpsert composes its database dependency internally from the runtime container, matching the OMN-14140 auto-wiring pattern.
 
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-07-11"
   updated: "2026-07-11"
-  ticket: "OMN-14375"
+  ticket: "OMN-14394"
   tags:
     - effect
     - github
