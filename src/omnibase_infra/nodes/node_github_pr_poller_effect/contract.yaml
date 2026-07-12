@@ -27,7 +27,7 @@ node_type: "EFFECT_GENERIC"
 runtime_profiles:
   - "effects"
 description: >
-  Effect node that polls the GitHub REST API for open pull-request triage state across configured repositories. Triggered by the runtime tick intent; checks elapsed time against poll_interval_seconds before calling the API. Publishes one ModelGitHubPRStatusEvent per open PR to onex.evt.github.pr-status.v1 with partition key "{repo}:{pr_number}".
+  Effect node that polls the GitHub REST API for open pull-request triage state across configured repositories. Triggered by the runtime tick intent; checks elapsed time against poll_interval_seconds before calling the API. Publishes one ModelGitHubPRStatusEvent per open PR to onex.evt.github.pr-status.v1 with partition key "{repo}:{pr_number}", including GitHub's draft flag as is_draft.
 
 # Input subscriptions: this is the scheduling trigger
 input_subscriptions:
@@ -133,7 +133,7 @@ capabilities:
   - name: "github_pr_polling"
     description: "Poll GitHub REST API for open PR triage state"
   - name: "triage_classification"
-    description: "Classify PRs into 8 triage states based on CI, reviews, staleness"
+    description: "Classify PRs into 8 triage states based on CI, reviews, staleness, and draft state"
   - name: "kafka_event_production"
     description: "Publish ModelGitHubPRStatusEvent to onex.evt.github.pr-status.v1"
 definitions:
@@ -200,7 +200,7 @@ health_check:
       env_var: "GITHUB_TOKEN"
       description: "Verify GITHUB_TOKEN is set"
 metadata:
-  description: "Polls GitHub REST API for open pull-request triage state across configured repositories on runtime tick intents, respecting configurable poll intervals"
+  description: "Polls GitHub REST API for open pull-request triage state and draft state across configured repositories on runtime tick intents, respecting configurable poll intervals"
   transport_type: "HTTP"
   author: "OmniNode Team"
   license: "MIT"

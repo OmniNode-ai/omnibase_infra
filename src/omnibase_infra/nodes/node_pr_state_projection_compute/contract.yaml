@@ -25,7 +25,7 @@ contract_version:
   patch: 0
 node_version: "0.1.0"
 description: >
-  Subscribes to onex.evt.github.pr-status.v1 and projects each PR status event into a ModelPayloadPrStateUpsert intent for NodePrStateWriteEffect to persist into the pr_state latest-known-state table. Mirrors the canonical node_build_loop_projection_compute pattern.
+  Subscribes to onex.evt.github.pr-status.v1 and projects each PR status event into a ModelPayloadPrStateUpsert intent, including the non-null is_draft seam field, for NodePrStateWriteEffect to persist into the pr_state latest-known-state table. Mirrors the canonical node_build_loop_projection_compute pattern.
 
 event_bus:
   version:
@@ -61,7 +61,7 @@ handler_routing:
         - "pr_state.project"
 capabilities:
   - name: "pr_state.projection"
-    description: "Project the GitHub PR status event into a write intent"
+    description: "Project the GitHub PR status event, including is_draft, into a write intent"
     version: "0.1.0"
   - name: "pr_state.projection.audit"
     description: "Read-only, latest-state consumption of PR status events"
@@ -73,13 +73,13 @@ dependencies:
     description: "Effect node that persists projected intents into pr_state"
 metadata:
   description: >
-    Subscribes to the GitHub PR status event topic and projects each event into a ModelPayloadPrStateUpsert intent for the EFFECT layer to persist into the pr_state latest-known-state table.
+    Subscribes to the GitHub PR status event topic and projects each event into a ModelPayloadPrStateUpsert intent, including the non-null is_draft field, for the EFFECT layer to persist into the pr_state latest-known-state table.
 
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-07-11"
   updated: "2026-07-11"
-  ticket: "OMN-14375"
+  ticket: "OMN-14394"
   tags:
     - compute
     - github
