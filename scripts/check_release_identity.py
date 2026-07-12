@@ -4,29 +4,35 @@
 
 """Fresh-deploy fitness gate: release identity / no-merge-onto-published (OMN-13412).
 
-A runtime image stamps ``org.opencontainers.image.version`` from
-``pyproject.toml``. If source under ``src/`` changes but the version is NOT
-bumped past the most recently *published* version (the latest ``vX.Y.Z`` git
-tag), then two distinct builds ship the SAME version string. Every downstream
-proof packet that cites the runtime version can no longer distinguish them — the
-no-provenance gap this wave closes. Release-identity stamps GIT_SHA into the
-image (the SHA disambiguates), and THIS gate makes the version bump mandatory so
+Thin CLI collector/shim over the canonical ``node_release_identity_compute`` COMPUTE
+node (OMN-14471). This file performs ONLY the I/O — reading ``pyproject.toml``,
+listing published git tags, and diffing changed files against a base — then hands
+the collected facts to the pure ``HandlerReleaseIdentity`` and renders its decision
+(exit code + message). All gate LOGIC lives in the node/handler; this shim exists so
+the two existing wiring points (fresh-deploy-fitness CI + the pre-commit hook) keep
+invoking the same command path with identical behavior.
+
+A runtime image stamps ``org.opencontainers.image.version`` from ``pyproject.toml``.
+If source under ``src/`` changes but the version is NOT bumped past the most recently
+*published* version (the latest ``vX.Y.Z`` git tag), then two distinct builds ship
+the SAME version string and every downstream proof packet that cites the runtime
+version can no longer distinguish them. This gate makes the version bump mandatory so
 the human-facing version never silently aliases two code states.
 
 What it enforces
 ----------------
-When the diff under inspection touches packaged source (``src/**``) AND any
-published tag exists, ``pyproject.toml``'s ``project.version`` MUST be strictly
-greater than the highest published version (latest ``v*`` / bare-semver tag).
+When the diff under inspection touches packaged source (``src/**``) AND any published
+tag exists, ``pyproject.toml``'s ``project.version`` MUST be strictly greater than the
+highest published version (latest ``v*`` / bare-semver tag).
 
 Modes
 -----
 * ``--base <ref>``    Compare the working tree against ``<ref>`` (e.g. ``origin/dev``)
                       to decide whether packaged source changed. CI passes the PR
-                      base. If omitted, the gate assumes source MAY have changed
-                      and always enforces the version-ahead invariant.
-* ``--changed-file``  Explicit changed-file list (repeatable / newline list on
-                      stdin via ``-``). Overrides ``--base`` diffing.
+                      base. If omitted, the gate assumes source MAY have changed and
+                      always enforces the version-ahead invariant.
+* ``--changed-file``  Explicit changed-file list (repeatable / newline list on stdin
+                      via ``-``). Overrides ``--base`` diffing.
 
 A docs-only / tests-only / CI-only diff (no ``src/**`` change) is exempt: the
 published image is unaffected, so no bump is required.
@@ -50,27 +56,20 @@ import sys
 import tomllib
 from pathlib import Path
 
-from packaging.version import InvalidVersion, Version
-
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
-# Packaged-source prefixes whose change requires a version bump.
-_PACKAGED_PREFIXES = ("src/",)
+_SRC_DIR = _REPO_ROOT / "src"
+if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
-
-def _read_pyproject_version() -> Version:
-    with _PYPROJECT.open("rb") as fh:
-        data = tomllib.load(fh)
-    raw = data.get("project", {}).get("version")
-    if not raw:
-        raise ValueError(f"no project.version in {_PYPROJECT}")
-    try:
-        return Version(str(raw))
-    except InvalidVersion as exc:
-        raise ValueError(f"malformed project.version {raw!r}: {exc}") from exc
+from omnibase_infra.nodes.node_release_identity_compute import (
+    HandlerReleaseIdentity,
+    ModelReleaseIdentityRequest,
+)
 
 
 def _git(args: list[str]) -> str:
+    """Run a git command in the repo root and return trimmed stdout."""
     return subprocess.run(
         ["git", *args],
         cwd=_REPO_ROOT,
@@ -80,39 +79,53 @@ def _git(args: list[str]) -> str:
     ).stdout.strip()
 
 
-def _latest_published_version() -> Version | None:
-    """Return the highest published semver tag, or None if there are no tags."""
-    out = _git(["tag", "--list"])
-    if not out:
-        return None
-    best: Version | None = None
-    for line in out.splitlines():
-        tag = line.strip()
-        candidate = tag[1:] if tag.startswith("v") else tag
-        try:
-            ver = Version(candidate)
-        except InvalidVersion:
-            continue
-        if best is None or ver > best:
-            best = ver
-    return best
+def _read_pyproject_version_raw(pyproject: Path) -> str | None:
+    """Read the raw ``project.version`` string from ``pyproject.toml``.
+
+    Returns the value as a string, or ``None`` when the key is absent. Parsing and
+    validation (empty/malformed) are the handler's job, so the shim stays pure-I/O.
+    """
+    with pyproject.open("rb") as fh:
+        data = tomllib.load(fh)
+    raw = data.get("project", {}).get("version")
+    return None if raw is None else str(raw)
 
 
-def _packaged_source_changed(base: str | None, explicit: list[str]) -> bool:
-    """Decide whether packaged source changed relative to base / explicit list."""
+def _collect_changed_files(
+    base: str | None, explicit: list[str]
+) -> tuple[str, ...] | None:
+    """Collect the changed-file set for the diff.
+
+    Returns an explicit list when provided; otherwise diffs against ``base``
+    (three-dot, falling back to two-dot when the merge-base form is empty). Returns
+    ``None`` when neither a base nor an explicit list is available — the handler
+    then enforces the invariant (cannot prove the diff is exempt).
+    """
     if explicit:
-        files = explicit
-    elif base:
+        return tuple(explicit)
+    if base:
         diff = _git(["diff", "--name-only", f"{base}...HEAD"])
         files = [f for f in diff.splitlines() if f.strip()]
         if not files:
             # Fall back to a two-dot diff if the merge-base form yielded nothing.
             diff = _git(["diff", "--name-only", base])
             files = [f for f in diff.splitlines() if f.strip()]
-    else:
-        # No base and no explicit list: cannot prove the diff is exempt — enforce.
-        return True
-    return any(f.startswith(prefix) for f in files for prefix in _PACKAGED_PREFIXES)
+        return tuple(files)
+    return None
+
+
+def collect_request(
+    base: str | None, explicit: list[str]
+) -> ModelReleaseIdentityRequest:
+    """Gather all I/O facts into the handler's typed request."""
+    out = _git(["tag", "--list"])
+    published_tags = tuple(out.splitlines()) if out else ()
+    return ModelReleaseIdentityRequest(
+        pyproject_version_raw=_read_pyproject_version_raw(_PYPROJECT),
+        pyproject_path=str(_PYPROJECT),
+        published_tags=published_tags,
+        changed_files=_collect_changed_files(base, explicit),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,42 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     if explicit == ["-"]:
         explicit = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip()]
 
-    try:
-        pyproject_version = _read_pyproject_version()
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+    request = collect_request(args.base, explicit)
+    decision = HandlerReleaseIdentity().handle(request)
 
-    latest = _latest_published_version()
-    if latest is None:
-        print("OK: no published tag yet — release-identity bump not required.")
-        return 0
-
-    changed = _packaged_source_changed(args.base, explicit)
-    if not changed:
-        print(
-            "OK: no packaged src/** change in this diff — version bump not required "
-            f"(pyproject {pyproject_version}, latest published {latest})."
-        )
-        return 0
-
-    if pyproject_version > latest:
-        print(f"OK: version {pyproject_version} is ahead of latest published {latest}.")
-        return 0
-
-    print(
-        "FAIL: packaged source changed but pyproject version "
-        f"{pyproject_version} is NOT ahead of the latest published version "
-        f"{latest} (OMN-13412 release-identity gate).",
-        file=sys.stderr,
-    )
-    print(
-        "Merging code onto an already-published version aliases two code states "
-        "under one image version. Bump project.version in pyproject.toml past "
-        f"{latest} (e.g. {Version(f'{latest.major}.{latest.minor}.{latest.micro + 1}')}).",
-        file=sys.stderr,
-    )
-    return 1
+    stream = sys.stderr if decision.stream == "stderr" else sys.stdout
+    print(decision.message, file=stream)
+    return decision.exit_code
 
 
 if __name__ == "__main__":

@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeReleaseIdentityCompute
+#
+# Pure COMPUTE node for the fresh-deploy fitness "release identity" gate. Receives
+# pre-collected inputs (pyproject version, published tags, changed files) and
+# returns an exit-code/message decision enforcing that packaged source may not
+# merge onto an already-published version without a version bump. No I/O, no side
+# effects.
+#
+# Related Tickets:
+#   - OMN-14471: Refactor legacy scripts/check_release_identity.py -> canonical node
+#   - OMN-13412: Fresh-deploy fitness gates (original release-identity invariant)
+#   - OMN-12515: Imperative-contract guard (scan_freestanding_imperative_io) context
+# Contract identifiers
+name: "node_release_identity_compute"
+contract_name: "node_release_identity_compute"
+node_name: "node_release_identity_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+# Node type - COMPUTE for the pure version-ahead / src-change fitness logic
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Pure COMPUTE node for the fresh-deploy fitness release-identity gate. Given the declared pyproject version, the published git tags, and the changed-file set, it decides whether packaged source (src/**) is merging onto an already-published version without a bump. Returns an exit-code (0/1/2), the target stream, a human-readable message, and a machine-readable reason code. No I/O, no side effects.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelReleaseIdentityRequest"
+  module: "omnibase_infra.nodes.node_release_identity_compute.models.model_release_identity_request"
+  description: >
+    Pre-collected gate inputs: raw pyproject.toml project.version string and its path, the raw `git tag --list` lines, and the changed-file set (or None when the source-change set is undeterminable and the invariant must be enforced).
+
+output_model:
+  name: "ModelReleaseIdentityDecision"
+  module: "omnibase_infra.nodes.node_release_identity_compute.models.model_release_identity_decision"
+  description: >
+    Gate decision: process exit_code (0 pass/exempt, 1 not-ahead, 2 config error), the target stream (stdout/stderr), the full message text, and a reason_code.
+
+# Handler routing - delegates the pure decision to the handler
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "release_identity.evaluate"
+      handler_type: "release_identity"
+      handler:
+        name: "HandlerReleaseIdentity"
+        module: "omnibase_infra.nodes.node_release_identity_compute.handlers.handler_release_identity"
+      supported_operations:
+        - "release_identity.evaluate"
+# Capabilities provided by this node
+capabilities:
+  - name: "release_identity.evaluate"
+    description: "Evaluate the release-identity version-ahead invariant for a diff."
+    version: "0.1.0"
+# Metadata
+metadata:
+  description: "Pure COMPUTE node for the fresh-deploy fitness release-identity gate. Enforces that packaged source (src/**) cannot merge onto an already-published version without a version bump. No I/O, no side effects."
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-07-12"
+  ticket: "OMN-14471"
+  tags:
+    - compute
+    - release-identity
+    - fresh-deploy-fitness
+    - fitness-gate
+    - pure-function

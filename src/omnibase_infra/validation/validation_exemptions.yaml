@@ -2630,6 +2630,12 @@ pattern_exemptions:
       'handle' is the standard ONEX handler method name per the ProtocolHandler and ProtocolMessageHandler conventions. All handlers use this name.
 
     ticket: OMN-2136
+  - file_pattern: 'handler_release_identity\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      'handle' is the canonical ONEX handler method name (definition B, OMN-14355/OMN-14407) that the shared runtime adapter binds. This node was refactored from the legacy scripts/check_release_identity.py gate into the canonical CONTRACT+NODE+HANDLER shape, which requires the core method be named 'handle'.
+
+    ticket: OMN-14471
   - file_pattern: 'evaluator_invariant\.py'
     class_pattern: "Class 'InvariantEvaluator'"
     violation_pattern: 'has \d+ methods'

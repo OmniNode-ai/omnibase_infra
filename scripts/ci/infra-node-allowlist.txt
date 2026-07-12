@@ -166,6 +166,8 @@ src/omnibase_infra/nodes/node_registry_effect/handlers/__init__.py  # approved e
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_partial_retry.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_deactivate.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_upsert.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_release_identity_compute/handlers/__init__.py  # infra-owned release-identity fresh-deploy fitness gate (refactored from scripts/check_release_identity.py, OMN-14471); infra's own CI gate cannot import an omnimarket node.
+src/omnibase_infra/nodes/node_release_identity_compute/handlers/handler_release_identity.py  # infra-owned release-identity fresh-deploy fitness gate (refactored from scripts/check_release_identity.py, OMN-14471); infra's own CI gate cannot import an omnimarket node.
 src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_reward_binder_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
