@@ -89,6 +89,10 @@ skills:
       - {name: skills-filter, payload_field: skills_filter, arg_type: string_list}
       - {name: skills-roots, payload_field: skills_roots, arg_type: string_list}
       - {name: nodes-root, payload_field: nodes_root, arg_type: string}
+  # OMN-14151 deregistered the legacy node_auto_merge_effect catalog entry.
+  # The active merge path is the merge-queue governor
+  # (node_pr_arm_gate_compute + node_pr_lifecycle_merge_effect), which needs a
+  # separate CLI contract instead of a stale direct-arm skill mapping.
   - skill_name: build_loop
     node_name: node_build_loop
     result_model: omnimarket.nodes.node_build_loop.models.model_loop_state.ModelLoopState
