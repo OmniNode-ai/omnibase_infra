@@ -14,7 +14,7 @@ unlike the optional db_io projection path).
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -24,11 +24,14 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _prepare_handler_wiring,
     _read_state_io,
+    wire_from_manifest,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
+    ModelAutoWiringManifest,
     ModelContractVersion,
     ModelDiscoveredContract,
     ModelEventBusWiring,
@@ -36,6 +39,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.state_io.state_store_adapter import StateIoUnconfiguredError
 
 _THIS_MODULE = "tests.unit.runtime.test_handler_wiring_state_io"
@@ -283,3 +287,118 @@ def test_state_io_unknown_database_raises_at_wiring_time(
     )
     with pytest.raises(ModelOnexError, match=r"state_io\.database"):
         _prepare(contract_path, _entry())
+
+
+# ---------------------------------------------------------------------------
+# Tests: fail-LOUD through wire_from_manifest, not fail-SILENT (OMN-14484)
+#
+# Regression guard. The unit-level test above proves _prepare_handler_wiring
+# raises StateIoUnconfiguredError when the DSN is unset. But the LIVE runtime
+# path is wire_from_manifest, whose default (non-strict) per-contract exception
+# handler previously CAUGHT that raise and demoted it to a logged FAILED result
+# — silently dropping EVERY dispatcher of the state_io contract while the
+# runtime booted "healthy." node_delegation_orchestrator is the only state_io
+# contract, so on a lane without OMNIBASE_INFRA_DB_URL this meant 100% of
+# delegation-request / invocation / lifecycle messages hit the dispatch engine
+# with no registered dispatcher and were routed to the DLQ ("No dispatcher found
+# for category 'command' and message type 'ModelDelegationRequest'"). OMN-14208
+# declared state_io a REQUIRED durability seam that "fails closed at wiring
+# time" — the non-strict swallow defeated that intent, turning fail-CLOSED into
+# fail-SILENT. These tests pin the wire_from_manifest contract: a misconfigured
+# REQUIRED state_io seam must abort wiring loudly, never boot with the
+# orchestrator silently dead.
+# ---------------------------------------------------------------------------
+
+
+def _plugin_managed_state_io_contract(
+    contract_path: Path,
+) -> ModelDiscoveredContract:
+    """A plugin_managed COMMAND contract declaring state_io — the shape of
+    node_delegation_orchestrator (plugin owns the subscription, auto-wiring owns
+    the dispatch route; state_io is read from ``contract_path``)."""
+    return ModelDiscoveredContract(
+        name="node_delegation_orchestrator",
+        node_type="ORCHESTRATOR_GENERIC",
+        contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+        contract_path=contract_path,
+        entry_point_name="node_delegation_orchestrator",
+        package_name="omnimarket",
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=("onex.cmd.omnibase-infra.delegation-request.v1",),
+            publish_topics=(),
+            plugin_managed=True,
+        ),
+        handler_routing=ModelHandlerRouting(
+            routing_strategy="payload_type_match",
+            handlers=(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name="HandlerDelegationWorkflow", module=_THIS_MODULE
+                    ),
+                    event_model=ModelHandlerRef(
+                        name="ModelStateIoPayload", module=_THIS_MODULE
+                    ),
+                    message_category="command",
+                    event_type="omnibase-infra.delegation-request",
+                    operation="delegation.orchestrate",
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_state_io_missing_db_url_fails_loud_through_wire_from_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-14484 RED-guard: an unconfigured REQUIRED state_io seam must PROPAGATE
+    out of wire_from_manifest (fail loud), not be demoted to a silent per-contract
+    FAILED result that drops all dispatchers. Before the fix wire_from_manifest
+    returned a report with total_failed=1 and NO raise — the runtime booted
+    "healthy" with every delegation message DLQ'd."""
+    monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+    contract_path = _write_contract(tmp_path, state_io=True)
+    contract = _plugin_managed_state_io_contract(contract_path)
+    manifest = ModelAutoWiringManifest(contracts=(contract,))
+    engine = MessageDispatchEngine()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
+    event_bus.subscribe = AsyncMock(return_value=AsyncMock())
+
+    with patch(_PATCH_IMPORT_HANDLER_CLASS, return_value=_FakeHandler):
+        with pytest.raises(StateIoUnconfiguredError, match="OMNIBASE_INFRA_DB_URL"):
+            await wire_from_manifest(
+                manifest, engine, event_bus=event_bus, environment="local"
+            )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_state_io_with_db_url_registers_command_dispatcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-14484 GREEN-side: with the DSN configured the same plugin_managed
+    state_io contract wires normally — the COMMAND dispatch route IS registered
+    so a ModelDelegationRequest resolves instead of hitting the DLQ. Proves the
+    fail-loud guard does not over-fire on a correctly-configured seam."""
+    monkeypatch.setenv(
+        "OMNIBASE_INFRA_DB_URL", "postgresql://user:pass@host:5432/omnibase_infra"
+    )
+    contract_path = _write_contract(tmp_path, state_io=True)
+    contract = _plugin_managed_state_io_contract(contract_path)
+    manifest = ModelAutoWiringManifest(contracts=(contract,))
+    engine = MessageDispatchEngine()
+    event_bus = MagicMock(spec=ProtocolEventBusLike)
+    event_bus.subscribe = AsyncMock(return_value=AsyncMock())
+
+    with patch(_PATCH_IMPORT_HANDLER_CLASS, return_value=_FakeHandler):
+        report = await wire_from_manifest(
+            manifest, engine, event_bus=event_bus, environment="local"
+        )
+
+    result = next(r for r in report.results if r.contract_name == contract.name)
+    assert result.outcome.value == "wired"
+    assert len(result.dispatchers_registered) > 0
+    # Kafka subscription stays with the plugin (plugin_managed) — auto-wiring
+    # only owns the dispatch route.
+    event_bus.subscribe.assert_not_called()
