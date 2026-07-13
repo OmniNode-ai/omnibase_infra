@@ -486,12 +486,12 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624": {
+    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938": {
       "category": "command",
       "contract_name": "node_ledger_write_effect",
       "event_model_module": null,
       "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938",
       "handler_module": "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append",
       "handler_name": "HandlerLedgerAppend",
       "message_types": [
@@ -503,12 +503,12 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6": {
+    "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675": {
       "category": "command",
       "contract_name": "node_ledger_write_effect",
       "event_model_module": null,
       "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675",
       "handler_module": "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query",
       "handler_name": "HandlerLedgerQuery",
       "message_types": [
@@ -760,12 +760,12 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51": {
+    "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913": {
       "category": "command",
       "contract_name": "node_pr_state_write_effect",
       "event_model_module": null,
       "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
+      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
       "handler_module": "omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert",
       "handler_name": "HandlerPrStateUpsert",
       "message_types": [
@@ -1532,7 +1532,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-13T13:32:28.653286+00:00",
+    "generated_at_utc": "2026-07-13T20:26:55.466427+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.7",
       "omnibase-infra": "0.38.4",
@@ -1793,7 +1793,7 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51"
+          "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -1922,7 +1922,7 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624"
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -1939,7 +1939,7 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6"
+          "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -7670,20 +7670,20 @@
     },
     {
       "contract_name": "node_ledger_write_effect",
-      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
-      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624",
+      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938",
       "message_category": "command",
-      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_7be24624.onex_cmd_platform_ledger_append_v1",
+      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938.onex_cmd_platform_ledger_append_v1",
       "topic": "onex.cmd.platform.ledger-append.v1",
       "topic_pattern": "*.cmd.platform.ledger-append.*",
       "type_scoped": false
     },
     {
       "contract_name": "node_ledger_write_effect",
-      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
-      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6",
+      "dispatcher_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675",
+      "handler_id": "dispatcher.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675",
       "message_category": "command",
-      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_438d28a6.onex_cmd_platform_ledger_query_v1",
+      "route_id": "route.auto.node_ledger_write_effect.HandlerLedgerQuery.ledger_query_40521675.onex_cmd_platform_ledger_query_v1",
       "topic": "onex.cmd.platform.ledger-query.v1",
       "topic_pattern": "*.cmd.platform.ledger-query.*",
       "type_scoped": false
@@ -7830,10 +7830,10 @@
     },
     {
       "contract_name": "node_pr_state_write_effect",
-      "dispatcher_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
-      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51",
+      "dispatcher_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
+      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
       "message_category": "command",
-      "route_id": "route.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_83baee51.onex_cmd_omnibase_infra_pr_state_upsert_v1",
+      "route_id": "route.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913.onex_cmd_omnibase_infra_pr_state_upsert_v1",
       "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1",
       "topic_pattern": "*.cmd.omnibase-infra.pr-state-upsert.*",
       "type_scoped": false
