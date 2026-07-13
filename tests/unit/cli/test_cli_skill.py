@@ -274,6 +274,9 @@ _NODE_BACKED_DOGFOOD_SKILLS: dict[str, str] = {
     "coverage_sweep": "node_coverage_sweep",
     # OMN-13995: post-release dep-bump dedup sweep — node existed, unregistered.
     "dep_cascade_dedup": "node_dep_cascade_dedup_orchestrator",
+    # OMN-14552: post-orchestration false-Done verifier — node existed but was
+    # never mapped, so `onex skill verification_sweep` returned "Unknown skill".
+    "verification_sweep": "node_verification_sweep_orchestrator",
 }
 
 
