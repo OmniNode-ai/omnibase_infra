@@ -26,6 +26,10 @@ import click
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
+from omnibase_infra.cli.omnimarket_drift_guard import (
+    OmnimarketDriftError,
+    check_omnimarket_drift,
+)
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
@@ -181,6 +185,18 @@ def _entry_point_module(value: str) -> str:
         "under <state-root>/emit_spool/ for later replay."
     ),
 )
+@click.option(
+    "--omni-home",
+    type=click.Path(path_type=Path),
+    envvar="OMNI_HOME",
+    default=None,
+    help=(
+        "Canonical omni_home workspace root for the local omnimarket drift "
+        "check. Defaults to the $OMNI_HOME environment variable (OMN-14560, "
+        "mirroring OMN-14531's 'onex skill' fix) -- without this binding the "
+        "drift guard silently receives omni_home=None and never fires."
+    ),
+)
 def run_node_by_name(
     node_name: str,
     contract_path: Path | None,
@@ -191,6 +207,7 @@ def run_node_by_name(
     verbose: bool,
     output_mode: str,
     emit_socket: Path | None,
+    omni_home: Path | None,
 ) -> None:
     """Run a packaged ONEX node on the local runtime, resolved by NAME.
 
@@ -210,6 +227,11 @@ def run_node_by_name(
         onex node merge_sweep --contract ./custom_contract.yaml --state-root ./state
         onex node merge_sweep --output receipt   # one typed result JSON on stdout
     """
+    try:
+        check_omnimarket_drift(omni_home=str(omni_home) if omni_home else None)
+    except OmnimarketDriftError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     resolved_contract = contract_path or _resolve_packaged_contract(node_name)
 
     try:
