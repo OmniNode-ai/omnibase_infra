@@ -25,9 +25,6 @@ known_entrypointless:
   - contract: handler_architecture_validation
     handler: HandlerArchitectureValidation
     module: omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation
-  - contract: handler_ledger_projection
-    handler: HandlerLedgerProjection
-    module: omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection
   - contract: node_artifact_change_detector_effect
     handler: HandlerContractFileWatcher
     module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher
@@ -73,9 +70,6 @@ known_entrypointless:
   - contract: node_invariant_evaluate_compute
     handler: HandlerInvariantEvaluate
     module: omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate
-  - contract: node_ledger_projection_compute
-    handler: HandlerLedgerProjection
-    module: omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection
   - contract: node_llm_embedding_effect
     handler: HandlerEmbeddingOpenaiCompatible
     module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible

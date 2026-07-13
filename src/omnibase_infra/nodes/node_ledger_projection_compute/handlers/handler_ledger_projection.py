@@ -162,6 +162,58 @@ class HandlerLedgerProjection:
             payload=payload,
         )
 
+    async def handle(
+        self,
+        message: object,
+    ) -> ModelHandlerOutput[ModelIntent]:
+        """Contract-typed auto-wiring entry point.
+
+        ``node_ledger_projection_compute``'s contract declares
+        ``operation_match`` routing with no ``event_model``, so auto-wiring
+        (``handler_wiring._make_dispatch_callback``) invokes ``handle(envelope)``
+        directly rather than ``execute()``. Without this method the callback
+        binds ``_missing_handle``, which raises on every dispatched event — and
+        the auto-wired consume boundary log-and-discards that exception, so the
+        events are acked and the ledger stays empty with nothing surfaced
+        (OMN-14516).
+
+        The value delivered here is whatever
+        ``MessageDispatchEngine._materialize_envelope_with_bindings`` produces on
+        the live dispatch path — a **dict** (``{"payload": ..., ...}``), not an
+        attribute-bearing envelope. ``_coerce_event_message`` accepts both shapes
+        so this works for the real runtime path and for object-shaped envelopes.
+        """
+        raw_message = self._coerce_event_message(message)
+        intent = self.project(raw_message)
+        # correlation_id is optional on the headers; the audit ledger must never
+        # drop an event over a missing trace ID, so fall back to a fresh UUID.
+        correlation_id = raw_message.headers.correlation_id
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id if correlation_id is not None else uuid4(),
+            handler_id=HANDLER_ID_LEDGER_PROJECTION,
+            result=intent,
+        )
+
+    @staticmethod
+    def _coerce_event_message(raw: object) -> ModelEventMessage:
+        """Accept a direct ModelEventMessage or an auto-wired envelope wrapper.
+
+        The dispatch engine delivers a materialized dict on the live runtime
+        path and a ``ModelEventEnvelope``-like object from the auto_wiring
+        event-bus callback and test doubles; both must work here.
+        """
+        if isinstance(raw, ModelEventMessage):
+            return raw
+        payload = (
+            raw.get("payload", raw)
+            if isinstance(raw, dict)
+            else getattr(raw, "payload", raw)
+        )
+        if isinstance(payload, ModelEventMessage):
+            return payload
+        return ModelEventMessage.model_validate(payload)
+
     async def execute(
         self,
         envelope: dict[str, object],

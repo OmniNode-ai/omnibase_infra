@@ -32,6 +32,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
@@ -98,7 +99,15 @@ def _fake_handler_cls() -> type:
 
 
 @pytest.mark.asyncio
-async def test_raw_event_projection_requires_explicit_result_applier() -> None:
+async def test_raw_event_projection_without_result_applier_FAILS_not_skips() -> None:
+    """A purpose-declared consumer with no result applier is FAILED, never SKIPPED.
+
+    ``total_failed`` does not count SKIPPED, so the pre-fix behaviour (SKIPPED) let
+    the runtime boot green over a raw projection that was wired to nothing — the
+    exact mechanism that kept event_ledger at zero rows while 1M+ events flowed
+    (OMN-14516/OMN-14530). FAILED is the only outcome that surfaces in
+    ``total_failed`` and trips ``ONEX_WIRING_STRICT_MODE``.
+    """
     manifest = discover_contracts_from_paths([CONTRACT])
     engine = MessageDispatchEngine()
 
@@ -110,9 +119,13 @@ async def test_raw_event_projection_requires_explicit_result_applier() -> None:
         subscribe_immediately=False,
     )
 
-    assert report.total_failed == 0
-    assert report.total_skipped == 1
-    assert "requires dedicated raw event projection wiring" in report.results[0].reason
+    assert report.total_failed == 1, (
+        "a consumer_purpose contract with no result applier must FAIL — if this is "
+        "0 the SKIPPED regression is back and total_failed hides a dead consumer"
+    )
+    assert report.total_skipped == 0
+    assert report.results[0].outcome == EnumWiringOutcome.FAILED
+    assert "no result applier is wired" in report.results[0].reason
 
 
 @pytest.mark.asyncio

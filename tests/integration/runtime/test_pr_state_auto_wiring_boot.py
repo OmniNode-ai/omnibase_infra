@@ -38,6 +38,9 @@ from omnibase_infra.runtime.auto_wiring import (
 from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
 )
+from omnibase_infra.runtime.service_intent_routing_loader import (
+    load_intent_routing_table,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -58,6 +61,11 @@ COMPUTE_CONTRACT = (
 EFFECT_CONTRACT = (
     _ROOT / "src/omnibase_infra/nodes/node_pr_state_write_effect/contract.yaml"
 )
+
+
+class _StubResultApplier:
+    async def apply(self, *args: object, **kwargs: object) -> None:
+        return None
 
 
 def test_pr_state_projection_contract_files_exist() -> None:
@@ -92,11 +100,18 @@ async def test_pr_state_projection_chain_wires_from_manifest() -> None:
     assert manifest.total_errors == 0
 
     engine = MessageDispatchEngine(logger=MagicMock())
+    result_appliers = (
+        {"node_pr_state_projection_compute": _StubResultApplier()}
+        if load_intent_routing_table(COMPUTE_CONTRACT)
+        else {}
+    )
     report = await wire_from_manifest(
         manifest=manifest,
         dispatch_engine=engine,
         event_bus=None,  # No live Kafka in this gate; auto-wiring is in-process.
         environment="test",
+        container=MagicMock(),
+        result_appliers_by_contract=result_appliers,
     )
 
     assert report.total_failed == 0, (

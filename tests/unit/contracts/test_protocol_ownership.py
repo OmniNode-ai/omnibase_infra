@@ -72,6 +72,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
     "ProtocolTopicProvisioner": "protocols/protocol_topic_provisioner.py",  # [RUNTIME] OMN-13237 per-contract boot interleave provisioner boundary (provision+readiness); fake-swappable for the no-global-gather regression test
+    "DispatchTarget": "runtime/intent_effects/intent_effect_dispatch_bridge.py",  # [RUNTIME] OMN-14516 local bridge target for contract-derived projection intent dispatch
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",

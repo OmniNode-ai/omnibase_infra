@@ -19,7 +19,9 @@ the kind of breakage that OMN-8735 introduced and that must never reach prod aga
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -28,6 +30,9 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models.model_discovery_error import (
     ModelDiscoveryError,
 )
+from omnibase_infra.runtime.service_intent_routing_loader import (
+    load_intent_routing_table,
+)
 
 _KNOWN_DELETED_OCC_STUBS = {
     "node_contract_dependency_compute",
@@ -35,6 +40,30 @@ _KNOWN_DELETED_OCC_STUBS = {
     "node_contract_dependency_orchestrator",
     "node_contract_dependency_reducer",
 }
+
+# SHRINK-ONLY ratchet (OMN-14516). Raw audit/projection contracts that are dead in
+# production AND have a tracking ticket. The wiring gate reports these RED (see the
+# assertion message) but does not fail on them — every OTHER raw projection with no
+# derivable applier IS a hard failure. Removing an entry is part of its ticket's
+# DoD; NEVER add a live node here to silence the gate.
+#   - node_validation_ledger_projection_compute: no write-effect node exists
+#     (PostgresValidationLedgerRepository is never instantiated), so it cannot yet
+#     declare an intent_routing_table. Tracked in OMN-14524 (build the write-effect,
+#     prove validation_event_ledger 0->N, then delete this entry).
+_KNOWN_UNWIRED_RAW_PROJECTIONS = {"node_validation_ledger_projection_compute"}
+
+
+class _StubResultApplier:
+    """Presence-only stand-in for the kernel's derived DispatchResultApplier.
+
+    The kernel derives a real applier for every audit/projection consumer that
+    declares an ``intent_consumption.intent_routing_table``. This offline gate
+    mirrors that derivation with a no-op stub so the wiring phase proves the same
+    set of contracts reaches WIRED — without a DB.
+    """
+
+    async def apply(self, *args: object, correlation_id: UUID | None = None) -> None:
+        return None
 
 
 def _actionable_manifest_errors(
@@ -86,10 +115,26 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
     failure here means a handler that was working before has broken — exactly the
     OMN-8735 regression pattern (14 handlers silently broke without this gate).
 
+    OMN-14516: raw audit/projection consumers are FAILED (not SKIPPED) when they
+    have no result applier. The kernel DERIVES an applier for every such consumer
+    that declares an ``intent_consumption.intent_routing_table``; this offline gate
+    mirrors that derivation by supplying a presence-only stub applier for the same
+    set. The remaining failures must be EXACTLY the shrink-only, ticketed
+    ``_KNOWN_UNWIRED_RAW_PROJECTIONS`` set — anything else is a real regression.
+
     The dispatch engine is mocked to avoid Kafka/DB dependencies; event_bus=None
     skips topic subscriptions so the test runs fully offline.
     """
     manifest = discover_contracts()
+
+    # Mirror the kernel derivation: every contract that declares an intent routing
+    # table gets a result applier. Presence in this map is exactly what
+    # handler_wiring's _raw_event_projection_enabled checks.
+    derived_appliers = {
+        contract.name: _StubResultApplier()
+        for contract in manifest.contracts
+        if load_intent_routing_table(Path(contract.contract_path))
+    }
 
     dispatch_engine = MagicMock()
     dispatch_engine.is_frozen = False
@@ -99,14 +144,31 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
         dispatch_engine=dispatch_engine,
         event_bus=None,
         subscribe_immediately=False,
+        result_appliers_by_contract=derived_appliers,
     )
 
     failed_results = [r for r in report.results if str(r.outcome).endswith("FAILED")]
-    assert report.total_failed == 0, (
-        f"wire_from_manifest() reported {report.total_failed} failure(s) against the "
-        f"real manifest — this is a wiring regression (OMN-8735 pattern).\n"
-        + "\n".join(f"  {r.contract_name}: {r.reason}" for r in failed_results)
+    failed_names = {r.contract_name for r in failed_results}
+    unexpected = failed_names - _KNOWN_UNWIRED_RAW_PROJECTIONS
+    assert not unexpected, (
+        f"wire_from_manifest() reported {len(unexpected)} unexpected failure(s) "
+        f"against the real manifest — this is a wiring regression (OMN-8735 / "
+        f"OMN-14516).\n"
+        + "\n".join(
+            f"  {r.contract_name}: {r.reason}"
+            for r in failed_results
+            if r.contract_name in unexpected
+        )
     )
+    # Surface the known-unwired ratchet RED-and-tracked (OMN-14516 must-hold): it is
+    # visible in test output, never a silent exclusion. Shrinks to empty when the
+    # tracked tickets land.
+    tracked_dead = failed_names & _KNOWN_UNWIRED_RAW_PROJECTIONS
+    if tracked_dead:
+        print(
+            "KNOWN-UNWIRED raw projections (dead in prod, ticketed, shrink-only): "
+            f"{sorted(tracked_dead)} — see OMN-14524"
+        )
 
     # Confirm no ModelOnexError was raised in the results
     error_results = [

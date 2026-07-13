@@ -534,7 +534,16 @@ class TestWireFromManifest:
         assert report.total_skipped == 1
 
     @pytest.mark.asyncio
-    async def test_skip_raw_projection_consumer_purpose(self) -> None:
+    async def test_raw_projection_consumer_purpose_without_applier_FAILS(self) -> None:
+        """A raw audit/projection consumer with no result applier is FAILED.
+
+        This test previously asserted ``total_skipped == 1`` / ``outcome ==
+        SKIPPED``. That SKIPPED outcome is exactly how node_ledger_projection_
+        compute booted green while dropping every event into its own audit ledger:
+        ``total_failed`` does not count SKIPPED, so the runtime never surfaced the
+        dead consumer. OMN-14516/OMN-14530 flips it to FAILED so total_failed is
+        accurate and ONEX_WIRING_STRICT_MODE can crash the boot.
+        """
         contract = _make_contract(
             name="node_ledger_projection_compute",
             consumer_purpose="audit",
@@ -548,13 +557,21 @@ class TestWireFromManifest:
 
         report = await wire_from_manifest(manifest, engine)
 
-        assert report.total_skipped == 1
+        assert report.total_failed == 1
+        assert report.total_skipped == 0
         assert report.total_wired == 0
-        assert report.results[0].outcome == EnumWiringOutcome.SKIPPED
-        assert "raw event projection wiring" in str(report.results[0].reason)
+        assert report.results[0].outcome == EnumWiringOutcome.FAILED
+        assert "no result applier is wired" in str(report.results[0].reason)
 
     @pytest.mark.asyncio
-    async def test_skip_raw_projection_before_container_preresolve(self) -> None:
+    async def test_raw_projection_short_circuits_before_container_preresolve(
+        self,
+    ) -> None:
+        """The raw-projection outcome is decided before handler import/pre-resolve.
+
+        OMN-14530 changed the outcome from SKIPPED to FAILED, but the short-circuit
+        (no handler import attempted for an unwired raw projection) is unchanged.
+        """
         contract = _make_contract(
             name="node_ledger_projection_compute",
             consumer_purpose="audit",
@@ -578,7 +595,8 @@ class TestWireFromManifest:
                 container=FakeContainer(),
             )
 
-        assert report.total_skipped == 1
+        assert report.total_failed == 1
+        assert report.results[0].outcome == EnumWiringOutcome.FAILED
         import_handler.assert_not_called()
 
     @pytest.mark.asyncio
