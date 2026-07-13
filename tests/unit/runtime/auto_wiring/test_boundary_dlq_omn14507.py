@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -234,3 +235,167 @@ class TestBoundaryDlqFlagOn:
         await callback(_envelope())  # must not raise
 
         event_bus._publish_raw_to_dlq.assert_awaited_once()
+
+
+def _real_validation_error() -> ValidationError:
+    """A genuine pydantic ValidationError -- not a hand-rolled stand-in --
+    for the G2 non-retryable-content-error tests. Mirrors the exact shape a
+    handler-level wire model raises when ``extra="forbid"`` rejects an
+    unknown field (the §7 death signal this boundary must carry)."""
+
+    class _StrictModel(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        field: int
+
+    try:
+        _StrictModel.model_validate({"field": 1, "unexpected_field": "boom"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected ValidationError")  # pragma: no cover
+
+
+class TestBoundaryDlqNonRetryableClassification:
+    """G2 (OMN-14507 review): content/config errors must NOT be retried --
+    they are deterministic, so retrying only burns the backoff budget before
+    an identical failure. This is the exact §7 wire-model-forbid path."""
+
+    @pytest.mark.asyncio
+    async def test_content_error_skips_retry_goes_straight_to_dlq(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        validation_error = _real_validation_error()
+        dispatch_engine = _raising_dispatch_engine(validation_error)
+        event_bus = _dlq_capable_event_bus()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())
+
+        # ONE attempt, not _BOUNDARY_DLQ_MAX_ATTEMPTS -- the retry budget is
+        # never spent on a guaranteed-repeat content error.
+        dispatch_engine.dispatch.assert_awaited_once()
+        event_bus._publish_raw_to_dlq.assert_awaited_once()
+        call_kwargs = event_bus._publish_raw_to_dlq.call_args.kwargs
+        assert call_kwargs["error"] is validation_error
+
+    @pytest.mark.asyncio
+    async def test_protocol_configuration_error_skips_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        config_error = ProtocolConfigurationError("no dispatcher registered")
+        dispatch_engine = _raising_dispatch_engine(config_error)
+        event_bus = _dlq_capable_event_bus()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())
+
+        dispatch_engine.dispatch.assert_awaited_once()
+        event_bus._publish_raw_to_dlq.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_transient_error_still_gets_full_retry_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Contrast case: a non-content error (e.g. RuntimeError) is NOT
+        classified as non-retryable and still gets the full bounded budget."""
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _BOUNDARY_DLQ_MAX_ATTEMPTS,
+        )
+
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("transient"))
+        event_bus = _dlq_capable_event_bus()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())
+
+        assert dispatch_engine.dispatch.await_count == _BOUNDARY_DLQ_MAX_ATTEMPTS
+
+
+class TestBoundaryDlqMetricNaming:
+    """G3 (OMN-14507 review): only dlq_routed=true is real prevention.
+    Everything else must log boundary_swallow_observed, not
+    boundary_swallow_prevented, so an operator alerting on the "prevented"
+    counter is not misled into believing a lost message survived."""
+
+    @pytest.mark.asyncio
+    async def test_flag_off_logs_observed_not_prevented(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv(_BOUNDARY_DLQ_ENV, raising=False)
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+
+        with caplog.at_level("ERROR"):
+            await callback(_envelope())
+
+        assert "metric_name=boundary_swallow_observed" in caplog.text
+        assert "metric_name=boundary_swallow_prevented" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_flag_on_dlq_success_logs_prevented(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        with caplog.at_level("ERROR"):
+            await callback(_envelope())
+
+        assert "metric_name=boundary_swallow_prevented dlq_routed=true" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_flag_on_dlq_failure_logs_observed_and_message_lost(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+        event_bus._publish_raw_to_dlq = AsyncMock(
+            side_effect=RuntimeError("dlq topic unreachable")
+        )
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        with caplog.at_level("ERROR"):
+            await callback(_envelope())
+
+        assert "metric_name=boundary_swallow_prevented" not in caplog.text
+        assert "metric_name=boundary_swallow_observed" in caplog.text
+        assert "message_lost=true" in caplog.text

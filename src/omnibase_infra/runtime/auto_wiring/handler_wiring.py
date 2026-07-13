@@ -1986,12 +1986,36 @@ def _make_event_bus_callback(
         """Dispatch + apply, retrying a bounded number of times on failure.
 
         A single attempt (no retry, no sleep) when the boundary-DLQ flag is
-        off -- byte-identical to the pre-OMN-14507 call shape. Only the
-        dispatch/apply step is retried: a deserialize failure above this
-        point is a content error (malformed JSON/schema) that retrying can
-        never fix, matching the sibling classifier's non-retryable treatment
-        of content errors.
+        off -- matches the pre-OMN-14507 call shape exactly (dispatch once,
+        apply once). Only the dispatch/apply step is retried: a deserialize
+        failure above this point is a content error (malformed JSON/schema)
+        that retrying can never fix.
+
+        Non-retryable classification (OMN-14507 review, gap G2): a Pydantic
+        ``ValidationError`` or ``ProtocolConfigurationError`` raised BY the
+        dispatch/apply step is itself a content/config error -- e.g. a
+        handler-level wire-model rejecting an unknown field under
+        ``extra="forbid"`` (the exact §7 death signal this boundary exists to
+        carry), or ``ProtocolConfigurationError`` from a missing dispatcher.
+        Both are deterministic: retrying burns the full backoff budget for a
+        guaranteed-identical failure. These break out of the loop on the
+        FIRST occurrence and go straight to the caller's DLQ/log handling,
+        matching the sibling classifier's (``EventBusSubcontractWiring``)
+        non-retryable treatment of content errors. Everything else (network
+        blips, transient infra errors) is retried up to
+        ``_BOUNDARY_DLQ_MAX_ATTEMPTS`` times.
+
+        Idempotency note (gap G4): a handler that performs a side effect
+        before raising will have that side effect repeated on each retry
+        attempt within a single delivery (in addition to Kafka's own
+        at-least-once redelivery). Handlers on this boundary are expected to
+        be idempotent already for that reason; this does not introduce a new
+        assumption, only a higher chance of exercising it within one message.
         """
+        from pydantic import ValidationError as PydanticValidationError
+
+        from omnibase_infra.errors import ProtocolConfigurationError
+
         attempts = _BOUNDARY_DLQ_MAX_ATTEMPTS if _boundary_dlq_enabled() else 1
         last_exc: Exception | None = None
         for attempt in range(attempts):
@@ -2002,6 +2026,11 @@ def _make_event_bus_callback(
                 if result_applier is not None and result is not None:
                     await result_applier.apply(result, envelope.correlation_id)
                 return
+            except (PydanticValidationError, ProtocolConfigurationError) as exc:
+                # Non-retryable: deterministic content/config error. No
+                # backoff, no further attempts -- see docstring gap G2.
+                last_exc = exc
+                break
             except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
                 last_exc = exc
                 if attempt < attempts - 1:
@@ -2029,18 +2058,34 @@ def _make_event_bus_callback(
     ) -> None:
         """Handle a handler exception that survived dispatch (OMN-14507).
 
-        flag OFF (default): identical to the pre-fix behavior -- one
-        ``logger.error`` -- plus a structured metric-shaped log line so the
-        swallow is at least observable (the DEFAULT-OFF, warn-first stage of
-        the rollout).
+        flag OFF (default): identical swallow-and-ACK semantics to the
+        pre-fix behavior -- one ``logger.error`` -- plus a structured
+        metric-shaped log line so the swallow is at least observable (the
+        DEFAULT-OFF, warn-first stage of the rollout).
 
         flag ON: additionally attempts to durably preserve the message in
         the topic's DLQ via the same duck-typed ``_publish_raw_to_dlq``
         contract ``EventBusSubcontractWiring._publish_to_dlq`` already
-        depends on. If no ``event_bus`` was supplied, or the bus does not
-        expose that method, this degrades to the same loud-log-only path
-        with an additional "DLQ unavailable" notice -- it never raises and
-        never blocks the boundary from returning.
+        depends on. If no ``event_bus`` was supplied, the bus does not
+        expose that method, or the DLQ publish itself raises, this degrades
+        to the same loud-log-only path -- it never raises and never blocks
+        the boundary from returning.
+
+        Honesty note (OMN-14507 review, gap G1): this is BEST-EFFORT DLQ
+        delivery, not true at-least-once. The offset always advances (no
+        nack/redelivery here) -- if the retry budget is exhausted AND the
+        DLQ publish itself fails, the message IS lost, just loudly instead of
+        silently. Strictly better than the pre-fix 100% swallow, but callers
+        must not read "flag ON" as a guarantee that no message can ever be
+        lost; that would require true nack/redelivery, deliberately deferred
+        to a follow-up (see G1 in the PR review).
+
+        Metric naming (gap G3): only the case that ACTUALLY prevented loss
+        (``dlq_routed=true``) is logged as ``boundary_swallow_prevented``. The
+        flag-off path and the DLQ-unavailable/DLQ-publish-failed paths are
+        logged as ``boundary_swallow_observed`` -- nothing was prevented
+        there, only observed; conflating the two would mislead an operator
+        alerting on the "prevented" counter into believing the message survived.
         """
         from omnibase_infra.utils.util_error_sanitization import (
             sanitize_error_message,
@@ -2064,8 +2109,9 @@ def _make_event_bus_callback(
         if publish_dlq_fn is None or not callable(publish_dlq_fn):
             # metric surface: a structured, greppable log line stands in for a
             # counter emission in this DRAFT (see PR body for the follow-up).
+            # Nothing was prevented here -- see gap G3 above.
             logger.error(
-                "metric_name=boundary_swallow_prevented dlq_routed=false "
+                "metric_name=boundary_swallow_observed dlq_routed=false "
                 "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
                 dlq_enabled,
                 topic,
@@ -2096,10 +2142,12 @@ def _make_event_bus_callback(
                 correlation_id,
             )
         except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the consumer
+            # Best-effort DLQ failed too -- the message IS lost here (gap G1).
+            # Loud, not silent, but not prevented -- see gap G3 above.
             logger.error(
-                "metric_name=boundary_swallow_prevented dlq_routed=false "
-                "dlq_enabled=%s dlq_publish_failed=true topic=%s error_type=%s "
-                "dlq_error=%s correlation_id=%s",
+                "metric_name=boundary_swallow_observed dlq_routed=false "
+                "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
+                "topic=%s error_type=%s dlq_error=%s correlation_id=%s",
                 dlq_enabled,
                 topic,
                 type(exc).__name__,
@@ -2828,11 +2876,16 @@ def _boundary_dlq_enabled() -> bool:
     compliance is proven): when unset/false, the boundary keeps its exact
     historical swallow-and-ACK behavior, with one addition -- a structured
     metric-shaped log line so the swallow is at least observable. When
-    enabled, an exception that survives the bounded retry is durably
-    preserved in the topic's DLQ (reusing the same
+    enabled, an exception that survives the bounded retry is routed to the
+    topic's DLQ on a BEST-EFFORT basis (reusing the same
     ``EventBusKafka._publish_raw_to_dlq`` / ``get_dlq_topic_for_original``
     machinery ``EventBusSubcontractWiring._publish_to_dlq`` already uses)
-    instead of vanishing.
+    instead of only being logged. This is NOT true at-least-once: the
+    consumer offset always advances regardless (no nack/redelivery), so if
+    the DLQ publish itself fails the message is still lost -- loudly
+    (``message_lost=true`` in the log) rather than silently. See
+    ``_route_swallowed_exception``'s docstring for the full gap (OMN-14507
+    review, G1).
     """
     return os.environ.get(_BOUNDARY_DLQ_ENV, "").lower() in (
         "1",
