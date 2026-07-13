@@ -95,6 +95,24 @@ def _clear_registry_cache() -> None:
     load_skill_registry.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_omnimarket_drift_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the omnimarket pre-flight drift guard for this file.
+
+    OMN-14531 wired ``--omni-home`` to the ``$OMNI_HOME`` envvar so the guard
+    actually fires in normal usage. Without this fixture, any test in this
+    file that invokes ``run_skill_by_name`` via ``CliRunner`` would become
+    non-hermetic: it would pass or fail depending on the ambient developer
+    shell's ``$OMNI_HOME`` and whether THIS test venv happens to have
+    omnimarket co-installed (the drift-guard-specific behavior belongs to
+    ``test_omnimarket_drift_guard.py``, not here). Delete the envvar and stub
+    the guard so command-wiring tests stay deterministic regardless of the
+    environment they run in.
+    """
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_skill, "check_omnimarket_drift", lambda **_: None)
+
+
 def test_registry_loads_and_validates() -> None:
     registry = load_skill_registry()
     assert isinstance(registry, ModelSkillMappingRegistry)

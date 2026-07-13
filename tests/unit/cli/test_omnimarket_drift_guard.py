@@ -149,12 +149,44 @@ def test_canonical_none_when_git_invocation_fails(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_drift_check_fails_open_when_not_installed() -> None:
-    with patch(
-        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
-        return_value=None,
+def test_drift_check_fails_open_when_not_installed_and_no_canonical_clone() -> None:
+    # Neither side determinable (e.g. CI runner, no $OMNI_HOME) -- fails open.
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=None,
+        ),
     ):
         check_omnimarket_drift()  # must not raise
+
+
+def test_drift_check_raises_when_not_installed_but_canonical_clone_present() -> None:
+    # OMN-14531: the actual aislop_sweep-blind regression -- omnimarket
+    # silently reverted from a git co-install to completely absent while a
+    # canonical $OMNI_HOME/omnimarket clone was reachable. This is a
+    # DETERMINABLE, actionable state and must now raise loudly instead of
+    # falling through the old unconditional "installed is None -> return"
+    # fail-open path.
+    with (
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+            return_value=None,
+        ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+            return_value=_FAKE_SHA_A,
+        ),
+    ):
+        with pytest.raises(OmnimarketDriftError) as exc_info:
+            check_omnimarket_drift()
+    message = str(exc_info.value)
+    assert "NOT INSTALLED" in message
+    assert _FAKE_SHA_A[:12] in message
+    assert "install-node-skill-package.sh --execute" in message
 
 
 def test_drift_check_fails_open_when_no_canonical_clone() -> None:

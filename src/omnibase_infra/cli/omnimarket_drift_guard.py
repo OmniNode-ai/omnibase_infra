@@ -26,12 +26,26 @@ from against the HEAD of the already-checked-out canonical clone at
 ``scripts/check-omnimarket-venv-drift.sh --repair``, meant to run on a
 session/cron tick, NOT inline on every dispatch).
 
-The check fails OPEN (no-op, never raises) whenever either side cannot be
-determined locally -- e.g. ``OMNI_HOME`` unset, no canonical clone present,
-or omnimarket not installed from git (PyPI/no install). This keeps the guard
-silent on CI runners and fresh machines where the ``$OMNI_HOME/omnimarket``
-convention does not apply, and it never blocks in an environment it cannot
-reason about.
+The check fails OPEN (no-op, never raises) **only** when the canonical local
+clone itself cannot be determined -- e.g. ``OMNI_HOME`` unset, or no
+``$OMNI_HOME/omnimarket`` clone present. That keeps the guard silent on CI
+runners and fresh machines where the ``$OMNI_HOME/omnimarket`` convention
+does not apply, and it never blocks in an environment it cannot reason
+about.
+
+On a machine that DOES have the canonical clone, "omnimarket is not
+installed from git" (absent entirely, or installed from PyPI/a non-VCS
+source) is now a DETERMINABLE, actionable state, not an indeterminate one --
+it now raises with a repair pointer instead of failing open (OMN-14531).
+Before this, ``installed_omnimarket_commit() is None`` unconditionally
+short-circuited to a silent no-op, so the exact regression this module
+exists to catch -- ``omnimarket`` silently reverting from a git co-install to
+completely absent -- fell through the guard undetected. The only symptom was
+a generic, unhelpful ``onex skill``/``onex run`` "Unknown node" error with no
+pointer back to this module or the repair command (the OMN-13829 ->
+OMN-14060 -> OMN-14531 recurrence: each time, the venv drifted from
+"installed" to "absent", not merely "stale", and the pre-flight guard's
+fail-open-on-None path let it pass silently).
 """
 
 from __future__ import annotations
@@ -113,22 +127,36 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
 
 
 def check_omnimarket_drift(omni_home: str | None = None) -> None:
-    """Fail fast if the current venv's omnimarket has drifted from the
-    canonical local clone.
+    """Fail fast if the current venv's omnimarket is missing or has drifted
+    from the canonical local clone.
 
-    Fails OPEN (returns silently) whenever either side cannot be determined
-    locally -- see the module docstring for why. Never performs network I/O.
+    Fails OPEN (returns silently) only when the canonical local clone cannot
+    be determined -- see the module docstring for why. Never performs
+    network I/O.
 
     Raises:
-        OmnimarketDriftError: installed commit does not match the canonical
-            local clone's HEAD commit.
+        OmnimarketDriftError: a canonical clone IS present locally, and
+            either (a) omnimarket is not installed from git in the current
+            interpreter at all (absent, or a non-VCS/PyPI install), or (b)
+            its installed commit does not match the canonical local clone's
+            HEAD commit.
     """
-    installed = installed_omnimarket_commit()
-    if installed is None:
-        return
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         return
+    installed = installed_omnimarket_commit()
+    if installed is None:
+        raise OmnimarketDriftError(
+            "omnimarket is NOT INSTALLED from git in this interpreter "
+            "(absent, or installed from PyPI/a non-VCS source), but a "
+            f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
+            f"{canonical[:12]}). 'onex skill'/'onex run' dispatch for "
+            "market-provided nodes (e.g. node_aislop_sweep) will fail with "
+            "'Unknown node'. Repair with: "
+            "scripts/install-node-skill-package.sh --execute (or "
+            "scripts/check-omnimarket-venv-drift.sh --repair). "
+            "See docs/runbooks/node-skill-package-install.md."
+        )
     if installed != canonical:
         raise OmnimarketDriftError(
             f"omnimarket venv is STALE: installed commit {installed[:12]} != "

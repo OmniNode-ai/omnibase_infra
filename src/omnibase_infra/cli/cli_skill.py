@@ -235,8 +235,16 @@ def _write_payload(
 @click.option(
     "--omni-home",
     type=click.Path(path_type=Path),
+    envvar="OMNI_HOME",
     default=None,
-    help="Canonical omni_home workspace root for the local omnimarket drift check.",
+    help=(
+        "Canonical omni_home workspace root for the local omnimarket drift "
+        "check. Defaults to the $OMNI_HOME environment variable (OMN-14531) "
+        "-- without this binding the drift guard silently receives "
+        "omni_home=None and never fires in normal usage, even when "
+        "$OMNI_HOME is exported, because callers never pass this flag "
+        "explicitly."
+    ),
 )
 @click.argument("skill_args", nargs=-1, type=click.UNPROCESSED)
 def run_skill_by_name(
