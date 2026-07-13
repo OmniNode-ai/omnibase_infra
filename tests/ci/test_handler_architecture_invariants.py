@@ -98,6 +98,7 @@ _KNOWN_ROUTING_STRATEGIES: frozenset[str] = frozenset(
         "operation_match",
         "payload_type_match",
         "handler_type_match",
+        "topic_match",
     }
 )
 
