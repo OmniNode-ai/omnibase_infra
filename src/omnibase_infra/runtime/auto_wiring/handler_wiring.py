@@ -1875,9 +1875,13 @@ def _make_stateful_dispatch_callback(
         table=table,
         pool_factory=pool_provider.create,
     )
-    from uuid import UUID, uuid5
+    from uuid import UUID, uuid4, uuid5
 
     publish_topic_map: dict[str, str] = dict(output_topic_map or {})
+    # OMN-14576: a per-process claim token so the boot-recovery sweep can CAS-claim
+    # a row before publishing it — under concurrent recovery (rolling redeploy /
+    # multi-pod) exactly ONE instance publishes a given batch.
+    _recovery_claim_token = str(uuid4())
     _recovery_ran = False
     _recovery_lock = asyncio.Lock()
 
@@ -2047,6 +2051,7 @@ def _make_stateful_dispatch_callback(
         """
         if event_bus is None or not hasattr(adapter, "select_recoverable_batches"):
             return
+        can_claim = hasattr(adapter, "claim_recoverable_row")
         for row in await adapter.select_recoverable_batches():
             row_cid = str(row["correlation_id"])
             if skip_cid is not None and row_cid == skip_cid:
@@ -2056,13 +2061,28 @@ def _make_stateful_dispatch_callback(
             )
             if not entries:
                 continue
+            row_version = int(cast("int", row["version"]))
+            # OMN-14576 single-publisher claim: CAS-claim the row BEFORE publishing
+            # so two processes racing boot recovery (rolling redeploy overlap /
+            # multi-pod) do not each re-publish the same batch. The claim bumps the
+            # version, so the finalize below CASes against version+1. A legacy
+            # adapter without claim support keeps the prior behavior (no claim).
+            if can_claim:
+                won = await adapter.claim_recoverable_row(
+                    row_cid,
+                    expected_version=row_version,
+                    claim_token=_recovery_claim_token,
+                )
+                if not won:
+                    continue  # another instance claimed this batch — skip
+                row_version += 1
             await _publish_outbox_batch(entries)
             await _finalize_outbox_row(
                 row_cid,
                 str(row["tenant_id"]),
                 str(row["state"]),
                 str(row["payload_json"]),
-                int(cast("int", row["version"])),
+                row_version,
             )
 
     async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:

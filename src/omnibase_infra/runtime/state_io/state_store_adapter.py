@@ -57,6 +57,15 @@ _TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _DEFAULT_STALE_TTL_SECONDS = 900
 _STALE_TTL_ENV = "DELEGATION_STALE_TTL_SECONDS"
 
+# OMN-14576: how long a recovery CLAIM is honored before a crashed claimer's row
+# becomes re-selectable. Short (default 120s, << the 900s stale-FAIL TTL) so a
+# claimer that dies mid-publish does not strand the batch for long — a later sweep
+# re-claims + re-publishes (at-least-once; the idempotent-consumer end-state
+# OMN-14577 collapses the duplicate). Distinct from the stale-FAIL give-up TTL: an
+# UNCLAIMED crashed row (recovery_claimed_at IS NULL) is still recovered promptly.
+_DEFAULT_RECOVERY_CLAIM_TTL_SECONDS = 120
+_RECOVERY_CLAIM_TTL_ENV = "DELEGATION_RECOVERY_CLAIM_TTL_SECONDS"
+
 # Cross-repo seam ContextVar. Value is unconditionally set (never left as the
 # default None) for the duration of a state_io-wired dispatch, keyed by the
 # envelope's correlation_id, to `(payload_json, version)` — `payload_json` is
@@ -318,6 +327,9 @@ class StateStoreAdapter:
         the re-publish on TTL would strand a seconds-old crashed row's batch
         until it aged past the stale TTL.
         """
+        claim_ttl = int(
+            os.environ.get(_RECOVERY_CLAIM_TTL_ENV, _DEFAULT_RECOVERY_CLAIM_TTL_SECONDS)
+        )
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
@@ -329,7 +341,15 @@ class StateStoreAdapter:
                     f"FROM {self._table} "
                     f"WHERE in_flight "
                     f"  AND pending_emissions IS NOT NULL "
-                    f"  AND jsonb_array_length(pending_emissions) > 0",
+                    f"  AND jsonb_array_length(pending_emissions) > 0 "
+                    # OMN-14576 single-publisher claim: skip a row another sweep is
+                    # actively re-publishing (a FRESH claim). An unclaimed row
+                    # (recovery_claimed_at IS NULL) or a stale claim (crashed
+                    # claimer, past the claim-TTL) is still selected — so a
+                    # genuinely-crashed row is recovered promptly (spec §4.1 E3).
+                    f"  AND (recovery_claimed_at IS NULL "
+                    f"       OR recovery_claimed_at < NOW() - make_interval(secs => $1))",
+                    claim_ttl,
                 )
         except asyncpg.PostgresError as exc:
             raise RepositoryExecutionError(
@@ -356,6 +376,57 @@ class StateStoreAdapter:
                 }
             )
         return recoverable
+
+    async def claim_recoverable_row(
+        self,
+        correlation_id: str,
+        *,
+        expected_version: int,
+        claim_token: str,
+    ) -> bool:
+        """CAS-claim an in-flight recoverable row for single-publisher re-publish.
+
+        OMN-14576. A version-gated UPDATE (the existing optimistic-concurrency
+        machinery — NOT a distributed lock): stamps ``recovery_claimed_by`` /
+        ``recovery_claimed_at`` and bumps ``version`` WHERE the row is still
+        recoverable AND not FRESHLY claimed by another sweep. Under concurrent
+        recovery sweeps (rolling redeploy / multi-pod), only the instance whose
+        CAS wins publishes a given batch; a losing sweep's UPDATE matches 0 rows
+        (the version already advanced, or a fresh claim exists) and skips.
+
+        Returns:
+            True iff this call won the claim (exactly one concurrent claimer does).
+        """
+        claim_ttl = int(
+            os.environ.get(_RECOVERY_CLAIM_TTL_ENV, _DEFAULT_RECOVERY_CLAIM_TTL_SECONDS)
+        )
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                result = await conn.execute(
+                    f"UPDATE {self._table} "  # noqa: S608 — table validated in __init__
+                    f"SET recovery_claimed_by = $1, recovery_claimed_at = NOW(), "
+                    f"    version = version + 1 "
+                    f"WHERE correlation_id = $2 AND version = $3 "
+                    f"  AND in_flight "
+                    f"  AND pending_emissions IS NOT NULL "
+                    f"  AND jsonb_array_length(pending_emissions) > 0 "
+                    f"  AND (recovery_claimed_at IS NULL "
+                    f"       OR recovery_claimed_at < NOW() - make_interval(secs => $4))",
+                    claim_token,
+                    correlation_id,
+                    expected_version,
+                    claim_ttl,
+                )
+        except asyncpg.PostgresError as exc:
+            raise RepositoryExecutionError(
+                f"state_io claim_recoverable_row failed: {type(exc).__name__}",
+                op_name="claim_recoverable_row",
+                table=self._table,
+                context=self._context("claim_recoverable_row", correlation_id),
+            ) from exc
+        # asyncpg execute() returns a tag string like "UPDATE 1" / "UPDATE 0".
+        return int(result.split()[-1]) == 1
 
     async def recover_stale_rows(self, ttl_seconds: int | None = None) -> int:
         """Fail closed on abandoned in-flight rows past their TTL.
