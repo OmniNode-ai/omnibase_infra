@@ -231,6 +231,68 @@ def test_new_shim_matches_legacy_gate(
     )
 
 
+def test_real_shim_resists_pythonpath_shadow_from_editable_install(
+    tmp_path: Path,
+) -> None:
+    """The real shim must resolve ``omnibase_infra`` from repo-local ``src/``, not
+    a decoy earlier on ``PYTHONPATH`` (OMN-14504).
+
+    Runs the REAL ``scripts/check_release_identity.py`` at its REAL repo path
+    (never copied) via ``sys.executable`` — this test suite runs under this
+    project's own ``uv``-managed venv, whose editable install already appended
+    the literal ``_SRC_DIR`` string to ``sys.path`` (via a plain-path ``.pth``
+    file processed at interpreter startup) before the shim's own bootstrap runs.
+    That is the exact condition that makes a ``not in sys.path`` guard a no-op:
+    if the bootstrap only inserted when NOT already present, it would never fire
+    here, and an adversarial ``PYTHONPATH`` entry (which lands ahead of
+    site-packages/``.pth`` entries) would win the import.
+
+    A copied shim (as ``test_real_shim_subprocess_fail_emits_two_guidance_lines``
+    above uses) cannot exercise this: a copy's self-located ``_SRC_DIR`` points
+    under a src-less temp dir, so ``_SRC_DIR.is_dir()`` is False and the guard
+    never reaches the ``sys.path`` check at all — a green there would be a
+    RED-on-absence vacuous pass, not proof of shadow resistance.
+    """
+    decoy_root = tmp_path / "decoy_pythonpath"
+    pkg_dir = decoy_root / "omnibase_infra" / "nodes" / "node_release_identity_compute"
+    pkg_dir.mkdir(parents=True)
+    (decoy_root / "omnibase_infra" / "__init__.py").write_text("")
+    (decoy_root / "omnibase_infra" / "nodes" / "__init__.py").write_text("")
+    (pkg_dir / "__init__.py").write_text(
+        "class ModelReleaseIdentityRequest:\n"
+        "    def __init__(self, **kw):\n"
+        "        self.__dict__.update(kw)\n"
+        "\n"
+        "\n"
+        "class HandlerReleaseIdentity:\n"
+        "    def handle(self, request):\n"
+        "        raise RuntimeError('CRID_DECOY_SENTINEL_9f3a')\n"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(_NEW_SHIM), "--changed-file", "docs/x.md"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env={**_CLEAN_ENV, "PYTHONPATH": str(decoy_root)},
+        check=False,
+    )
+
+    assert "CRID_DECOY_SENTINEL_9f3a" not in proc.stderr, (
+        "PYTHONPATH shadow won: the shim resolved the decoy omnibase_infra "
+        "package instead of the real repo-local src/.\n"
+        f"returncode={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+    # docs-only change is exempt regardless of this real repo's live version/tag
+    # state (Step 4 of HandlerReleaseIdentity.handle short-circuits on no
+    # packaged-source change) — deterministic exit 0 proves the REAL handler ran.
+    assert proc.returncode == 0, (
+        f"expected the real gate's exempt/docs-only decision (exit 0); got "
+        f"{proc.returncode}.\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+    assert proc.stdout.startswith("OK: no packaged src/** change"), proc.stdout
+
+
 def test_real_shim_subprocess_fail_emits_two_guidance_lines(tmp_path: Path) -> None:
     """End-to-end: the REAL shim file runs as a script and emits the FAIL guidance.
 

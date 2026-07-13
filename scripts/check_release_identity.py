@@ -59,8 +59,23 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _SRC_DIR = _REPO_ROOT / "src"
-if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(_SRC_DIR))
+if _SRC_DIR.is_dir():
+    # Force this repo's src/ to the FRONT of sys.path so it always wins the
+    # import race below, regardless of where it (or a shadow) already sits.
+    #
+    # A `str(_SRC_DIR) not in sys.path` guard is NOT sufficient (OMN-14504): when
+    # this script runs the way both real call sites invoke it — `uv run` inside
+    # this project's own venv — the venv's editable install already appended the
+    # IDENTICAL path string to sys.path via a plain-path `.pth` file during
+    # interpreter startup, near site-packages (i.e. AFTER any PYTHONPATH-derived
+    # entries). That makes the guard's `not in` check False, so the insert never
+    # ran and an ambient/adversarial PYTHONPATH entry ahead of it silently won
+    # the `omnibase_infra` import (reference_pythonpath_shadows_worktree_source).
+    # Removing prior occurrences before inserting at index 0 makes the promotion
+    # unconditional and idempotent instead of a no-op in the realistic case.
+    _src_str = str(_SRC_DIR)
+    sys.path[:] = [p for p in sys.path if p != _src_str]
+    sys.path.insert(0, _src_str)
 
 from omnibase_infra.nodes.node_release_identity_compute import (
     HandlerReleaseIdentity,
