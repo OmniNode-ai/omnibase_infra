@@ -1,0 +1,144 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-14135 — frozen burn-down baseline for the handler dispatch-ENTRYPOINT gate.
+#
+# INVARIANT (omnibase_infra.validators.handler_dispatch_entrypoint):
+#   a handler named in a contract's `handler_routing.handlers[]` MUST expose a
+#   callable `handle` or `handle_async`. Auto-wiring's _make_dispatch_callback binds
+#   one of them at wiring time; a handler exposing NEITHER is bound to
+#   `_missing_handle`, which raises ModelOnexError on EVERY dispatch — while the
+#   contract validates, the node boots, and CI stays green. Registration and routing
+#   do NOT imply executability.
+#
+# THIS IS A RATCHET, NOT AN EXEMPTION. It is SHRINK-ONLY:
+#   * a handler NOT listed here with no entrypoint  -> FAIL (no new instances, ever);
+#   * a handler listed here that GAINS an entrypoint -> FAIL until it is removed
+#     (a fixed handler still listed is STALE = FAIL, so the list cannot rot).
+#
+# Census 2026-07-13 at dev: 40 of 153 distinct contract-declared handlers
+# are entrypointless. HandlerA2ATask is deliberately NOT listed — it is the victim
+# that exposed this defect class (OMN-14489) and carries a real def-B entrypoint.
+#
+# Burn-down tracked under OMN-14135. End state is an empty list, at which point
+# `_missing_handle` becomes a wiring-time hard failure instead of a per-message one.
+known_entrypointless:
+  - contract: handler_architecture_validation
+    handler: HandlerArchitectureValidation
+    module: omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation
+  - contract: handler_ledger_projection
+    handler: HandlerLedgerProjection
+    module: omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerContractFileWatcher
+    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerManualTrigger
+    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerPRWebhookIngestion
+    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion
+  - contract: node_artifact_reconciliation_orchestrator
+    handler: HandlerPlanToPRComment
+    module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment
+  - contract: node_artifact_reconciliation_orchestrator
+    handler: HandlerPlanToYaml
+    module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_yaml
+  - contract: node_auth_gate_compute
+    handler: HandlerAuthGate
+    module: omnibase_infra.nodes.node_auth_gate_compute.handlers.handler_auth_gate
+  - contract: node_broker_disk_watermark_compute
+    handler: HandlerBrokerDiskWatermark
+    module: omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark
+  - contract: node_chain_verify_reducer
+    handler: HandlerChainVerify
+    module: omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify
+  - contract: node_checkpoint_effect
+    handler: HandlerCheckpointList
+    module: omnibase_infra.nodes.node_checkpoint_effect.handlers.handler_checkpoint_list
+  - contract: node_checkpoint_effect
+    handler: HandlerCheckpointRead
+    module: omnibase_infra.nodes.node_checkpoint_effect.handlers.handler_checkpoint_read
+  - contract: node_checkpoint_effect
+    handler: HandlerCheckpointWrite
+    module: omnibase_infra.nodes.node_checkpoint_effect.handlers.handler_checkpoint_write
+  - contract: node_checkpoint_validate_compute
+    handler: HandlerCheckpointValidate
+    module: omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate
+  - contract: node_contract_validate_compute
+    handler: HandlerContractValidate
+    module: omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate
+  - contract: node_impact_analyzer_compute
+    handler: HandlerImpactAnalysis
+    module: omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis
+  - contract: node_invariant_evaluate_compute
+    handler: HandlerInvariantEvaluate
+    module: omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate
+  - contract: node_ledger_projection_compute
+    handler: HandlerLedgerProjection
+    module: omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection
+  - contract: node_llm_embedding_effect
+    handler: HandlerEmbeddingOpenaiCompatible
+    module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible
+  - contract: node_llm_inference_effect
+    handler: HandlerLlmCliSubprocess
+    module: omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess
+  - contract: node_model_health_effect
+    handler: HandlerProbeHealth
+    module: omnibase_infra.nodes.node_model_health_effect.handlers.handler_probe_health
+  - contract: node_model_router_compute
+    handler: HandlerScoreModels
+    module: omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models
+  - contract: node_registration_storage_effect
+    handler: HandlerRegistrationStorageMock
+    module: omnibase_infra.handlers.registration_storage.handler_registration_storage_mock
+  - contract: node_registration_storage_effect
+    handler: HandlerRegistrationStoragePostgres
+    module: omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres
+  - contract: node_reward_binder_effect
+    handler: HandlerRewardBinder
+    module: omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder
+  - contract: node_routing_orchestrator
+    handler: HandlerHealthComplete
+    module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_health_complete
+  - contract: node_routing_orchestrator
+    handler: HandlerRoutingInitiate
+    module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_routing_initiate
+  - contract: node_routing_orchestrator
+    handler: HandlerScoringComplete
+    module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_scoring_complete
+  - contract: node_routing_score_reducer
+    handler: HandlerUpdateScores
+    module: omnibase_infra.nodes.node_routing_score_reducer.handlers.handler_update_scores
+  - contract: node_runtime_source_attestor_effect
+    handler: HandlerSourceAttestation
+    module: omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation
+  - contract: node_setup_infisical_effect
+    handler: HandlerInfisicalFullSetup
+    module: omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup
+  - contract: node_setup_local_provision_effect
+    handler: HandlerLocalProvision
+    module: omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_provision
+  - contract: node_setup_local_provision_effect
+    handler: HandlerLocalStatus
+    module: omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_status
+  - contract: node_setup_local_provision_effect
+    handler: HandlerLocalTeardown
+    module: omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_teardown
+  - contract: node_setup_preflight_effect
+    handler: HandlerPreflightCheck
+    module: omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check
+  - contract: node_setup_validate_effect
+    handler: HandlerServiceValidate
+    module: omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate
+  - contract: node_topic_migration_executor_effect
+    handler: HandlerTopicMigrationExecutor
+    module: omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor
+  - contract: node_topic_migration_projection
+    handler: HandlerTopicMigrationProjection
+    module: omnibase_infra.nodes.node_topic_migration_projection.handlers.handler_topic_migration_projection
+  - contract: node_update_plan_reducer
+    handler: HandlerCreatePlan
+    module: omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan
+  - contract: node_validation_ledger_projection_compute
+    handler: HandlerValidationLedgerProjection
+    module: omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection
