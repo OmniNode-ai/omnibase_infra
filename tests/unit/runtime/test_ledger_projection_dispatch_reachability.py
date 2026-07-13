@@ -194,7 +194,7 @@ def test_every_raw_projection_contract_has_a_kernel_result_applier() -> None:
     # effect path as-is: its handler returns a plain dict rather than a
     # ModelIntent, and its write side is PostgresValidationLedgerRepository
     # (asyncpg pool) rather than a HandlerDb-composing write-effect node -- so it
-    # needs its own intent payload + intent effect. Tracked in OMN-14517.
+    # needs its own intent payload + intent effect. Tracked in OMN-14524.
     known_unwired = {"node_validation_ledger_projection_compute"}
 
     nodes_root = (
