@@ -1394,6 +1394,21 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4": {
+      "category": "command",
+      "contract_name": "node_validation_ledger_write_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4",
+      "handler_module": "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append",
+      "handler_name": "HandlerValidationLedgerAppend",
+      "message_types": [
+        "omnibase-infra.validation-ledger-append",
+        "onex.cmd.omnibase-infra.validation-ledger-append.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan": {
       "category": "event",
       "contract_name": "node_validation_orchestrator",
@@ -1468,15 +1483,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 7,
-        "omnibase_infra": 111,
+        "omnibase_infra": 112,
         "onex-change-control": 4
       },
-      "contracts_discovered": 122,
+      "contracts_discovered": 123,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 90,
-      "probe_count": 331,
-      "registered_dispatchers": 85,
-      "registered_routes": 101,
+      "distinct_subscribe_topics": 91,
+      "probe_count": 333,
+      "registered_dispatchers": 86,
+      "registered_routes": 102,
       "type_scoped_dispatchers": 42
     },
     "duplicate_winners": [],
@@ -1517,7 +1532,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-13T02:12:01.781985+00:00",
+    "generated_at_utc": "2026-07-13T13:32:28.653286+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.7",
       "omnibase-infra": "0.38.4",
@@ -1863,6 +1878,23 @@
         "status": "success"
       },
       "topic": "onex.cmd.omnibase-infra.topic-migration-execute.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.validation-ledger-append.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.validation-ledger-append",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.validation-ledger-append",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.validation-ledger-append.v1"
     },
     "P1a::onex.cmd.omnibase-infra.vector-store-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -3285,6 +3317,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.topic-migration-execute.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.validation-ledger-append.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.validation-ledger-append.v1"
     },
     "P1b::onex.cmd.omnibase-infra.vector-store-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -8149,6 +8196,16 @@
       "route_id": "route.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc.onex_evt_validation_cross_repo_violations_batch_v1",
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1",
       "topic_pattern": "*.evt.validation.cross-repo-violations-batch.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_validation_ledger_write_effect",
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4",
+      "handler_id": "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4",
+      "message_category": "command",
+      "route_id": "route.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4.onex_cmd_omnibase_infra_validation_ledger_append_v1",
+      "topic": "onex.cmd.omnibase-infra.validation-ledger-append.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.validation-ledger-append.*",
       "type_scoped": false
     },
     {
