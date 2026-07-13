@@ -2213,7 +2213,7 @@ def _make_event_bus_callback(
                     return
                 envelope = message
             if envelope.correlation_id is not None:
-                correlation_id = cast("UUID", envelope.correlation_id)
+                correlation_id = envelope.correlation_id
             await _dispatch_with_bounded_retry(envelope)
         except Exception as exc:  # noqa: BLE001 — boundary: never unsubscribe; route to _route_swallowed_exception
             await _route_swallowed_exception(exc, message, correlation_id)
