@@ -40,6 +40,13 @@ APPROVED_INFIX_PATTERNS=(
     # OMN-14208: state_io's stale-in-flight-row TTL (DELEGATION_STALE_TTL_SECONDS)
     # is a narrowly-scoped, single-purpose module dedicated to this seam.
     "/runtime/state_io/"
+    # OMN-14597: model_postgres_pool_config.py's from_env() already reads
+    # POSTGRES_POOL_MIN_SIZE/MAX_SIZE via os.getenv() pre-gate, in the exact
+    # same method. POSTGRES_SSL_MODE/POSTGRES_SSL_CA_FILE (needed so the
+    # runtime can reach RDS, which enforces TLS) are the same class of
+    # env-var read for the same factory, not a new pattern introduced
+    # elsewhere.
+    "/runtime/models/model_postgres_pool_config.py"
 )
 
 ENV_READ_PATTERNS='os\.environ\[|os\.environ\.get|os\.getenv|from os import environ|from os import getenv'

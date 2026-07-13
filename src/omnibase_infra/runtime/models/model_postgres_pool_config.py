@@ -16,6 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
+# Valid asyncpg/libpq sslmode values. "" is the backward-compatible sentinel
+# meaning "no explicit ssl kwarg" — asyncpg falls back to its own default
+# negotiation (opportunistic TLS for TCP addresses, no certificate
+# verification), matching pre-OMN-14597 behavior exactly.
+_VALID_SSL_MODES = frozenset(
+    {"", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+)
+
 
 class ModelPostgresPoolConfig(BaseModel):
     """PostgreSQL connection pool configuration.
@@ -46,6 +54,26 @@ class ModelPostgresPoolConfig(BaseModel):
     )
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")
+    ssl_mode: str = Field(
+        default="",
+        description=(
+            "PostgreSQL SSL negotiation mode threaded through to asyncpg's "
+            "`ssl` kwarg. Empty string (default) omits the kwarg entirely, "
+            "preserving asyncpg's own default negotiation — backward "
+            "compatible with local Docker/dev. One of: '', 'disable', "
+            "'allow', 'prefer', 'require', 'verify-ca', 'verify-full'. "
+            "RDS deployments (which enforce SSL) should use 'verify-full' "
+            "with ssl_ca_file set to the RDS CA bundle."
+        ),
+    )
+    ssl_ca_file: str = Field(
+        default="",
+        description=(
+            "Path to a PEM CA bundle used to verify the server certificate. "
+            "Required when ssl_mode is 'verify-ca' or 'verify-full'; ignored "
+            "otherwise."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_pool_size_bounds(self) -> ModelPostgresPoolConfig:
@@ -61,6 +89,30 @@ class ModelPostgresPoolConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _check_ssl_config(self) -> ModelPostgresPoolConfig:
+        """Validate ssl_mode is a known value and ssl_ca_file is set when required.
+
+        Raises:
+            ValueError: If ssl_mode is not a recognized value, or if ssl_mode
+                is 'verify-ca'/'verify-full' without an ssl_ca_file (fail-fast
+                rather than silently falling back to asyncpg's own CA
+                discovery, e.g. ``~/.postgresql/root.crt``).
+        """
+        if self.ssl_mode not in _VALID_SSL_MODES:
+            msg = (
+                f"ssl_mode must be one of {sorted(_VALID_SSL_MODES)}, got "
+                f"{self.ssl_mode!r}"
+            )
+            raise ValueError(msg)
+        if self.ssl_mode in ("verify-ca", "verify-full") and not self.ssl_ca_file:
+            msg = (
+                f"ssl_ca_file is required when ssl_mode={self.ssl_mode!r} "
+                "(certificate verification needs an explicit CA bundle path)"
+            )
+            raise ValueError(msg)
+        return self
+
     @classmethod
     def from_env(
         cls,
@@ -70,6 +122,9 @@ class ModelPostgresPoolConfig(BaseModel):
 
         Parses the DSN to extract host, port, user, password, and database.
         Pool-size overrides are still read from ``POSTGRES_POOL_*`` env vars.
+        SSL is read from ``POSTGRES_SSL_MODE`` / ``POSTGRES_SSL_CA_FILE``;
+        both default to empty string (no SSL override — see ``ssl_mode``
+        field docs), so this is opt-in and does not affect existing deploys.
 
         Args:
             db_url_var: Name of the environment variable holding the DSN.
@@ -107,6 +162,8 @@ class ModelPostgresPoolConfig(BaseModel):
             db_url,
             min_size=min_size,
             max_size=max_size,
+            ssl_mode=os.getenv("POSTGRES_SSL_MODE", "").strip(),
+            ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE", "").strip(),
         )
 
     @staticmethod
@@ -164,6 +221,8 @@ class ModelPostgresPoolConfig(BaseModel):
         *,
         min_size: int = 2,
         max_size: int = 10,
+        ssl_mode: str = "",
+        ssl_ca_file: str = "",
     ) -> ModelPostgresPoolConfig:
         """Create config by parsing a PostgreSQL DSN string.
 
@@ -179,6 +238,12 @@ class ModelPostgresPoolConfig(BaseModel):
                 (``postgresql://user:pass@host:port/database``).
             min_size: Minimum pool size.
             max_size: Maximum pool size.
+            ssl_mode: SSL negotiation mode (see ``ssl_mode`` field docs).
+                Defaults to "" (no override — the DSN's own ``sslmode``
+                query param, if any, is NOT read from here; see the
+                query-parameter warning below).
+            ssl_ca_file: Path to a CA bundle; required when ssl_mode is
+                'verify-ca' or 'verify-full'.
 
         Raises:
             ValueError: If the DSN is malformed or missing required parts.
@@ -223,6 +288,8 @@ class ModelPostgresPoolConfig(BaseModel):
             database=database,
             min_size=min_size,
             max_size=max_size,
+            ssl_mode=ssl_mode,
+            ssl_ca_file=ssl_ca_file,
         )
 
 
