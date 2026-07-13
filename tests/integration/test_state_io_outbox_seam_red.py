@@ -1112,6 +1112,36 @@ def test_has_bus_wrapper_publishes_once_and_finalizes_no_double_publish() -> Non
 
 
 @pytest.mark.integration
+def test_has_bus_wrapper_publish_failure_propagates_for_redelivery() -> None:
+    """The production has-bus publish-from-row path must not ACK broker failure."""
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus(fail_at_index=1)  # event 0 lands, event 1 is rejected
+    handler = _FanOutHandler(_fanout_batch())
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+    applier = _make_applier(bus)
+    on_message = _bus_callback(callback, applier)
+
+    raised: BaseException | None = None
+
+    async def _run() -> None:
+        nonlocal raised
+        try:
+            await on_message(_input_envelope())
+        except BaseException as exc:  # noqa: BLE001 - asserting on propagation
+            raised = exc
+
+    asyncio.run(_run())
+
+    assert len(bus.published) == 1, "precondition: the has-bus batch failed mid-way"
+    assert raised is not None, (
+        "SWALLOWED. The has-bus publish-from-row path raised a broker failure, "
+        "but the auto-wired boundary ACKed it instead of redelivering."
+    )
+    assert "broker rejected publish" in str(raised)
+
+
+@pytest.mark.integration
 def test_non_outbox_boundary_still_swallows_unchanged() -> None:
     """Decision 3 regression guard: a NON-outbox contract is UNCHANGED.
 

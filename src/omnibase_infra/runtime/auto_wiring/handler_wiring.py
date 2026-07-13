@@ -2285,7 +2285,12 @@ def _make_stateful_dispatch_callback(
         # Return None so the external applier does NOT re-publish the same batch
         # (no double-publish — OMN-14403 §7 decision 1).
         if entries and event_bus is not None:
-            await _publish_outbox_batch(entries)
+            try:
+                await _publish_outbox_batch(entries)
+            except Exception as exc:
+                raise BoundaryPublishError(
+                    "handler_wiring: state_io outbox publish-from-row failed"
+                ) from exc
             await _finalize_outbox_row(
                 cid,
                 metadata.tenant_id,
