@@ -25,6 +25,9 @@ Related:
 from omnibase_infra.runtime.intent_effects.intent_effect_build_loop_append import (
     IntentEffectBuildLoopAppend,
 )
+from omnibase_infra.runtime.intent_effects.intent_effect_ledger_append import (
+    IntentEffectLedgerAppend,
+)
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
     IntentEffectPostgresUpdate,
 )
@@ -37,6 +40,7 @@ from omnibase_infra.runtime.intent_effects.intent_effect_pr_state_upsert import 
 
 __all__: list[str] = [
     "IntentEffectBuildLoopAppend",
+    "IntentEffectLedgerAppend",
     "IntentEffectPostgresUpdate",
     "IntentEffectPostgresUpsert",
     "IntentEffectPrStateUpsert",

@@ -2,19 +2,31 @@
 # SPDX-License-Identifier: MIT
 
 # Copyright (c) 2026 OmniNode Team
-"""Integration tests for Event Ledger end-to-end pipeline.
+"""Integration tests for the Event Ledger projection -> append -> Postgres path.
 
-These tests verify the complete flow:
-1. HandlerLedgerProjection transforms ModelEventMessage to ModelIntent
-2. Extract ModelPayloadLedgerAppend from the intent
-3. HandlerLedgerAppend persists to PostgreSQL
-4. Verify data appears correctly in event_ledger table
+SCOPE — read this before trusting a green run (OMN-14516):
+    These tests drive the handler seam against a REAL PostgreSQL instance:
 
-This validates the full pipeline without requiring Kafka infrastructure.
+    1. ``HandlerLedgerProjection.handle(envelope)`` -- the actual auto-wiring
+       dispatch entrypoint, invoked with the DICT-shaped envelope the live
+       dispatch path delivers (NOT ``project()``, and NOT an object envelope).
+    2. ``IntentEffectLedgerAppend`` -- the real intent effect the kernel
+       registers, which is what carries the emitted intent to the write effect.
+    3. ``HandlerLedgerAppend`` persists to PostgreSQL.
+    4. Readback from the ``event_ledger`` table by its natural key.
 
-Note:
-    HandlerLedgerProjection.project() is synchronous (pure compute) - no await needed.
-    ModelEventMessage.headers is required - use empty ModelEventHeaders for headerless events.
+    What these tests do NOT cover: Kafka, and the auto-wiring decision that
+    determines whether this node is subscribed AT ALL. That gap is exactly how
+    ``event_ledger`` sat at ZERO rows in every lane while this file was green --
+    the previous version called ``project()`` directly and then hand-carried the
+    payload into ``append()``, manually performing the two hops the runtime was
+    structurally unable to perform. It was a surrogate for the pipeline, not the
+    pipeline.
+
+    Dispatch reachability (does this contract actually WIRE and get a consumer?)
+    is covered by
+    ``tests/unit/runtime/test_ledger_projection_dispatch_reachability.py``.
+    Neither file substitutes for the EFFECT-side readback on a live lane.
 """
 
 from __future__ import annotations
@@ -90,22 +102,29 @@ class TestLedgerE2EPipeline:
             offset=str(unique_offset),
         )
 
-        # Step 1: Projection handler transforms message to intent
-        # Note: project() is synchronous (pure compute) - no await
-        intent = projection_handler.project(message)
+        # Step 1: dispatch entrypoint. handle() -- not project() -- is what
+        # auto-wiring actually invokes, and it receives a DICT envelope on the
+        # live path. Calling project() here would bypass the exact method whose
+        # absence kept this table empty.
+        from omnibase_infra.runtime.intent_effects import IntentEffectLedgerAppend
+
+        output = await projection_handler.handle({"payload": message.model_dump()})
+        intent = output.result
 
         assert intent.intent_type
         assert intent.payload.intent_type == "ledger.append"
 
-        # Step 2: Append handler persists to database
-        result = await ledger_append_handler.append(intent.payload)
+        # Step 2: the REAL intent effect the kernel registers carries the intent
+        # to the write effect. Hand-carrying intent.payload into append() here is
+        # what made the old version of this test a surrogate.
+        await IntentEffectLedgerAppend(ledger_append_handler).execute(
+            intent.payload,
+            correlation_id=correlation_id,
+        )
 
-        assert result.success is True
-        assert result.duplicate is False
-        assert result.ledger_entry_id is not None
-        cleanup_event_ledger.append(result.ledger_entry_id)
-
-        # Step 3: Verify data in database
+        # Step 3: EFFECT-side readback by the row's NATURAL key
+        # (topic, partition, kafka_offset) -- not by an id handed back to us by
+        # the code under test. If the row is not there, the pipeline did not run.
         async with postgres_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -122,12 +141,18 @@ class TestLedgerE2EPipeline:
                     onex_headers,
                     ledger_written_at
                 FROM event_ledger
-                WHERE ledger_entry_id = $1
+                WHERE topic = $1 AND partition = $2 AND kafka_offset = $3
                 """,
-                result.ledger_entry_id,
+                "onex.evt.platform.node-registration.v1",
+                0,
+                unique_offset,
             )
 
-        assert row is not None
+        assert row is not None, (
+            "event_ledger has no row for this event: the projection -> intent "
+            "effect -> append path did not persist."
+        )
+        cleanup_event_ledger.append(row["ledger_entry_id"])
         assert row["topic"] == "onex.evt.platform.node-registration.v1"
         assert row["partition"] == 0
         assert row["kafka_offset"] == unique_offset

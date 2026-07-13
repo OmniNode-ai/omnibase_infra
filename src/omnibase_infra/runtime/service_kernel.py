@@ -2283,6 +2283,58 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+        # ledger.append intents (from node_ledger_projection_compute) route to
+        # HandlerLedgerAppend exactly as build_loop.append routes to
+        # HandlerBuildLoopAppend above. This registration is what makes the
+        # audit ledger live at all: node_ledger_projection_compute declares
+        # consumer_purpose="audit", so handler_wiring treats it as a raw event
+        # projection contract and SKIPS it outright unless a result applier is
+        # registered here under its contract name -- a contract that emits
+        # intents with no effect path would otherwise consume Kafka offsets and
+        # silently drop every intent. Missing this entry is why event_ledger held
+        # ZERO rows since the node shipped, while its 7 subscribed topics carried
+        # live traffic and consumer group onex-ledger-projection-compute never
+        # existed (OMN-14516).
+        if event_bus is not None and build_loop_dsn:
+            from omnibase_infra.nodes.node_ledger_write_effect.handlers import (
+                HandlerLedgerAppend,
+            )
+            from omnibase_infra.runtime.intent_effects import (
+                IntentEffectLedgerAppend,
+            )
+            from omnibase_infra.runtime.service_intent_executor import (
+                IntentExecutor,
+            )
+
+            ledger_append_handler = HandlerLedgerAppend(
+                container,
+                build_loop_dsn,
+            )
+            await ledger_append_handler.initialize({})
+            ledger_intent_executor = IntentExecutor(container=container)
+            ledger_intent_executor.register_handler(
+                "ledger.append",
+                IntentEffectLedgerAppend(ledger_append_handler),
+            )
+            auto_wiring_result_appliers["node_ledger_projection_compute"] = (
+                DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=config.output_topic,
+                    intent_executor=ledger_intent_executor,
+                )
+            )
+            logger.info(
+                "Ledger raw projection result applier registered "
+                "(contract=node_ledger_projection_compute, correlation_id=%s)",
+                correlation_id,
+            )
+        elif event_bus is not None:
+            logger.warning(
+                "Ledger raw projection result applier not registered: "
+                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
+                correlation_id,
+            )
+
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
         # plugin registry loop. It is always activated first.
