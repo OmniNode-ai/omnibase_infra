@@ -23,9 +23,18 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from omnibase_infra.cli import cli_node
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract, run_node_by_name
+from omnibase_infra.cli.omnimarket_drift_guard import check_omnimarket_drift
 
 pytestmark = pytest.mark.unit
+
+_FAKE_SHA = "cccccccccccccccccccccccccccccccccccccc"
+
+# The omnimarket drift guard is neutralized for this whole directory by the
+# autouse fixture in tests/unit/cli/conftest.py (OMN-14560, mirroring
+# OMN-14531's cli_skill.py fix). test_drift_guard_fires_before_unknown_node_lookup
+# below restores the real guard for its own scope.
 
 
 def _first_resolvable_packaged_node_name() -> str | None:
@@ -239,3 +248,54 @@ def test_input_file_not_found_surfaces_cli_error(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "does_not_exist.json" in result.output
+
+
+def test_drift_guard_fires_before_unknown_node_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-14560: ``onex node``/``onex run`` now call the same drift guard
+    ``onex skill`` was fixed to call under OMN-14531.
+
+    Before this fix, ``run_node_by_name`` had ZERO drift-guard wiring: a
+    machine with a canonical ``$OMNI_HOME/omnimarket`` clone but omnimarket
+    absent/non-VCS in the venv fell straight through to
+    ``_resolve_packaged_contract`` and reported a generic, unhelpful
+    "Unknown node" — with no pointer back to the actual cause or the repair
+    command. This drives the exact OMN-14531 regression shape (canonical
+    clone present, omnimarket not installed from git) through the CLI and
+    asserts the loud ``OmnimarketDriftError`` message fires FIRST, instead
+    of node resolution ever running.
+
+    Fails under the pre-fix ``cli_node.py`` (no ``check_omnimarket_drift``
+    import, no ``--omni-home`` option, no call site -- the drift patches
+    below have nothing to attach to and the CLI reports "Unknown node"
+    unconditionally); passes once the guard is wired.
+    """
+    # Restore the real guard for this test only -- the autouse fixture above
+    # neutralizes it for every other test in this file so they stay hermetic
+    # against the ambient dev environment.
+    monkeypatch.setattr(cli_node, "check_omnimarket_drift", check_omnimarket_drift)
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
+        lambda omni_home=None: _FAKE_SHA,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_node_by_name,
+        ["definitely_not_a_real_node", "--omni-home", "/fake/omni_home"],
+    )
+
+    assert result.exit_code != 0
+    combined = result.output + str(result.exception or "")
+    assert "NOT INSTALLED" in combined
+    assert _FAKE_SHA[:12] in combined
+    assert "install-node-skill-package.sh --execute" in combined
+    # The guard's own message mentions "Unknown node" as explanatory text
+    # (describing what WOULD happen downstream); assert the CLI's actual
+    # "Unknown node '<name>'." formatted error was never reached/raised.
+    assert "Unknown node 'definitely_not_a_real_node'" not in combined
