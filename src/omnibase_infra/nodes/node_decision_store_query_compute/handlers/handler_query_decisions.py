@@ -163,11 +163,17 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
         "list[object]", json.loads(_sup) if isinstance(_sup, str) else _sup
     )
 
+    # NOTE (OMN-14529): "title" and "epic_id" are real decision_store columns
+    # (see migration 046) but ModelDecisionStoreEntry (omnibase_core) declares
+    # neither field and uses extra="forbid" — passing them here raised a
+    # ValidationError on every non-empty result set, so this handler had never
+    # successfully returned a queried row. Dropped until omnibase_core grows
+    # the fields; tracked as a follow-up, not fixed here to avoid a
+    # cross-repo model change inside a routing-wiring ticket.
     return ModelDecisionStoreEntry.model_validate(
         {
             "decision_id": row["decision_id"],
             "correlation_id": row["correlation_id"],
-            "title": row["title"],
             "decision_type": row["decision_type"],
             "status": row["status"],
             "scope_domain": row["scope_domain"],
@@ -176,7 +182,6 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
             "rationale": row["rationale"],
             "alternatives": alternatives_list,
             "tags": tuple(tags_list),
-            "epic_id": row["epic_id"],
             "supersedes": tuple(UUID(str(s)) for s in supersedes_list),
             "superseded_by": row["superseded_by"],
             "source": row["source"],

@@ -595,3 +595,21 @@ skills:
       - {name: scope, payload_field: scope, arg_type: string}
       - {name: git-ref, payload_field: git_ref, arg_type: string}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # OMN-14529: `decision_store` was documented in SKILL.md with zero backing
+  # code — no entry here, no wired dispatch route, decision_store had 0 rows
+  # its entire existence. node_decision_store_orchestrator (omnimarket) exists
+  # and routes record/query/check_conflicts, but its input model
+  # (ModelDecisionStoreRequest) carries nested objects (`entry`,
+  # `query_filter`) that the flat string/integer/boolean/string_list arg
+  # types cannot construct — hence the `json` arg_type (see
+  # enum_skill_arg_type.py). Callers pass `--entry` / `--query-filter` as a
+  # JSON-encoded object matching ModelDecisionEntry / ModelDecisionQueryFilter.
+  - skill_name: decision_store
+    node_name: node_decision_store_orchestrator
+    result_model: omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request.ModelDecisionStoreResult
+    args:
+      - {name: action, payload_field: action, arg_type: string, required: true}
+      - {name: entry, payload_field: entry, arg_type: json}
+      - {name: query-filter, payload_field: query_filter, arg_type: json}
+      - {name: conflict-scope, payload_field: conflict_scope, arg_type: string}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}

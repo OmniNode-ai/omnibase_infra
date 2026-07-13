@@ -1299,3 +1299,96 @@ def test_pr_state_payload_validates_against_request_model() -> None:
     request = ModelGithubGatewayRequest.model_validate(payload)
     assert request.operation.value == "open_prs_list"
     assert request.pr_number is None
+
+
+def test_json_arg_type_coerces_object() -> None:
+    """OMN-14529: the ``json`` arg_type parses a raw CLI string into a dict.
+
+    Generic escape hatch for a backing node's input model with a nested
+    field — decision_store is the first (and, at introduction, only) user.
+    """
+    spec = ModelSkillArgSpec(
+        name="entry",
+        payload_field="entry",
+        arg_type=EnumSkillArgType.JSON,
+    )
+    coerced = cli_skill._coerce_value(spec, '{"domain": "api", "limit": 3}')
+    assert coerced == {"domain": "api", "limit": 3}
+
+
+def test_json_arg_type_rejects_invalid_json() -> None:
+    spec = ModelSkillArgSpec(
+        name="entry",
+        payload_field="entry",
+        arg_type=EnumSkillArgType.JSON,
+    )
+    with pytest.raises(Exception, match="expects valid JSON"):
+        cli_skill._coerce_value(spec, "{not valid json")
+
+
+def test_decision_store_registered_and_wired() -> None:
+    """OMN-14529: decision_store had a SKILL.md but zero backing dispatch —
+    no skill_mapping.yaml entry, so `onex skill decision_store` returned
+    "Unknown skill" and the skill had recorded 0 rows in its entire
+    existence. This pins the mapping itself.
+    """
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+    assert decision_store.node_name == "node_decision_store_orchestrator"
+
+
+def test_decision_store_record_payload_validates_against_request_model() -> None:
+    """The decision_store `record` mapping builds a payload the orchestrator's
+    ModelDecisionStoreRequest accepts, including the nested `entry` object
+    built from the `json` arg_type (OMN-14529).
+    """
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
+    )
+    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
+
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+
+    entry_json = json.dumps(
+        {
+            "decision_type": "TECH_STACK_CHOICE",
+            "domain": "api",
+            "layer": "architecture",
+            "summary": "Use Kafka for all inter-service transport",
+            "rationale": "Replay, ordering, and backpressure guarantees.",
+        }
+    )
+    payload = _parse_skill_args(
+        decision_store, ("--action", "record", "--entry", entry_json)
+    )
+    request = ModelDecisionStoreRequest.model_validate(payload)
+    assert request.action.value == "record"
+    assert request.entry is not None
+    assert request.entry.domain == "api"
+    assert request.dry_run is False
+
+
+def test_decision_store_query_payload_validates_against_request_model() -> None:
+    """The decision_store `query` mapping builds a valid nested query_filter."""
+    request_module = pytest.importorskip(
+        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
+    )
+    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
+
+    registry = load_skill_registry()
+    decision_store = registry.get("decision_store")
+    assert decision_store is not None
+
+    query_filter_json = json.dumps({"domain": "api", "limit": 5})
+    payload = _parse_skill_args(
+        decision_store,
+        ("--action", "query", "--query-filter", query_filter_json),
+    )
+    request = ModelDecisionStoreRequest.model_validate(payload)
+    assert request.action.value == "query"
+    assert request.query_filter is not None
+    assert request.query_filter.domain == "api"
+    assert request.query_filter.limit == 5

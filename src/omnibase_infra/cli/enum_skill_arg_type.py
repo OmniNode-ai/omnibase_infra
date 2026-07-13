@@ -23,3 +23,9 @@ class EnumSkillArgType(StrEnum):
     INTEGER = "integer"
     BOOLEAN = "boolean"
     STRING_LIST = "string_list"
+    # JSON: raw CLI string is parsed as a JSON document (object, array, or
+    # scalar) and assigned to payload_field verbatim. Generic escape hatch for
+    # backing-node input models with a nested field (e.g. a request model that
+    # embeds a sub-object) that the flat string/integer/boolean/string_list
+    # types cannot construct (OMN-14529).
+    JSON = "json"

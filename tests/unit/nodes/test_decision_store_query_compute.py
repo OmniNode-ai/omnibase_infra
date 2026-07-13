@@ -38,6 +38,7 @@ import pytest
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions import (
     HandlerQueryDecisions,
+    _row_to_entry,
     decode_cursor,
     encode_cursor,
 )
@@ -97,6 +98,37 @@ class _MockEntry:
     def __init__(self, decision_id: UUID, created_at: datetime) -> None:
         self.decision_id = decision_id
         self.created_at = created_at
+
+
+# ============================================================================
+# _row_to_entry — real conversion (OMN-14529)
+#
+# Every test_handle_* below patches _row_to_entry with a mock, so the real
+# conversion body was never exercised end-to-end. It raised a Pydantic
+# ValidationError on any non-empty result set: ModelDecisionStoreEntry
+# (omnibase_core) declares neither "title" nor "epic_id" and uses
+# extra="forbid", but the real decision_store row (see _make_mock_row, which
+# mirrors migration 046's columns) carries both. This test exercises the
+# unpatched function directly against a realistic row.
+# ============================================================================
+
+
+def test_row_to_entry_converts_real_row_without_raising() -> None:
+    # NOTE (OMN-14529, separate from the title/epic_id fix under test here):
+    # omnibase_core.enums.enum_decision_type.EnumDecisionType uses LOWERCASE
+    # values ("tech_stack_choice") while the omnimarket orchestrator's own
+    # EnumDecisionType (model_decision_store_request.py) and the raw DB TEXT
+    # column both use UPPERCASE ("TECH_STACK_CHOICE"). A row written via the
+    # orchestrator path fails this conversion on decision_type case alone —
+    # a distinct, not-fixed-here latent bug. Use the omnibase_core casing so
+    # this test isolates the title/epic_id fix.
+    row = _make_mock_row(decision_type="tech_stack_choice")
+    entry = _row_to_entry(row)
+    assert entry.decision_id == row["decision_id"]
+    assert entry.rationale == "Test rationale"
+    assert entry.scope_domain == "data-model"
+    assert entry.scope_layer == "architecture"
+    assert entry.status == "ACTIVE"
 
 
 # ============================================================================
