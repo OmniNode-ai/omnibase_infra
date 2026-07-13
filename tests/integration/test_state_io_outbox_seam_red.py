@@ -7,6 +7,23 @@ below is expected to FAIL against today's code. That ordering is the point: it
 is the structural fix for self-certifying evidence (a suite written after the
 implementation only ever proves the implementation agrees with itself).
 
+**P3b LANDED (OMN-14493, implementer note).** Tests 1-4 now PASS (their xfail
+markers were removed — a strict-xfail that starts passing is a CI failure).
+Test 5 remains an HONEST ``xfail(strict=True)``: it drives the applier directly
+and asserts the causation-scoped dedupe id, which is authored by the SEPARATE
+P3a lane (OMN-14403 §8.1) — P3b must MATCH that seam, not double-author it; it
+greens on the P3a rebase (see the test's reason string + the PR body). Two
+harness changes, ASSERTIONS UNTOUCHED: (1) ``_stateful_callback`` gained an
+optional ``event_bus`` threaded into the two recovery/resume SETUPS (the wrapper,
+not the applier, owns the row and the publish-from-row); (2) ``_bus_callback``
+passes ``propagate_publish_failures=True`` (the flag the state_io wiring sets for
+an outbox contract). Two non-xfail guards were added at the end:
+``test_has_bus_wrapper_publishes_once_and_finalizes_no_double_publish`` (no
+double-publish + finalize-within-leg) and
+``test_non_outbox_boundary_still_swallows_unchanged`` (the boundary no-swallow is
+scoped to the outbox path; non-outbox contracts are unchanged). The positive
+control is UNCHANGED — its ``in_flight stays TRUE`` models the no-bus commit path.
+
 Spec: ``docs/plans/2026-07-12-multi-event-publish-seam-spec.md`` rev 3.2 §4/§8/§11.
 
 The proof standard (non-negotiable)
@@ -434,8 +451,21 @@ def _make_applier(bus: _RecordingBus) -> DispatchResultApplier:
     )
 
 
-def _stateful_callback(handler: _FanOutHandler, adapter: _FakeStateStoreAdapter) -> Any:
-    """Build the REAL stateful dispatch callback over the fake adapter."""
+def _stateful_callback(
+    handler: _FanOutHandler,
+    adapter: _FakeStateStoreAdapter,
+    *,
+    event_bus: _RecordingBus | None = None,
+) -> Any:
+    """Build the REAL stateful dispatch callback over the fake adapter.
+
+    P3b (OMN-14493): ``event_bus`` threads a bus into the stateful wrapper so it
+    can publish-from-row for the recovery (boot-sweep) and resume (redelivery)
+    paths — the wrapper, not the applier, owns the row and therefore the
+    re-publish (spec §4.1 D2). No-bus builds keep the legacy commit-then-return
+    shape (external applier publishes), matching the positive control. Only the
+    two recovery/resume test SETUPS pass a bus; every assertion is untouched.
+    """
     with (
         patch.dict(
             "os.environ",
@@ -445,7 +475,13 @@ def _stateful_callback(handler: _FanOutHandler, adapter: _FakeStateStoreAdapter)
         patch(_PATCH_ADAPTER, return_value=adapter),
     ):
         return _make_stateful_dispatch_callback(
-            cast("Any", handler), None, dict(STATE_IO)
+            cast("Any", handler),
+            None,
+            dict(STATE_IO),
+            event_bus=event_bus,
+            output_topic_map=(
+                dict(OUTPUT_TOPIC_MAP) if event_bus is not None else None
+            ),
         )
 
 
@@ -546,18 +582,6 @@ def test_e1_guard_causation_and_envelope_ids_must_differ() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "OMN-14403 P3b: EXISTS-but-WRONG — commit-then-publish. "
-        "_load_handle_persist commits FSM state and RETURNS; the publish happens "
-        "outside the retry unit (back in _make_event_bus_callback). A crash in "
-        "that window loses the batch permanently: nothing was persisted to "
-        "re-publish FROM, and the boot sweep (recover_stale_rows) is TTL-gated "
-        "and blind-FAILs the row instead of re-emitting it. Fix = in-row outbox: "
-        "commit-with-intent -> publish-from-row -> CAS'd finalize."
-    ),
-    **XFAIL_KW,
-)
 def test_crash_after_commit_republishes_byte_identical_batch_from_row_alone() -> None:
     """A crash between state-commit and publish must lose NOTHING.
 
@@ -593,7 +617,8 @@ def test_crash_after_commit_republishes_byte_identical_batch_from_row_alone() ->
     bus2 = _RecordingBus()
     # If recovery re-runs the handler it is not row-only recovery. Count it.
     handler2 = _FanOutHandler(_fanout_batch())
-    callback2 = _stateful_callback(handler2, adapter2)
+    # P3b: the wrapper owns the bus for the boot-sweep re-publish (spec §4.1 D2).
+    callback2 = _stateful_callback(handler2, adapter2, event_bus=bus2)
 
     async def _boot() -> None:
         # Boot recovery fires on first dispatch (_ensure_stale_rows_recovered).
@@ -676,18 +701,6 @@ def test_crash_after_commit_republishes_byte_identical_batch_from_row_alone() ->
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "OMN-14403 P3b §11.11: EXISTS-but-WRONG — there is no in_flight-lock and "
-        "no resume branch. A redelivered input RE-RUNS the handler; the FSM's "
-        "synchronous in-flight dedup guard sees in_flight=true on the reloaded row "
-        "and FOLDS without re-emitting (handler_wiring.py fold-on-redelivery), so "
-        "the partially-published batch is lost forever. Fix = in_flight-lock rule: "
-        "resume publish-from-row when incoming.envelope_id == "
-        "row.causation_envelope_id. GUARDS THE E1 LIVENESS DEADLOCK."
-    ),
-    **XFAIL_KW,
-)
 def test_redelivery_of_same_input_resumes_publish_from_row_without_rerunning_handler() -> (
     None
 ):
@@ -733,7 +746,8 @@ def test_redelivery_of_same_input_resumes_publish_from_row_without_rerunning_han
     adapter2 = _FakeStateStoreAdapter(store2)
     bus2 = _RecordingBus()
     handler2 = _FanOutHandler(_fanout_batch())
-    callback2 = _stateful_callback(handler2, adapter2)
+    # P3b: the wrapper owns the bus for the redelivery resume-from-row (spec §4.1 E2).
+    callback2 = _stateful_callback(handler2, adapter2, event_bus=bus2)
     applier2 = _make_applier(bus2)
 
     async def _redeliver() -> None:
@@ -792,7 +806,14 @@ def test_redelivery_of_same_input_resumes_publish_from_row_without_rerunning_han
 
 
 def _bus_callback(callback: Any, applier: DispatchResultApplier) -> Any:
-    """Drive the REAL auto-wired consume boundary — the one that swallows."""
+    """Drive the REAL auto-wired consume boundary on the state_io / outbox path.
+
+    ``propagate_publish_failures=True`` is what the state_io wiring passes for an
+    outbox contract (OMN-14403 §4.3): a publish-from-row failure + a conflict-
+    retry exhaustion propagate (redeliver) instead of being log-and-discarded.
+    Non-outbox contracts never set it, so their swallow behavior is unchanged
+    (see ``test_non_outbox_boundary_still_swallows_unchanged``).
+    """
 
     class _Engine:
         async def dispatch(
@@ -801,22 +822,14 @@ def _bus_callback(callback: Any, applier: DispatchResultApplier) -> Any:
             return await callback(envelope)
 
     return _make_event_bus_callback(
-        TOPIC_INBOUND, cast("Any", _Engine()), cast("Any", applier)
+        TOPIC_INBOUND,
+        cast("Any", _Engine()),
+        cast("Any", applier),
+        propagate_publish_failures=True,
     )
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "OMN-14403 P3b (spec §4.3 E4): EXISTS-but-WRONG — the auto-wired consume "
-        "boundary (handler_wiring.py :2021, 'except Exception: logger.error(...)') "
-        "log-and-DISCARDS a publish failure. The message is ACKed, there is no DLQ "
-        "and no redelivery, and the un-published remainder of the batch is gone. "
-        "P3b's publish-from-row must propagate or DLQ, never swallow. (OMN-14498 "
-        "covers only the NON-outbox general hole — not this path.)"
-    ),
-    **XFAIL_KW,
-)
 def test_publish_exception_mid_batch_propagates_and_is_never_silently_acked() -> None:
     """A broker rejection at event k<N must be LOUD, not an ack.
 
@@ -853,15 +866,6 @@ def test_publish_exception_mid_batch_propagates_and_is_never_silently_acked() ->
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "OMN-14403 P3b (spec §4.3 E4): EXISTS-but-WRONG — conflict-retry "
-        "exhaustion raises OptimisticConflictError out of the stateful callback "
-        "(correctly, fail-closed), but the auto-wired boundary at :2021 then "
-        "SWALLOWS it: the message is ACKed and the leg is silently dropped."
-    ),
-    **XFAIL_KW,
-)
 def test_conflict_retry_exhaustion_propagates_and_is_never_silently_acked() -> None:
     """CAS contention that never resolves must surface, not vanish."""
     store = _DurableRows()
@@ -916,17 +920,6 @@ def test_conflict_retry_exhaustion_propagates_and_is_never_silently_acked() -> N
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "OMN-14403 P3b (spec §4.1 D1 / §14): EXISTS-but-WRONG — cas_update is "
-        "UNCONDITIONAL on in_flight (state_store_adapter.py :241-280). A "
-        "concurrent leg-3 loads the row at the committed version while leg-2 is "
-        "mid-publish, runs the handler, and CAS-succeeds — overwriting leg-2's "
-        "un-published intent. Leg-2's remainder is then unrecoverable. Fix = the "
-        "in_flight-lock rule: a row with in_flight=true MUST NOT run the handler."
-    ),
-    **XFAIL_KW,
-)
 def test_concurrent_leg_cannot_clobber_an_in_flight_batchs_unpublished_intent() -> None:
     """The single rule that makes "the committed row is the publish source" TRUE.
 
@@ -992,13 +985,16 @@ def test_concurrent_leg_cannot_clobber_an_in_flight_batchs_unpublished_intent() 
 @pytest.mark.integration
 @pytest.mark.xfail(
     reason=(
-        "OMN-14403 P3b (spec §8.1): EXISTS-but-WRONG — the deterministic id is "
-        "uuid5(correlation_id, 'class:idx') "
-        "(service_dispatch_result_applier.py :661-664). node_delegation_orchestrator "
-        "is a multi-leg FSM on ONE correlation_id, so a re-route's second "
-        "ModelRoutingIntent computes the IDENTICAL id as the first leg's — an "
-        "id-deduping consumer drops the legitimate re-emission. Fix = "
-        "uuid5(correlation_id, '{causation_envelope_id}:{class}:{idx}')."
+        "OMN-14493 P3b: HONEST cross-lane seam xfail — blocked on the P3a "
+        "applier seam (OMN-14403 §8.1 causation-scoped id / §5 tenant-carry). "
+        "This test drives the applier DIRECTLY (applier.apply(result, CID)); "
+        "the causation-scoped deterministic id it asserts is authored by the "
+        "P3a lane (DispatchResultApplier._deterministic_envelope_id), NOT by "
+        "P3b's §4 in-row outbox. P3b must NOT double-author it (define-and-"
+        "match-seams: match, do not re-implement). Greens on the P3a rebase — "
+        "the causation must flow via ModelDispatchResult.causation_envelope_id "
+        "so apply(result, CID) (2-arg) resolves it. See PR body + OMN-14403 "
+        "comment for the exact bridge."
     ),
     **XFAIL_KW,
 )
@@ -1062,4 +1058,103 @@ def test_same_class_emissions_from_different_legs_get_distinct_dedupe_ids() -> N
     # And the negative control: today's key is what produces the collision.
     assert id_leg1 != _todays_correlation_only_id("ModelSeamRoutingIntent", 0), (
         "the id is still keyed on (correlation_id, class, idx) — the colliding key"
+    )
+
+
+# ==========================================================================
+# P3b GUARDS (OMN-14493) — added by the implementer per the build-lead decision.
+# These are NOT xfail: they assert the two hard constraints on the §4 fix.
+# ==========================================================================
+
+
+@pytest.mark.integration
+def test_has_bus_wrapper_publishes_once_and_finalizes_no_double_publish() -> None:
+    """Decision 1 guard: the has-bus wrapper publishes-from-row EXACTLY once.
+
+    When the state_io wrapper owns a bus (the production path), it publishes the
+    committed batch FROM THE ROW and CAS-finalizes WITHIN the leg, then returns
+    ``None`` — so the external applier at the consume boundary is a no-op and the
+    same batch is NEVER published twice. Also pins Decision 2 (finalize-within-
+    leg): the row is left ``in_flight=False`` with the batch cleared, so the next
+    leg's CAS-retry cannot deadlock on a never-cleared in-flight row (the actual
+    stuck-at-INFERENCE_COMPLETED symptom OMN-14493 fixes).
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus()
+    handler = _FanOutHandler(_fanout_batch())
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+    applier = _make_applier(bus)
+
+    async def _run() -> None:
+        result = await callback(_input_envelope())
+        assert result is None, (
+            "a has-bus wrapper that published-from-row MUST return None so the "
+            "external applier does not re-publish the same batch (double-publish)"
+        )
+        # Running the external applier on the None result must be a no-op.
+        await applier.apply(result, CID)
+
+    asyncio.run(_run())
+
+    published = bus.envelopes_for(CID)
+    assert len(published) == 3, (
+        f"exactly one 3-event batch must reach the bus (no double-publish); "
+        f"got {len(published)}"
+    )
+    assert bus.topics_for(CID) == [TOPIC_ROUTING, TOPIC_INFERENCE, TOPIC_QUALITY]
+    row = store.rows[str(CID)]
+    assert row["in_flight"] is False, (
+        "finalize-within-leg: the has-bus leg must CAS-finalize (in_flight=False) "
+        "so the next leg does not deadlock on a never-cleared in-flight row"
+    )
+    assert not row["pending_emissions"], "finalize must clear pending_emissions"
+
+
+@pytest.mark.integration
+def test_non_outbox_boundary_still_swallows_unchanged() -> None:
+    """Decision 3 regression guard: a NON-outbox contract is UNCHANGED.
+
+    The boundary no-swallow is scoped to the outbox path by
+    ``propagate_publish_failures``. With the flag at its default (off), a publish
+    failure is STILL log-and-discarded exactly as before P3b — P3b must not
+    broaden the un-swallow to every auto-wired contract (the platform-wide hole
+    is OMN-14498/OMN-14507's, not this ticket's). This is the mirror image of
+    ``test_publish_exception_mid_batch_propagates...`` with the flag OFF.
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus(fail_at_index=1)  # event 0 lands, event 1 is rejected
+    handler = _FanOutHandler(_fanout_batch())
+    callback = _stateful_callback(handler, adapter)  # no bus → external applier
+    applier = _make_applier(bus)
+
+    class _Engine:
+        async def dispatch(
+            self, topic: str, envelope: ModelEventEnvelope[object]
+        ) -> Any:
+            return await callback(envelope)
+
+    # DEFAULT flag (propagate_publish_failures NOT passed) = non-outbox behavior.
+    on_message = _make_event_bus_callback(
+        TOPIC_INBOUND, cast("Any", _Engine()), cast("Any", applier)
+    )
+
+    raised: BaseException | None = None
+
+    async def _run() -> None:
+        nonlocal raised
+        try:
+            await on_message(_input_envelope())
+        except BaseException as exc:  # noqa: BLE001 — asserting on propagation
+            raised = exc
+
+    asyncio.run(_run())
+
+    assert len(bus.published) == 1, "precondition: the batch really did fail mid-way"
+    assert raised is None, (
+        "REGRESSION: a non-outbox contract's publish failure must STILL be "
+        "swallowed at the boundary (flag default off) — P3b must not broaden the "
+        "un-swallow to every auto-wired contract. Only the outbox path (flag on) "
+        "propagates (see test_publish_exception_mid_batch_propagates...)."
     )

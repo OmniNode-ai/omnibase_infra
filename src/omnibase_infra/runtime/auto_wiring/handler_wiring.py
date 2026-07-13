@@ -112,7 +112,25 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     StateStoreAdapter,
 )
 from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
-from omnibase_infra.utils.util_retry_optimistic import retry_on_optimistic_conflict
+from omnibase_infra.utils.util_retry_optimistic import (
+    OptimisticConflictError,
+    retry_on_optimistic_conflict,
+)
+
+
+class BoundaryPublishError(Exception):
+    """Marks a result-applier (publish) failure the outbox boundary must PROPAGATE.
+
+    OMN-14403 §4.3: on the state_io / in-row-outbox path, a publish failure mid-
+    batch and a conflict-retry exhaustion must NOT be log-and-discarded (that
+    silently loses the un-published remainder with no redelivery). The auto-wired
+    boundary (`_make_event_bus_callback`) tags an applier failure with this type
+    ONLY when `propagate_publish_failures` is set (state_io contracts), so the
+    outer handler re-raises it (no offset commit → redelivery) instead of
+    swallowing. Non-outbox contracts never set the flag → behavior is unchanged.
+    """
+
+
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
@@ -1747,6 +1765,9 @@ def _make_stateful_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None,
     state_io: dict[str, object],
+    *,
+    event_bus: object | None = None,
+    output_topic_map: dict[str, str] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for contracts that declare ``state_io``.
 
@@ -1755,6 +1776,21 @@ def _make_stateful_dispatch_callback(
     callback a non-stateful contract would get, preserving the OMN-13247
     envelope-coercion fallback and the ``payload_type_matcher`` scoping that
     multi-leg orchestrator contracts depend on untouched (OMN-14208).
+
+    In-row outbox (OMN-14493 / OMN-14403 §4). When ``event_bus`` +
+    ``output_topic_map`` are supplied, this wrapper is also the publish-from-row
+    author for the state_io path: a leg's emitted events are persisted into the
+    row's ``pending_emissions`` column WITHIN the same CAS that advances the FSM
+    (commit-with-intent, ``in_flight=True``); the CAS winner then publishes those
+    events FROM the committed row and CAS-finalizes (``in_flight=False``, batch
+    cleared) all within the leg. This closes the CAS-retry result-selection race
+    that stranded delegation rows at ``INFERENCE_COMPLETED`` — a losing/retried
+    attempt can no longer lose an already-emitted intent, because the committed
+    row (not the in-memory return of a possibly-losing attempt) is the publish
+    source. Finalizing within the leg is load-bearing: a leg that leaves
+    ``in_flight`` set would deadlock the next leg's CAS-retry forever. When no
+    ``event_bus`` is supplied (the legacy/no-outbox path), the wrapper commits
+    with intent and returns the result for the external applier to publish.
 
     Per-dispatch sequence:
 
@@ -1839,17 +1875,204 @@ def _make_stateful_dispatch_callback(
         table=table,
         pool_factory=pool_provider.create,
     )
+    from uuid import UUID, uuid5
+
+    publish_topic_map: dict[str, str] = dict(output_topic_map or {})
     _recovery_ran = False
     _recovery_lock = asyncio.Lock()
 
-    async def _ensure_stale_rows_recovered() -> None:
-        """Run ``recover_stale_rows`` exactly once per adapter (OMN-14208 G1).
+    def _outbox_topic_for(class_name: str) -> str | None:
+        """Resolve an outbox entry's Kafka topic from the published_events map.
 
-        Wiring is synchronous, so this cannot run at wiring time; the first
-        live dispatch is the deterministic async point to fail closed on rows
-        abandoned by a prior process crash/redeploy before any further leg
-        touches them. Lock-guarded so concurrent first-dispatches (different
-        correlation_ids racing in) don't double-run the recovery sweep.
+        The contract's ``published_events`` map is authoritative (short name with
+        the ``Model`` prefix stripped, then the full class name). A class with no
+        mapping returns ``None`` — ``_publish_outbox_batch`` then raises rather
+        than misrouting a fan-out element to a fallback topic (spec §2 Amendment C).
+        """
+        short = class_name.removeprefix("Model")
+        return publish_topic_map.get(short) or publish_topic_map.get(class_name)
+
+    def _build_outbox_entries(
+        result: ModelDispatchResult | None,
+        causation_envelope_id: str,
+        cid: str,
+        tenant_id: str,
+    ) -> list[dict[str, object]]:
+        """Serialize a leg's emitted events into row-storable outbox entries.
+
+        Each entry carries exactly what recovery needs to rebuild the emitted
+        envelope WITHOUT re-running the handler (spec §12): the event class'
+        module+name, its own JSON payload, its index, and the causation /
+        correlation / tenant scope for the deterministic id + tenant stamp.
+        """
+        # A non-ModelDispatchResult return (e.g. the event_model=None cast-through
+        # can hand back a raw list on clean dev — P3a's normalize coerces it) has
+        # no output_events to store; the outbox only stores a real dispatch result.
+        output_events = getattr(result, "output_events", None)
+        if not output_events:
+            return []
+        entries: list[dict[str, object]] = []
+        for idx, event in enumerate(output_events):
+            if not isinstance(event, BaseModel):
+                continue
+            entries.append(
+                {
+                    "module": type(event).__module__,
+                    "class_name": type(event).__name__,
+                    "payload": event.model_dump(mode="json"),
+                    "index": idx,
+                    "causation_envelope_id": causation_envelope_id,
+                    "correlation_id": cid,
+                    "tenant_id": tenant_id,
+                }
+            )
+        return entries
+
+    def _rebuild_outbox_event(entry: dict[str, object]) -> BaseModel:
+        """Rebuild the typed event model from a stored outbox entry.
+
+        Stamps tenant_id + causation_id onto the payload FROM THE ROW (the
+        applier does not, and in a fresh recovery process the input envelope is
+        gone — the row is the ONLY source, spec §5 tenant-trap).
+
+        Imports the event class via ``importlib`` (not ``_import_handler_class``)
+        so the module/class recorded at commit time from an event WE emitted is
+        rebuilt directly — the handler-class loader's namespace allowlist is for
+        untrusted contract refs, not for a self-recorded outbox entry.
+        """
+        import importlib
+
+        module = importlib.import_module(str(entry["module"]))
+        cls = getattr(module, str(entry["class_name"]))
+        model = cls.model_validate(entry["payload"])
+        updates: dict[str, object] = {}
+        fields = type(model).model_fields
+        tenant_id = entry.get("tenant_id")
+        if (
+            tenant_id
+            and "tenant_id" in fields
+            and not getattr(model, "tenant_id", None)
+        ):
+            updates["tenant_id"] = tenant_id
+        causation = entry.get("causation_envelope_id")
+        if (
+            causation
+            and "causation_id" in fields
+            and not getattr(model, "causation_id", None)
+        ):
+            updates["causation_id"] = UUID(str(causation))
+        return model.model_copy(update=updates) if updates else model
+
+    async def _publish_outbox_batch(entries: list[dict[str, object]]) -> int:
+        """Publish a persisted outbox batch FROM THE ROW (recovery / resume).
+
+        Rebuilds each envelope with the causation-scoped deterministic id (spec
+        §8.1) + tenant, resolves its per-class topic, and publishes via the bus.
+        Idempotent: row-derived ids collapse against the original at the
+        consume-path dedupe, so a duplicate re-publish is benign.
+        """
+        from omnibase_core.models.events.model_event_envelope import (
+            ModelEventEnvelope as _Envelope,
+        )
+
+        if event_bus is None or not hasattr(event_bus, "publish_envelope"):
+            return 0
+        published = 0
+        for entry in entries:
+            class_name = str(entry["class_name"])
+            topic = _outbox_topic_for(class_name)
+            if topic is None:
+                raise ModelOnexError(
+                    "handler_wiring: outbox recovery cannot resolve a topic for "
+                    f"fan-out class {class_name!r} — no published_events mapping."
+                )
+            cid_uuid = UUID(str(entry["correlation_id"]))
+            causation = UUID(str(entry["causation_envelope_id"]))
+            idx = int(cast("int", entry["index"]))
+            envelope_id = uuid5(cid_uuid, f"{causation}:{class_name}:{idx}")
+            payload = _rebuild_outbox_event(entry)
+            out_envelope: _Envelope[BaseModel] = _Envelope(
+                envelope_id=envelope_id,
+                payload=payload,
+                correlation_id=cid_uuid,
+            )
+            key: bytes | None = None
+            for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
+                value = getattr(payload, attr, None)
+                if value is not None:
+                    key = str(value).encode("utf-8")
+                    break
+            await event_bus.publish_envelope(  # type: ignore[attr-defined]
+                envelope=out_envelope, topic=topic, key=key
+            )
+            published += 1
+        return published
+
+    async def _finalize_outbox_row(
+        cid: str,
+        tenant_id: str,
+        state: str,
+        payload_json: str,
+        expected_version: int,
+    ) -> int:
+        """CAS-finalize a published outbox row: in_flight=False + clear the batch.
+
+        A CAS (not an unconditional UPDATE, spec §4.1 D1) so a concurrent
+        recovery/leg that already finalized this row cannot be silently
+        overwritten; a lost finalize means another path owns terminal state.
+        """
+        return await adapter.cas_update(
+            cid,
+            tenant_id=tenant_id,
+            state=state,
+            in_flight=False,
+            payload_json=payload_json,
+            expected_version=expected_version,
+            pending_emissions=None,
+        )
+
+    async def _recover_outbox_batches(skip_cid: str | None = None) -> None:
+        """Boot/redeploy re-publish of any in-flight row carrying a live batch.
+
+        The adapter surfaces the recoverable rows (it has no bus); THIS wrapper
+        publishes them (it does) with the same row-derived deterministic ids and
+        CAS-finalizes — spec §4.1 D2 layering. Runs BEFORE recover_stale_rows so
+        a recoverable row is re-emitted, not blind-FAILed (spec §4.2 R1).
+
+        ``skip_cid`` is the correlation of the dispatch that TRIGGERED this boot
+        sweep: that row is owned by the triggering leg's own in_flight-lock /
+        resume path (which keys the resume on envelope_id), so the boot sweep
+        must not race it — otherwise a redelivery of the crashed input would
+        find its batch already recovered and needlessly re-run + fold the handler.
+        """
+        if event_bus is None or not hasattr(adapter, "select_recoverable_batches"):
+            return
+        for row in await adapter.select_recoverable_batches():
+            row_cid = str(row["correlation_id"])
+            if skip_cid is not None and row_cid == skip_cid:
+                continue
+            entries = list(
+                cast("list[dict[str, object]]", row.get("pending_emissions") or [])
+            )
+            if not entries:
+                continue
+            await _publish_outbox_batch(entries)
+            await _finalize_outbox_row(
+                row_cid,
+                str(row["tenant_id"]),
+                str(row["state"]),
+                str(row["payload_json"]),
+                int(cast("int", row["version"])),
+            )
+
+    async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:
+        """Run outbox re-publish + the give-up sweep exactly once per adapter.
+
+        Wiring is synchronous, so this cannot run at wiring time; the first live
+        dispatch is the deterministic async point. Outbox re-publish runs FIRST
+        so a recoverable in-flight batch is re-emitted before the give-up sweep
+        (which fail-closes genuinely-abandoned rows) can touch it (OMN-14208 G1,
+        OMN-14403 §4.1/§4.2 R1). Lock-guarded against concurrent first-dispatch.
         """
         nonlocal _recovery_ran
         if _recovery_ran:
@@ -1857,13 +2080,109 @@ def _make_stateful_dispatch_callback(
         async with _recovery_lock:
             if _recovery_ran:
                 return
+            await _recover_outbox_batches(skip_cid=skip_cid)
             await adapter.recover_stale_rows()
             _recovery_ran = True
+
+    async def _find_recoverable_row(cid: str) -> dict[str, object] | None:
+        """Return this cid's in-flight-with-live-batch row, if one exists.
+
+        Backward-compatible: an adapter without ``select_recoverable_batches``
+        (a legacy fake, or any non-outbox state store) has no in-row outbox, so
+        the in_flight-lock is skipped and dispatch behaves exactly as pre-P3b.
+        In steady state the partial index (``in_flight AND pending_emissions``)
+        returns zero rows, so the per-dispatch check is a cheap empty index scan.
+        """
+        if not hasattr(adapter, "select_recoverable_batches"):
+            return None
+        for row in await adapter.select_recoverable_batches():
+            if str(row["correlation_id"]) == cid:
+                return row
+        return None
+
+    def _dispatch_result_from_entries(
+        entries: list[dict[str, object]], cid: str
+    ) -> ModelDispatchResult:
+        """Rebuild a ModelDispatchResult carrying a row's batch (no-bus resume)."""
+        from datetime import UTC, datetime
+
+        from omnibase_infra.enums import EnumDispatchStatus
+        from omnibase_infra.models.dispatch.model_dispatch_result import (
+            ModelDispatchResult as _Result,
+        )
+
+        events = [_rebuild_outbox_event(e) for e in entries]
+        return _Result(
+            status=EnumDispatchStatus.SUCCESS,
+            topic="",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            output_count=len(events),
+            output_events=events,
+            correlation_id=UUID(cid),
+        )
 
     async def _load_handle_persist(
         envelope: ModelEventEnvelope[object],
         cid: str,
     ) -> tuple[int, ModelDispatchResult | None]:
+        # in_flight-lock (spec §4.1 D1): a row with a live, un-finalized outbox
+        # batch MUST NOT run the handler — a concurrent leg would clobber the
+        # winner's un-published intent. Resume-from-row if THIS input is the one
+        # that created the batch (a redelivery: envelope_id == causation); else
+        # defer without running the handler (branch b) so the winner's intent is
+        # preserved. The resume predicate keys on envelope_id, NOT causation_id
+        # (spec §4.1 E1 — a redelivered input keeps its envelope_id; its own
+        # causation_id is the grandparent and would never match).
+        incoming_envelope_id = getattr(envelope, "envelope_id", None)
+        locked = await _find_recoverable_row(cid)
+        if locked is not None:
+            entries = list(
+                cast("list[dict[str, object]]", locked.get("pending_emissions") or [])
+            )
+            causation = str(entries[0]["causation_envelope_id"]) if entries else None
+            is_redelivery = (
+                incoming_envelope_id is not None
+                and causation is not None
+                and str(incoming_envelope_id) == causation
+            )
+            if is_redelivery and entries:
+                # Resume: re-publish the SAME batch from the row (idempotent, same
+                # ids) + CAS-finalize. Handler NOT re-run (spec §4.1 E1/E2).
+                if event_bus is not None:
+                    await _publish_outbox_batch(entries)
+                    await _finalize_outbox_row(
+                        cid,
+                        str(locked["tenant_id"]),
+                        str(locked["state"]),
+                        str(locked["payload_json"]),
+                        int(cast("int", locked["version"])),
+                    )
+                    return 1, None
+                # No bus: hand the batch back for the external applier + finalize.
+                await _finalize_outbox_row(
+                    cid,
+                    str(locked["tenant_id"]),
+                    str(locked["state"]),
+                    str(locked["payload_json"]),
+                    int(cast("int", locked["version"])),
+                )
+                return 1, _dispatch_result_from_entries(entries, cid)
+            # A DIFFERENT input arrived while the batch is un-finalized. Do NOT
+            # run the handler (would clobber the winner's un-published intent).
+            # Defer as a clean no-op: under normal (sequential-per-partition)
+            # consumption the winner finalizes within its own leg before the next
+            # leg dispatches, so this branch only fires under genuine concurrent
+            # dispatch on one correlation; the un-finalized batch is cleared by
+            # the winner's finalize or by boot recovery. See PR body §branch-b.
+            logger.warning(
+                "state_io in_flight-lock: deferring leg (cid=%s) — a prior leg's "
+                "outbox batch is committed but not yet finalized; not running the "
+                "handler to avoid clobbering its un-published intent.",
+                cid,
+            )
+            return 1, None
+
         loaded = await adapter.load(cid)
         payload_json, version = loaded if loaded is not None else (None, 0)
         token = CONTEXTVAR_STATE_IO_ROWS.set({cid: (payload_json, version)})
@@ -1887,27 +2206,98 @@ def _make_stateful_dispatch_callback(
             # identical write. Reported as a successful (non-conflict) attempt.
             return 1, result
 
+        metadata = _extract_state_io_metadata(new_payload_json)
+        causation_envelope_id = (
+            str(incoming_envelope_id) if incoming_envelope_id is not None else cid
+        )
+        # The in-row outbox is active only when the adapter supports it. A legacy
+        # adapter (or a non-outbox state store) whose seed/cas_update have no
+        # pending_emissions kwarg keeps the pre-P3b commit-then-return behavior
+        # exactly (no batch persisted, no publish-from-row) — fully backward-compat.
+        outbox_supported = hasattr(adapter, "select_recoverable_batches")
+        entries = (
+            _build_outbox_entries(
+                result, causation_envelope_id, cid, metadata.tenant_id
+            )
+            if outbox_supported
+            else []
+        )
+        # Commit-with-intent (spec §4.1): persist the advanced FSM state AND the
+        # intended emissions in ONE CAS. in_flight=True marks "batch committed,
+        # awaiting publish+finalize" so a crash between here and publish is
+        # recoverable from the row alone.
+        commit_in_flight = bool(entries) or metadata.in_flight
+        # Pass pending_emissions only to an outbox-capable adapter; a legacy
+        # adapter's seed/cas_update have no such kwarg (backward-compat).
+        pending = entries or None
+
         if loaded is None:
-            metadata = _extract_state_io_metadata(new_payload_json)
-            won = await adapter.seed(
+            if outbox_supported:
+                won = await adapter.seed(
+                    cid,
+                    tenant_id=metadata.tenant_id,
+                    state=metadata.state,
+                    in_flight=commit_in_flight,
+                    payload_json=new_payload_json,
+                    pending_emissions=pending,
+                )
+            else:
+                won = await adapter.seed(
+                    cid,
+                    tenant_id=metadata.tenant_id,
+                    state=metadata.state,
+                    in_flight=commit_in_flight,
+                    payload_json=new_payload_json,
+                )
+            row_count = 1 if won else 0
+            committed_version = 0
+        elif outbox_supported:
+            row_count = await adapter.cas_update(
                 cid,
                 tenant_id=metadata.tenant_id,
                 state=metadata.state,
-                in_flight=metadata.in_flight,
+                in_flight=commit_in_flight,
                 payload_json=new_payload_json,
+                expected_version=version,
+                pending_emissions=pending,
             )
-            return (1 if won else 0), result
+            committed_version = version + 1
+        else:
+            row_count = await adapter.cas_update(
+                cid,
+                tenant_id=metadata.tenant_id,
+                state=metadata.state,
+                in_flight=commit_in_flight,
+                payload_json=new_payload_json,
+                expected_version=version,
+            )
+            committed_version = version + 1
 
-        metadata = _extract_state_io_metadata(new_payload_json)
-        row_count = await adapter.cas_update(
-            cid,
-            tenant_id=metadata.tenant_id,
-            state=metadata.state,
-            in_flight=metadata.in_flight,
-            payload_json=new_payload_json,
-            expected_version=version,
-        )
-        return row_count, result
+        if row_count == 0:
+            # Lost the CAS — a concurrent winner advanced the row. Retry reloads
+            # against the winner (which committed + publishes ITS own intent), so
+            # this attempt's events are correctly dropped, never lost.
+            return 0, result
+
+        # Winner. If the wrapper owns a bus AND emitted a batch, publish-from-row
+        # + CAS-finalize WITHIN this leg — leaving the row in_flight would deadlock
+        # the next leg's CAS-retry (the stuck-at-INFERENCE_COMPLETED symptom).
+        # Return None so the external applier does NOT re-publish the same batch
+        # (no double-publish — OMN-14403 §7 decision 1).
+        if entries and event_bus is not None:
+            await _publish_outbox_batch(entries)
+            await _finalize_outbox_row(
+                cid,
+                metadata.tenant_id,
+                metadata.state,
+                new_payload_json,
+                committed_version,
+            )
+            return 1, None
+
+        # No-bus path (test commit / non-emitting leg): hand the result back for
+        # the external applier to publish; the row keeps its committed intent.
+        return 1, result
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -1925,7 +2315,7 @@ def _make_stateful_dispatch_callback(
             )
         cid = str(correlation_id)
 
-        await _ensure_stale_rows_recovered()
+        await _ensure_stale_rows_recovered(skip_cid=cid)
 
         _row_count, result = await retry_on_optimistic_conflict(
             lambda: _load_handle_persist(envelope, cid),
@@ -1944,6 +2334,7 @@ def _make_event_bus_callback(
     *,
     tenant_scoped: bool = False,
     event_bus: object | None = None,
+    propagate_publish_failures: bool = False,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -2024,11 +2415,28 @@ def _make_event_bus_callback(
                     return
                 result = await dispatch_engine.dispatch(topic, envelope)
                 if result_applier is not None and result is not None:
-                    await result_applier.apply(result, envelope.correlation_id)
+                    try:
+                        await result_applier.apply(result, envelope.correlation_id)
+                    except Exception as apply_exc:
+                        # OMN-14403 §4.3: on the outbox path a publish failure
+                        # must PROPAGATE (redeliver), never be retried-then-
+                        # swallowed. Tag it so the loop breaks and the outer
+                        # handler re-raises. Off the outbox path this is a no-op:
+                        # the original exception rides the generic retry arm.
+                        if propagate_publish_failures:
+                            raise BoundaryPublishError(
+                                "outbox publish failed"
+                            ) from apply_exc
+                        raise
                 return
-            except (PydanticValidationError, ProtocolConfigurationError) as exc:
-                # Non-retryable: deterministic content/config error. No
-                # backoff, no further attempts -- see docstring gap G2.
+            except (
+                PydanticValidationError,
+                ProtocolConfigurationError,
+                BoundaryPublishError,
+            ) as exc:
+                # Non-retryable: deterministic content/config error, or an outbox
+                # publish failure that must propagate (not retry). No backoff, no
+                # further attempts -- see docstring gap G2 + OMN-14403 §4.3.
                 last_exc = exc
                 break
             except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
@@ -2215,6 +2623,18 @@ def _make_event_bus_callback(
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
             await _dispatch_with_bounded_retry(envelope)
+        except (OptimisticConflictError, BoundaryPublishError) as exc:
+            # OMN-14403 §4.3: on the state_io / in-row-outbox path, conflict-retry
+            # exhaustion (fail-closed) and a publish-from-row failure must
+            # PROPAGATE — no offset commit, the message redelivers — never be
+            # log-and-discarded. Scoped to the outbox path by the flag; a
+            # non-outbox contract never sets it, so these ride the swallow arm
+            # below exactly as before (behavior UNCHANGED off the outbox path).
+            if propagate_publish_failures:
+                if isinstance(exc, BoundaryPublishError) and exc.__cause__:
+                    raise exc.__cause__
+                raise
+            await _route_swallowed_exception(exc, message, correlation_id)
         except Exception as exc:  # noqa: BLE001 — boundary: never unsubscribe; route to _route_swallowed_exception
             await _route_swallowed_exception(exc, message, correlation_id)
 
@@ -3897,6 +4317,11 @@ async def _subscribe_contract_topics(
                 # OMN-14507: gives the boundary a DLQ target (duck-typed
                 # _publish_raw_to_dlq) when ONEX_BOUNDARY_DLQ_ENABLED is set.
                 event_bus=typed_bus,
+                # OMN-14493 §4.3: on the state_io / in-row-outbox path ONLY, a
+                # publish-from-row failure + conflict-retry exhaustion PROPAGATE
+                # (redeliver) instead of being log-and-discarded. Non-state_io
+                # contracts keep the historical swallow behavior unchanged.
+                propagate_publish_failures=_contract_declares_state_io(contract),
             )
         topic_callbacks.append((topic, callback))
 
@@ -4298,14 +4723,35 @@ def _prepare_handler_wiring(
         # them untyped so the projection dispatch path is unchanged.
         payload_type_matcher: Callable[[object], bool] | None = None
     elif state_io:
+        # OMN-14493 in-row outbox: give the stateful wrapper the bus + the
+        # contract's published_events (class -> topic) map so it can publish-from-
+        # row + CAS-finalize WITHIN the leg (production has-bus path) and re-publish
+        # a crash-recovered batch on boot. Without these the wrapper falls back to
+        # commit-then-return (external applier publishes) — which is the exact
+        # CAS-retry loss OMN-14493 fixes, so production MUST pass them.
+        from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+            load_published_events_map,
+        )
+
+        _outbox_topic_map = (
+            load_published_events_map(contract.contract_path)
+            if contract.event_bus is not None
+            else None
+        )
         callback = _make_stateful_dispatch_callback(
-            handler_instance, entry.event_model, state_io
+            handler_instance,
+            entry.event_model,
+            state_io,
+            event_bus=event_bus,
+            output_topic_map=_outbox_topic_map,
         )
         logger.info(
-            "Auto-wired stateful handler with state_io load-before/"
-            "CAS-persist-after: handler=%s table=%s",
+            "Auto-wired stateful handler with state_io in-row outbox "
+            "(publish-from-row + CAS-finalize): handler=%s table=%s "
+            "outbox_topics=%d",
             handler_ref.name,
             state_io.get("table"),
+            len(_outbox_topic_map or {}),
         )
         # state_io wraps the standard dispatch callback, so the same
         # event_model type-scoping applies as the non-stateful path

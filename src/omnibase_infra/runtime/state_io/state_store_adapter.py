@@ -35,7 +35,6 @@ import os
 import re
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -202,7 +201,7 @@ class StateStoreAdapter:
         state: str,
         in_flight: bool,
         payload_json: str,
-        pending_emissions: list[dict[str, Any]] | None = None,
+        pending_emissions: list[dict[str, object]] | None = None,
         publish_attempts: int = 0,
     ) -> bool:
         """Insert the first row for a correlation_id (leg-1 creation).
@@ -262,7 +261,7 @@ class StateStoreAdapter:
         in_flight: bool,
         payload_json: str,
         expected_version: int,
-        pending_emissions: list[dict[str, Any]] | None = None,
+        pending_emissions: list[dict[str, object]] | None = None,
         publish_attempts: int | None = None,
     ) -> int:
         """Compare-and-swap update gated on the row's current version.
@@ -308,7 +307,7 @@ class StateStoreAdapter:
         # asyncpg execute() returns a tag string like "UPDATE 1" / "UPDATE 0".
         return int(result.split()[-1])
 
-    async def select_recoverable_batches(self) -> list[dict[str, Any]]:
+    async def select_recoverable_batches(self) -> list[dict[str, object]]:
         """Return in-flight rows carrying a non-empty ``pending_emissions`` batch.
 
         The P3b boot/redeploy recovery seam (spec §4.1 D2/E3): the ADAPTER
@@ -339,7 +338,7 @@ class StateStoreAdapter:
                 table=self._table,
                 context=self._context("select_recoverable_batches", None),
             ) from exc
-        recoverable: list[dict[str, Any]] = []
+        recoverable: list[dict[str, object]] = []
         for row in rows:
             pending_json = row["pending_emissions_json"]
             recoverable.append(
