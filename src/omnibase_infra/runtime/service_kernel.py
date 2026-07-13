@@ -2674,8 +2674,31 @@ async def bootstrap() -> int:
                             load_intent_routing_table,
                         )
 
+                        # OMN-14517: resolve effect-node targets from the FULL
+                        # discovery manifest, not the runtime-profile-filtered
+                        # one. `filtered_manifest` only contains contracts OWNED
+                        # by this process's runtime_profile (main/effects/...),
+                        # but an audit/projection consumer's intent_routing_table
+                        # may legitimately name an effect node that lives in a
+                        # DIFFERENT profile (e.g. node_pr_state_write_effect
+                        # declares runtime_profiles: [effects] so it also runs
+                        # as its own standalone command consumer there). This
+                        # derivation only needs the effect contract's STATIC
+                        # handler_routing metadata to import + construct its
+                        # handler in-process -- it does not claim ownership of
+                        # that contract's Kafka subscription, so profile
+                        # ownership is the wrong filter to apply here. Using the
+                        # profile-filtered manifest for this lookup made a
+                        # correctly-declared cross-profile route look "absent
+                        # from the manifest" and crashed cold boot with
+                        # ONEX_CORE_081 (confirmed live on a genuinely cold
+                        # `--profile runtime` bring-up; masked on warm restarts
+                        # that recreate only a targeted service subset).
+                        _effect_lookup_manifest = (
+                            auto_wiring_manifest_discovered or filtered_manifest
+                        )
                         _contracts_by_name = {
-                            _c.name: _c for _c in filtered_manifest.contracts
+                            _c.name: _c for _c in _effect_lookup_manifest.contracts
                         }
                         for _contract in filtered_manifest.contracts:
                             if _contract.name in auto_wiring_result_appliers:
