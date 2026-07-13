@@ -187,7 +187,7 @@ fi
 
 log "deploy command  :"
 log "  ${PLAN_ENV[*]} \\"
-log "    ${DEPLOY_RUNTIME} --execute ${BRINGUP}"
+log "    ${DEPLOY_RUNTIME} --execute --force ${BRINGUP}"
 
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no tags cut, no build/deploy performed. Re-run with --execute."
@@ -213,4 +213,17 @@ if [[ "${HOTPATCH}" != true ]]; then
 fi
 
 log "executing deploy-runtime.sh ..."
-exec bash "${DEPLOY_RUNTIME}" --execute "${BRINGUP}"
+# --force: the lab fast lane redeploys the SAME package version at new SHAs
+# constantly (version bumps are infrequent/manual), so deploy-runtime.sh's
+# version-directory collision guard ("Deployment directory already exists")
+# fires on nearly every lab redeploy -- and it fires BEFORE the RT-1 clean-ref
+# checkout even runs, so the checkout this whole wrapper exists for never
+# happens (OMN-14562). A same-version overwrite is the expected happy path
+# for this wrapper; deploy-runtime.sh's --force already backs up the existing
+# deployment dir and restores it on failure, so this is a safe, reversible
+# overwrite of the lab lane's OWN deployed/{version}/ staging dir -- it does
+# not touch prod, other lanes, or running containers beyond the lane's own
+# rebuild. Prod/release deploys never go through this wrapper (Train 2 is
+# grant-gated and refuses here -- see the lane case above), so the guard
+# stays fully intact for that path.
+exec bash "${DEPLOY_RUNTIME}" --execute --force "${BRINGUP}"

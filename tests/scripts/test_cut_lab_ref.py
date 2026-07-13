@@ -79,6 +79,10 @@ def test_dry_run_plan_dev_lane(tmp_path: Path) -> None:
     assert "BUILD_SOURCE=workspace" in plan
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra" in plan
     assert "DEPLOY_HOTPATCH=0" in plan
+    # OMN-14562: the lab fast lane always forces a same-version overwrite --
+    # deploy-runtime.sh's version-directory collision guard otherwise fires
+    # before the RT-1 clean-ref checkout ever runs.
+    assert "--execute --force" in plan
     assert "dry-run" in plan  # no build/deploy performed
 
 
@@ -149,6 +153,9 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     # The stub deploy-runtime was actually invoked.
     assert marker.exists()
+    # OMN-14562: --force must reach deploy-runtime.sh so a same-version lab
+    # redeploy overwrites rather than tripping the version-directory guard.
+    assert "--force" in result.stderr
 
     # A lab tag lab/dev/<utc>-<shortsha> was cut in every sibling clone at its dev SHA.
     tag_re = re.compile(r"^lab/dev/\d{8}T\d{6}Z-[0-9a-f]{12}$")
