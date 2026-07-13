@@ -78,6 +78,10 @@ repos:
         - context: "CI Summary"
           coverage: direct
           rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
+        - context: "node-migration-sync"
+          coverage: direct
+          rule: >-
+            OMN-14556: node-migration-sync.yml is its OWN workflow file (separate run_id from ci.yml), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- a needs_child declaration would be a false COVERED. Confirmed live on PR #2288 (2026-07-13): node-migration-sync=FAIL, CI Summary=PASS, different run_ids. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
   # --- The two repos the audit CONFIRMED are missing the gates (M1-M4) ---
   omnimarket:
     dev:
