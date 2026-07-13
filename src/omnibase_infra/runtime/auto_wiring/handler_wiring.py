@@ -2919,6 +2919,13 @@ async def wire_from_manifest(
             # demoted to a collectable failure. Propagate unchanged so the
             # kernel crashes loudly at boot.
             raise
+        except StateIoUnconfiguredError:
+            # OMN-14484 invariant: a REQUIRED state_io seam without its DSN is a
+            # startup-FATAL config error (OMN-14208) — never a per-contract
+            # failure to collect under non-strict mode. Propagate so boot crashes
+            # loudly instead of booting "healthy" with the orchestrator silently
+            # dead and every one of its messages routed to the DLQ.
+            raise
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
             exc_summary = _sanitize_exc(exc)
             logger.error(
@@ -3357,6 +3364,17 @@ def _prepare_contract_wiring(
         except TypeError:
             # OMN-8735 invariant: resolver Step 6 exhaustion must NOT be
             # wrapped. Propagate unchanged so the kernel crashes loudly.
+            raise
+        except StateIoUnconfiguredError:
+            # OMN-14484 invariant: an unconfigured REQUIRED state_io durability
+            # seam is a startup-FATAL configuration error (OMN-14208), not a
+            # per-handler wiring bug to wrap-and-collect. Propagate UNWRAPPED so
+            # wire_from_manifest re-raises it and boot fails loudly. Wrapping it
+            # into a generic ModelOnexError + collecting it under non-strict mode
+            # turned this fail-CLOSED seam into fail-SILENT: it dropped every
+            # dispatcher of the contract while the runtime booted "healthy", so
+            # node_delegation_orchestrator (the only state_io contract) DLQ'd
+            # 100% of its command/event traffic on any lane missing the DSN.
             raise
         except Exception as exc:
             exc_summary = _sanitize_exc(exc)
