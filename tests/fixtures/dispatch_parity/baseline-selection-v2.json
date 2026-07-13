@@ -459,15 +459,16 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d": {
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3": {
       "category": "event",
       "contract_name": "node_ledger_projection_compute",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
       "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
       "handler_name": "HandlerLedgerProjection",
       "message_types": [
+        "ModelEventMessage",
         "onex.cmd.platform.request-introspection.v1",
         "onex.evt.platform.fsm-state-transitions.v1",
         "onex.evt.platform.node-heartbeat.v1",
@@ -484,7 +485,175 @@
         "platform.runtime-tick"
       ],
       "package": "omnibase_infra",
-      "type_scoped": false
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7": {
+      "category": "command",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab": {
+      "category": "intent",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
     },
     "dispatcher.auto.node_ledger_write_effect.HandlerLedgerAppend.ledger_append_e4688938": {
       "category": "command",
@@ -1378,12 +1547,13 @@
     "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc": {
       "category": "event",
       "contract_name": "node_validation_ledger_projection_compute",
-      "event_model_module": null,
-      "event_model_name": null,
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
       "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc",
       "handler_module": "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection",
       "handler_name": "HandlerValidationLedgerProjection",
       "message_types": [
+        "ModelEventMessage",
         "onex.evt.validation.cross-repo-run-completed.v1",
         "onex.evt.validation.cross-repo-run-started.v1",
         "onex.evt.validation.cross-repo-violations-batch.v1",
@@ -1392,7 +1562,7 @@
         "validation.cross-repo-violations-batch"
       ],
       "package": "omnibase_infra",
-      "type_scoped": false
+      "type_scoped": true
     },
     "dispatcher.auto.node_validation_ledger_write_effect.HandlerValidationLedgerAppend.validation_ledger_append_387161a4": {
       "category": "command",
@@ -1489,10 +1659,10 @@
       "contracts_discovered": 123,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 91,
-      "probe_count": 333,
-      "registered_dispatchers": 86,
+      "probe_count": 385,
+      "registered_dispatchers": 92,
       "registered_routes": 102,
-      "type_scoped_dispatchers": 42
+      "type_scoped_dispatchers": 50
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -1532,7 +1702,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-13T20:26:55.466427+00:00",
+    "generated_at_utc": "2026-07-13T21:26:57.170603+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.7",
       "omnibase-infra": "0.38.4",
@@ -2647,13 +2817,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.fsm-state-transitions",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.fsm-state-transitions.v1"
     },
@@ -2681,13 +2849,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -2698,13 +2864,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -2715,13 +2879,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-registration",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-registration.v1"
     },
@@ -2732,13 +2894,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.registration-snapshots",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
@@ -2989,13 +3149,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.validation.v1",
         "message_category": "event",
         "message_type": "validation.cross-repo-run-completed",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.validation.cross-repo-run-completed.v1"
     },
@@ -3006,13 +3164,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.validation.v1",
         "message_category": "event",
         "message_type": "validation.cross-repo-run-started",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.validation.cross-repo-run-started.v1"
     },
@@ -3023,13 +3179,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.validation.v1",
         "message_category": "event",
         "message_type": "validation.cross-repo-violations-batch",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
     },
@@ -5053,6 +5207,986 @@
       },
       "topic": "onex.intent.platform.runtime-tick.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
     "P4::dispatcher.auto.node_llm_inference_effect.HandlerLlmInferenceCommand.inference_command_cb168568::onex.cmd.omnibase-infra.llm-inference-request.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_llm_inference_effect.HandlerLlmInferenceCommand.inference_command_cb168568",
@@ -5459,13 +6593,11 @@
         "payload": "ModelTopicCatalogRequest"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -5479,13 +6611,11 @@
         "payload": "ModelTopicCatalogRequest"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -5590,7 +6720,6 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
           "dispatcher.auto.node_registration_orchestrator.HandlerNodeHeartbeat"
         ],
         "dlq_topic": null,
@@ -5610,13 +6739,11 @@
         "payload": "ModelNodeHeartbeatEvent"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -5720,13 +6847,11 @@
         "payload": "ModelNodeIntrospectionEvent"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -5741,7 +6866,6 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
           "dispatcher.auto.node_registration_orchestrator.HandlerNodeIntrospected"
         ],
         "dlq_topic": null,
@@ -5853,13 +6977,11 @@
         "payload": "ModelNodeRegistrationAcked"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -5873,13 +6995,11 @@
         "payload": "ModelNodeRegistrationAcked"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -5983,13 +7103,11 @@
         "payload": "ModelRuntimeTick"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -6003,13 +7121,11 @@
         "payload": "ModelRuntimeTick"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -6118,13 +7234,11 @@
         "payload": "ModelTopicCatalogQuery"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-heartbeat",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-heartbeat.v1"
     },
@@ -6138,13 +7252,11 @@
         "payload": "ModelTopicCatalogQuery"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.node-introspection",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.node-introspection.v1"
     },
@@ -7186,6 +8298,66 @@
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
     },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc::onex.evt.validation.cross-repo-run-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-run-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-run-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-run-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc::onex.evt.validation.cross-repo-run-started.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-run-started",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-run-started",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-run-started.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc::onex.evt.validation.cross-repo-violations-batch.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-violations-batch",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-violations-batch",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
+    },
     "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan::onex.evt.platform.validation-adjudication-completed.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
@@ -7600,73 +8772,73 @@
     },
     {
       "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
       "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_cmd_platform_request_introspection_v1",
-      "topic": "onex.cmd.platform.request-introspection.v1",
-      "topic_pattern": "*.cmd.platform.request-introspection.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_evt_platform_fsm_state_transitions_v1",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3.onex_evt_platform_fsm_state_transitions_v1",
       "topic": "onex.evt.platform.fsm-state-transitions.v1",
       "topic_pattern": "*.evt.platform.fsm-state-transitions.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
       "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_evt_platform_node_heartbeat_v1",
-      "topic": "onex.evt.platform.node-heartbeat.v1",
-      "topic_pattern": "*.evt.platform.node-heartbeat.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_evt_platform_node_introspection_v1",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9.onex_evt_platform_node_introspection_v1",
       "topic": "onex.evt.platform.node-introspection.v1",
       "topic_pattern": "*.evt.platform.node-introspection.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_evt_platform_node_registration_v1",
-      "topic": "onex.evt.platform.node-registration.v1",
-      "topic_pattern": "*.evt.platform.node-registration.*",
-      "type_scoped": false
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "message_category": "command",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7.onex_cmd_platform_request_introspection_v1",
+      "topic": "onex.cmd.platform.request-introspection.v1",
+      "topic_pattern": "*.cmd.platform.request-introspection.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_evt_platform_registration_snapshots_v1",
-      "topic": "onex.evt.platform.registration-snapshots.v1",
-      "topic_pattern": "*.evt.platform.registration-snapshots.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_ledger_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d",
-      "message_category": "event",
-      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c56fe78d.onex_intent_platform_runtime_tick_v1",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "message_category": "intent",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab.onex_intent_platform_runtime_tick_v1",
       "topic": "onex.intent.platform.runtime-tick.v1",
       "topic_pattern": "*.intent.platform.runtime-tick.*",
-      "type_scoped": false
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "message_category": "event",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f.onex_evt_platform_registration_snapshots_v1",
+      "topic": "onex.evt.platform.registration-snapshots.v1",
+      "topic_pattern": "*.evt.platform.registration-snapshots.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "message_category": "event",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2.onex_evt_platform_node_registration_v1",
+      "topic": "onex.evt.platform.node-registration.v1",
+      "topic_pattern": "*.evt.platform.node-registration.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "message_category": "event",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33.onex_evt_platform_node_heartbeat_v1",
+      "topic": "onex.evt.platform.node-heartbeat.v1",
+      "topic_pattern": "*.evt.platform.node-heartbeat.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_write_effect",
@@ -8176,7 +9348,7 @@
       "route_id": "route.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc.onex_evt_validation_cross_repo_run_completed_v1",
       "topic": "onex.evt.validation.cross-repo-run-completed.v1",
       "topic_pattern": "*.evt.validation.cross-repo-run-completed.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_validation_ledger_projection_compute",
@@ -8186,7 +9358,7 @@
       "route_id": "route.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc.onex_evt_validation_cross_repo_run_started_v1",
       "topic": "onex.evt.validation.cross-repo-run-started.v1",
       "topic_pattern": "*.evt.validation.cross-repo-run-started.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_validation_ledger_projection_compute",
@@ -8196,7 +9368,7 @@
       "route_id": "route.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_7c0294fc.onex_evt_validation_cross_repo_violations_batch_v1",
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1",
       "topic_pattern": "*.evt.validation.cross-repo-violations-batch.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_validation_ledger_write_effect",
