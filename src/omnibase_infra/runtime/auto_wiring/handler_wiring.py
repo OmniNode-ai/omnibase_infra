@@ -981,7 +981,15 @@ _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # must NOT include genuine Postgres text[] ARRAY columns (e.g.
 # swarm_runs.models_used / machines_used), which are correctly passed as raw
 # lists.
-_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors"})
+# OMN-14487: recent_responses is the same defect class as corpus_errors — a JSONB
+# array column (projection_delegation_inference_response_text, declared
+# ``JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(...) = 'array')``)
+# holding a list of objects, with no _json/_jsonb suffix. HandlerProjectionDelegation-
+# InferenceResponse handed the raw list[dict] to this adapter; psycopg2 could not
+# adapt the inner dicts (``can't adapt type 'dict'``), the inference-response
+# projection write crashed, and — with no dlq_topics declared on that node's
+# contract — the erroring event was silently dropped.
+_JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors", "recent_responses"})
 
 # Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
