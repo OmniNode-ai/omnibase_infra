@@ -188,6 +188,19 @@ jobs:
       - name: Check handler Any signature gate (OMN-10820)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
 
+      # OMN-14135: a contract-declared handler exposing NEITHER handle() nor
+      # handle_async() is bound by auto-wiring to _missing_handle, which raises on
+      # EVERY dispatch — while the contract validates, the node boots, and CI stays
+      # green (HandlerA2ATask shipped exactly this way). Registration and routing do
+      # NOT imply executability, so the OMN-14488 route-coverage gates cannot see it.
+      # Runs here (unconditional, already-required lint job) rather than relying on
+      # the pytest copy, which the change-aware selector could narrow away on the very
+      # PR that adds a bad handler. Ratchet is frozen in
+      # config/validation/handler_dispatch_entrypoint_baseline.yaml and is shrink-only.
+      # SYNC with pre-commit hook 'handler-dispatch-entrypoint'.
+      - name: Check handler dispatch-entrypoint gate (OMN-14135)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
+
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
 
