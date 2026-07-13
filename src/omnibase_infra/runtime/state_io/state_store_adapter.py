@@ -29,6 +29,7 @@ name is a different object and breaks the seam silently.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -200,6 +201,8 @@ class StateStoreAdapter:
         state: str,
         in_flight: bool,
         payload_json: str,
+        pending_emissions: list[dict[str, object]] | None = None,
+        publish_attempts: int = 0,
     ) -> bool:
         """Insert the first row for a correlation_id (leg-1 creation).
 
@@ -208,6 +211,12 @@ class StateStoreAdapter:
         correlation_id can tell it lost (no row returned) and reload +
         retry against the winner's row rather than silently dropping its own
         ``handle()`` output.
+
+        ``pending_emissions`` / ``publish_attempts`` are the OMN-14403 §4.1
+        in-row-outbox columns (migration 093): commit-with-intent persists a
+        leg's intended emissions IN THE SAME INSERT that seeds the FSM state,
+        so a crash/CAS-loss between commit and publish cannot lose the batch —
+        the committed row is the publish source, not the in-memory return.
 
         Returns:
             True if this call's INSERT won (row created), False if a
@@ -219,8 +228,9 @@ class StateStoreAdapter:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     f"INSERT INTO {self._table} "  # noqa: S608 — table validated in __init__
-                    f"(correlation_id, tenant_id, state, in_flight, payload) "
-                    f"VALUES ($1, $2, $3, $4, $5::jsonb) "
+                    f"(correlation_id, tenant_id, state, in_flight, payload, "
+                    f"pending_emissions, publish_attempts) "
+                    f"VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7) "
                     f"ON CONFLICT (correlation_id) DO NOTHING "
                     f"RETURNING correlation_id",
                     correlation_id,
@@ -228,6 +238,10 @@ class StateStoreAdapter:
                     state,
                     in_flight,
                     payload_json,
+                    None
+                    if pending_emissions is None
+                    else json.dumps(pending_emissions),
+                    publish_attempts,
                 )
         except asyncpg.PostgresError as exc:
             raise RepositoryExecutionError(
@@ -247,8 +261,16 @@ class StateStoreAdapter:
         in_flight: bool,
         payload_json: str,
         expected_version: int,
+        pending_emissions: list[dict[str, object]] | None = None,
+        publish_attempts: int | None = None,
     ) -> int:
         """Compare-and-swap update gated on the row's current version.
+
+        ``pending_emissions`` is always written (``None`` clears it — the
+        CAS'd finalize path, spec §4.1 step 3). ``publish_attempts`` is written
+        only when supplied (``None`` leaves the existing counter unchanged, via
+        ``COALESCE``) so a plain state advance does not reset the poison-retry
+        counter.
 
         Returns:
             Row count affected by the UPDATE (0 = conflict — a concurrent
@@ -260,12 +282,18 @@ class StateStoreAdapter:
                 result = await conn.execute(
                     f"UPDATE {self._table} "  # noqa: S608 — table validated in __init__
                     f"SET payload = $1::jsonb, state = $2, in_flight = $3, "
-                    f"tenant_id = $4, version = version + 1 "
-                    f"WHERE correlation_id = $5 AND version = $6",
+                    f"tenant_id = $4, pending_emissions = $5::jsonb, "
+                    f"publish_attempts = COALESCE($6, publish_attempts), "
+                    f"version = version + 1 "
+                    f"WHERE correlation_id = $7 AND version = $8",
                     payload_json,
                     state,
                     in_flight,
                     tenant_id,
+                    None
+                    if pending_emissions is None
+                    else json.dumps(pending_emissions),
+                    publish_attempts,
                     correlation_id,
                     expected_version,
                 )
@@ -278,6 +306,56 @@ class StateStoreAdapter:
             ) from exc
         # asyncpg execute() returns a tag string like "UPDATE 1" / "UPDATE 0".
         return int(result.split()[-1])
+
+    async def select_recoverable_batches(self) -> list[dict[str, object]]:
+        """Return in-flight rows carrying a non-empty ``pending_emissions`` batch.
+
+        The P3b boot/redeploy recovery seam (spec §4.1 D2/E3): the ADAPTER
+        surfaces the recoverable rows, the state_io WRAPPER (which owns the bus)
+        re-publishes them with the same row-derived deterministic ids and
+        CAS-finalizes. Selected REGARDLESS of TTL — a duplicate re-publish is
+        benign (row-derived ids collapse at the consume-path dedupe), and gating
+        the re-publish on TTL would strand a seconds-old crashed row's batch
+        until it aged past the stale TTL.
+        """
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT correlation_id, tenant_id, state, in_flight, "  # noqa: S608 — table validated in __init__
+                    f"payload::text AS payload_json, version, "
+                    f"pending_emissions::text AS pending_emissions_json, "
+                    f"publish_attempts "
+                    f"FROM {self._table} "
+                    f"WHERE in_flight "
+                    f"  AND pending_emissions IS NOT NULL "
+                    f"  AND jsonb_array_length(pending_emissions) > 0",
+                )
+        except asyncpg.PostgresError as exc:
+            raise RepositoryExecutionError(
+                f"state_io select_recoverable_batches failed: {type(exc).__name__}",
+                op_name="select_recoverable_batches",
+                table=self._table,
+                context=self._context("select_recoverable_batches", None),
+            ) from exc
+        recoverable: list[dict[str, object]] = []
+        for row in rows:
+            pending_json = row["pending_emissions_json"]
+            recoverable.append(
+                {
+                    "correlation_id": row["correlation_id"],
+                    "tenant_id": row["tenant_id"],
+                    "state": row["state"],
+                    "in_flight": row["in_flight"],
+                    "payload_json": row["payload_json"],
+                    "version": row["version"],
+                    "pending_emissions": (
+                        json.loads(pending_json) if pending_json else []
+                    ),
+                    "publish_attempts": row["publish_attempts"],
+                }
+            )
+        return recoverable
 
     async def recover_stale_rows(self, ttl_seconds: int | None = None) -> int:
         """Fail closed on abandoned in-flight rows past their TTL.
@@ -317,6 +395,15 @@ class StateStoreAdapter:
                     f"    version = version + 1 "
                     f"WHERE state NOT IN ('COMPLETED', 'FAILED') "
                     f"  AND in_flight "
+                    # OMN-14403 §4.1/§4.2 R1: NEVER blind-FAIL a row that still
+                    # carries a live outbox batch — that would permanently destroy
+                    # the persisted pending_emissions (a crash becomes strictly
+                    # WORSE than today). Those rows are RECOVERABLE:
+                    # select_recoverable_batches surfaces them and the wrapper
+                    # re-publishes + CAS-finalizes. The give-up FAIL is reserved
+                    # for genuinely abandoned rows with no batch to re-emit.
+                    f"  AND (pending_emissions IS NULL "
+                    f"       OR jsonb_array_length(pending_emissions) = 0) "
                     f"  AND updated_at < NOW() - make_interval(secs => $1)",
                     ttl,
                 )
