@@ -203,6 +203,13 @@ x-runtime-env: &runtime-env
   OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set OMNIMEMORY_MEMGRAPH_HOST}
   OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:?runtime policy contract must set OMNIMEMORY_MEMGRAPH_PORT}
   OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
+  # OMN-14297: node_architecture_graph_{populate,query}_effect's bolt_uri
+  # config ref. Same Memgraph instance as OMNIMEMORY_MEMGRAPH_HOST/PORT above
+  # (container omnimemory-memgraph, aliased omnibase-infra-memgraph on this
+  # network) — only reachable from services on omnibase-infra-network (dev
+  # lane); stability-test/judge/prod run on isolated lane networks and cannot
+  # resolve this hostname.
+  ARCH_GRAPH_BOLT_URI: ${ARCH_GRAPH_BOLT_URI:?runtime policy contract must set ARCH_GRAPH_BOLT_URI}
   # Filesystem crawler path prefixes — comma-separated list of dirs to crawl for .md files
   OMNIMEMORY_CRAWL_PATH_PREFIXES: ${OMNIMEMORY_CRAWL_PATH_PREFIXES:-/data/omninode/omni_home}
   # Qdrant vector store (embeddings for semantic memory)
