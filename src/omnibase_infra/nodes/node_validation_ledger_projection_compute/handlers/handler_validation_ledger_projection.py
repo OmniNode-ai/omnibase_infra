@@ -20,24 +20,38 @@ Bytes Encoding:
     verification and deterministic replay. Base64 encoding for the read path is
     handled at the SQL layer via encode(envelope_bytes, 'base64').
 
-Ticket: OMN-1908
+    ``handle()`` (OMN-14524) additionally base64-encodes the raw bytes into the
+    ``ModelIntent`` payload it emits -- bytes cannot safely cross intent
+    boundaries, the same rule ``HandlerLedgerProjection`` follows for
+    ``event_value``. The Effect layer (``HandlerValidationLedgerAppend``)
+    decodes it before storage.
+
+Ticket: OMN-1908, OMN-14524
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.validation_ledger import (
+    ModelPayloadValidationLedgerAppend,
+)
 from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
@@ -199,6 +213,126 @@ class HandlerValidationLedgerProjection:
                 error_code=EnumCoreErrorCode.OPERATION_FAILED,
                 context=context,
             ) from e
+
+    async def handle(
+        self,
+        message: object,
+    ) -> ModelHandlerOutput[ModelIntent]:
+        """Contract-typed auto-wiring entry point (OMN-14524).
+
+        ``node_validation_ledger_projection_compute``'s contract declares
+        ``operation_match`` routing with no ``event_model``, so auto-wiring
+        (``handler_wiring._make_dispatch_callback``) invokes
+        ``handle(envelope)`` directly rather than ``execute()``. Without this
+        method the callback binds ``_missing_handle``, which raises on every
+        dispatched event -- and the auto-wired consume boundary
+        log-and-discards that exception, so events are acked and the
+        validation ledger stays empty with nothing surfaced. This mirrors the
+        exact OMN-14516 defect class for the sibling event_ledger.
+
+        Unlike ``project()`` (which returns a plain dict of extracted
+        metadata for existing callers), ``handle()`` wraps that dict into a
+        ``ModelPayloadValidationLedgerAppend`` and emits a ``ModelIntent`` --
+        the shape the kernel's generic intent-routing derivation (OMN-14516)
+        requires to route to ``node_validation_ledger_write_effect`` via
+        ``intent_consumption.intent_routing_table``.
+
+        The value delivered here is whatever
+        ``MessageDispatchEngine._materialize_envelope_with_bindings`` produces
+        on the live dispatch path -- a **dict** (``{"payload": ..., ...}``),
+        not an attribute-bearing envelope. ``_coerce_event_message`` accepts
+        both shapes so this works for the real runtime path and for
+        object-shaped envelopes.
+        """
+        raw_message = self._coerce_event_message(message)
+        headers = raw_message.headers
+        correlation_id = headers.correlation_id if headers else None
+        header_bytes: dict[str, bytes] | None = (
+            {"correlation_id": str(correlation_id).encode("utf-8")}
+            if correlation_id is not None
+            else None
+        )
+
+        projected = self.project(
+            topic=raw_message.topic,
+            partition=raw_message.partition if raw_message.partition is not None else 0,
+            offset=self._parse_offset(raw_message.offset),
+            value=raw_message.value or b"",
+            _headers=header_bytes,
+        )
+
+        envelope_bytes_raw = projected["envelope_bytes"]
+        assert isinstance(envelope_bytes_raw, bytes)
+        # project() returns dict[str, object] since its callers only need key
+        # lookup; handle() knows the concrete per-key types project() actually
+        # populates (see its Returns: docstring), so narrow via cast() rather
+        # than a blanket type: ignore per field.
+        payload = ModelPayloadValidationLedgerAppend(
+            run_id=cast("UUID", projected["run_id"]),
+            repo_id=cast("str", projected["repo_id"]),
+            event_type=cast("str", projected["event_type"]),
+            event_version=cast("str", projected["event_version"]),
+            occurred_at=cast("datetime", projected["occurred_at"]),
+            kafka_topic=cast("str", projected["kafka_topic"]),
+            kafka_partition=cast("int", projected["kafka_partition"]),
+            kafka_offset=cast("int", projected["kafka_offset"]),
+            envelope_bytes=base64.b64encode(envelope_bytes_raw).decode("ascii"),
+            envelope_hash=cast("str", projected["envelope_hash"]),
+            correlation_id=correlation_id,
+        )
+        intent = ModelIntent(
+            intent_type=payload.intent_type,
+            target=(
+                f"postgres://validation_event_ledger/{payload.kafka_topic}/"
+                f"{payload.kafka_partition}/{payload.kafka_offset}"
+            ),
+            payload=payload,
+        )
+
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=correlation_id if correlation_id is not None else uuid4(),
+            handler_id=HANDLER_ID_VALIDATION_LEDGER_PROJECTION,
+            result=intent,
+        )
+
+    @staticmethod
+    def _coerce_event_message(raw: object) -> ModelEventMessage:
+        """Accept a direct ModelEventMessage or an auto-wired envelope wrapper.
+
+        The dispatch engine delivers a materialized dict on the live runtime
+        path and a ``ModelEventEnvelope``-like object from the auto_wiring
+        event-bus callback and test doubles; both must work here. Mirrors
+        ``HandlerLedgerProjection._coerce_event_message``.
+        """
+        if isinstance(raw, ModelEventMessage):
+            return raw
+        payload = (
+            raw.get("payload", raw)
+            if isinstance(raw, dict)
+            else getattr(raw, "payload", raw)
+        )
+        if isinstance(payload, ModelEventMessage):
+            return payload
+        return ModelEventMessage.model_validate(payload)
+
+    @staticmethod
+    def _parse_offset(offset: str | None) -> int:
+        """Parse a Kafka offset string (as carried by ModelEventMessage) to int.
+
+        Returns 0 if None or unparseable -- best-effort, mirroring
+        ``HandlerLedgerProjection._parse_offset``.
+        """
+        if offset is None:
+            return 0
+        try:
+            return int(offset)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Failed to parse offset '%s' as integer, defaulting to 0",
+                offset,
+            )
+            return 0
 
     @staticmethod
     def _extract_header_correlation_id(

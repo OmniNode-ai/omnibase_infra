@@ -1,0 +1,189 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeValidationLedgerWriteEffect
+#
+# Capability-oriented effect node for validation event ledger write operations.
+# Provides append-only validation ledger storage with idempotent writes,
+# mirroring node_ledger_write_effect's pattern for the generic event_ledger.
+#
+# Related Tickets:
+#   - OMN-1908: Cross-Repo Validation Ledger Persistence
+#   - OMN-14524: validation_event_ledger had 0 rows -- no write-effect node
+#     existed. node_validation_ledger_projection_compute emitted a plain dict,
+#     not a ModelIntent, and PostgresValidationLedgerRepository (asyncpg.Pool
+#     constructor) could not be constructed by the contract-driven auto-wiring
+#     resolver the way HandlerLedgerAppend's (container, dsn) shape can. This
+#     node closes that gap by mirroring node_ledger_write_effect exactly:
+#     HandlerValidationLedgerAppend composes HandlerDb internally from
+#     `container`, so the kernel's generic intent-routing derivation
+#     (OMN-14516) can construct and wire it with NO by-name allowlist entry --
+#     see node_validation_ledger_projection_compute/contract.yaml's
+#     intent_consumption.intent_routing_table.
+# Contract identifiers
+name: "node_validation_ledger_write_effect"
+contract_name: "node_validation_ledger_write_effect"
+node_name: "node_validation_ledger_write_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Runtime lane (OMN-12957): "effects" is the consumer-attached profile that
+# drains EFFECT subscriptions -- mirrors node_pr_state_write_effect (the most
+# recent intent-routed write-effect node built on this same pattern).
+runtime_profiles:
+  - effects
+# Description
+description: >
+  Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset).
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPayloadValidationLedgerAppend"
+  module: "omnibase_infra.models.validation_ledger"
+  description: "Input model for validation ledger append operations (event payload with Kafka position)."
+output_model:
+  name: "ModelValidationLedgerAppendResult"
+  module: "omnibase_infra.models.validation_ledger"
+  description: "Output model for validation ledger append results (success, entry ID, duplicate flag)."
+# Event bus configuration
+# The primary invocation path is the generic intent-routing derivation
+# (IntentEffectDispatchBridge, OMN-14516) -- node_validation_ledger_projection_compute's
+# contract routes its "validation_ledger.append" intent here. This command topic
+# mirrors node_build_loop_write_effect's shape (also intent-routed) so the node is
+# introspectable/independently invocable like every other effect node.
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.validation-ledger-append.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.validation-ledger-appended.v1"
+# Capability declaration (capability-oriented naming)
+capabilities:
+  - name: "validation_ledger.write"
+    description: "Append cross-repo validation events to the validation ledger with idempotent write support"
+    version: "0.1.0"
+  - name: "validation_ledger.write.append"
+    description: "Append a single validation event to the validation ledger"
+# Node capabilities (infrastructure-level feature flags for introspection)
+# Extracted at startup by ContractNodeCapabilityExtractor -> ModelNodeCapabilities
+node_capabilities:
+  postgres: true
+  write: true
+  database: true
+  transactions: true
+io_operations:
+  - operation: "validation_ledger.append"
+    description: "Append a cross-repo validation event to the validation ledger with idempotent write support"
+    input_fields:
+      - run_id: "UUID"
+      - repo_id: "str"
+      - event_type: "str"
+      - event_version: "str"
+      - occurred_at: "datetime"
+      - kafka_topic: "str"
+      - kafka_partition: "int"
+      - kafka_offset: "int"
+      - envelope_bytes: "str"
+      - envelope_hash: "str"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - success: "bool"
+      - ledger_entry_id: "UUID | None"
+      - duplicate: "bool"
+      - kafka_topic: "str"
+      - kafka_partition: "int"
+      - kafka_offset: "int"
+    # Idempotent: Uses ON CONFLICT DO NOTHING with (kafka_topic, kafka_partition,
+    # kafka_offset). Duplicate calls return duplicate=True without creating new
+    # entries.
+    idempotent: true
+# Handler routing for validation ledger operations
+# Handler composes with HandlerDb for PostgreSQL operations
+#
+# NOTE (mirrors OMN-14139/OMN-14140 on node_ledger_write_effect): the handler
+# reference MUST use the nested `handler: {name, module}` block, and the
+# constructor MUST be (container, db_dsn) -- HandlerDb is composed internally,
+# not accepted as a constructor argument -- so the contract-driven auto-wiring
+# resolver (and the OMN-14516 intent-routing derivation, which constructs
+# `_effect_cls(container, build_loop_dsn)`) can build this handler.
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validation_ledger.append"
+      handler:
+        name: "HandlerValidationLedgerAppend"
+        module: "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append"
+      description: "Idempotent append to validation event ledger with duplicate detection"
+# Dependencies (protocols this node requires)
+# Note: The validation ledger handler composes with HandlerDb internally
+dependencies:
+  - name: "handler_validation_ledger_append"
+    type: "handler"
+    class_name: "HandlerValidationLedgerAppend"
+    module: "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append"
+    description: "Handler for idempotent validation ledger append operations"
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "PostgreSQL database handler (composed by the validation ledger append handler)"
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "DatabaseConnectionError"
+      description: "Unable to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "DatabaseTimeoutError"
+      description: "Database operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "ValidationError"
+      description: "Input validation failed"
+      recoverable: false
+      retry_strategy: "none"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "database_backend"
+      type: "connection"
+      critical: true
+# Metadata
+metadata:
+  description: "Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset)."
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-07-13"
+  ticket: "OMN-14524"
+  tags:
+    - effect
+    - validation-ledger
+    - audit
+    - storage
+    - postgresql
+    - capability-oriented
+    - idempotent

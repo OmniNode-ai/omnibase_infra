@@ -2547,6 +2547,18 @@ pattern_exemptions:
     documentation:
       - OMN-1908 (Cross-repo validation ledger persistence)
     ticket: OMN-1908
+  # ModelPayloadValidationLedgerAppend (OMN-14524) carries the same repo_id
+  # field 1:1 through to PostgresValidationLedgerRepository.append() / the
+  # validation_event_ledger table -- same non-UUID identifier, same reason.
+  - file_pattern: 'validation_ledger/model_payload_validation_ledger_append\.py'
+    violation_pattern: "Field 'repo_id' should use UUID type instead of str"
+    reason: >
+      repo_id is a human-readable repository identifier (e.g., "omnibase_core") carried through the validation_ledger.append intent payload to the validation_event_ledger table. It is not a UUID-based system identifier.
+
+    documentation:
+      - OMN-1908 (Cross-repo validation ledger persistence)
+      - OMN-14524 (validation_event_ledger write-effect)
+    ticket: OMN-14524
   # ==========================================================================
   # Session State Node Exemptions (OMN-2117)
   # ==========================================================================

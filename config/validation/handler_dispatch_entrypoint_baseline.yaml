@@ -133,6 +133,3 @@ known_entrypointless:
   - contract: node_update_plan_reducer
     handler: HandlerCreatePlan
     module: omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan
-  - contract: node_validation_ledger_projection_compute
-    handler: HandlerValidationLedgerProjection
-    module: omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection
