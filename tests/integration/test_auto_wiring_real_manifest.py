@@ -46,11 +46,12 @@ _KNOWN_DELETED_OCC_STUBS = {
 # assertion message) but does not fail on them — every OTHER raw projection with no
 # derivable applier IS a hard failure. Removing an entry is part of its ticket's
 # DoD; NEVER add a live node here to silence the gate.
-#   - node_validation_ledger_projection_compute: no write-effect node exists
-#     (PostgresValidationLedgerRepository is never instantiated), so it cannot yet
-#     declare an intent_routing_table. Tracked in OMN-14524 (build the write-effect,
-#     prove validation_event_ledger 0->N, then delete this entry).
-_KNOWN_UNWIRED_RAW_PROJECTIONS = {"node_validation_ledger_projection_compute"}
+#
+# EMPTY as of OMN-14524: node_validation_ledger_projection_compute now declares
+# intent_consumption.intent_routing_table -> node_validation_ledger_write_effect
+# (HandlerValidationLedgerAppend), so the kernel derivation wires it with no
+# allowlist entry. Do NOT add a live node here to silence this gate.
+_KNOWN_UNWIRED_RAW_PROJECTIONS: set[str] = set()
 
 
 class _StubResultApplier:

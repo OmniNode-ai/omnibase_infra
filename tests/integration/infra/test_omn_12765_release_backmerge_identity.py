@@ -47,7 +47,7 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-14471: the regenerated image_version=6 identity binds the current dev
-    # shared environment digest used by the release-identity node migration lane.
-    assert lock["identity_digest"] == "c4b259aef0791aee9d1fdb1111da632f"
-    assert lock["shared_env_digest"] == "98b3d453ba530d1135bf81f3"
+    # OMN-14524: the regenerated image_version=6 identity binds the current dev
+    # shared environment digest after the validation-ledger write-effect lane.
+    assert lock["identity_digest"] == "1742589d908dc188c04b284e3af6ef62"
+    assert lock["shared_env_digest"] == "03c0958c80f472a630357ba5"

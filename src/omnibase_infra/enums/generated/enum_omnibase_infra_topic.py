@@ -37,6 +37,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1
     CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1 = "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"  # onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1
     CMD_TOPIC_MIGRATION_EXECUTE_V1 = "onex.cmd.omnibase-infra.topic-migration-execute.v1"  # onex.cmd.omnibase-infra.topic-migration-execute.v1
+    CMD_VALIDATION_LEDGER_APPEND_V1 = "onex.cmd.omnibase-infra.validation-ledger-append.v1"  # onex.cmd.omnibase-infra.validation-ledger-append.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     DLQ_COMMANDS_V1 = "onex.dlq.omnibase-infra.commands.v1"  # onex.dlq.omnibase-infra.commands.v1
     DLQ_EVENTS_V1 = "onex.dlq.omnibase-infra.events.v1"  # onex.dlq.omnibase-infra.events.v1
@@ -88,4 +89,5 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
     EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1
+    EVT_VALIDATION_LEDGER_APPENDED_V1 = "onex.evt.omnibase-infra.validation-ledger-appended.v1"  # onex.evt.omnibase-infra.validation-ledger-appended.v1
     EVT_VECTOR_STORE_COMPLETED_V1 = "onex.evt.omnibase-infra.vector-store-completed.v1"  # onex.evt.omnibase-infra.vector-store-completed.v1

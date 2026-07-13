@@ -71,14 +71,13 @@ _NODES_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 CONTRACT_PATH = _NODES_ROOT / "node_ledger_projection_compute" / "contract.yaml"
 CONTRACT_NAME = "node_ledger_projection_compute"
 
-# node_validation_ledger_projection_compute is dead for a RELATED but distinct
-# reason: it has no write-effect node at all (PostgresValidationLedgerRepository is
-# never instantiated in production) and its handler returns a plain dict rather
-# than a ModelIntent, so it cannot declare a routing table until that write-effect
-# is built. Tracked in OMN-14524. This is a SHRINK-ONLY ratchet — a node stays here
-# only while genuinely dead-in-production with a ticket; never add a live node to
-# silence this gate.
-KNOWN_UNWIRED: frozenset[str] = frozenset({"node_validation_ledger_projection_compute"})
+# EMPTY as of OMN-14524: node_validation_ledger_projection_compute now has a
+# write-effect node (node_validation_ledger_write_effect / HandlerValidationLedgerAppend)
+# and its handle() emits a ModelIntent, so it declares
+# intent_consumption.intent_routing_table like every other derived projection. This
+# is a SHRINK-ONLY ratchet — a node stays here only while genuinely
+# dead-in-production with a ticket; never add a live node to silence this gate.
+KNOWN_UNWIRED: frozenset[str] = frozenset()
 
 
 class _StubResultApplier:

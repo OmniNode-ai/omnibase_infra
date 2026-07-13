@@ -106,6 +106,8 @@ src/omnibase_infra/nodes/node_ledger_projection_compute/handlers/handler_ledger_
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_append.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_query.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/__init__.py  # OMN-14524: validation-ledger persistence is platform/audit infra (same class as node_ledger_write_effect above), not a business-domain workflow.
+src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/handler_validation_ledger_append.py  # OMN-14524: validation-ledger persistence is platform/audit infra (same class as node_ledger_write_effect above), not a business-domain workflow.
 src/omnibase_infra/nodes/node_llm_completion_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_completion_effect/handlers/handler_llm_completion.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_llm_embedding_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
