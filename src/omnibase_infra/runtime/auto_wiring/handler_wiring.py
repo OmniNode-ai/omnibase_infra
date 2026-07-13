@@ -3338,6 +3338,28 @@ def _prepare_contract_wiring(
         contract
     ) and not _raw_event_projection_enabled(contract, result_appliers_by_contract):
         consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
+        # OMN-14516/OMN-14530: a contract that DECLARES consumer_purpose=audit|
+        # projection AND subscribe_topics is asserting it must consume and persist.
+        # Reaching this branch means no result applier is wired for it — a kernel
+        # MISCONFIGURATION, not a valid opt-out. It is FAILED, never SKIPPED.
+        #
+        # SKIPPED is not counted by total_failed, so the runtime booted GREEN with
+        # the contract silently unwired: zero handlers, zero subscriptions, class
+        # never constructed. node_ledger_projection_compute died exactly this way —
+        # event_ledger held ZERO rows while 1,028,463 events flowed past, on
+        # stability-test AND prod, because nobody hand-added its name to the
+        # kernel's result-applier allowlist. That allowlist is now DELETED: an
+        # audit/projection consumer wires itself by declaring
+        # intent_consumption.intent_routing_table (the kernel DERIVES the applier).
+        # If it reaches here it declared neither an applier nor a resolvable routing
+        # table, so FAILED makes the gap loud and lets ONEX_WIRING_STRICT_MODE catch
+        # it (the strict assert reads total_failed, which SKIPPED sailed past).
+        #
+        # Same fail-closed reasoning as the StateIoUnconfiguredError seam
+        # (OMN-14484): a declared-but-unconfigured durability seam is a startup
+        # error, not a per-contract shrug. Do NOT soften this back to SKIPPED to
+        # make a boot go green — declare the routing table (kernel derivation wires
+        # it) or remove consumer_purpose from the contract.
         return PreparedContractWiring(
             contract=contract,
             prepared_wirings=[],
@@ -3346,10 +3368,14 @@ def _prepare_contract_wiring(
             skip_result=ModelContractWiringResult(
                 contract_name=contract.name,
                 package_name=contract.package_name,
-                outcome=EnumWiringOutcome.SKIPPED,
+                outcome=EnumWiringOutcome.FAILED,
                 reason=(
-                    f"consumer_purpose={consumer_purpose!r} requires dedicated "
-                    "raw event projection wiring"
+                    f"consumer_purpose={consumer_purpose!r} declares a raw event "
+                    f"projection but no result applier is wired for contract "
+                    f"{contract.name!r} — it would consume offsets and drop every "
+                    f"intent. Declare intent_consumption.intent_routing_table so the "
+                    f"kernel derives a DispatchResultApplier, or remove "
+                    f"consumer_purpose."
                 ),
             ),
         )

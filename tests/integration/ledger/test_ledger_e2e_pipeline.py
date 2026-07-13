@@ -10,8 +10,11 @@ SCOPE — read this before trusting a green run (OMN-14516):
     1. ``HandlerLedgerProjection.handle(envelope)`` -- the actual auto-wiring
        dispatch entrypoint, invoked with the DICT-shaped envelope the live
        dispatch path delivers (NOT ``project()``, and NOT an object envelope).
-    2. ``IntentEffectLedgerAppend`` -- the real intent effect the kernel
-       registers, which is what carries the emitted intent to the write effect.
+    2. ``IntentEffectDispatchBridge`` -- the single generic intent effect the
+       kernel DERIVES for every audit/projection consumer (OMN-14516). It carries
+       the emitted intent's payload to the write effect's canonical ``handle()``,
+       exactly as the runtime IntentExecutor does. There is no per-node bespoke
+       bridge and no by-name kernel allowlist anymore.
     3. ``HandlerLedgerAppend`` persists to PostgreSQL.
     4. Readback from the ``event_ledger`` table by its natural key.
 
@@ -106,7 +109,7 @@ class TestLedgerE2EPipeline:
         # auto-wiring actually invokes, and it receives a DICT envelope on the
         # live path. Calling project() here would bypass the exact method whose
         # absence kept this table empty.
-        from omnibase_infra.runtime.intent_effects import IntentEffectLedgerAppend
+        from omnibase_infra.runtime.intent_effects import IntentEffectDispatchBridge
 
         output = await projection_handler.handle({"payload": message.model_dump()})
         intent = output.result
@@ -114,10 +117,11 @@ class TestLedgerE2EPipeline:
         assert intent.intent_type
         assert intent.payload.intent_type == "ledger.append"
 
-        # Step 2: the REAL intent effect the kernel registers carries the intent
-        # to the write effect. Hand-carrying intent.payload into append() here is
-        # what made the old version of this test a surrogate.
-        await IntentEffectLedgerAppend(ledger_append_handler).execute(
+        # Step 2: the generic intent effect the kernel DERIVES carries the intent's
+        # payload to the write effect's canonical handle() -- the same call the
+        # runtime IntentExecutor makes. Hand-carrying intent.payload into append()
+        # directly is what made the old version of this test a surrogate.
+        await IntentEffectDispatchBridge(ledger_append_handler).execute(
             intent.payload,
             correlation_id=correlation_id,
         )

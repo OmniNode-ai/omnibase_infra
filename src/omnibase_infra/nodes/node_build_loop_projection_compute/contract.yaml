@@ -55,6 +55,15 @@ handler_routing:
         module: "omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection"
       supported_operations:
         - "build_loop.project"
+# Intent consumption (OMN-14516): the projection emits a `build_loop.append`
+# intent per consumed terminal event. The kernel DERIVES this contract's result
+# applier from this table — it names the effect node whose canonical handle()
+# persists the intent (node_build_loop_write_effect → HandlerBuildLoopAppend,
+# keyed by the write-effect's `build_loop.append` operation). Replaces the former
+# hand-maintained by-name entry in service_kernel's result-applier allowlist.
+intent_consumption:
+  intent_routing_table:
+    "build_loop.append": "node_build_loop_write_effect"
 capabilities:
   - name: "build_loop.projection"
     description: "Project the build_loop_workflow terminal event into a write intent"

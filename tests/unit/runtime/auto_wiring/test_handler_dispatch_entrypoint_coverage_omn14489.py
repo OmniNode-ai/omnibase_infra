@@ -52,7 +52,9 @@ _SRC_ROOT = _REPO_ROOT / "src" / "omnibase_infra"
 _KNOWN_ENTRYPOINTLESS: frozenset[tuple[str, str]] = frozenset(
     {
         ("handler_architecture_validation", "HandlerArchitectureValidation"),
-        ("handler_ledger_projection", "HandlerLedgerProjection"),
+        # HandlerLedgerProjection removed from the shrink-only census (OMN-14516):
+        # it now exposes a handle() dispatch entrypoint, so it is no longer
+        # entrypointless. Do not re-add.
         ("node_artifact_change_detector_effect", "HandlerContractFileWatcher"),
         ("node_artifact_change_detector_effect", "HandlerManualTrigger"),
         ("node_artifact_change_detector_effect", "HandlerPRWebhookIngestion"),
@@ -68,7 +70,8 @@ _KNOWN_ENTRYPOINTLESS: frozenset[tuple[str, str]] = frozenset(
         ("node_contract_validate_compute", "HandlerContractValidate"),
         ("node_impact_analyzer_compute", "HandlerImpactAnalysis"),
         ("node_invariant_evaluate_compute", "HandlerInvariantEvaluate"),
-        ("node_ledger_projection_compute", "HandlerLedgerProjection"),
+        # (node_ledger_projection_compute, HandlerLedgerProjection) removed with the
+        # entry above — HandlerLedgerProjection gained handle() in OMN-14516.
         ("node_llm_embedding_effect", "HandlerEmbeddingOpenaiCompatible"),
         ("node_llm_inference_effect", "HandlerLlmCliSubprocess"),
         ("node_model_health_effect", "HandlerProbeHealth"),

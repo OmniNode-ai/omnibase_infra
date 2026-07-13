@@ -59,6 +59,15 @@ handler_routing:
         module: "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection"
       supported_operations:
         - "pr_state.project"
+# Intent consumption (OMN-14516): the projection emits a `pr_state.upsert` intent
+# per consumed PR status event. The kernel DERIVES this contract's result applier
+# from this table — it names the effect node whose canonical handle() persists the
+# intent (node_pr_state_write_effect → HandlerPrStateUpsert, keyed by the
+# write-effect's `pr_state.upsert` operation). Replaces the former hand-maintained
+# by-name entry in service_kernel's result-applier allowlist.
+intent_consumption:
+  intent_routing_table:
+    "pr_state.upsert": "node_pr_state_write_effect"
 capabilities:
   - name: "pr_state.projection"
     description: "Project the GitHub PR status event, including is_draft, into a write intent"

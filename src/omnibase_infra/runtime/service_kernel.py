@@ -2200,140 +2200,24 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+        # DB DSN shared by every omnibase_infra durable-projection consumer
+        # (event_ledger, build_loop_runs, pr_state — all live in the same
+        # omnibase_infra Postgres instance). Consumed by the audit/projection
+        # result-applier DERIVATION below (which runs after the manifest is
+        # loaded), NOT by a per-node hand-maintained block.
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
-        if event_bus is not None and build_loop_dsn:
-            from omnibase_infra.nodes.node_build_loop_write_effect.handlers import (
-                HandlerBuildLoopAppend,
-            )
-            from omnibase_infra.runtime.intent_effects import (
-                IntentEffectBuildLoopAppend,
-            )
-            from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
-            build_loop_append_handler = HandlerBuildLoopAppend(
-                container,
-                build_loop_dsn,
-            )
-            await build_loop_append_handler.initialize({})
-            build_loop_intent_executor = IntentExecutor(container=container)
-            build_loop_intent_executor.register_handler(
-                "build_loop.append",
-                IntentEffectBuildLoopAppend(build_loop_append_handler),
-            )
-            auto_wiring_result_appliers["node_build_loop_projection_compute"] = (
-                DispatchResultApplier(
-                    event_bus=event_bus,
-                    output_topic=config.output_topic,
-                    intent_executor=build_loop_intent_executor,
-                )
-            )
-            logger.info(
-                "Build-loop raw projection result applier registered "
-                "(contract=node_build_loop_projection_compute, correlation_id=%s)",
-                correlation_id,
-            )
-        elif event_bus is not None:
-            logger.warning(
-                "Build-loop raw projection result applier not registered: "
-                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
-                correlation_id,
-            )
-
-        # pr_state.upsert intents (from node_pr_state_projection_compute) route
-        # to HandlerPrStateUpsert the same way build_loop.append intents route
-        # to HandlerBuildLoopAppend above -- reuses build_loop_dsn since pr_state
-        # lives in the same omnibase_infra Postgres instance (OMN-14375).
-        if event_bus is not None and build_loop_dsn:
-            from omnibase_infra.nodes.node_pr_state_write_effect.handlers import (
-                HandlerPrStateUpsert,
-            )
-            from omnibase_infra.runtime.intent_effects import (
-                IntentEffectPrStateUpsert,
-            )
-            from omnibase_infra.runtime.service_intent_executor import (
-                IntentExecutor,
-            )
-
-            pr_state_upsert_handler = HandlerPrStateUpsert(
-                container,
-                build_loop_dsn,
-            )
-            await pr_state_upsert_handler.initialize({})
-            pr_state_intent_executor = IntentExecutor(container=container)
-            pr_state_intent_executor.register_handler(
-                "pr_state.upsert",
-                IntentEffectPrStateUpsert(pr_state_upsert_handler),
-            )
-            auto_wiring_result_appliers["node_pr_state_projection_compute"] = (
-                DispatchResultApplier(
-                    event_bus=event_bus,
-                    output_topic=config.output_topic,
-                    intent_executor=pr_state_intent_executor,
-                )
-            )
-            logger.info(
-                "pr_state projection result applier registered "
-                "(contract=node_pr_state_projection_compute, correlation_id=%s)",
-                correlation_id,
-            )
-        elif event_bus is not None:
-            logger.warning(
-                "pr_state projection result applier not registered: "
-                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
-                correlation_id,
-            )
-
-        # ledger.append intents (from node_ledger_projection_compute) route to
-        # HandlerLedgerAppend exactly as build_loop.append routes to
-        # HandlerBuildLoopAppend above. This registration is what makes the
-        # audit ledger live at all: node_ledger_projection_compute declares
-        # consumer_purpose="audit", so handler_wiring treats it as a raw event
-        # projection contract and SKIPS it outright unless a result applier is
-        # registered here under its contract name -- a contract that emits
-        # intents with no effect path would otherwise consume Kafka offsets and
-        # silently drop every intent. Missing this entry is why event_ledger held
-        # ZERO rows since the node shipped, while its 7 subscribed topics carried
-        # live traffic and consumer group onex-ledger-projection-compute never
-        # existed (OMN-14516).
-        if event_bus is not None and build_loop_dsn:
-            from omnibase_infra.nodes.node_ledger_write_effect.handlers import (
-                HandlerLedgerAppend,
-            )
-            from omnibase_infra.runtime.intent_effects import (
-                IntentEffectLedgerAppend,
-            )
-            from omnibase_infra.runtime.service_intent_executor import (
-                IntentExecutor,
-            )
-
-            ledger_append_handler = HandlerLedgerAppend(
-                container,
-                build_loop_dsn,
-            )
-            await ledger_append_handler.initialize({})
-            ledger_intent_executor = IntentExecutor(container=container)
-            ledger_intent_executor.register_handler(
-                "ledger.append",
-                IntentEffectLedgerAppend(ledger_append_handler),
-            )
-            auto_wiring_result_appliers["node_ledger_projection_compute"] = (
-                DispatchResultApplier(
-                    event_bus=event_bus,
-                    output_topic=config.output_topic,
-                    intent_executor=ledger_intent_executor,
-                )
-            )
-            logger.info(
-                "Ledger raw projection result applier registered "
-                "(contract=node_ledger_projection_compute, correlation_id=%s)",
-                correlation_id,
-            )
-        elif event_bus is not None:
-            logger.warning(
-                "Ledger raw projection result applier not registered: "
-                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
-                correlation_id,
-            )
+        # NOTE (OMN-14516): the former per-node result-applier registrations for
+        # node_build_loop_projection_compute / node_pr_state_projection_compute /
+        # node_ledger_projection_compute lived HERE as a hand-maintained by-NAME
+        # allowlist. That allowlist is DELETED. Any audit/projection consumer that
+        # declares an ``intent_consumption.intent_routing_table`` now has its
+        # result applier DERIVED generically from the manifest (see the derivation
+        # loop after the manifest is filtered, below). A new such consumer wires
+        # itself by declaring the routing table — no kernel edit, no name lookup.
+        # node_ledger_projection_compute died precisely because nobody remembered
+        # to hand-add it here: handler_wiring SKIPPED it and event_ledger held zero
+        # rows while 1M+ events flowed. Derivation removes that failure mode.
 
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
@@ -2754,6 +2638,125 @@ async def bootstrap() -> int:
                             _contract.name,
                             _contract.node_type,
                             _topics,
+                            correlation_id,
+                        )
+
+                    # OMN-14516: DERIVE result appliers for audit/projection
+                    # consumers that emit intents to a durable write effect. This
+                    # is the generic replacement for the DELETED per-node by-NAME
+                    # result-applier allowlist. Any COMPUTE contract declaring
+                    # consumer_purpose=audit|projection AND an
+                    # ``intent_consumption.intent_routing_table`` gets a
+                    # DispatchResultApplier with an IntentExecutor derived FROM THE
+                    # CONTRACT: for each ``intent_type -> effect_node`` entry, the
+                    # effect handler is resolved from the effect node's OWN contract
+                    # (matched by ``operation == intent_type``), wrapped in the
+                    # single generic IntentEffectDispatchBridge, and registered under
+                    # intent_type. No name lookup, no bespoke per-node class.
+                    #
+                    # A consumer with a routing table but no DB DSN, or whose effect
+                    # node/handler cannot be resolved, is left UNWIRED so
+                    # handler_wiring FAILS it (fail-closed, OMN-14530) rather than
+                    # letting it consume offsets and silently drop every intent —
+                    # the exact failure that kept event_ledger empty (OMN-14516).
+                    if build_loop_dsn:
+                        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+                            _import_handler_class,
+                            _is_raw_event_projection_contract,
+                        )
+                        from omnibase_infra.runtime.intent_effects import (
+                            IntentEffectDispatchBridge,
+                        )
+                        from omnibase_infra.runtime.service_intent_executor import (
+                            IntentExecutor,
+                        )
+                        from omnibase_infra.runtime.service_intent_routing_loader import (
+                            load_intent_routing_table,
+                        )
+
+                        _contracts_by_name = {
+                            _c.name: _c for _c in filtered_manifest.contracts
+                        }
+                        for _contract in filtered_manifest.contracts:
+                            if _contract.name in auto_wiring_result_appliers:
+                                continue
+                            if not _is_raw_event_projection_contract(_contract):
+                                continue
+                            _routing = load_intent_routing_table(
+                                Path(_contract.contract_path),
+                                logger_override=logger,
+                            )
+                            if not _routing:
+                                # Audit/projection consumer with no declared effect
+                                # path — intentionally left unwired so handler_wiring
+                                # FAILS it (fail-closed) instead of silently skipping.
+                                continue
+                            _executor = IntentExecutor(container=container)
+                            for _intent_type, _effect_node in _routing.items():
+                                _effect_contract = _contracts_by_name.get(_effect_node)
+                                if (
+                                    _effect_contract is None
+                                    or _effect_contract.handler_routing is None
+                                ):
+                                    raise RuntimeHostError(
+                                        f"intent_routing_table on {_contract.name!r} "
+                                        f"routes {_intent_type!r} to effect node "
+                                        f"{_effect_node!r}, which is absent from the "
+                                        f"manifest or declares no handler_routing — "
+                                        f"cannot derive its result applier."
+                                    )
+                                _handler_ref = next(
+                                    (
+                                        _e.handler
+                                        for _e in _effect_contract.handler_routing.handlers
+                                        if _e.operation == _intent_type
+                                    ),
+                                    None,
+                                )
+                                if _handler_ref is None and (
+                                    len(_effect_contract.handler_routing.handlers) == 1
+                                ):
+                                    _handler_ref = (
+                                        _effect_contract.handler_routing.handlers[
+                                            0
+                                        ].handler
+                                    )
+                                if _handler_ref is None:
+                                    raise RuntimeHostError(
+                                        f"effect node {_effect_node!r} exposes no "
+                                        f"handler whose operation matches intent_type "
+                                        f"{_intent_type!r} (declared by "
+                                        f"{_contract.name!r}) — cannot derive applier."
+                                    )
+                                _effect_cls = _import_handler_class(
+                                    _handler_ref.module, _handler_ref.name
+                                )
+                                _effect_handler = _effect_cls(container, build_loop_dsn)
+                                await _effect_handler.initialize({})
+                                _executor.register_handler(
+                                    _intent_type,
+                                    IntentEffectDispatchBridge(_effect_handler),
+                                )
+                            auto_wiring_result_appliers[_contract.name] = (
+                                DispatchResultApplier(
+                                    event_bus=event_bus,
+                                    output_topic=config.output_topic,
+                                    intent_executor=_executor,
+                                )
+                            )
+                            logger.info(
+                                "Derived result applier for audit/projection consumer "
+                                "(contract=%s, intents=%s, correlation_id=%s)",
+                                _contract.name,
+                                sorted(_routing),
+                                correlation_id,
+                            )
+                    else:
+                        logger.warning(
+                            "OMNIBASE_INFRA_DB_URL is not set — audit/projection "
+                            "result appliers cannot be derived; any consumer "
+                            "declaring an intent_routing_table will FAIL wiring "
+                            "(fail-closed) (correlation_id=%s)",
                             correlation_id,
                         )
 

@@ -82,6 +82,17 @@ handler_routing:
         module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
       supported_operations:
         - "ledger.project"
+# Intent consumption (OMN-14516): the projection emits a `ledger.append` intent
+# per consumed platform event. This table is the SOURCE OF TRUTH the kernel uses
+# to DERIVE a result applier for this contract — it names the effect node whose
+# canonical handle() persists the intent (node_ledger_write_effect →
+# HandlerLedgerAppend, keyed by the write-effect's `ledger.append` operation).
+# Without this declaration the kernel has no wired effect path, handler_wiring
+# FAILS the contract (fail-closed), and event_ledger stays empty. There is no
+# by-name kernel allowlist anymore — declare the routing here, get wired.
+intent_consumption:
+  intent_routing_table:
+    "ledger.append": "node_ledger_write_effect"
 # Capabilities provided by this node
 capabilities:
   - name: "ledger.projection"
