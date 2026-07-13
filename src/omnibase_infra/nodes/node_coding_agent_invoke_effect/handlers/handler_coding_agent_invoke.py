@@ -30,13 +30,9 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar
-from uuid import uuid4
 
-from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.coding_agent.enum_agent_sandbox import EnumAgentSandbox
 from omnibase_infra.models.coding_agent.enum_agent_status import EnumAgentStatus
@@ -71,10 +67,6 @@ HANDLER_ID = "coding-agent-invoke-effect"
 # overlay value the spawned subprocess uses as HOME). The descriptor is the single
 # source of truth; the handler never hardcodes a credential-home path.
 _CONTRACT = Path(__file__).resolve().parent.parent / "contract.yaml"
-
-# Dispatch payloads are coerced at runtime; the protocol entry is generic over the
-# envelope payload type (ProtocolMessageHandler.handle(ModelEventEnvelope[T])).
-T = TypeVar("T")
 
 # The CLI binary name per agent. The binary NAME is stable; the agentic argv that
 # maps OmniNode sandbox -> CLI permission mode is finalized below (Phase 0 proof).
@@ -368,27 +360,22 @@ class HandlerCodingAgentInvoke:
             output=message,
         )
 
-    async def handle(self, envelope: ModelEventEnvelope[T]) -> ModelHandlerOutput[None]:
-        """Invoke the coding agent and emit the result as an effect event.
+    async def handle(
+        self, command: ModelCodingAgentInvokeCommand
+    ) -> ModelCodingAgentResult:
+        """Invoke the coding agent and return the system-derived result.
 
-        Effect handlers emit events (never intents/projections, never publish to
-        the bus directly). The runtime publishes the returned event envelope to
-        the effect's contract-declared publish topic.
+        Canonical def-B shape (OMN-14355 / OMN-14589): the contract's
+        ``handler_routing.handlers[0].event_model`` (``ModelCodingAgentInvokeCommand``)
+        is the typed request; the shared runtime adapter validates the dispatched
+        payload against it before calling ``handle()`` and wraps this bare
+        ``ModelCodingAgentResult`` return into the EFFECT's ``events[]``. The
+        dispatch-result applier unwraps any transport-envelope-shaped output event
+        to its inner payload before publish either way (see
+        ``DispatchResultApplier._publish_payload_for_output_event``), so this is
+        behavior-identical to the prior transport-wrapping form.
         """
-        command = _coerce_command(envelope.payload)
-        result = self.invoke(command)
-        result_event: ModelEventEnvelope[ModelCodingAgentResult] = ModelEventEnvelope(
-            payload=result,
-            correlation_id=command.correlation_id,
-        )
-        return ModelHandlerOutput.for_effect(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=(
-                envelope.correlation_id or command.correlation_id or uuid4()
-            ),
-            handler_id=HANDLER_ID,
-            events=(result_event,),
-        )
+        return self.invoke(command)
 
 
 def _default_which(binary: str) -> str | None:
@@ -513,21 +500,6 @@ def _git_capture_diff(cwd: str) -> tuple[tuple[str, ...], str]:
     for path in changed:
         seen.setdefault(path, None)
     return tuple(seen), diff_text
-
-
-def _coerce_command(payload: object) -> ModelCodingAgentInvokeCommand:
-    if isinstance(payload, ModelCodingAgentInvokeCommand):
-        return payload
-    if isinstance(payload, Mapping):
-        return ModelCodingAgentInvokeCommand.model_validate(dict(payload))
-    if hasattr(payload, "model_dump"):
-        return ModelCodingAgentInvokeCommand.model_validate(
-            payload.model_dump(mode="json")
-        )
-    raise TypeError(
-        "coding-agent invoke payload must be ModelCodingAgentInvokeCommand or a "
-        f"mapping; got {type(payload).__name__}"
-    )
 
 
 __all__: list[str] = [
