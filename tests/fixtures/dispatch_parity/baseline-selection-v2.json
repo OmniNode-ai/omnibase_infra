@@ -910,17 +910,18 @@
     "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e": {
       "category": "command",
       "contract_name": "node_remote_agent_invoke_effect",
-      "event_model_module": null,
-      "event_model_name": null,
+      "event_model_module": "omnibase_core.models.delegation.model_invocation_command",
+      "event_model_name": "ModelInvocationCommand",
       "handler_id": "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e",
       "handler_module": "omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task",
       "handler_name": "HandlerA2ATask",
       "message_types": [
+        "ModelInvocationCommand",
         "omnibase-infra.remote-agent-invoke",
         "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
       ],
       "package": "omnibase_infra",
-      "type_scoped": false
+      "type_scoped": true
     },
     "dispatcher.auto.node_reward_binder_effect.HandlerRewardBinder.emit_reward_events_f0dda7f0": {
       "category": "event",
@@ -1473,10 +1474,10 @@
       "contracts_discovered": 122,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 90,
-      "probe_count": 330,
+      "probe_count": 331,
       "registered_dispatchers": 85,
       "registered_routes": 101,
-      "type_scoped_dispatchers": 41
+      "type_scoped_dispatchers": 42
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -1516,7 +1517,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-12T20:40:01.404120+00:00",
+    "generated_at_utc": "2026-07-13T02:12:01.781985+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.7",
       "omnibase-infra": "0.38.4",
@@ -1793,13 +1794,11 @@
         "payload": "_DictPayload"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
         "message_category": "command",
         "message_type": "omnibase-infra.remote-agent-invoke",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
     },
@@ -6138,6 +6137,26 @@
       },
       "topic": "onex.intent.platform.runtime-tick.v1"
     },
+    "P4::dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e::onex.cmd.omnibase-infra.remote-agent-invoke.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e",
+      "event_model": "omnibase_core.models.delegation.model_invocation_command.ModelInvocationCommand",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.remote-agent-invoke",
+        "payload": "ModelInvocationCommand"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.remote-agent-invoke",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
+    },
     "P4::dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete::onex.cmd.router.route-request.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_routing_orchestrator.HandlerHealthComplete",
@@ -7840,7 +7859,7 @@
       "route_id": "route.auto.node_remote_agent_invoke_effect.HandlerA2ATask.agent_a2a_task_8289e52e.onex_cmd_omnibase_infra_remote_agent_invoke_v1",
       "topic": "onex.cmd.omnibase-infra.remote-agent-invoke.v1",
       "topic_pattern": "*.cmd.omnibase-infra.remote-agent-invoke.*",
-      "type_scoped": false
+      "type_scoped": true
     },
     {
       "contract_name": "node_routing_orchestrator",
