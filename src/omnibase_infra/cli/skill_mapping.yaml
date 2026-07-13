@@ -67,6 +67,20 @@ skills:
       - {name: tickets, payload_field: tickets, arg_type: string_list}
       - {name: run-surface-probes, payload_field: run_surface_probes, arg_type: boolean, default: true}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # OMN-14552: verification_sweep was UNDISPATCHABLE — absent from this mapping
+  # so `onex skill verification_sweep` returned "Unknown skill", and its
+  # extra="forbid" request model rejected the runtime-injected correlation_id.
+  # Both are fixed (correlation_id added to the request model in omnimarket).
+  - skill_name: verification_sweep
+    node_name: node_verification_sweep_orchestrator
+    result_model: omnimarket.nodes.node_verification_sweep_orchestrator.models.model_verification_sweep_orchestrator_result.ModelVerificationSweepOrchestratorResult
+    args:
+      - {name: targets, payload_field: targets, arg_type: string_list}
+      - {name: epic, payload_field: epic, arg_type: string}
+      - {name: check-types, payload_field: check_types, arg_type: string_list}
+      - {name: pr, payload_field: pr, arg_type: string}
+      - {name: timeout-seconds, payload_field: timeout_seconds, arg_type: integer}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: contract_sweep
     node_name: node_contract_sweep
     result_model: omnimarket.nodes.node_contract_sweep.handlers.handler_contract_sweep.ContractSweepResult
