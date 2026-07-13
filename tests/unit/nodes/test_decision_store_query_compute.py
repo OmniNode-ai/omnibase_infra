@@ -114,21 +114,34 @@ class _MockEntry:
 
 
 def test_row_to_entry_converts_real_row_without_raising() -> None:
-    # NOTE (OMN-14529, separate from the title/epic_id fix under test here):
-    # omnibase_core.enums.enum_decision_type.EnumDecisionType uses LOWERCASE
-    # values ("tech_stack_choice") while the omnimarket orchestrator's own
-    # EnumDecisionType (model_decision_store_request.py) and the raw DB TEXT
-    # column both use UPPERCASE ("TECH_STACK_CHOICE"). A row written via the
-    # orchestrator path fails this conversion on decision_type case alone —
-    # a distinct, not-fixed-here latent bug. Use the omnibase_core casing so
-    # this test isolates the title/epic_id fix.
-    row = _make_mock_row(decision_type="tech_stack_choice")
+    # _make_mock_row defaults to "TECH_STACK_CHOICE" (uppercase) — the same
+    # casing every known writer (the omnimarket orchestrator's own
+    # EnumDecisionType) actually persists to the decision_type TEXT column.
+    # This is the realistic row shape, not an isolated-fix fixture.
+    row = _make_mock_row()
     entry = _row_to_entry(row)
     assert entry.decision_id == row["decision_id"]
     assert entry.rationale == "Test rationale"
     assert entry.scope_domain == "data-model"
     assert entry.scope_layer == "architecture"
     assert entry.status == "ACTIVE"
+
+
+def test_row_to_entry_lowercases_decision_type_for_omnibase_core_enum() -> None:
+    """OMN-14529 full-CLI-seam-proof regression: omnibase_core's
+    EnumDecisionType uses LOWERCASE values ("tech_stack_choice") while the
+    decision_store TEXT column stores whatever case the writer used — every
+    known writer (the omnimarket orchestrator's EnumDecisionType) uses
+    UPPERCASE ("TECH_STACK_CHOICE"). Without the .lower() normalization in
+    _row_to_entry, any query against a domain/layer scope with an existing
+    row raised a ValidationError — invisible to the bare-handler row-proof
+    (which never queries a non-empty result set) and only surfaced when
+    `onex skill decision_store record` was driven end-to-end and its
+    conflict-detection query hit a real prior row.
+    """
+    row = _make_mock_row(decision_type="TECH_STACK_CHOICE")
+    entry = _row_to_entry(row)
+    assert entry.decision_type.value == "tech_stack_choice"
 
 
 # ============================================================================
