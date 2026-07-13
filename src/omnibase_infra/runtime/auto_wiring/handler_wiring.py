@@ -2379,19 +2379,36 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
 def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
     """Return the stable per-entry handler key used for pre-resolution and IDs.
 
-    The key preserves the legacy plain handler name when ``operation`` is
-    absent. When operation is present, it appends a sanitized operation label
-    plus a short digest, preventing collisions when a contract uses the same
-    handler class for multiple operations.
+    The key preserves the legacy plain handler name when neither ``operation``
+    nor ``topic`` is present. When ``operation`` is present, it appends a
+    sanitized operation label plus a short digest, preventing collisions when
+    a contract uses the same handler class for multiple operations.
+
+    OMN-14580: a ``topic_match`` contract can legitimately route the SAME
+    operation to the SAME handler from several distinct topics (e.g. one
+    reducer operation invoked from N event sources, each with its own
+    ``event_model`` — see ``node_swarm_subtask_state_reducer``) — operation
+    alone no longer disambiguates that shape and produced a dispatcher-ID
+    collision (ONEX_CORE_064_DUPLICATE_REGISTRATION) on cold boot. When the
+    entry declares its own ``topic``, it is folded into the digest (not the
+    human-readable label, to avoid re-duplicating the topic that
+    ``_derive_route_id`` already appends) so each topic still gets its own
+    key.
     """
     handler_name = entry.handler.name
-    operation = entry.operation
+    operation = entry.operation or ""
+    topic = entry.topic.strip() if entry.topic else ""
+    if not operation and not topic:
+        return handler_name
+
+    normalized_op = ""
     if operation:
-        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
-        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
-        safe_op = f"{normalized}_{digest}" if normalized else digest
-        return f"{handler_name}.{safe_op}"
-    return handler_name
+        normalized_op = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+
+    digest_source = f"{operation}|{topic}" if topic else operation
+    digest = hashlib.sha1(digest_source.encode()).hexdigest()[:8]
+    safe_op = f"{normalized_op}_{digest}" if normalized_op else digest
+    return f"{handler_name}.{safe_op}"
 
 
 def _required_handler_init_params(handler_cls: type) -> frozenset[str]:
