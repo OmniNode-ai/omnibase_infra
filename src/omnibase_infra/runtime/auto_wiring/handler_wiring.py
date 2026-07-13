@@ -2044,7 +2044,7 @@ def _make_event_bus_callback(
                         attempt + 1,
                         attempts,
                         type(exc).__name__,
-                        exc,
+                        _sanitize_exc(exc),
                         backoff,
                     )
                     await asyncio.sleep(backoff)
@@ -2151,7 +2151,7 @@ def _make_event_bus_callback(
                 dlq_enabled,
                 topic,
                 type(exc).__name__,
-                dlq_exc,
+                sanitize_error_message(dlq_exc),
                 correlation_id,
             )
 
