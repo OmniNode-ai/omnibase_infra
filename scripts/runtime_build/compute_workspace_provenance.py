@@ -102,7 +102,15 @@ WORKSPACE_PACKAGES: dict[str, str] = {
 }
 
 
-_TREE_EXCLUDE_PARTS = (".git", "__pycache__", ".venv", "*.egg-info")
+_TREE_EXCLUDE_PARTS = (".git", "__pycache__", ".venv")
+_TREE_EXCLUDE_SUFFIXES = (".egg-info",)
+
+
+def _is_excluded_part(part: str) -> bool:
+    """Return True if a single path component names a transient artefact."""
+    return part in _TREE_EXCLUDE_PARTS or any(
+        part.endswith(suffix) for suffix in _TREE_EXCLUDE_SUFFIXES
+    )
 
 
 def _tracked_files(root: Path) -> dict[str, bytes]:
@@ -111,15 +119,30 @@ def _tracked_files(root: Path) -> dict[str, bytes]:
     Shared by `_hash_tree` (single combined digest) and the OMN-14631
     content-parity check (per-file diff so a mismatch is debuggable, not
     just a single opaque hex string).
+
+    OMN-14635: the exclusion check MUST be evaluated against the path
+    RELATIVE TO `root`, never the absolute path. The installed package
+    directory resolved by `_installed_package_dir()` is always nested under
+    an ancestor literally named `.venv` (e.g.
+    `/app/.venv/lib/python3.12/site-packages/<pkg>`) -- that ancestor is not
+    a transient artefact *inside* the tree being hashed, it's part of the
+    root's own absolute location. Matching on `path.parts` (absolute)
+    excluded every file under every installed package unconditionally,
+    collapsing every installed-tree digest to `sha256(b"")` and hard-failing
+    the OMN-14631 content-parity gate on 100% of workspace builds. Matching
+    on `path.relative_to(root).parts` still correctly skips a `.venv`/
+    `.git`/`__pycache__` directory nested *inside* the staged source tree,
+    while no longer treating the root's own ancestors as exclusions.
     """
     out: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
+        rel = path.relative_to(root)
         # Skip common transient artefacts so the digest is stable.
-        if any(part in path.parts for part in _TREE_EXCLUDE_PARTS):
+        if any(_is_excluded_part(part) for part in rel.parts):
             continue
-        out[str(path.relative_to(root))] = path.read_bytes()
+        out[str(rel)] = path.read_bytes()
     return out
 
 

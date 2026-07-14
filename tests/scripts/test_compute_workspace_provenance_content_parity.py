@@ -21,6 +21,7 @@ build (installed content == staged content) still passes.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -35,6 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROVENANCE_SCRIPT = (
     REPO_ROOT / "scripts" / "runtime_build" / "compute_workspace_provenance.py"
 )
+
+# sha256 of zero bytes -- the exact digest `_hash_tree` collapses to when
+# `_tracked_files` (pre-OMN-14635-fix) excludes every file under a root
+# (e.g. because `.venv` matched an ancestor of the absolute path). Used as
+# a fail-closed sentinel: any real installed-package digest in these tests
+# must NOT equal this value.
+_SHA256_EMPTY = hashlib.sha256(b"").hexdigest()
 
 
 def _load_module() -> ModuleType:
@@ -94,6 +102,83 @@ def test_hash_tree_excludes_transient_artifacts(tmp_path: Path) -> None:
 
     # __pycache__ content changes must NOT move the digest.
     assert digest_with_cache == digest_after_mutating_cache
+
+
+@pytest.mark.unit
+def test_tracked_files_root_nested_under_dot_venv_ancestor_is_still_hashed(
+    tmp_path: Path,
+) -> None:
+    """OMN-14635 regression (RED before the fix, GREEN after).
+
+    The real installed-package layout is `/app/.venv/lib/python3.12/
+    site-packages/<pkg>` -- `.venv` is always an ANCESTOR of the root being
+    hashed, not a directory nested inside it. Before the fix, the exclusion
+    filter matched `.venv` against the file's ABSOLUTE path, so every file
+    under this root was excluded and `_tracked_files` returned `{}`
+    unconditionally (collapsing `_hash_tree` to `sha256(b"")` for every
+    installed package, every build, 100% of the time). This is the exact
+    root cause of the reproduced OMN-14635 failure. Reverting the
+    `_tracked_files`/`_is_excluded_part` fix reproduces the RED state for
+    this test (empty dict, `_hash_tree` == `_SHA256_EMPTY`).
+    """
+    mod = _load_module()
+    installed_root = (
+        tmp_path / "app" / ".venv" / "lib" / "python3.12" / "site-packages" / "some_pkg"
+    )
+    installed_root.mkdir(parents=True)
+    (installed_root / "__init__.py").write_text("", encoding="utf-8")
+    (installed_root / "configs").mkdir()
+    (installed_root / "configs" / "routing_tiers.yaml").write_text(
+        "tiers: [real]\n", encoding="utf-8"
+    )
+
+    tracked = mod._tracked_files(installed_root)
+
+    assert tracked == {
+        "__init__.py": b"",
+        "configs/routing_tiers.yaml": b"tiers: [real]\n",
+    }
+    assert mod._hash_tree(installed_root) != _SHA256_EMPTY
+
+
+@pytest.mark.unit
+def test_tracked_files_still_excludes_dot_venv_nested_inside_the_tree(
+    tmp_path: Path,
+) -> None:
+    """A `.venv` directory genuinely nested INSIDE the tree being hashed
+    (e.g. a stray venv left inside a staged source checkout) must still be
+    excluded -- the OMN-14635 fix narrows the match to be root-relative, it
+    does not remove the exclusion altogether."""
+    mod = _load_module()
+    tree = tmp_path / "staged_pkg"
+    tree.mkdir()
+    (tree / "real.py").write_text("x = 1\n", encoding="utf-8")
+    nested_venv = tree / ".venv"
+    nested_venv.mkdir()
+    (nested_venv / "leftover.py").write_text("y = 2\n", encoding="utf-8")
+
+    tracked = mod._tracked_files(tree)
+
+    assert set(tracked) == {"real.py"}
+
+
+@pytest.mark.unit
+def test_tracked_files_excludes_egg_info_directory(tmp_path: Path) -> None:
+    """`*.egg-info` was previously a literal-string membership check
+    (`"*.egg-info" in path.parts`) that never matched a real
+    `<pkg>.egg-info` directory name. Fixed in the same OMN-14635 pass since
+    it shares the exclusion code path."""
+    mod = _load_module()
+    tree = tmp_path / "pkg"
+    tree.mkdir()
+    (tree / "real.py").write_text("x = 1\n", encoding="utf-8")
+    egg_info = tree / "some_pkg.egg-info"
+    egg_info.mkdir()
+    (egg_info / "PKG-INFO").write_text("Name: some_pkg\n", encoding="utf-8")
+
+    tracked = mod._tracked_files(tree)
+
+    assert set(tracked) == {"real.py"}
 
 
 @pytest.mark.unit
@@ -402,3 +487,146 @@ def test_main_passes_when_installed_content_matches_staged_source(
 
     manifest = json.loads(mod.OUTPUT_MANIFEST.read_text(encoding="utf-8"))
     assert all(p["status"] == "verified" for p in manifest["proofs"])
+
+
+# ---------------------------------------------------------------------------
+# OMN-14635 regression, exercised through main(): the two tests above install
+# into an arbitrary `tmp_path / "site-packages"` directory, which never
+# contains a literal `.venv` ancestor component and so never triggers the
+# bug. The real runtime image layout is `/app/.venv/lib/python3.12/
+# site-packages/<pkg>` -- these two tests reproduce that exact shape.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_main_passes_when_installed_under_dot_venv_ancestor_matches_staged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_workspace_packages: dict[str, str],
+) -> None:
+    """RED before the OMN-14635 fix: with the real `.venv`-nested install
+    path, every package's installed digest collapsed to `sha256(b"")`
+    (`_tracked_files` returned `{}` because `.venv` matched the ABSOLUTE
+    path), so even a byte-identical clean install hard-failed as
+    `content_mismatch` for 100% of siblings, 100% of builds. GREEN after the
+    fix: a clean install is correctly reported as `verified` with a real,
+    non-empty installed digest."""
+    mod = _load_module()
+    sib_dir = tmp_path / "sibling-repos"
+    app_dir = tmp_path / "app"
+    site_packages = app_dir / ".venv" / "lib" / "python3.12" / "site-packages"
+    app_dir.mkdir(parents=True)
+
+    packages = synthetic_workspace_packages
+    for import_name, dist_name in packages.items():
+        _stage_and_install(
+            sib_dir,
+            site_packages,
+            import_name=import_name,
+            dist_name=dist_name,
+            installed_content="tiers: [fresh]\n",
+        )
+
+    (sib_dir / "_omn14631_fake_market" / "uv.lock").write_text("", encoding="utf-8")
+    vcs_prov = tmp_path / "sibling-vcs-provenance.json"
+    _write_vcs_provenance(vcs_prov, list(packages))
+
+    monkeypatch.syspath_prepend(str(site_packages))
+    importlib.invalidate_caches()
+    monkeypatch.setenv("VCS_REF", "deadbeef")
+    try:
+        mod.SIBLING_REPOS_DIR = sib_dir
+        mod.VENV_DIR = app_dir / ".venv"
+        mod.OUTPUT_MANIFEST = app_dir / "build-provenance.json"
+        mod.PIN_COMPARISON_PATH = tmp_path / "no-such-pin.json"
+        mod.VCS_PROVENANCE_PATH = vcs_prov
+        mod.CONSUMING_REPO = "_omn14631_fake_market"
+        mod.WORKSPACE_PACKAGES = packages
+        monkeypatch.setattr(mod, "build_comparisons", lambda **_kwargs: [])
+        monkeypatch.setattr(mod, "_host_infra_comparison", lambda _lock_path: None)
+
+        rc = mod.main()
+    finally:
+        for import_name in packages:
+            sys.modules.pop(import_name, None)
+
+    assert rc == 0, mod.OUTPUT_MANIFEST.read_text(encoding="utf-8")
+
+    manifest = json.loads(mod.OUTPUT_MANIFEST.read_text(encoding="utf-8"))
+    for proof in manifest["proofs"]:
+        assert proof["status"] == "verified", proof
+        assert proof["installed_package_digest"] != _SHA256_EMPTY, (
+            f"{proof['repo']}: installed digest collapsed to sha256(b'') -- "
+            "OMN-14635 regression."
+        )
+        assert proof["staged_package_digest"] == proof["installed_package_digest"]
+
+
+@pytest.mark.unit
+def test_main_fails_closed_on_real_drift_when_installed_under_dot_venv_ancestor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_workspace_packages: dict[str, str],
+) -> None:
+    """A genuine content mismatch must still fail closed under the real
+    `.venv`-nested install path -- the fix narrows the exclusion filter, it
+    must not weaken the gate's ability to catch a real drift."""
+    mod = _load_module()
+    sib_dir = tmp_path / "sibling-repos"
+    app_dir = tmp_path / "app"
+    site_packages = app_dir / ".venv" / "lib" / "python3.12" / "site-packages"
+    app_dir.mkdir(parents=True)
+
+    packages = synthetic_workspace_packages
+    for import_name, dist_name in packages.items():
+        installed_content = (
+            "tiers: [STALE-PRE-FIX]\n"
+            if import_name == "_omn14631_fake_market"
+            else "tiers: [fresh]\n"
+        )
+        _stage_and_install(
+            sib_dir,
+            site_packages,
+            import_name=import_name,
+            dist_name=dist_name,
+            installed_content=installed_content,
+        )
+
+    (sib_dir / "_omn14631_fake_market" / "uv.lock").write_text("", encoding="utf-8")
+    vcs_prov = tmp_path / "sibling-vcs-provenance.json"
+    _write_vcs_provenance(vcs_prov, list(packages))
+
+    monkeypatch.syspath_prepend(str(site_packages))
+    importlib.invalidate_caches()
+    monkeypatch.setenv("VCS_REF", "deadbeef")
+    try:
+        mod.SIBLING_REPOS_DIR = sib_dir
+        mod.VENV_DIR = app_dir / ".venv"
+        mod.OUTPUT_MANIFEST = app_dir / "build-provenance.json"
+        mod.PIN_COMPARISON_PATH = tmp_path / "no-such-pin.json"
+        mod.VCS_PROVENANCE_PATH = vcs_prov
+        mod.CONSUMING_REPO = "_omn14631_fake_market"
+        mod.WORKSPACE_PACKAGES = packages
+        monkeypatch.setattr(mod, "build_comparisons", lambda **_kwargs: [])
+        monkeypatch.setattr(mod, "_host_infra_comparison", lambda _lock_path: None)
+
+        rc = mod.main()
+    finally:
+        for import_name in packages:
+            sys.modules.pop(import_name, None)
+
+    assert rc == 1
+
+    manifest = json.loads(mod.OUTPUT_MANIFEST.read_text(encoding="utf-8"))
+    proofs_by_repo = {p["repo"]: p for p in manifest["proofs"]}
+
+    stale_proof = proofs_by_repo["_omn14631_fake_market"]
+    assert stale_proof["status"] == "content_mismatch"
+    # A real, single-file drift -- NOT the pre-fix "every file missing"
+    # shape caused by an empty installed-tree hash.
+    assert stale_proof["content_diff_files"] == ["configs/routing_tiers.yaml"]
+    assert stale_proof["installed_package_digest"] != _SHA256_EMPTY
+
+    clean_proof = proofs_by_repo["_omn14631_fake_core"]
+    assert clean_proof["status"] == "verified"
+    assert clean_proof["installed_package_digest"] != _SHA256_EMPTY
