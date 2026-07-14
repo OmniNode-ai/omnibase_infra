@@ -28,6 +28,7 @@ Exports:
     EnumDataProvenance: Origin quality classification for projected values
     EnumDegradedBehavior: Fallback strategy for stale or unavailable projections
     EnumDispatchStatus: Dispatch operation status enumeration
+    EnumDlqFailureClass: DLQ/dispatch-drop failure classification (publisher_malformed, no_dispatcher, valid_unrouted, consumer_error)
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
     EnumExecutionShapeViolation: Specific execution shape violation types
     EnumHandlerErrorType: Handler error types for validation and lifecycle
@@ -94,6 +95,7 @@ from omnibase_infra.enums.enum_declarative_node_violation import (
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_degraded_behavior import EnumDegradedBehavior
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.enums.enum_dlq_failure_class import EnumDlqFailureClass
 from omnibase_infra.enums.enum_environment import EnumEnvironment
 from omnibase_infra.enums.enum_eval_finding_category import EnumEvalFindingCategory
 from omnibase_infra.enums.enum_eval_finding_severity import EnumEvalFindingSeverity
@@ -170,6 +172,7 @@ __all__: list[str] = [
     "EnumDegradedBehavior",
     "EnumDedupeStrategy",
     "EnumDispatchStatus",
+    "EnumDlqFailureClass",
     "EnumEnvironment",
     "EnumEvalFindingCategory",
     "EnumEvalFindingSeverity",

@@ -136,7 +136,7 @@ async def test_valid_event_model_instance_routes_to_dispatcher() -> None:
     }
     # Precondition: the payload really is a valid instance of the declared model.
     ModelDelegationRequest.model_validate(valid)
-    matches = engine._find_matching_dispatchers(
+    matches, _scoping_outcome = engine._find_matching_dispatchers(
         topic=_COMMAND_TOPIC,
         category=EnumMessageCategory.COMMAND,
         message_type="ModelDelegationRequest",
@@ -160,7 +160,7 @@ async def test_nonconforming_payload_is_dropped_by_type_scoping() -> None:
     # Precondition: this payload is genuinely not a valid instance of the model.
     with pytest.raises(Exception):
         ModelDelegationRequest.model_validate(nonconforming)
-    matches = engine._find_matching_dispatchers(
+    matches, scoping_outcome = engine._find_matching_dispatchers(
         topic=_COMMAND_TOPIC,
         category=EnumMessageCategory.COMMAND,
         message_type="ModelDelegationRequest",
@@ -170,3 +170,7 @@ async def test_nonconforming_payload_is_dropped_by_type_scoping() -> None:
         "A payload that fails the declared event_model must be type-scoping-dropped "
         "(no dispatcher) — proving the matcher discriminates."
     )
+    # OMN-14492: the rejection must be classified publisher_malformed (a real
+    # candidate existed and was rejected), not silently indistinguishable from
+    # a true wiring gap.
+    assert scoping_outcome.type_scoped_candidate_rejected is True
