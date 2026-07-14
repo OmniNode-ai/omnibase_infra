@@ -261,7 +261,17 @@ class DispatchResultApplier:
         the bus and downstream consumers expect. Publishing the carrier verbatim
         would double-nest it (``ModelEventEnvelope(payload=ModelEventEnvelope(...))``),
         so a ``ModelEventEnvelope`` output event is always unwrapped to its inner
-        payload — mirroring the ``ModelDelegationEventEnvelope`` unwrap (OMN-13247).
+        payload (OMN-13247).
+
+        OMN-14600: the delegation orchestrator now emits the canonical
+        ``ModelEventEnvelope`` directly rather than the bespoke
+        ``ModelDelegationEventEnvelope`` carrier — but pre-fix in-flight rows
+        and any as-yet-unredeployed producer can still legitimately emit the
+        old shape, and the core class itself has NOT been deleted (a separate
+        cleanup PR owns that, to avoid a cross-repo release-ordering break).
+        KEEPING the special case here is deliberate: dropping it before the
+        old shape is provably gone from every live producer + every stored
+        row is a gratuitous skew risk for zero benefit this PR.
         """
         if type(event).__name__ in (
             "ModelEventEnvelope",
