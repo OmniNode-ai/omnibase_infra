@@ -238,7 +238,11 @@ async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing()
     )
     await service.start()
 
-    forged_payload = {"prompt": "steal tenant data", "tenant_id": "evil-tenant-forged"}
+    forged_payload = {
+        "prompt": "steal tenant data",
+        "tenant_id": "evil-tenant-forged",
+        "tenant_slug": "evil-tenant-forged-slug",
+    }
     await cloud_bus.emit(
         WIRE_INBOUND_TOPIC,
         _envelope(
