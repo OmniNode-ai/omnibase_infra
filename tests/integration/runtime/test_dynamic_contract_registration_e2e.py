@@ -59,6 +59,10 @@ event_bus:
     - onex.evt.test.e2e-dynamic.v1
   publish_topics: []
 handler_routing:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
   routing_strategy: payload_type_match
   handlers:
     - handler:
