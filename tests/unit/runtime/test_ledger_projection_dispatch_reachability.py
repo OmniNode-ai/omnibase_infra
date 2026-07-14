@@ -44,7 +44,9 @@ import pytest
 import yaml
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection import (
@@ -119,6 +121,11 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
     A gate that only checks "the routing entry parses" or "the handler class
     exists" stays GREEN on the dead node: the entry parses, all 7 topics get
     assigned, and the contract is still never wired.
+
+    OMN-14594: the contract now declares 7 topic_match entries (one per
+    topic, each type-scoped + correctly categorized — see the contract's own
+    comment) instead of 1 operation_match entry spanning all 7, so
+    wiring_count is 7, one per topic-scoped dispatcher.
     """
     outcome, wiring_count, reason = await _wire(with_applier=True)
 
@@ -127,7 +134,9 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
         f"reason={reason!r}). A raw audit/projection contract that does not reach "
         "WIRED never creates a consumer, so event_ledger stays empty."
     )
-    assert wiring_count == 1, f"expected exactly 1 wired handler, got {wiring_count}"
+    assert wiring_count == 7, (
+        f"expected 7 wired handlers (1 per topic), got {wiring_count}"
+    )
 
 
 @pytest.mark.asyncio
@@ -363,4 +372,134 @@ async def test_handle_projects_dict_envelope_to_ledger_append_intent() -> None:
     # event_value is base64-encoded at this boundary; the Effect layer decodes it.
     assert intent.payload.event_value == base64.b64encode(b'{"node_id": "abc"}').decode(
         "ascii"
+    )
+
+
+# ---------------------------------------------------------------------------
+# OMN-14594: cross-contamination on shared topics
+# ---------------------------------------------------------------------------
+#
+# node_ledger_projection_compute's single handler_routing entry (operation
+# ledger.project) declares NO event_model, so its dispatcher registers with no
+# payload_type_matcher (OMN-12416 type-scoping never applies to it). All 7 of
+# its subscribed topics (e.g. onex.evt.platform.node-registration.v1) are ALSO
+# subscribed by other nodes (node_registration_orchestrator et al.) whose own
+# Kafka consume loop decodes the raw bytes into the DOMAIN event shape
+# (ModelNodeRegistrationEvent-like: node_id/node_type/...) before calling
+# MessageDispatchEngine.dispatch(topic, envelope) — but dispatch() is a single
+# process-wide engine: _find_matching_dispatchers() selects EVERY registered
+# route for a topic+category, regardless of which subscriber's callback
+# triggered the call. Since this dispatcher has no type-scoping, it gets
+# invoked for that domain-shaped envelope too, and HandlerLedgerProjection
+# always coerces envelope.payload against the RAW ModelEventMessage wrapper
+# shape (topic/value/headers/partition) — which a domain event dict can never
+# satisfy, so it fails with a ValidationError on every such cross-dispatch,
+# live evidence: "Dispatcher '...HandlerLedgerProjection...' failed:
+# ValidationError: N validation errors for ModelEventMessage".
+class _StubResultApplierNoOp:
+    async def apply(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+async def _wire_and_freeze() -> MessageDispatchEngine:
+    """Wire the real ledger contract into a real, frozen dispatch engine."""
+    discovered = discover_contracts_from_paths([CONTRACT_PATH])
+    contracts = getattr(discovered, "contracts", discovered)
+    manifest = ModelAutoWiringManifest(contracts=tuple(contracts))
+    engine = MessageDispatchEngine()
+    await wire_from_manifest(
+        manifest,
+        engine,
+        event_bus=None,
+        environment="dev",
+        container=ModelONEXContainer(),
+        subscribe_immediately=False,
+        result_appliers_by_contract={CONTRACT_NAME: _StubResultApplierNoOp()},
+    )
+    engine.freeze()
+    return engine
+
+
+def _raw_wrapper_envelope(topic: str) -> ModelEventEnvelope[object]:
+    """Build the envelope shape node_ledger_projection_compute's OWN raw-event-
+    projection subscribe callback constructs (envelope.payload = the dumped
+    ModelEventMessage — see _make_raw_event_projection_callback)."""
+    message = ModelEventMessage(
+        topic=topic,
+        value=b'{"node_id": "abc"}',
+        headers=ModelEventHeaders(
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source="test-producer",
+            event_type="platform.node-registration",
+        ),
+        partition=0,
+        offset="0",
+    )
+    return ModelEventEnvelope[object](
+        payload=message.model_dump(mode="json"),
+        correlation_id=uuid4(),
+        event_type="platform.node-registration",
+    )
+
+
+def _domain_shaped_envelope(topic: str) -> ModelEventEnvelope[object]:
+    """Build the envelope shape a SIBLING node's own consume loop constructs for
+    this SAME topic (the standard _make_event_bus_callback path): envelope.payload
+    is the decoded domain event dict, never a ModelEventMessage wrapper."""
+    return ModelEventEnvelope[object](
+        payload={
+            "node_id": str(uuid4()),
+            "node_type": "effect",
+            "default_enabled": False,
+        },
+        correlation_id=uuid4(),
+        event_type="platform.node-registration",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ledger_projection_still_processes_its_own_raw_wrapper_shape() -> None:
+    """Sanity: the genuinely-shaped envelope this dispatcher was built for must
+    keep working before and after any type-scoping fix."""
+    engine = await _wire_and_freeze()
+    topic = "onex.evt.platform.node-registration.v1"
+
+    result = await engine.dispatch(topic, _raw_wrapper_envelope(topic))
+
+    assert result.status == EnumDispatchStatus.SUCCESS, result.error_message
+
+
+@pytest.mark.asyncio
+async def test_ledger_projection_does_not_error_on_sibling_domain_shaped_envelope() -> (
+    None
+):
+    """OMN-14594: a domain-shaped envelope from a SIBLING subscriber on the same
+    topic must not reach (and crash) this dispatcher.
+
+    Pre-fix: no payload_type_matcher exists on this dispatcher, so
+    _find_matching_dispatchers() selects it for ANY envelope on this topic —
+    the domain-shaped payload gets handed to HandlerLedgerProjection, which
+    raises ValidationError trying to coerce it into ModelEventMessage, and
+    MessageDispatchEngine reports EnumDispatchStatus.HANDLER_ERROR. Live
+    evidence (docker logs omninode-runtime, .201 dev-lane cold boot,
+    2026-07-13): 18 such failures in ~6 minutes, recurring in bursts matching
+    other nodes' periodic node-heartbeat/node-introspection broadcasts.
+
+    Post-fix: the ledger.project entry declares event_model=ModelEventMessage,
+    giving this dispatcher a payload_type_matcher (OMN-12416) that rejects any
+    payload failing ModelEventMessage validation BEFORE the handler is ever
+    invoked — the engine reports NO_DISPATCHER (cleanly unrouted for this
+    contract, not a crash) instead of HANDLER_ERROR.
+    """
+    engine = await _wire_and_freeze()
+    topic = "onex.evt.platform.node-registration.v1"
+
+    result = await engine.dispatch(topic, _domain_shaped_envelope(topic))
+
+    assert result.status == EnumDispatchStatus.NO_DISPATCHER, (
+        f"node_ledger_projection_compute's dispatcher must be type-scoped out of "
+        f"a domain-shaped envelope from a sibling subscriber (expected "
+        f"NO_DISPATCHER, a clean non-match), not invoked-and-crashed: "
+        f"status={result.status!r} error={result.error_message!r}"
     )

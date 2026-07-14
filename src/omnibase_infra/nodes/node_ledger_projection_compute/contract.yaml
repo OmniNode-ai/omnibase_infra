@@ -72,11 +72,115 @@ output_model:
     ModelIntent wrapping ModelPayloadLedgerAppend to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
 
 # Handler routing - delegates compute logic to handler
+#
+# OMN-14594: one entry PER topic (topic_match), not one operation_match entry
+# spanning all 7. Two compounding defects on the single-entry shape:
+#
+# 1. No event_model -> no payload_type_matcher (OMN-12416). This dispatcher's
+#    7 topics are ALSO subscribed by other nodes (e.g.
+#    node_registration_orchestrator); MessageDispatchEngine is a single
+#    process-wide engine and dispatch() fans out to EVERY registered route
+#    for a topic regardless of which subscriber's own Kafka consume loop
+#    triggered the call. Without type-scoping, this dispatcher got invoked
+#    for every sibling's domain-shaped envelope too, crashing with
+#    ValidationError trying to coerce a domain event dict into
+#    ModelEventMessage (the raw kafka wrapper this handler actually needs).
+# 2. A SINGLE entry/dispatcher spanning topics of MIXED category (5 .evt +
+#    1 .cmd + 1 .intent) can only ever be registered under ONE category
+#    (handler_wiring derives it once, from either an explicit
+#    message_category or the contract's FIRST subscribe_topic) — so 2 of
+#    the 7 topics (request-introspection.v1 = command,
+#    runtime-tick.v1 = intent) were silently registered under the wrong
+#    category and could never route at all (no error — permanent
+#    NO_DISPATCHER, same "quiet" symptom class as OMN-14517).
+#
+# The fix for both: 7 topic_match entries, each single-topic/single-category,
+# sharing the same operation + handler class (safe: OMN-14580 folds topic
+# into the dispatcher-ID digest, so same-operation/same-handler/different-
+# topic entries get distinct dispatcher IDs instead of colliding) and each
+# declaring event_model so OMN-12416 type-scoping applies per topic.
 handler_routing:
-  routing_strategy: "operation_match"
+  routing_strategy: "topic_match"
   handlers:
-    - operation: ledger.project
+    - topic: "onex.evt.platform.node-registration.v1"
+      operation: ledger.project
+      message_category: "event"
       handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.platform.node-introspection.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.platform.node-heartbeat.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.cmd.platform.request-introspection.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.platform.fsm-state-transitions.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.intent.platform.runtime-tick.v1"
+      operation: ledger.project
+      message_category: "intent"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.platform.registration-snapshots.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
       handler:
         name: "HandlerLedgerProjection"
         module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"

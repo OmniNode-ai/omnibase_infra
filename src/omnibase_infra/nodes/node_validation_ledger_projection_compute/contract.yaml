@@ -68,11 +68,25 @@ output_model:
     ModelIntent wrapping ModelPayloadValidationLedgerAppend to be passed to NodeValidationLedgerWriteEffect. Contains the validation event data with Kafka position for idempotent writes.
 
 # Handler routing - delegates compute logic to handler
+#
+# OMN-14594: event_model is REQUIRED here, not decorative — same disease as
+# node_ledger_projection_compute. All 3 of these validation topics are ALSO
+# reachable via the SHARED, process-wide MessageDispatchEngine's topic-keyed
+# fan-out (dispatch() selects every registered route for a topic regardless
+# of which subscriber's consume loop triggered the call); without a
+# payload_type_matcher (OMN-12416) this dispatcher has no way to reject a
+# non-ModelEventMessage-shaped envelope before crashing inside
+# HandlerValidationLedgerProjection. All 3 subscribe_topics here share ONE
+# category (event), so — unlike node_ledger_projection_compute — a single
+# entry is sufficient once event_model is declared.
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: validation_ledger.project
       handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
       handler:
         name: "HandlerValidationLedgerProjection"
         module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
