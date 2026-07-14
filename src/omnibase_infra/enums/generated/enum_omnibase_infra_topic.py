@@ -26,6 +26,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CODING_AGENT_WORKSPACE_VALIDATE_V1 = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"  # onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-inference-request.v1"  # onex.cmd.omnibase-infra.delegation-inference-request.v1
+    CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1

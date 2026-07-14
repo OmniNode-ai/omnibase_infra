@@ -47,6 +47,7 @@ config:
     mirror_topics:
       inbound:
         - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+        - "onex.cmd.omnibase-infra.delegation-request.v1"
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
       outbound:
         - "onex.evt.omnibase-infra.inference-response.v1"
@@ -62,10 +63,12 @@ config:
 event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+    - "onex.cmd.omnibase-infra.delegation-request.v1"
     - "onex.evt.omnibase-infra.inference-response.v1"
     - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
   publish_topics:
     - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+    - "onex.cmd.omnibase-infra.delegation-request.v1"
     - "onex.evt.omnibase-infra.inference-response.v1"
     - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
 handler_routing:
