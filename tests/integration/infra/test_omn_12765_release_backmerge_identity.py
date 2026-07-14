@@ -18,7 +18,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     clean, reproducible runtime image from immutable artifacts. The proven
     runtime inputs are now the released versions, not git revs.
 
-    OMN-14254 refresh: the proven runtime advances to core 0.46.7 while keeping
+    OMN-14600 refresh: the proven runtime advances to core 0.46.8 while keeping
     the PyPI-sourced reproducible lock.
     """
 
@@ -26,7 +26,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
     # The proven runtime now pins the published PyPI releases (exact versions).
-    assert "omnibase-core==0.46.7" in pyproject
+    assert "omnibase-core==0.46.8" in pyproject
     assert "omnibase-spi==0.23.1" in pyproject
 
     # The retired git-rev overrides must be gone from both manifest and lock:
@@ -49,5 +49,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
 
     # OMN-14524: the regenerated image_version=6 identity binds the current dev
     # shared environment digest after the validation-ledger write-effect lane.
-    assert lock["identity_digest"] == "1742589d908dc188c04b284e3af6ef62"
-    assert lock["shared_env_digest"] == "03c0958c80f472a630357ba5"
+    assert lock["identity_digest"] == "8a9355b9644c810c16a778947e31e4cc"
+    assert lock["shared_env_digest"] == "891609c2acbfd142db5c0c77"
