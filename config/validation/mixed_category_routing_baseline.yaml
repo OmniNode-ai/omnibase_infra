@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-14605 — frozen burn-down baseline for the mixed-category routing gate.
+#
+# INVARIANT (omnibase_infra.validators.mixed_category_routing):
+#   a handler_routing entry MUST NOT be assigned (via the real
+#   _topics_for_handler_entry) topics that span more than one real message
+#   category (.cmd.=command, .evt.=event, .intent.=intent). handler_wiring
+#   derives ONE category per entry (explicit message_category, else
+#   subscribe_topics[0]) and stamps it on EVERY route the entry registers, so
+#   any off-category topic is permanently NO_DISPATCHER (silent DLQ/drop) while
+#   the container boots green. MixinNodeDispatch (OMN-12549) hard-rejects the
+#   same route/dispatcher category disagreement at registration time.
+#
+# THIS IS A RATCHET, NOT AN EXEMPTION. It is SHRINK-ONLY:
+#   * an entry NOT listed here that is mixed-category      -> FAIL (no new instances, ever);
+#   * an entry listed here that is no longer mixed-category -> FAIL until removed
+#     (a fixed entry still listed is STALE = FAIL, so the list cannot rot).
+#
+# This baseline is omnibase_infra-scoped: the gate scans src/omnibase_infra and
+# lists only this repo's offenders. The systemic census (OMN-14605) found 22
+# distinct contracts / 31 entries across omnibase_infra, omnimarket,
+# omniintelligence — the other repos carry their own baselines when the gate
+# fans out to them (OMN-14605 Lane B). node_swarm_fanout_orchestrator (omnimarket)
+# is a real offender whose fix is a REARCHITECTURE, not a mechanical split
+# (OMN-14606 / OMN-14607); it is allowlisted in omnimarket's baseline, not here.
+#
+# Fix disposition per entry below is annotated inline. Burn-down under OMN-14605.
+# End state is an empty list, at which point the gate hard-fails on any
+# mixed-category entry.
+known_mixed_category_entries:
+  # node_artifact_change_detector_effect — MISSING_HANDLE: these 3 handlers expose
+  # NEITHER handle() nor handle_async() (also listed in
+  # handler_dispatch_entrypoint_baseline.yaml), so a mechanical split alone is
+  # insufficient — the handlers cannot process a dispatched event at all. Fix
+  # tracked with the entrypoint burn-down.
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerContractFileWatcher
+    operation: artifact.watch_contracts
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerManualTrigger
+    operation: artifact.manual_trigger
+  - contract: node_artifact_change_detector_effect
+    handler: HandlerPRWebhookIngestion
+    operation: artifact.ingest_pr_webhook
+  # node_coding_agent_orchestrator — CLEAN: handle(envelope) branches on
+  # event_type (workspace-validated.v1 etc.), so the OMN-14594-style per-topic
+  # topic_match + message_category split is a safe mechanical fix.
+  - contract: node_coding_agent_orchestrator
+    handler: HandlerCodingAgentOrchestrator
+    operation: coding_agent.orchestrate
