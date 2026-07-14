@@ -10,7 +10,7 @@ the canonical typed-payload shape (definition B). It is monotonically
 NON-INCREASING: it may only shrink. A node leaves this set (flips canonical) ONLY
 with a committed adequacy receipt under ``scripts/ci/adequacy_receipts/`` — a shape
 flip alone is not proof of equivalence (the OMN-14208 trap). A NEW non-canonical
-node, or growth of this set, HARD-FAILS CI + pre-commit. Retirement mechanism = the
+node, or growth of this set, HARD-FAILS the CI ratchet. Retirement mechanism = the
 RSD canonical rewrite regenerating these handlers, each with an adequacy receipt.
 """
 

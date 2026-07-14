@@ -246,7 +246,7 @@ jobs:
       # node's contract-declared handler (definition B: typed-payload handle(request)
       # -> response, adapted by the shared runtime, no envelope in the core), WARNs
       # the committed baseline's debt (scripts/ci/canonical_handler_shape_baseline.py,
-      # OMN-14587: 93 non-canonical / 115 scanned), and HARD-FAILS a NEW non-canonical
+      # OMN-14587: 92 non-canonical / 115 scanned), and HARD-FAILS a NEW non-canonical
       # node or baseline-count growth. Sourced from the sibling omnibase_core checkout
       # above (.ci/omnibase_core, already cloned for Transport-mock lint) since the
       # classifier lives at omnibase_core's repo-root scripts/ci/, not the installed
