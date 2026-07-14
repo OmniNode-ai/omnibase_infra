@@ -34,6 +34,22 @@ def test_emits_no_separate_tenant_slug_key() -> None:
     assert "tenant_slug" not in result
 
 
+def test_strips_client_supplied_tenant_slug_key() -> None:
+    """A forged/stale tenant_slug in the raw payload must not survive the stamp.
+
+    Regression pin (CodeRabbit finding on OMN-14367 infra#2311): the helper
+    only ever WRITES tenant_id, so a pre-existing tenant_slug key in the
+    input was passing through untouched via the dict-spread. That would let
+    a client-supplied tenant_slug reach a downstream consumer that does not
+    enforce extra="forbid" as a second, unverified tenant signal.
+    """
+    result = stamp_verified_tenant_slug(
+        {"prompt": "hi", "tenant_slug": "attacker-tenant"}, "acme"
+    )
+    assert result["tenant_id"] == "acme"
+    assert "tenant_slug" not in result
+
+
 def test_preserves_other_payload_keys() -> None:
     result = stamp_verified_tenant_slug({"prompt": "hi", "task_type": "test"}, "beta")
     assert result["prompt"] == "hi"
