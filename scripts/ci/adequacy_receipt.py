@@ -29,6 +29,7 @@ import functools
 import hashlib
 import io
 import json
+import tempfile
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -209,11 +210,14 @@ def select_covering(
     return selected, covered
 
 
-def coverage_pct_for(*, run: Callable[[], object], source_match: str) -> float:
-    """Overall branch-coverage percent for ``run()`` over files matching source_match.
+def _coverage_metrics_for(
+    *, run: Callable[[], object], source_match: str
+) -> tuple[float, int]:
+    """Return (branch-inclusive percent, missing branch count) for one run.
 
-    Uses coverage.py's documented ``report()`` return value (the total percent,
-    branch-inclusive when ``branch=True``), scoped via an ``include`` glob.
+    Uses coverage.py's documented report/json totals, scoped to measured handler
+    files so the numbers describe the handler under adequacy review, not the
+    surrounding package.
     """
     # config_file=False so the repo's [tool.coverage] source does not scope us;
     # report() is then given the explicit measured handler files (morfs) so the
@@ -226,12 +230,26 @@ def coverage_pct_for(*, run: Callable[[], object], source_match: str) -> float:
         cov.stop()
     morfs = [f for f in cov.get_data().measured_files() if source_match in f]
     if not morfs:
-        return 0.0
+        return 0.0, 0
     sink = io.StringIO()
     try:
-        return round(float(cov.report(morfs=morfs, file=sink)), 2)
+        pct = round(float(cov.report(morfs=morfs, file=sink)), 2)
     except coverage.exceptions.NoDataError:
-        return 0.0
+        return 0.0, 0
+    with tempfile.NamedTemporaryFile(suffix=".coverage.json") as report_file:
+        cov.json_report(morfs=morfs, outfile=report_file.name)
+        totals = json.loads(Path(report_file.name).read_text()).get("totals", {})
+    return pct, int(totals.get("missing_branches") or 0)
+
+
+def coverage_pct_for(*, run: Callable[[], object], source_match: str) -> float:
+    """Overall branch-coverage percent for ``run()`` over files matching source_match.
+
+    Uses coverage.py's documented ``report()`` return value (the total percent,
+    branch-inclusive when ``branch=True``), scoped via an ``include`` glob.
+    """
+    pct, _missing_branches = _coverage_metrics_for(run=run, source_match=source_match)
+    return pct
 
 
 def build_receipt(
@@ -255,7 +273,9 @@ def build_receipt(
         for candidate in selected:
             handler_call(candidate)
 
-    pct = coverage_pct_for(run=_run_selected, source_match=source_match)
+    pct, missing_branches = _coverage_metrics_for(
+        run=_run_selected, source_match=source_match
+    )
     meets = pct >= coverage_target
     waiver = None
     if not meets:
@@ -266,7 +286,7 @@ def build_receipt(
                 f"(< {coverage_target:.0f}% target); pool needs coverage-guided "
                 "synthesis for the uncovered branches"
             ),
-            uncovered_branch_count=0,
+            uncovered_branch_count=missing_branches,
         )
     return ModelAdequacyReceipt(
         node_id=node_id,
