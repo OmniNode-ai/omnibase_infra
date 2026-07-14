@@ -33,7 +33,7 @@ import math
 import os
 import re
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,6 +86,11 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 )
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
+)
+from omnibase_infra.runtime.auto_wiring.fanout_seam import (
+    check_fanout_publish_coverage,
+    is_fanout_sequence,
+    normalize_fanout_sequence,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -170,6 +175,36 @@ _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
 _LEDGER_DB_DSN_ENV_VARS: tuple[str, ...] = ("OMNIBASE_INFRA_DB_URL", "DATABASE_URL")
+
+# OMN-14403 P3a §6ii — the def-B multi-event (fan-out) publish seam. Default OFF;
+# flipped in a separate PR once every wired fan-out handler is coverage-clean (repo
+# rule: a gate that tightens acceptance ships behind an env flag, default OFF). A
+# Sequence[BaseModel] return stops being silently dropped to output_events=[] /
+# SUCCESS and becomes the published batch. This is the ONE env read for the seam
+# (the OMN-11069 env-read gate approves this module); the pure logic + the mirror
+# read on the RuntimeLocal path (LocalRuntimeBusAdapter) both gate on this same
+# flag so the two runtimes agree. NOTE: this PR is §6ii ONLY — the §8.1
+# causation/tenant carry (seam_apply_context) is a separate lane.
+ENV_MULTI_EVENT_PUBLISH_SEAM = "ONEX_MULTI_EVENT_PUBLISH_SEAM"
+
+
+def multi_event_seam_enabled() -> bool:
+    """Return True when the def-B fan-out publish seam is enabled (default: False)."""
+    return os.environ.get(ENV_MULTI_EVENT_PUBLISH_SEAM, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _check_fanout_publish_coverage(contract: ModelDiscoveredContract) -> None:
+    """Prove fan-out handlers' emittable classes are contract-declared (§2C)."""
+    check_fanout_publish_coverage(
+        contract,
+        seam_enabled=multi_event_seam_enabled(),
+        env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+    )
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -501,8 +536,13 @@ def _make_dispatch_callback(
             )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
-            if isinstance(raw_result, str | list):
+            if isinstance(raw_result, str):
                 return cast("ModelDispatchResult | None", raw_result)
+            # OMN-14403 §2A. A bare list/sequence used to be cast straight through
+            # AS IF it were a ModelDispatchResult — strictly worse than the sibling
+            # silent drop, since the applier then reads .output_events/.status off a
+            # list and finds neither. Route it through the one fan-out coercion so it
+            # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
@@ -978,6 +1018,20 @@ def _normalize_handler_result(
             output_events.append(result.result)
     elif isinstance(result, BaseModel):
         output_events = [result]
+    elif is_fanout_sequence(result):
+        # OMN-14403 §2A — the def-B fan-out entry. Before this branch existed a
+        # Sequence return matched NEITHER branch above and fell through to
+        # output_events=[] / SUCCESS: the handler's N events were dropped and the
+        # dispatch reported success. That silent drop IS the defect. The applier
+        # resolves each element's topic via published_events (same short-name
+        # resolution the shared core resolver uses); the boot coverage gate keeps
+        # that fail-closed.
+        output_events = normalize_fanout_sequence(
+            cast("Sequence[object]", result),
+            message_type,
+            seam_enabled=multi_event_seam_enabled(),
+            env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+        )
 
     return ModelDispatchResult(
         status=EnumDispatchStatus.SUCCESS,
@@ -4039,6 +4093,12 @@ def _prepare_contract_wiring(
                 ),
             ),
         )
+
+    # OMN-14403 §2C: prove every fan-out handler's emittable classes are declared
+    # in this contract's published_events BEFORE registering any dispatch route —
+    # an unmapped fan-out element would fall back to the single output_topic and
+    # silently misroute. Warn-only while the seam is OFF; fail-closed once ON.
+    _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:

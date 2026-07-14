@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.46.7",
+    "omnibase-core==0.46.8",
     "omnibase-spi==0.23.1",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.6",
@@ -181,7 +181,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.46.7",
+    "omnibase-core==0.46.8",
     "omnibase-spi==0.23.1",
     "omnibase-compat==0.5.6",
 ]
@@ -192,6 +192,11 @@ override-dependencies = [
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
+# OMN-14403 §6ii: TEMPORARY dev-build pin to omnibase_core#1440's head, which
+# carries runtime_fanout_resolver (the shared def-B fan-out resolver this PR's
+# fanout_seam imports). NOT yet on PyPI/dev. RE-PIN to the merged dev squash rev
+# (or the released version) once core#1440 lands, then this override is DELETED.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "db813012e071256f37fe24b331e78595bb47f750" }  # raw-override-ok: OMN-14403
 # OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
 # omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
