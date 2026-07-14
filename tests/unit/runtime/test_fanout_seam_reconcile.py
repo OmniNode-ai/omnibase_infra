@@ -11,6 +11,8 @@ carry is a separate lane and is intentionally NOT wired here.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from pydantic import BaseModel, ConfigDict
 
@@ -105,3 +107,33 @@ class TestNormalizeHandlerResultFanoutBranch:
         )
         assert result is not None
         assert result.output_events == []  # seam OFF: byte-for-byte today's drop
+
+
+class TestLegacyNoBusSequenceReturns:
+    def test_event_model_free_callback_preserves_empty_sequence_noop(self) -> None:
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_dispatch_callback,
+        )
+
+        class Handler:
+            def handle(self, _envelope: object) -> list[str]:
+                return []
+
+        callback = _make_dispatch_callback(Handler(), None)
+
+        assert asyncio.run(callback({"topic": "onex.evt.x.v1"})) == []
+
+    def test_event_model_free_callback_preserves_string_sequence_intent_marker(
+        self,
+    ) -> None:
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_dispatch_callback,
+        )
+
+        class Handler:
+            def handle(self, _envelope: object) -> list[str]:
+                return ["inference-intent"]
+
+        callback = _make_dispatch_callback(Handler(), None)
+
+        assert asyncio.run(callback({"topic": "onex.evt.x.v1"})) == ["inference-intent"]

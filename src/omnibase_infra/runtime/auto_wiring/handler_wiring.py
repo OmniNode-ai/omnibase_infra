@@ -600,6 +600,14 @@ def _make_dispatch_callback(
                 return raw_result
             if isinstance(raw_result, str):
                 return cast("ModelDispatchResult | None", raw_result)
+            if is_fanout_sequence(raw_result) and not any(
+                isinstance(element, BaseModel)
+                for element in cast("Sequence[object]", raw_result)
+            ):
+                # Legacy no-bus/state_io handlers use [] as a no-op fold and may
+                # return list[str] intent markers. OMN-14403 only normalizes
+                # actual BaseModel fan-out batches here.
+                return cast("ModelDispatchResult | None", raw_result)
             # OMN-14403 §2A. A bare list/sequence used to be cast straight through
             # AS IF it were a ModelDispatchResult — strictly worse than the sibling
             # silent drop, since the applier then reads .output_events/.status off a
