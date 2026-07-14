@@ -201,6 +201,17 @@ jobs:
       - name: Check handler dispatch-entrypoint gate (OMN-14135)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
 
+      # OMN-14605: a handler_routing entry whose _topics_for_handler_entry-assigned
+      # topics span >1 real category (.cmd/.evt/.intent) gets ONE category stamped on
+      # every route by handler_wiring, so the off-category topics are permanent
+      # NO_DISPATCHER (silent DLQ/drop) while the node boots green — the OMN-14606
+      # (node_swarm_fanout_orchestrator) live defect. MixinNodeDispatch (OMN-12549)
+      # hard-rejects the same shape at registration; this gate flags it at CI time.
+      # Ratchet frozen in config/validation/mixed_category_routing_baseline.yaml
+      # (shrink-only). SYNC with pre-commit hook 'mixed-category-routing'.
+      - name: Check mixed-category routing gate (OMN-14605)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.mixed_category_routing src/omnibase_infra
+
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
 
