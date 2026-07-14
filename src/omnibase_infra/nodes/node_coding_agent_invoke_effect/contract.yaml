@@ -29,12 +29,19 @@
 # Auth is ambient (the CLI reads ~/.codex / ~/.claude); no API-key/endpoint argv
 # is built. The subprocess + git I/O remain behind injected seams so tests run no
 # real CLI. The only DoD gap remaining is the live e2e on dev (post-Phase-B).
+#
+# DEF-B CANONICAL HANDLER SHAPE (OMN-14589): handle() receives the contract's
+# event_model payload (ModelCodingAgentInvokeCommand) and returns the bare
+# output_model (ModelCodingAgentResult). The shared runtime adapter owns input
+# validation and EFFECT event wrapping; the dispatch-result applier unwraps
+# transport-envelope-shaped output events before publish, preserving the
+# contract-declared terminal event semantics without node-local envelope code.
 name: node_coding_agent_invoke_effect
-contract_version: {major: 1, minor: 0, patch: 0}
+contract_version: {major: 1, minor: 0, patch: 1}
 node_type: EFFECT_GENERIC
-node_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 1}
 description: >
-  Coding-agent invoke effect. Runs the claude/codex CLI subprocess in the target workspace and returns a system-derived ModelCodingAgentResult: status, exit code, git-derived files_changed + diff (captured AFTER the subprocess exits, never trusted from agent stdout), diff_hash, starting_head_sha, structured error_class (UNAVAILABLE/TIMEOUT/SUBPROCESS_ERROR/EMPTY_RESPONSE), timed_out, and duration. shutil.which gates availability; the subprocess spawns in its own process group and a timeout kills the whole group. The subprocess + git I/O are injected seams so this node is the single sanctioned model-CLI shell-out surface. agent-reported output/usage are advisory only.
+  Coding-agent invoke effect. Runs the claude/codex CLI subprocess in the target workspace and returns a system-derived ModelCodingAgentResult: status, exit code, git-derived files_changed + diff (captured AFTER the subprocess exits, never trusted from agent stdout), diff_hash, starting_head_sha, structured error_class (UNAVAILABLE/TIMEOUT/SUBPROCESS_ERROR/EMPTY_RESPONSE), timed_out, and duration. The handler uses the canonical def-B runtime shape: the contract event_model payload is validated by the shared runtime adapter before handle(command), and the bare ModelCodingAgentResult return is wrapped for EFFECT publication by the runtime. shutil.which gates availability; the subprocess spawns in its own process group and a timeout kills the whole group. The subprocess + git I/O are injected seams so this node is the single sanctioned model-CLI shell-out surface. agent-reported output/usage are advisory only.
 
 handler_routing:
   routing_strategy: operation_match
