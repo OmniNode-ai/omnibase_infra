@@ -32,7 +32,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_checkpoint_effect",
     "omnibase_infra.nodes.node_checkpoint_validate_compute",
     "omnibase_infra.nodes.node_coding_agent_fsm_reducer",
-    "omnibase_infra.nodes.node_coding_agent_invoke_effect",
     "omnibase_infra.nodes.node_coding_agent_orchestrator",
     "omnibase_infra.nodes.node_coding_agent_workspace_compute",
     "omnibase_infra.nodes.node_context_audit_dlq_effect",
