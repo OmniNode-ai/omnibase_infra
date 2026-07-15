@@ -176,6 +176,7 @@ class RuntimeDelegationDispatchPort:
         output_schema_key: str | None = None,
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
+        tenant_id: str | None = None,
     ) -> dict[str, object]:
         """Dispatch a delegation request and return the terminal result payload."""
 
@@ -192,6 +193,7 @@ class RuntimeDelegationDispatchPort:
             "output_schema_key": output_schema_key,
             "quality_contract_mode": quality_contract_mode,
             "acceptance_criteria": list(acceptance_criteria),
+            "tenant_id": tenant_id,
         }
 
         command = ModelDispatchBusCommand(

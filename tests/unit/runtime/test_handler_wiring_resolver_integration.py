@@ -25,15 +25,24 @@ Test matrix (plan §Task 5 acceptance):
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
+)
+from omnibase_core.models.dispatch.model_dispatch_bus_command import (
+    ModelDispatchBusCommand,
+)
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
 )
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
@@ -56,6 +65,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
@@ -593,6 +603,156 @@ class TestPrepareHandlerWiringDelegatesToResolver:
             HandlerWithOptionalDispatchPort.last_dispatch_port,
             RuntimeDelegationDispatchPort,
         )
+
+    @pytest.mark.asyncio
+    async def test_auto_wired_dispatch_port_accepts_omnimarket_call_shape(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-14628 regression pin: the REAL auto-wired dispatch port must accept
+        the exact keyword-argument shape omnimarket's ``HandlerDelegateSkill.handle()``
+        passes to ``self._dispatch_port.dispatch(...)`` (including ``tenant_id``,
+        added by OMN-14349).
+
+        This is a non-mock end-to-end test: it drives handler_wiring.py's real
+        ``_prepare_handler_wiring`` -> ``_materialize_known_handler_dependencies``
+        auto-wiring path (the code that decides which concrete
+        ``RuntimeDelegationDispatchPort`` a handler receives), obtains the REAL
+        infra-owned dispatch port instance it constructs, and calls its REAL
+        ``.dispatch()`` method (including the REAL ``_select_delegation_route``
+        selection logic) with the production kwarg set. Only two I/O
+        boundaries are faked: on-disk package/contract discovery (the
+        omnimarket package is not an omnibase_infra runtime dependency, so
+        discovery is seeded with an equivalent synthetic route instead of
+        performing filesystem scanning) and the outbound Kafka broker
+        transport -- the same boundary a live cluster crosses.
+
+        Before the OMN-14628 fix this raised
+        ``TypeError: dispatch() got an unexpected keyword argument 'tenant_id'``
+        on every ``onex delegate --bus kafka`` invocation platform-wide. The
+        prior coverage for this seam
+        (``test_handler_propagates_verified_tenant_id_to_dispatch_port`` in
+        omnimarket) used ``AsyncMock()`` for the port and could not catch this --
+        the mock accepted any keyword argument silently.
+        """
+        contract = _make_contract(handler_name="HandlerWithOptionalDispatchPort")
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+
+        class ProtocolDelegationDispatchPort(Protocol):
+            def dispatch(self, **kwargs: object) -> Awaitable[dict[str, object]]:
+                """Protocol method stub for dispatch port."""
+
+        class HandlerWithOptionalDispatchPort:
+            last_dispatch_port: object | None = None
+
+            def __init__(
+                self,
+                event_bus: object,
+                dispatch_port: ProtocolDelegationDispatchPort | None = None,
+            ) -> None:
+                self.event_bus = event_bus
+                self.dispatch_port = dispatch_port
+                HandlerWithOptionalDispatchPort.last_dispatch_port = dispatch_port
+
+            def handle(self, envelope: object) -> None:
+                return None
+
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        event_bus = MagicMock(spec=ProtocolEventBusLike)
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithOptionalDispatchPort,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=event_bus,
+                container=None,
+            )
+
+        assert prepared.is_skip is False
+        dispatch_port = HandlerWithOptionalDispatchPort.last_dispatch_port
+        from omnibase_infra.runtime.service_delegation_dispatch_port import (
+            RuntimeDelegationDispatchPort,
+        )
+
+        assert isinstance(dispatch_port, RuntimeDelegationDispatchPort)
+
+        # Seed route discovery with a real-shaped omnimarket delegation route.
+        # (omnimarket is not an omnibase_infra runtime dependency, so on-disk
+        # contract discovery cannot resolve it here; production discovers
+        # this same route from the installed omnimarket package via
+        # ONEX_ACTIVE_RUNTIME_PACKAGES.) The REAL _select_delegation_route
+        # filtering/selection logic still runs against this route unmocked.
+        omnimarket_route = ModelRuntimeLocalIngressRoute(
+            node_name="node_delegation_orchestrator",
+            contract_name="node_delegation_orchestrator",
+            command_topic="onex.cmd.omnimarket.delegation-request.v1",
+            event_type="omnimarket.delegation-request",
+            terminal_event="onex.evt.omnimarket.delegation-completed.v1",
+            terminal_events=(
+                "onex.evt.omnimarket.delegation-completed.v1",
+                "onex.evt.omnimarket.delegation-failed.v1",
+            ),
+            contract_path="/contracts/omnimarket/node_delegation_orchestrator.yaml",
+            package_name="omnimarket",
+        )
+        monkeypatch.setattr(
+            "omnibase_infra.runtime.service_delegation_dispatch_port."
+            "discover_runtime_local_ingress_routes",
+            lambda package_names: {
+                "omnimarket.node_delegation_orchestrator.delegation.orchestrate": (
+                    omnimarket_route
+                )
+            },
+        )
+
+        captured_payloads: list[dict[str, object]] = []
+
+        class FakeBroker:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                pass
+
+            async def dispatch_request(
+                self, command: ModelDispatchBusCommand
+            ) -> tuple[object, ModelDispatchBusTerminalResult]:
+                await asyncio.sleep(0)
+                captured_payloads.append(dict(command.payload))
+                return object(), ModelDispatchBusTerminalResult(
+                    correlation_id=command.correlation_id,
+                    status="completed",
+                    payload={"content": "ok"},
+                    completed_at=datetime.now(UTC),
+                )
+
+        monkeypatch.setattr(
+            "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+            FakeBroker,
+        )
+
+        # Exact kwarg shape from
+        # omnimarket/src/omnimarket/nodes/node_delegate_skill_orchestrator/
+        # handlers/handler_delegate_skill.py::HandlerDelegateSkill.handle().
+        result = await dispatch_port.dispatch(
+            prompt="respond with the word ready",
+            task_type="test",
+            correlation_id=uuid4(),
+            max_tokens=64,
+            source_file_path=None,
+            source_session_id=None,
+            wait=True,
+            quality_contract_mode="extend_task_class",
+            acceptance_criteria=(),
+            tenant_id="omn-14628-regression-tenant",
+        )
+
+        assert result["status"] == "completed"
+        assert captured_payloads[0]["tenant_id"] == "omn-14628-regression-tenant"
 
 
 # ---------------------------------------------------------------------------

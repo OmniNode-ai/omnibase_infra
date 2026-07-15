@@ -102,6 +102,11 @@ from uuid import UUID, uuid5
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+from omnibase_core.models.delegation.wire.model_delegation_result import (
+    ModelDelegationCompleted,
+    ModelDelegationFailed,
+    ModelDelegationResult,
+)
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
@@ -112,6 +117,7 @@ from omnibase_infra.runtime.service_dispatch_result_applier import DispatchResul
 from omnibase_infra.runtime.state_io.state_store_adapter import (
     CONTEXTVAR_STATE_IO_ROWS,
 )
+from omnibase_infra.utils.util_retry_optimistic import OptimisticConflictError
 
 # --------------------------------------------------------------------------
 # Fixture identities. These are FIXED, not random: the whole suite turns on
@@ -150,11 +156,22 @@ TOPIC_TERMINAL = "onex.evt.test-seam.terminal.v1"  # onex-topic-allow: test fixt
 TOPIC_INBOUND = (
     "onex.cmd.test-seam.workflow-request.v1"  # onex-topic-allow: test fixture
 )
+TOPIC_DELEGATION_COMPLETED = (
+    "onex.evt.omnibase-infra.delegation-completed.v1"  # onex-topic-allow: test fixture
+)
+TOPIC_DELEGATION_FAILED = (
+    "onex.evt.omnibase-infra.delegation-failed.v1"  # onex-topic-allow: test fixture
+)
 
 OUTPUT_TOPIC_MAP = {
     "SeamRoutingIntent": TOPIC_ROUTING,
     "SeamInferenceIntent": TOPIC_INFERENCE,
     "SeamQualityGateIntent": TOPIC_QUALITY,
+    # OMN-14600 (canonical two-class split): the delegation terminal is a
+    # bare class emit resolved purely by class name -- mirrors the real
+    # contract's published_events split (DelegationCompleted / DelegationFailed).
+    "DelegationCompleted": TOPIC_DELEGATION_COMPLETED,
+    "DelegationFailed": TOPIC_DELEGATION_FAILED,
 }
 
 STATE_IO = {
@@ -948,8 +965,20 @@ def test_concurrent_leg_cannot_clobber_an_in_flight_batchs_unpublished_intent() 
         # leg-2 wins CAS: row committed, in_flight=true, intent persisted.
         leg2_result = await leg2_cb(_input_envelope())
 
-        # ...and is descheduled here, mid-publish. leg-3 arrives NOW.
-        await leg3_cb(_input_envelope(envelope_id=LEG3_ENVELOPE_ID))
+        # ...and is descheduled here, mid-publish. leg-3 arrives NOW. Neither
+        # leg has a bus wired, so leg-2's row is NEVER finalized within this
+        # test (the external applier below publishes but does not finalize
+        # the row) -- leg-3's defer is therefore against a lock nothing will
+        # ever clear. OMN-14600: the defer now reports a CONFLICT and retries
+        # in-process before raising OptimisticConflictError on exhaustion,
+        # rather than silently returning as if leg-3 had been handled. That
+        # raise is expected and orthogonal to this test's own assertions
+        # (leg-3 must not run its handler, must not clobber leg-2's batch) --
+        # both hold regardless of whether the exhausted retry raises.
+        try:
+            await leg3_cb(_input_envelope(envelope_id=LEG3_ENVELOPE_ID))
+        except OptimisticConflictError:
+            pass
 
         # leg-2 finally gets to publish, from the row it committed.
         await applier.apply(leg2_result, CID)
@@ -1187,4 +1216,288 @@ def test_non_outbox_boundary_still_swallows_unchanged() -> None:
         "swallowed at the boundary (flag default off) — P3b must not broaden the "
         "un-swallow to every auto-wired contract. Only the outbox path (flag on) "
         "propagates (see test_publish_exception_mid_batch_propagates...)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# OMN-14600 (canonical two-class split, executes OMN-14403 A1): the
+# delegation terminal is a BARE class emit — ModelDelegationCompleted /
+# ModelDelegationFailed, two distinct classes with no embedded topic field —
+# resolved purely by class name via the SAME OUTPUT_TOPIC_MAP / _outbox_topic_for
+# path this whole file already proves works for plain fan-out events. ROOT
+# CAUSE this pinned: the orchestrator used to emit a BESPOKE
+# ModelDelegationEventEnvelope{topic, payload} carrier whose real class name
+# never matched the contract's published_events map (one class name, ONE
+# topic — could not represent completed-vs-failed on the SAME class), so
+# _outbox_topic_for returned None and every delegation terminal raised
+# ModelOnexError before _finalize_outbox_row ever ran (stranded at
+# COMPLETED/in_flight=true). The fix: two distinct classes, one topic each,
+# resolved through the unmodified published_events class-name lookup — no
+# carrier, no embedded-topic detection needed anywhere in the outbox.
+# ---------------------------------------------------------------------------
+
+
+def _delegation_terminal_fields(*, failed: bool) -> dict[str, object]:
+    return {
+        "correlation_id": CID,
+        "task_type": "test",
+        "model_used": "local-coder",
+        "endpoint_url": "http://127.0.0.1:8001",
+        "content": "" if failed else "def add(a, b):\n    return a + b",
+        "quality_passed": not failed,
+        "quality_score": 0.0 if failed else 0.95,
+        "latency_ms": 42,
+        "fallback_to_claude": False,
+        "failure_reason": "configured endpoint missing" if failed else "",
+    }
+
+
+@pytest.mark.integration
+def test_delegation_terminal_bare_class_finalizes_and_publishes_completed() -> None:
+    """OMN-14600 root-cause fix, COMPLETED terminal.
+
+    A bare ``ModelDelegationCompleted(...)`` — the EXACT shape
+    ``HandlerDelegationWorkflow._emit_terminal`` now emits — must finalize the
+    row (in_flight cleared, pending_emissions cleared) and reach the bus on
+    the completed topic, resolved purely by class name, never raising
+    ``ModelOnexError`` for an unmapped class.
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus()
+    terminal = ModelDelegationCompleted(**_delegation_terminal_fields(failed=False))
+    handler = _FanOutHandler((terminal,))
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+
+    async def _run() -> None:
+        result = await callback(_input_envelope())
+        assert result is None, (
+            "a has-bus wrapper that published-from-row MUST return None so the "
+            "external applier does not re-publish the same batch"
+        )
+
+    asyncio.run(_run())
+
+    published = bus.envelopes_for(CID)
+    assert len(published) == 1, (
+        f"exactly one terminal event must reach the bus; got {len(published)}"
+    )
+    assert bus.topics_for(CID) == [TOPIC_DELEGATION_COMPLETED]
+    wire_payload = published[0].payload
+    assert isinstance(wire_payload, ModelDelegationCompleted), (
+        f"expected ModelDelegationCompleted on the wire — got "
+        f"{type(wire_payload).__name__}"
+    )
+    assert wire_payload.quality_passed is True
+    row = store.rows[str(CID)]
+    assert row["in_flight"] is False, (
+        "STRANDED (OMN-14600): the delegation terminal's row must finalize — "
+        "before the fix, _outbox_topic_for(class_name='ModelDelegationEventEnvelope') "
+        "returned None and the whole leg raised ModelOnexError, leaving "
+        "in_flight=true forever."
+    )
+    assert not row["pending_emissions"], "finalize must clear pending_emissions"
+
+
+@pytest.mark.integration
+def test_delegation_terminal_bare_class_finalizes_and_publishes_failed() -> None:
+    """OMN-14600 root-cause fix, FAILED terminal — mirrors the completed case.
+
+    Pins that the FAILED topic resolves independently of the COMPLETED topic:
+    ``ModelDelegationCompleted`` and ``ModelDelegationFailed`` are two
+    DISTINCT classes, each with its own ``published_events`` entry — exactly
+    the disambiguation the OLD single-class bespoke carrier could not express
+    (one class, one topic-per-class-name map, two possible outcomes).
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus()
+    terminal = ModelDelegationFailed(**_delegation_terminal_fields(failed=True))
+    handler = _FanOutHandler((terminal,))
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+
+    async def _run() -> None:
+        result = await callback(_input_envelope())
+        assert result is None
+
+    asyncio.run(_run())
+
+    published = bus.envelopes_for(CID)
+    assert len(published) == 1
+    assert bus.topics_for(CID) == [TOPIC_DELEGATION_FAILED]
+    wire_payload = published[0].payload
+    assert isinstance(wire_payload, ModelDelegationFailed), (
+        f"expected ModelDelegationFailed on the wire — got "
+        f"{type(wire_payload).__name__}"
+    )
+    assert wire_payload.quality_passed is False
+    assert wire_payload.failure_reason == "configured endpoint missing"
+    row = store.rows[str(CID)]
+    assert row["in_flight"] is False, (
+        "STRANDED (OMN-14600): a FAILED delegation terminal must finalize too — "
+        "the defect was topic-resolution-based (class name), not outcome-based, "
+        "so both completed and failed terminals stranded identically."
+    )
+    assert not row["pending_emissions"]
+
+
+# ---------------------------------------------------------------------------
+# OMN-14600 (Fable-gate #13): the periodic sweep must HEAL a pre-fix,
+# legacy-shaped row (class_name="ModelDelegationEventEnvelope", committed by
+# the OLD bespoke carrier before this fix — this is the EXACT shape of the 2
+# real stuck rows live-verified on .201) via _legacy_delegation_envelope_
+# unwrap, AND must not CHOKE when a genuinely unresolvable row sits in the
+# same sweep batch (Priority 2 per-row isolation) — a non-isolated sweep
+# raises on the FIRST unresolvable row, so _recovery_last_run_monotonic never
+# advances and EVERY subsequent dispatch re-enters and re-raises the same
+# failing sweep, silently dropping every triggering leg's own input. This is
+# seeded directly into the fake store (not driven through a dispatch) because
+# these rows predate this fix -- no code path in the CURRENT wiring could
+# ever produce them; they are inherited state.
+# ---------------------------------------------------------------------------
+
+LEGACY_ROW_CID = UUID("66666666-6666-6666-6666-666666666666")
+POISON_ROW_CID = UUID("77777777-7777-7777-7777-777777777777")
+_LEGACY_CAUSATION = UUID("88888888-8888-8888-8888-888888888888")
+_POISON_CAUSATION = UUID("99999999-9999-9999-9999-999999999999")
+
+
+def _seeded_row(
+    cid: UUID, *, causation: UUID, entry: dict[str, object]
+) -> dict[str, object]:
+    return {
+        "correlation_id": str(cid),
+        "tenant_id": TENANT,
+        "state": "COMPLETED",
+        "in_flight": True,
+        "payload_json": "{}",
+        "version": 0,
+        "pending_emissions": [entry],
+        "publish_attempts": 0,
+        "updated_at": time.time(),
+    }
+
+
+@pytest.mark.integration
+def test_sweep_heals_legacy_row_and_is_not_choked_by_an_unresolvable_poison_row() -> (
+    None
+):
+    """Fable #13: legacy-row healing + per-row sweep isolation, together.
+
+    Seeds two stranded rows directly (bypassing dispatch — these are
+    INHERITED pre-fix state, not something current code can produce):
+
+    * ``LEGACY_ROW_CID`` — the exact shape of the 2 real .201 stuck rows: a
+      ``pending_emissions`` entry recorded under the OLD bespoke carrier's
+      own class name (``ModelDelegationEventEnvelope``), no ``topic`` key on
+      the entry itself (that field did not exist pre-fix), payload dump is
+      the carrier's own ``{"topic": ..., "payload": {...}}`` shape.
+    * ``POISON_ROW_CID`` — an entry with a genuinely unresolvable class name
+      (no ``published_events`` mapping, not the legacy shape either) that
+      MUST fail to resolve a topic and raise inside ``_publish_outbox_batch``.
+
+    An UNRELATED probe dispatch triggers the periodic sweep. Both rows must
+    be visited; the poison row's failure must not prevent the legacy row from
+    healing (order is dict-insertion — legacy first — but isolation must hold
+    regardless of order), and the sweep must complete without raising out to
+    the probe's own dispatch (which would drop the probe's own input too).
+    """
+    completed_payload = {
+        "correlation_id": str(LEGACY_ROW_CID),
+        "task_type": "test",
+        "model_used": "local-coder",
+        "endpoint_url": "http://127.0.0.1:8001",
+        "content": "def add(a, b):\n    return a + b",
+        "quality_passed": True,
+        "quality_score": 0.95,
+        "latency_ms": 42,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "fallback_to_claude": False,
+        "failure_reason": "",
+    }
+    legacy_entry = {
+        "module": "omnibase_core.models.delegation.wire.model_delegation_wire_envelope",
+        "class_name": "ModelDelegationEventEnvelope",
+        "payload": {
+            "topic": TOPIC_DELEGATION_COMPLETED,
+            "payload": completed_payload,
+        },
+        "index": 0,
+        "causation_envelope_id": str(_LEGACY_CAUSATION),
+        "correlation_id": str(LEGACY_ROW_CID),
+        "tenant_id": TENANT,
+    }
+    poison_entry = {
+        "module": "some.unresolvable.module",
+        "class_name": "ModelSomeGarbageClassNoOneEverMapped",
+        "payload": {"whatever": 1},
+        "index": 0,
+        "causation_envelope_id": str(_POISON_CAUSATION),
+        "correlation_id": str(POISON_ROW_CID),
+        "tenant_id": TENANT,
+    }
+    store = _DurableRows(
+        rows={
+            str(LEGACY_ROW_CID): _seeded_row(
+                LEGACY_ROW_CID, causation=_LEGACY_CAUSATION, entry=legacy_entry
+            ),
+            str(POISON_ROW_CID): _seeded_row(
+                POISON_ROW_CID, causation=_POISON_CAUSATION, entry=poison_entry
+            ),
+        }
+    )
+    adapter = _FakeStateStoreAdapter(store)
+
+    bus = _RecordingBus()
+    probe_handler = _FanOutHandler(_fanout_batch(note="probe"))
+    shared_cb = _stateful_callback(probe_handler, adapter, event_bus=bus)
+
+    raised: BaseException | None = None
+
+    async def _run() -> None:
+        nonlocal raised
+        try:
+            await shared_cb(_input_envelope())
+        except BaseException as exc:  # noqa: BLE001 — asserting on propagation
+            raised = exc
+
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring."
+        "_STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS",
+        0.0,
+        create=True,
+    ):
+        asyncio.run(_run())
+
+    assert raised is None, (
+        "CHOKED (OMN-14600): the poison row's unresolvable topic must not "
+        f"escape the sweep and drop the probe's own input — got {raised!r}"
+    )
+
+    legacy_row = store.rows[str(LEGACY_ROW_CID)]
+    assert legacy_row["in_flight"] is False, (
+        "the legacy-shaped row must self-heal via _legacy_delegation_envelope_"
+        "unwrap — this is the exact shape of the 2 real stuck .201 rows"
+    )
+    assert not legacy_row["pending_emissions"]
+    legacy_published = bus.envelopes_for(LEGACY_ROW_CID)
+    assert len(legacy_published) == 1
+    assert bus.topics_for(LEGACY_ROW_CID) == [TOPIC_DELEGATION_COMPLETED]
+    healed_payload = legacy_published[0].payload
+    assert isinstance(healed_payload, ModelDelegationResult), (
+        f"the legacy row must republish the UNWRAPPED inner ModelDelegationResult, "
+        f"not the carrier — got {type(healed_payload).__name__}"
+    )
+    assert healed_payload.quality_passed is True
+
+    poison_row = store.rows[str(POISON_ROW_CID)]
+    assert poison_row["in_flight"] is True, (
+        "the genuinely unresolvable poison row must NOT be silently marked "
+        "healed — it stays stranded (and logged) for a human to investigate, "
+        "isolation means 'does not choke the sweep', not 'pretends to succeed'"
+    )
+    assert not bus.envelopes_for(POISON_ROW_CID), (
+        "nothing should have been published for the unresolvable row"
     )
