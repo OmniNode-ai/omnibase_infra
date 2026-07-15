@@ -2,8 +2,8 @@
   "schema_version": "1.0.0",
   "event_type": "lane-census-drift",
   "topic": "onex.evt.infra.lane-census-drift.v1",
-  "host": "192.168.86.201",
-  "emitted_at": "2026-07-02T20:16:51.447943+00:00",
+  "host": "omninode-pc.tail75df5e.ts.net",
+  "emitted_at": "2026-07-15T10:06:06.110889+00:00",
   "severity": "critical",
   "lanes_checked": [
     "stability-test",
@@ -11,21 +11,133 @@
     "judge",
     "dev"
   ],
-  "drift_count": 4,
+  "drift_count": 29,
   "findings": [
     {
       "lane": "stability-test",
-      "kind": "oneshot_stuck",
-      "container": "omnibase-infra-stability-test-migration-gate",
-      "detail": "migration/init container 'omnibase-infra-stability-test-migration-gate' is still Running (expected run-to-completion): Up 38 minutes (healthy)",
-      "severity": "warning"
+      "kind": "container_absent",
+      "container": "omnibase-infra-stability-test-postgres",
+      "detail": "required service container 'omnibase-infra-stability-test-postgres' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omnibase-infra-stability-test-redpanda",
+      "detail": "required service container 'omnibase-infra-stability-test-redpanda' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omnibase-infra-stability-test-valkey",
+      "detail": "required service container 'omnibase-infra-stability-test-valkey' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omnibase-infra-stability-test-keycloak",
+      "detail": "required service container 'omnibase-infra-stability-test-keycloak' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-runtime",
+      "detail": "required service container 'omninode-stability-test-runtime' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-runtime-effects",
+      "detail": "required service container 'omninode-stability-test-runtime-effects' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omnimarket-stability-test-projection-api",
+      "detail": "required service container 'omnimarket-stability-test-projection-api' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-runtime-worker",
+      "detail": "required service container 'omninode-stability-test-runtime-worker' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-agent-actions-consumer",
+      "detail": "required service container 'omninode-stability-test-agent-actions-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-skill-lifecycle-consumer",
+      "detail": "required service container 'omninode-stability-test-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omnibase-stability-test-intelligence-api",
+      "detail": "required service container 'omnibase-stability-test-intelligence-api' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "stability-test",
+      "kind": "container_absent",
+      "container": "omninode-stability-test-contract-resolver",
+      "detail": "required service container 'omninode-stability-test-contract-resolver' is not running (desired replicas=1); lane 'stability-test' is degraded",
+      "severity": "critical"
     },
     {
       "lane": "prod",
-      "kind": "oneshot_stuck",
-      "container": "omnibase-infra-prod-migration-gate",
-      "detail": "migration/init container 'omnibase-infra-prod-migration-gate' is still Running (expected run-to-completion): Up 7 days (healthy)",
-      "severity": "warning"
+      "kind": "container_absent",
+      "container": "omnibase-infra-prod-postgres",
+      "detail": "required service container 'omnibase-infra-prod-postgres' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omnibase-infra-prod-redpanda",
+      "detail": "required service container 'omnibase-infra-prod-redpanda' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omnibase-infra-prod-valkey",
+      "detail": "required service container 'omnibase-infra-prod-valkey' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-runtime",
+      "detail": "required service container 'omninode-prod-runtime' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-runtime-effects",
+      "detail": "required service container 'omninode-prod-runtime-effects' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omnimarket-prod-projection-api",
+      "detail": "required service container 'omnimarket-prod-projection-api' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
     },
     {
       "lane": "prod",
@@ -35,14 +147,77 @@
       "severity": "critical"
     },
     {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-agent-actions-consumer",
+      "detail": "required service container 'omninode-prod-agent-actions-consumer' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-skill-lifecycle-consumer",
+      "detail": "required service container 'omninode-prod-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omnibase-prod-intelligence-api",
+      "detail": "required service container 'omnibase-prod-intelligence-api' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "prod",
+      "kind": "container_absent",
+      "container": "omninode-prod-contract-resolver",
+      "detail": "required service container 'omninode-prod-contract-resolver' is not running (desired replicas=1); lane 'prod' is degraded",
+      "severity": "critical"
+    },
+    {
       "lane": "judge",
-      "kind": "oneshot_stuck",
-      "container": "omnibase-infra-judge-migration-gate",
-      "detail": "migration/init container 'omnibase-infra-judge-migration-gate' is still Running (expected run-to-completion): Up 3 weeks (healthy)",
-      "severity": "warning"
+      "kind": "container_absent",
+      "container": "omnibase-infra-judge-postgres",
+      "detail": "required service container 'omnibase-infra-judge-postgres' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "container_absent",
+      "container": "omnibase-infra-judge-redpanda",
+      "detail": "required service container 'omnibase-infra-judge-redpanda' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "container_absent",
+      "container": "omnibase-infra-judge-valkey",
+      "detail": "required service container 'omnibase-infra-judge-valkey' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "container_absent",
+      "container": "omninode-judge-runtime",
+      "detail": "required service container 'omninode-judge-runtime' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "container_absent",
+      "container": "omninode-judge-runtime-effects",
+      "detail": "required service container 'omninode-judge-runtime-effects' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
+    },
+    {
+      "lane": "judge",
+      "kind": "container_absent",
+      "container": "omnimarket-judge-projection-api",
+      "detail": "required service container 'omnimarket-judge-projection-api' is not running (desired replicas=1); lane 'judge' is degraded",
+      "severity": "critical"
     }
   ],
-  "alert_key": "lane-census-drift:192.168.86.201:443b69d781c32ed8",
-  "ticket_title": "fix(infra): lane drift [judge, prod, stability-test] \u2014 1x container_absent, 3x oneshot_stuck",
-  "ticket_body": "## Lane census drift detected\n\nHost: `192.168.86.201`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[warning] oneshot_stuck** `omnibase-infra-stability-test-migration-gate` (stability-test): migration/init container 'omnibase-infra-stability-test-migration-gate' is still Running (expected run-to-completion): Up 38 minutes (healthy)\n- **[warning] oneshot_stuck** `omnibase-infra-prod-migration-gate` (prod): migration/init container 'omnibase-infra-prod-migration-gate' is still Running (expected run-to-completion): Up 7 days (healthy)\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[warning] oneshot_stuck** `omnibase-infra-judge-migration-gate` (judge): migration/init container 'omnibase-infra-judge-migration-gate' is still Running (expected run-to-completion): Up 3 weeks (healthy)\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
+  "alert_key": "lane-census-drift:omninode-pc.tail75df5e.ts.net:58372a77f45a124e",
+  "ticket_title": "fix(infra): lane drift [judge, prod, stability-test] \u2014 29x container_absent",
+  "ticket_body": "## Lane census drift detected\n\nHost: `omninode-pc.tail75df5e.ts.net`\nLanes checked: stability-test, prod, judge, dev\n\nThe desired-state lane census (deploy/lane-census/lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n- **[critical] container_absent** `omnibase-infra-stability-test-postgres` (stability-test): required service container 'omnibase-infra-stability-test-postgres' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-infra-stability-test-redpanda` (stability-test): required service container 'omnibase-infra-stability-test-redpanda' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-infra-stability-test-valkey` (stability-test): required service container 'omnibase-infra-stability-test-valkey' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-infra-stability-test-keycloak` (stability-test): required service container 'omnibase-infra-stability-test-keycloak' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-runtime` (stability-test): required service container 'omninode-stability-test-runtime' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-runtime-effects` (stability-test): required service container 'omninode-stability-test-runtime-effects' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnimarket-stability-test-projection-api` (stability-test): required service container 'omnimarket-stability-test-projection-api' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-runtime-worker` (stability-test): required service container 'omninode-stability-test-runtime-worker' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-agent-actions-consumer` (stability-test): required service container 'omninode-stability-test-agent-actions-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-skill-lifecycle-consumer` (stability-test): required service container 'omninode-stability-test-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-stability-test-intelligence-api` (stability-test): required service container 'omnibase-stability-test-intelligence-api' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omninode-stability-test-contract-resolver` (stability-test): required service container 'omninode-stability-test-contract-resolver' is not running (desired replicas=1); lane 'stability-test' is degraded\n- **[critical] container_absent** `omnibase-infra-prod-postgres` (prod): required service container 'omnibase-infra-prod-postgres' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-infra-prod-redpanda` (prod): required service container 'omnibase-infra-prod-redpanda' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-infra-prod-valkey` (prod): required service container 'omnibase-infra-prod-valkey' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-runtime` (prod): required service container 'omninode-prod-runtime' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-runtime-effects` (prod): required service container 'omninode-prod-runtime-effects' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnimarket-prod-projection-api` (prod): required service container 'omnimarket-prod-projection-api' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-runtime-worker` (prod): required service container 'omninode-prod-runtime-worker' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-agent-actions-consumer` (prod): required service container 'omninode-prod-agent-actions-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-skill-lifecycle-consumer` (prod): required service container 'omninode-prod-skill-lifecycle-consumer' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-prod-intelligence-api` (prod): required service container 'omnibase-prod-intelligence-api' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omninode-prod-contract-resolver` (prod): required service container 'omninode-prod-contract-resolver' is not running (desired replicas=1); lane 'prod' is degraded\n- **[critical] container_absent** `omnibase-infra-judge-postgres` (judge): required service container 'omnibase-infra-judge-postgres' is not running (desired replicas=1); lane 'judge' is degraded\n- **[critical] container_absent** `omnibase-infra-judge-redpanda` (judge): required service container 'omnibase-infra-judge-redpanda' is not running (desired replicas=1); lane 'judge' is degraded\n- **[critical] container_absent** `omnibase-infra-judge-valkey` (judge): required service container 'omnibase-infra-judge-valkey' is not running (desired replicas=1); lane 'judge' is degraded\n- **[critical] container_absent** `omninode-judge-runtime` (judge): required service container 'omninode-judge-runtime' is not running (desired replicas=1); lane 'judge' is degraded\n- **[critical] container_absent** `omninode-judge-runtime-effects` (judge): required service container 'omninode-judge-runtime-effects' is not running (desired replicas=1); lane 'judge' is degraded\n- **[critical] container_absent** `omnimarket-judge-projection-api` (judge): required service container 'omnimarket-judge-projection-api' is not running (desired replicas=1); lane 'judge' is degraded\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
 }
