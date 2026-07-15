@@ -1138,6 +1138,40 @@ _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # contract — the erroring event was silently dropped.
 _JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors", "recent_responses"})
 
+
+def _should_jsonb_wrap_list(key: str, value: list[object]) -> bool:
+    """Decide whether a ``list`` row value must be JSON-wrapped for psycopg2.
+
+    Three independent rules; any one triggers wrapping:
+
+    1. Column-name suffix convention (``_json`` / ``_jsonb``).
+    2. The ``_JSONB_LIST_COLUMNS`` allowlist -- legacy unsuffixed JSONB list
+       columns (``corpus_errors``, ``recent_responses``) that predate rule 3
+       and that the structural rule below does not cover on its own (e.g. a
+       JSONB column holding ``list[str]``, which is structurally
+       indistinguishable from a genuine ``text[]`` ARRAY).
+    3. STRUCTURAL heuristic (OMN-14494): any element of the list is itself a
+       ``dict``/``list``. A genuine Postgres scalar ARRAY (``text[]``,
+       ``int[]``, ...) can only ever hold scalars, so an element that is
+       itself a dict/list can NEVER be a valid ARRAY member -- this case is
+       unambiguously a JSONB list-of-objects/list-of-lists column. This rule
+       needs no allowlist maintenance and auto-covers every future
+       unsuffixed JSONB list-of-objects column, closing the recurring defect
+       class behind OMN-13350 and OMN-14487 (both required a manual
+       allowlist edit before this fix).
+
+    A flat scalar list (``list[str]`` / ``list[int]`` with no dict/list
+    elements) that matches none of the three rules returns ``False`` here
+    and is passed raw by the caller, preserving genuine ``text[]``/``int[]``
+    ARRAY semantics (e.g. ``swarm_runs.models_used`` / ``machines_used``).
+    """
+    if str(key).endswith(("_json", "_jsonb")):
+        return True
+    if str(key) in _JSONB_LIST_COLUMNS:
+        return True
+    return any(isinstance(item, (dict, list)) for item in value)
+
+
 # Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
 # dedicated *_DB_URL env var. This map MUST stay in parity with that table; a
@@ -1404,24 +1438,18 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             # JSONB adaptation: a dict is always JSON-adapted. A list is
-            # JSON-adapted for a JSONB column (suffix _json/_jsonb, or the
-            # _JSONB_LIST_COLUMNS allowlist for unsuffixed JSONB list columns such
-            # as corpus_errors, OMN-13350) and otherwise passed raw so genuine
-            # Postgres text[] ARRAY columns (e.g. swarm_runs.models_used /
-            # machines_used) keep their array semantics. A JSONB list sent as a
-            # Postgres ARRAY literal fails the INSERT — which is what
-            # silently dropped node-generation-completed events before this fix.
+            # JSON-adapted per _should_jsonb_wrap_list (suffix convention,
+            # allowlist, or the OMN-14494 structural any-element-is-dict/list
+            # heuristic) and otherwise passed raw so genuine Postgres text[]
+            # ARRAY columns (e.g. swarm_runs.models_used / machines_used)
+            # keep their array semantics. A JSONB list sent as a Postgres
+            # ARRAY literal fails the INSERT — which is what silently
+            # dropped node-generation-completed events before this fix.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
                     if isinstance(value, dict)
-                    or (
-                        isinstance(value, list)
-                        and (
-                            str(key).endswith(("_json", "_jsonb"))
-                            or str(key) in _JSONB_LIST_COLUMNS
-                        )
-                    )
+                    or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
                     else value
                 )
                 for key, value in row.items()

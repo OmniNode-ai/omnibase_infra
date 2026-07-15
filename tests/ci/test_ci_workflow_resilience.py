@@ -45,7 +45,7 @@ SETUP_PYTHON_UV_ACTION = (
 )
 CHECKOUT_V7_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "a677c8f978cd87a8894e3dab9c0291e12c37c545"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "3a298cef9c810cb0ed265ab94f90e58b0b511e23"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -833,7 +833,7 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
         for job_name, job in workflow["jobs"].items():
             if "uses" in job:
                 assert job["uses"].endswith(
-                    "occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf"
+                    "occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12"
                 )
                 continue
 
