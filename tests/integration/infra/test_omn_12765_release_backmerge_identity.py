@@ -47,7 +47,13 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
         (ROOT / "docker/runners/runner-image.lock.json").read_text(encoding="utf-8")
     )
 
-    # OMN-14403: the regenerated image_version=6 identity binds the current dev
-    # shared environment digest after the fan-out seam core pin refresh.
-    assert lock["identity_digest"] == "f3f1d66be22e6b19f285d870f3ea1c45"
-    assert lock["shared_env_digest"] == "433be4f0a13256d3efeb7b1d"
+    # OMN-12765 / #2306 (dependabot uvicorn <0.51.0 -> <0.52.0 bound bump): the
+    # runner identity is a binding, not a label (OMN-12567). It folds in the full
+    # dependency-manifest bytes (pyproject.toml + uv.lock), so a dependency-range
+    # update legitimately rebinds the runner lock. Regenerated with
+    # scripts/ci/runner_image_identity.py --mode generate and build-proven by the
+    # runner-image-build-smoke gate (baked image label == lock identity_digest).
+    # Precedent: #2227 (prior uvicorn bump) and #2228 (fastapi bump) rebound the
+    # same lock and updated this anchor in lockstep.
+    assert lock["identity_digest"] == "87239d2a9ea58d2fb961526f9745f144"
+    assert lock["shared_env_digest"] == "3b1bee43f2d16dd5df988cde"
