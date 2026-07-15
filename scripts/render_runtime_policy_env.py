@@ -74,6 +74,7 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         "GOOGLE_CLOUD_PROJECT": contract.google_cloud_project,
         "GOOGLE_CLOUD_LOCATION": contract.google_cloud_location,
         "OMNIMEMORY_MEMGRAPH_PORT": str(contract.omnimemory_memgraph_port),
+        "ARCH_GRAPH_BOLT_URI": contract.arch_graph_bolt_uri,
     }
 
     dev_main = contract.profiles["dev"].processes["main"]

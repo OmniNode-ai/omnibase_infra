@@ -14,6 +14,12 @@ bifrost_vertex_gemini_endpoint_url: https://us-central1-aiplatform.googleapis.co
 google_cloud_project: gen-lang-client-0084338881
 google_cloud_location: us-central1
 omnimemory_memgraph_port: 7687
+# OMN-14297: bolt URI for node_architecture_graph_{populate,query}_effect.
+# Currently only reachable from the dev lane (omnibase-infra-network) —
+# the omnimemory-memgraph container is not attached to the stability-test/
+# judge/prod lane networks. This is the in-network alias; the Tailscale
+# host address (bolt://100.109.203.94:7687) is the cross-lane fallback.
+arch_graph_bolt_uri: "bolt://omnibase-infra-memgraph:7687"
 auxiliary_services_omnimemory_enabled: false
 profiles:
   dev:
