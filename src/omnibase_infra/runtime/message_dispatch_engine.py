@@ -184,6 +184,16 @@ from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
 
+_VALIDATION_DETAIL_MAX_LENGTH = 500
+
+
+def _sanitize_validation_detail(detail: str) -> str:
+    """Sanitize validation detail before it reaches logs, results, or DLQ metadata."""
+    return sanitize_error_message(
+        ValueError(detail), max_length=_VALIDATION_DETAIL_MAX_LENGTH
+    )
+
+
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -1331,7 +1341,7 @@ class MessageDispatchEngine:
             if scoping_outcome.type_scoped_candidate_rejected:
                 failure_class = EnumDlqFailureClass.PUBLISHER_MALFORMED
                 error_code = EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED
-                validation_detail = (
+                validation_detail = _sanitize_validation_detail(
                     scoping_outcome.validation_detail or "validation detail unavailable"
                 )
                 error_message = (
@@ -1987,9 +1997,10 @@ class MessageDispatchEngine:
         """Return (matched, validation_detail) for a type-scoped dispatcher.
 
         The matcher validates the payload against the dispatcher's
-        contract-declared ``event_model``. A matcher that raises is treated as a
-        non-match (the payload does not conform to this dispatcher's model), so a
-        malformed or wrong-type payload never selects a type-scoped dispatcher.
+        contract-declared ``event_model``. Genuine validation rejects return
+        ``False`` and expose ``last_validation_detail``. Unexpected matcher
+        exceptions are not converted into publisher_malformed; they propagate as
+        runtime failures.
         Callers MUST only invoke this when ``entry.payload_type_matcher`` is set.
 
         When the matcher is a ``_PayloadTypeMatcher`` (built via
@@ -2004,10 +2015,7 @@ class MessageDispatchEngine:
         matcher = entry.payload_type_matcher
         if matcher is None:
             return True, None
-        try:
-            matched = bool(matcher(payload))
-        except Exception:  # noqa: BLE001 — a raising matcher means "not my type"
-            return False, getattr(matcher, "last_validation_detail", None)
+        matched = bool(matcher(payload))
         if matched:
             return True, None
         return False, getattr(matcher, "last_validation_detail", None)

@@ -46,8 +46,9 @@ from typing import (
     get_origin,
     runtime_checkable,
 )
+from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
@@ -747,7 +748,7 @@ class PayloadTypeMatcher:
             return True
         try:
             model_cls.model_validate(payload)
-        except Exception as exc:  # noqa: BLE001 — validation failure means "not my type"
+        except ValidationError as exc:
             if _is_delegation_inference_intent_ref(
                 self._event_model
             ) and _payload_claims_delegation_inference_intent(payload):
@@ -1649,7 +1650,7 @@ async def _route_projection_error_to_dlq(
 
     payload = _extract_dispatch_payload(envelope)
     correlation = _extract_dispatch_correlation_id(envelope, payload)
-    correlation_id = str(correlation) if correlation is not None else ""
+    correlation_id = str(correlation) if correlation is not None else str(uuid4())
     original_message: object
     model_dump = getattr(payload, "model_dump", None)
     if isinstance(payload, Mapping):
