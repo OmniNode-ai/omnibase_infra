@@ -19,6 +19,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_projection_dispatch_callback,
     _read_db_io_tables,
     _read_dlq_topics,
+    _should_jsonb_wrap_list,
 )
 
 _PATCH_BUILD_ADAPTER = (
@@ -580,6 +581,121 @@ def test_sync_db_adapter_json_adapts_recent_responses_list_of_objects() -> None:
     # Scalar columns pass through unchanged.
     assert params["provisioned"] is True
     assert params["latest_model_name"] == "Qwen3.6-27B-MT"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _should_jsonb_wrap_list (OMN-14494 structural heuristic)
+# ---------------------------------------------------------------------------
+#
+# OMN-14494: _JSONB_LIST_COLUMNS is a hardcoded allowlist that has already
+# bitten twice (OMN-13350 corpus_errors, OMN-14487 recent_responses) -- every
+# NEW unsuffixed JSONB list-of-objects column crashes with
+# ``can't adapt type 'dict'`` until someone manually adds it to the
+# allowlist. These tests prove the structural heuristic (any list element is
+# itself a dict/list) covers a brand-new, never-allowlisted column WITHOUT an
+# allowlist edit, while still preserving flat text[]/int[] passthrough. The
+# chosen column name below (``audit_findings``) is deliberately absent from
+# both the ``_json``/``_jsonb`` suffix convention and ``_JSONB_LIST_COLUMNS``
+# -- against the pre-OMN-14494 allowlist-only implementation this exact
+# scenario reproduces the OMN-14487 crash class (RED); the structural rule
+# added in this ticket makes it GREEN without touching the allowlist.
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_structural_heuristic_new_unsuffixed_column() -> None:
+    """A never-allowlisted, unsuffixed column with list[dict] must wrap (structural rule)."""
+    assert (
+        _should_jsonb_wrap_list(
+            "audit_findings",
+            [{"rule": "no-hardcoded-topics", "severity": "high"}],
+        )
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_structural_heuristic_list_of_lists() -> None:
+    """A never-allowlisted column with list[list] must also wrap (structural rule)."""
+    assert _should_jsonb_wrap_list("audit_findings", [["a", "b"], ["c"]]) is True
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_preserves_flat_scalar_list() -> None:
+    """A flat list[str] under an unsuffixed, non-allowlisted column stays raw (ARRAY)."""
+    assert _should_jsonb_wrap_list("machines_used", ["worker-a", "worker-b"]) is False
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_preserves_empty_list() -> None:
+    """An empty list has no structurally-JSON element and is left for the caller as raw."""
+    assert _should_jsonb_wrap_list("audit_findings", []) is False
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_suffix_convention_still_wraps() -> None:
+    """The pre-existing _json/_jsonb suffix convention keeps working unchanged."""
+    assert _should_jsonb_wrap_list("quality_gates_checked_jsonb", ["x"]) is True
+
+
+@pytest.mark.unit
+def test_should_jsonb_wrap_list_allowlist_still_wraps() -> None:
+    """The pre-existing allowlist (for flat list[str] JSONB columns) keeps working."""
+    assert (
+        _should_jsonb_wrap_list("corpus_errors", ["missed violation_fixture v3"])
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_sync_db_adapter_json_adapts_new_unsuffixed_unallowlisted_list_of_dicts_column() -> (
+    None
+):
+    """OMN-14494: a brand-new unsuffixed, non-allowlisted list[dict] column must be
+    JSON-adapted through the full upsert path, not just the pure-function unit test above.
+
+    Before this fix (allowlist-only), a raw list[dict] under a column name that
+    is neither suffixed nor in _JSONB_LIST_COLUMNS was passed straight to
+    psycopg2, which cannot adapt the inner dicts -- this reproduces the exact
+    ``can't adapt type 'dict'`` crash class from OMN-13350/OMN-14487 for any
+    FUTURE column, without requiring an allowlist edit first.
+    """
+    import psycopg2  # type: ignore[import-untyped]
+    import psycopg2.extensions  # type: ignore[import-untyped]
+    import psycopg2.extras
+
+    audit_findings = [{"rule": "no-hardcoded-topics", "severity": "high"}]
+
+    # Exists-but-wrong proof, independent of the wrapping decision: an
+    # un-wrapped list[dict] is unconditionally un-adaptable by psycopg2 -- this
+    # is the exact crash the old allowlist-only adapter produced for any
+    # never-allowlisted column before this fix.
+    with pytest.raises(psycopg2.Error):
+        psycopg2.extensions.adapt(audit_findings).getquoted()
+
+    cursor = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = cursor
+    conn = MagicMock()
+    conn.closed = False
+    conn.cursor.return_value = cursor_context
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _build_sync_db_adapter("postgresql://user:pass@host/db")
+        result = adapter.upsert(
+            "compliance_scan_results",
+            "scan_id",
+            {
+                "scan_id": "scan-1",
+                "scan_passed": False,
+                "audit_findings": audit_findings,
+            },
+        )
+
+    assert result is True
+    params = cursor.execute.call_args.args[1]
+    # GREEN: the structural heuristic wraps a never-allowlisted list[dict] column.
+    assert isinstance(params["audit_findings"], psycopg2.extras.Json)
+    assert params["scan_passed"] is False
 
 
 # ---------------------------------------------------------------------------
