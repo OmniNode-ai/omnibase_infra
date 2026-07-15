@@ -42,5 +42,5 @@ jobs:
 
   call-reject-skip-token:
     needs: occ-preflight
-    uses: OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml@a677c8f978cd87a8894e3dab9c0291e12c37c545
+    uses: OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml@3a298cef9c810cb0ed265ab94f90e58b0b511e23
     secrets: inherit
