@@ -99,7 +99,16 @@ class ModelDelegationResult(BaseModel):
 
 
 class ModelDelegationEventEnvelope(BaseModel):
-    """Stub topic-bearing delegation event envelope."""
+    """Stub of the (now-legacy) bespoke topic-bearing delegation envelope.
+
+    OMN-14600 (Fable-gate correction): the delegation orchestrator no longer
+    emits this shape, but the applier's special case for it was DELIBERATELY
+    KEPT (see ``_publish_payload_for_output_event``) — pre-fix in-flight rows
+    and the core class itself are still real, and dropping the special case
+    before every producer + every stored row is provably clear of the old
+    shape is a gratuitous skew risk. This stub pins that the special case
+    still works.
+    """
 
     topic: str
     payload: ModelDelegationResult
@@ -505,6 +514,14 @@ class TestDelegationIntentTopicRouting:
     async def test_delegation_topic_envelope_publishes_inner_terminal_payload(
         self,
     ) -> None:
+        """OMN-14600: the delegation orchestrator emits the canonical
+        ``ModelEventEnvelope`` directly (no bespoke ``ModelDelegationEventEnvelope``
+        carrier) -- the applier's generic ``ModelEventEnvelope`` unwrap
+        (``_publish_payload_for_output_event`` / ``_resolve_embedded_output_topic``,
+        OMN-13247) must still resolve the embedded ``event_type`` as the topic and
+        publish the UNWRAPPED inner ``ModelDelegationResult``, never a
+        double-nested envelope-in-envelope.
+        """
         mock_bus = AsyncMock(spec=ProtocolEventBusLike)
         completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
         applier = DispatchResultApplier(
@@ -512,6 +529,39 @@ class TestDelegationIntentTopicRouting:
             output_topic=completed_topic,
         )
         terminal_payload = ModelDelegationResult(correlation_id="cid-456")
+        result = _make_result(
+            output_events=[
+                ModelEventEnvelope(
+                    event_type=completed_topic,
+                    payload=terminal_payload,
+                )
+            ],
+        )
+
+        await applier.apply(result)
+
+        mock_bus.publish_envelope.assert_called_once()
+        call_kwargs = mock_bus.publish_envelope.call_args.kwargs
+        assert call_kwargs["topic"] == completed_topic
+        assert call_kwargs["envelope"].payload == terminal_payload
+
+    @pytest.mark.asyncio
+    async def test_legacy_delegation_envelope_still_unwraps_omn14600(self) -> None:
+        """OMN-14600 (Fable-gate correction, Priority 5): the applier's special
+        case for the (now-legacy) bespoke ``ModelDelegationEventEnvelope`` carrier
+        was DELIBERATELY KEPT — pre-fix in-flight rows and any as-yet-
+        unredeployed producer can still emit this shape, and the core class
+        itself has not been deleted. Dropping the special case in this PR would
+        be a gratuitous skew risk for zero benefit. This pins that it still
+        unwraps to the inner payload exactly as before.
+        """
+        mock_bus = AsyncMock(spec=ProtocolEventBusLike)
+        completed_topic = "onex.evt.omnibase-infra.delegation-completed.v1"
+        applier = DispatchResultApplier(
+            event_bus=mock_bus,
+            output_topic=completed_topic,
+        )
+        terminal_payload = ModelDelegationResult(correlation_id="cid-789")
         result = _make_result(
             output_events=[
                 ModelDelegationEventEnvelope(

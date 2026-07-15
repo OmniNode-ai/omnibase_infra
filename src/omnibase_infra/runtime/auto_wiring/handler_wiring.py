@@ -32,8 +32,9 @@ import logging
 import math
 import os
 import re
+import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +88,11 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
+from omnibase_infra.runtime.auto_wiring.fanout_seam import (
+    check_fanout_publish_coverage,
+    is_fanout_sequence,
+    normalize_fanout_sequence,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
@@ -121,13 +127,23 @@ from omnibase_infra.utils.util_retry_optimistic import (
 class BoundaryPublishError(Exception):
     """Marks a result-applier (publish) failure the outbox boundary must PROPAGATE.
 
-    OMN-14403 §4.3: on the state_io / in-row-outbox path, a publish failure mid-
-    batch and a conflict-retry exhaustion must NOT be log-and-discarded (that
-    silently loses the un-published remainder with no redelivery). The auto-wired
-    boundary (`_make_event_bus_callback`) tags an applier failure with this type
-    ONLY when `propagate_publish_failures` is set (state_io contracts), so the
-    outer handler re-raises it (no offset commit → redelivery) instead of
-    swallowing. Non-outbox contracts never set the flag → behavior is unchanged.
+    OMN-14403 §4.3: on the state_io / in-row-outbox path, a publish failure at
+    the RESULT-APPLIER layer (the no-bus / external-applier shape) must NOT be
+    log-and-discarded. The auto-wired boundary (`_make_event_bus_callback`)
+    tags an applier failure with this type ONLY when
+    `propagate_publish_failures` is set (state_io contracts), so the outer
+    handler re-raises it instead of swallowing. Non-outbox contracts never set
+    the flag → behavior is unchanged.
+
+    OMN-14600 CORRECTION: this type is distinct from a conflict-retry
+    exhaustion (`OptimisticConflictError`) raised INSIDE the state_io
+    dispatcher itself — that exception is absorbed by
+    `MessageDispatchEngine.dispatch()`'s per-dispatcher catch-all before it
+    ever reaches this boundary at all, so it does NOT redeliver on this
+    runtime (see the detailed note at `_make_event_bus_callback`'s
+    `except (OptimisticConflictError, BoundaryPublishError)` clause). The
+    state_io in_flight-lock branch self-heals inline for that reason instead
+    of depending on redelivery.
     """
 
 
@@ -165,11 +181,92 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
 _BOUNDARY_DLQ_MAX_ATTEMPTS = 3
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
+# OMN-14600: the state_io outbox recovery sweep (re-publish + finalize any row
+# whose batch is committed but never finalized) originally ran exactly once
+# per adapter lifetime (first live dispatch only) -- a row stranded later in a
+# long-lived process's life was NOT re-scanned until the next boot/redeploy.
+# Gating on elapsed wall-clock time instead of a boolean makes the sweep
+# periodic: it re-runs opportunistically on the next dispatch once this many
+# seconds have passed since the last run. select_recoverable_batches() is a
+# cheap empty partial-index scan in steady state (docstring above), so a
+# 30s interval costs nothing while bounding the self-heal window.
+_STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS = 30.0
 _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
 _LEDGER_DB_DSN_ENV_VARS: tuple[str, ...] = ("OMNIBASE_INFRA_DB_URL", "DATABASE_URL")
+# OMN-14600: pre-fix rows committed by the delegation orchestrator's OLD
+# bespoke terminal carrier. Those entries recorded the CARRIER's own
+# module/class_name (never the "topic" entry key -- that field did not exist
+# yet) and stored its own dump verbatim: {"topic": <str>, "payload":
+# {...ModelDelegationResult fields...}}. ModelDelegationEventEnvelope was the
+# ONLY payload type this carrier ever wrapped in this codebase (the
+# delegation orchestrator's single terminal-emit site), so the inner class is
+# hardcoded here rather than re-derived generically -- there is no other
+# legacy-shaped carrier to generalize for.
+_LEGACY_DELEGATION_ENVELOPE_CLASS_NAME = "ModelDelegationEventEnvelope"
+_LEGACY_DELEGATION_RESULT_MODULE = (
+    "omnibase_core.models.delegation.wire.model_delegation_result"
+)
+_LEGACY_DELEGATION_RESULT_NAME = "ModelDelegationResult"
+
+
+def _legacy_delegation_envelope_unwrap(
+    entry: dict[str, object],
+) -> tuple[str, dict[str, object]] | None:
+    """Detect + unwrap a pre-fix ``ModelDelegationEventEnvelope`` outbox entry.
+
+    Returns ``(topic, inner_payload_dict)`` when ``entry`` is the legacy
+    shape (see module comment above), else ``None``. A row healed once by
+    this path is re-persisted with the NEW shape by its own
+    ``_finalize_outbox_row`` call, so this is a one-time migration read, not
+    a permanent dual-shape burden.
+    """
+    if entry.get("class_name") != _LEGACY_DELEGATION_ENVELOPE_CLASS_NAME:
+        return None
+    if entry.get("topic"):
+        # Already carries the new-shape topic key -- not the legacy shape.
+        return None
+    stored_payload = entry.get("payload")
+    if not isinstance(stored_payload, dict):
+        return None
+    topic = stored_payload.get("topic")
+    inner = stored_payload.get("payload")
+    if isinstance(topic, str) and topic and isinstance(inner, dict):
+        return topic, inner
+    return None
+
+
+# OMN-14403 P3a §6ii — the def-B multi-event (fan-out) publish seam. Default OFF;
+# flipped in a separate PR once every wired fan-out handler is coverage-clean (repo
+# rule: a gate that tightens acceptance ships behind an env flag, default OFF). A
+# Sequence[BaseModel] return stops being silently dropped to output_events=[] /
+# SUCCESS and becomes the published batch. This is the ONE env read for the seam
+# (the OMN-11069 env-read gate approves this module); the pure logic + the mirror
+# read on the RuntimeLocal path (LocalRuntimeBusAdapter) both gate on this same
+# flag so the two runtimes agree. NOTE: this PR is §6ii ONLY — the §8.1
+# causation/tenant carry (seam_apply_context) is a separate lane.
+ENV_MULTI_EVENT_PUBLISH_SEAM = "ONEX_MULTI_EVENT_PUBLISH_SEAM"
+
+
+def multi_event_seam_enabled() -> bool:
+    """Return True when the def-B fan-out publish seam is enabled (default: False)."""
+    return os.environ.get(ENV_MULTI_EVENT_PUBLISH_SEAM, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _check_fanout_publish_coverage(contract: ModelDiscoveredContract) -> None:
+    """Prove fan-out handlers' emittable classes are contract-declared (§2C)."""
+    check_fanout_publish_coverage(
+        contract,
+        seam_enabled=multi_event_seam_enabled(),
+        env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+    )
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -501,8 +598,21 @@ def _make_dispatch_callback(
             )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
-            if isinstance(raw_result, str | list):
+            if isinstance(raw_result, str):
                 return cast("ModelDispatchResult | None", raw_result)
+            if is_fanout_sequence(raw_result) and not any(
+                isinstance(element, BaseModel)
+                for element in cast("Sequence[object]", raw_result)
+            ):
+                # Legacy no-bus/state_io handlers use [] as a no-op fold and may
+                # return list[str] intent markers. OMN-14403 only normalizes
+                # actual BaseModel fan-out batches here.
+                return cast("ModelDispatchResult | None", raw_result)
+            # OMN-14403 §2A. A bare list/sequence used to be cast straight through
+            # AS IF it were a ModelDispatchResult — strictly worse than the sibling
+            # silent drop, since the applier then reads .output_events/.status off a
+            # list and finds neither. Route it through the one fan-out coercion so it
+            # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
@@ -978,6 +1088,20 @@ def _normalize_handler_result(
             output_events.append(result.result)
     elif isinstance(result, BaseModel):
         output_events = [result]
+    elif is_fanout_sequence(result):
+        # OMN-14403 §2A — the def-B fan-out entry. Before this branch existed a
+        # Sequence return matched NEITHER branch above and fell through to
+        # output_events=[] / SUCCESS: the handler's N events were dropped and the
+        # dispatch reported success. That silent drop IS the defect. The applier
+        # resolves each element's topic via published_events (same short-name
+        # resolution the shared core resolver uses); the boot coverage gate keeps
+        # that fail-closed.
+        output_events = normalize_fanout_sequence(
+            cast("Sequence[object]", result),
+            message_type,
+            seam_enabled=multi_event_seam_enabled(),
+            env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+        )
 
     return ModelDispatchResult(
         status=EnumDispatchStatus.SUCCESS,
@@ -1820,10 +1944,22 @@ def _make_stateful_dispatch_callback(
        the FSM's synchronous in-flight dedup guard observes the freshly
        persisted flag on the retried attempt and folds without re-emitting.
 
-    Fail-closed: an exhausted retry raises ``OptimisticConflictError``
-    (propagates — no offset commit, message redelivers) rather than
-    swallowing; a resolvable-but-unresolved race is never reported as a
-    successful dispatch.
+    An exhausted retry raises ``OptimisticConflictError`` — never swallowed —
+    so a resolvable-but-unresolved race is never reported as a successful
+    dispatch. OMN-14600 CORRECTION: earlier revisions of this docstring
+    claimed the raise "propagates — no offset commit, message redelivers".
+    That is FALSE on this runtime: ``MessageDispatchEngine.dispatch()``
+    catches every exception a wired dispatcher raises and converts it to a
+    returned ``HANDLER_ERROR`` status rather than re-raising, and
+    ``EventBusSubcontractWiring``'s consume callback has no status branch for
+    ``HANDLER_ERROR`` — it commits the Kafka offset unconditionally once
+    ``dispatch()`` returns. The raise here is still valuable (it surfaces the
+    conflict loudly in logs/metrics and, for a caller that inspects the
+    return value directly rather than going through the engine, genuinely
+    propagates), but it is NOT a redelivery mechanism on the production
+    consume path. The state_io in_flight-lock branch below (``_load_handle_
+    persist``) therefore self-heals a stuck row INLINE rather than depending
+    on this exception to trigger redelivery.
     """
     inner_callback = _make_dispatch_callback(handler_instance, event_model)
 
@@ -1878,7 +2014,8 @@ def _make_stateful_dispatch_callback(
     from uuid import UUID, uuid5
 
     publish_topic_map: dict[str, str] = dict(output_topic_map or {})
-    _recovery_ran = False
+    # 0.0 sentinel means "never run" -- always due on the first dispatch.
+    _recovery_last_run_monotonic = 0.0
     _recovery_lock = asyncio.Lock()
 
     def _outbox_topic_for(class_name: str) -> str | None:
@@ -1904,6 +2041,20 @@ def _make_stateful_dispatch_callback(
         envelope WITHOUT re-running the handler (spec §12): the event class'
         module+name, its own JSON payload, its index, and the causation /
         correlation / tenant scope for the deterministic id + tenant stamp.
+
+        OMN-14600: the delegation terminal (the only state_io node today) is a
+        BARE class emit — ``ModelDelegationCompleted`` / ``ModelDelegationFailed``,
+        two distinct classes with no embedded topic field — resolved purely by
+        class name via ``_outbox_topic_for`` / the contract's
+        ``published_events`` map, same as every other emitted event. An
+        earlier revision of this function detected an embedded-topic carrier
+        (a ``ModelEventEnvelope`` or a typed payload's own ``.topic`` field)
+        and fail-closed-validated it against ``allowed_output_topics`` —
+        removed: dead code for delegation (its terminal carries no topic of
+        its own to embed), and no other state_io node exists yet to need it.
+        Add it back if a future state_io node genuinely needs an embedded,
+        per-instance topic — don't carry speculative capability for a
+        hypothetical node.
         """
         # A non-ModelDispatchResult return (e.g. the event_model=None cast-through
         # can hand back a raw list on clean dev — P3a's normalize coerces it) has
@@ -1939,12 +2090,25 @@ def _make_stateful_dispatch_callback(
         so the module/class recorded at commit time from an event WE emitted is
         rebuilt directly — the handler-class loader's namespace allowlist is for
         untrusted contract refs, not for a self-recorded outbox entry.
+
+        OMN-14600: a pre-fix legacy-shaped entry (``_legacy_delegation_envelope_
+        unwrap``) rebuilds the INNER ``ModelDelegationResult`` from the nested
+        payload dict instead of the recorded carrier class — reconstructing the
+        carrier itself would republish the double-nested bespoke shape no
+        current consumer expects.
         """
         import importlib
 
-        module = importlib.import_module(str(entry["module"]))
-        cls = getattr(module, str(entry["class_name"]))
-        model = cls.model_validate(entry["payload"])
+        legacy = _legacy_delegation_envelope_unwrap(entry)
+        if legacy is not None:
+            _legacy_topic, inner_payload = legacy
+            module = importlib.import_module(_LEGACY_DELEGATION_RESULT_MODULE)
+            cls = getattr(module, _LEGACY_DELEGATION_RESULT_NAME)
+            model = cls.model_validate(inner_payload)
+        else:
+            module = importlib.import_module(str(entry["module"]))
+            cls = getattr(module, str(entry["class_name"]))
+            model = cls.model_validate(entry["payload"])
         updates: dict[str, object] = {}
         fields = type(model).model_fields
         tenant_id = entry.get("tenant_id")
@@ -1967,9 +2131,18 @@ def _make_stateful_dispatch_callback(
         """Publish a persisted outbox batch FROM THE ROW (recovery / resume).
 
         Rebuilds each envelope with the causation-scoped deterministic id (spec
-        §8.1) + tenant, resolves its per-class topic, and publishes via the bus.
+        §8.1) + tenant, resolves its topic, and publishes via the bus.
         Idempotent: row-derived ids collapse against the original at the
         consume-path dedupe, so a duplicate re-publish is benign.
+
+        Topic resolution: the contract's ``published_events`` class-name map
+        (``_outbox_topic_for``) is authoritative — every current emit is a
+        bare, un-carried class (OMN-14600). The ONE exception is
+        ``_legacy_delegation_envelope_unwrap``: a pre-fix row committed by the
+        old bespoke ``ModelDelegationEventEnvelope`` carrier, whose OWN nested
+        dump is the only place that topic survived (the row predates the
+        ``published_events`` split into completed/failed entries) — checked
+        first so those specific stuck rows still resolve and self-heal.
         """
         from omnibase_core.models.events.model_event_envelope import (
             ModelEventEnvelope as _Envelope,
@@ -1980,7 +2153,8 @@ def _make_stateful_dispatch_callback(
         published = 0
         for entry in entries:
             class_name = str(entry["class_name"])
-            topic = _outbox_topic_for(class_name)
+            legacy = _legacy_delegation_envelope_unwrap(entry)
+            topic = legacy[0] if legacy is not None else _outbox_topic_for(class_name)
             if topic is None:
                 raise ModelOnexError(
                     "handler_wiring: outbox recovery cannot resolve a topic for "
@@ -2044,6 +2218,18 @@ def _make_stateful_dispatch_callback(
         resume path (which keys the resume on envelope_id), so the boot sweep
         must not race it — otherwise a redelivery of the crashed input would
         find its batch already recovered and needlessly re-run + fold the handler.
+
+        OMN-14600 (Fable-gate correction): each row is recovered in its OWN
+        try/except. Before this, one row that fails to recover (e.g. a stale
+        pre-fix legacy-shaped entry the running code cannot resolve a topic
+        for) raised out of the whole sweep — ``_ensure_stale_rows_recovered``
+        never reached its ``_recovery_last_run_monotonic`` update, so the
+        interval gate stayed permanently due and EVERY subsequent dispatch
+        re-entered this same failing sweep and re-raised, silently dropping
+        every triggering leg's own input. A row that fails here is logged and
+        skipped; the sweep still completes, the timer still advances, and the
+        failing row gets another attempt on the next interval (or self-heals
+        via ``_legacy_delegation_envelope_unwrap`` if that was the cause).
         """
         if event_bus is None or not hasattr(adapter, "select_recoverable_batches"):
             return
@@ -2056,33 +2242,61 @@ def _make_stateful_dispatch_callback(
             )
             if not entries:
                 continue
-            await _publish_outbox_batch(entries)
-            await _finalize_outbox_row(
-                row_cid,
-                str(row["tenant_id"]),
-                str(row["state"]),
-                str(row["payload_json"]),
-                int(cast("int", row["version"])),
-            )
+            try:
+                await _publish_outbox_batch(entries)
+                await _finalize_outbox_row(
+                    row_cid,
+                    str(row["tenant_id"]),
+                    str(row["state"]),
+                    str(row["payload_json"]),
+                    int(cast("int", row["version"])),
+                )
+            except Exception as exc:  # noqa: BLE001 — per-row isolation, see docstring
+                logger.error(
+                    "state_io recovery sweep: failed to recover row cid=%s (%s) "
+                    "— skipping this row so the sweep completes and the "
+                    "interval timer still advances (OMN-14600); retried on "
+                    "the next sweep interval.",
+                    row_cid,
+                    _sanitize_exc(exc),
+                )
 
     async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:
-        """Run outbox re-publish + the give-up sweep exactly once per adapter.
+        """Run outbox re-publish + the give-up sweep, at most once per interval.
 
         Wiring is synchronous, so this cannot run at wiring time; the first live
         dispatch is the deterministic async point. Outbox re-publish runs FIRST
         so a recoverable in-flight batch is re-emitted before the give-up sweep
         (which fail-closes genuinely-abandoned rows) can touch it (OMN-14208 G1,
-        OMN-14403 §4.1/§4.2 R1). Lock-guarded against concurrent first-dispatch.
+        OMN-14403 §4.1/§4.2 R1). Lock-guarded against concurrent same-tick runs.
+
+        OMN-14600: this used to run EXACTLY ONCE per adapter lifetime (boot-time
+        only, gated by a bool). A row whose winning leg crashes or otherwise
+        never finalizes (e.g. a retry-storm cascade exhausting the in_flight-
+        lock defer's own retries) stayed stranded until the next boot/redeploy
+        -- a live, long-running process had no way to self-heal it. Gating on
+        elapsed time instead makes this periodic: any dispatch that lands more
+        than ``_STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS`` after the last run
+        re-triggers it, bounding how long a stranded row can survive in a busy
+        process without requiring a dedicated background task.
         """
-        nonlocal _recovery_ran
-        if _recovery_ran:
+        nonlocal _recovery_last_run_monotonic
+        now = time.monotonic()
+        if (
+            now - _recovery_last_run_monotonic
+            < _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS
+        ):
             return
         async with _recovery_lock:
-            if _recovery_ran:
+            now = time.monotonic()
+            if (
+                now - _recovery_last_run_monotonic
+                < _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS
+            ):
                 return
             await _recover_outbox_batches(skip_cid=skip_cid)
             await adapter.recover_stale_rows()
-            _recovery_ran = True
+            _recovery_last_run_monotonic = time.monotonic()
 
     async def _find_recoverable_row(cid: str) -> dict[str, object] | None:
         """Return this cid's in-flight-with-live-batch row, if one exists.
@@ -2170,18 +2384,58 @@ def _make_stateful_dispatch_callback(
                 return 1, _dispatch_result_from_entries(entries, cid)
             # A DIFFERENT input arrived while the batch is un-finalized. Do NOT
             # run the handler (would clobber the winner's un-published intent).
-            # Defer as a clean no-op: under normal (sequential-per-partition)
-            # consumption the winner finalizes within its own leg before the next
-            # leg dispatches, so this branch only fires under genuine concurrent
-            # dispatch on one correlation; the un-finalized batch is cleared by
-            # the winner's finalize or by boot recovery. See PR body §branch-b.
+            #
+            # OMN-14600 (Fable-gate correction, superseding the original
+            # WIP): this branch used to return (1, None) -- a REPORTED SUCCESS
+            # that commits the Kafka offset without ever running the handler
+            # for THIS leg. The first fix attempt reported a conflict
+            # (row_count=0) instead, relying on retry_on_optimistic_conflict's
+            # in-process retries to exhaust and raise OptimisticConflictError
+            # so the caller would redeliver. THAT DOES NOT WORK ON THIS
+            # RUNTIME: MessageDispatchEngine.dispatch() catches every
+            # exception a dispatcher raises (message_dispatch_engine.py's
+            # per-dispatcher invocation loop) and converts it to a returned
+            # HANDLER_ERROR status instead of re-raising; EventBusSubcontract
+            # Wiring's consume callback has NO status branch for
+            # HANDLER_ERROR and commits the Kafka offset unconditionally once
+            # dispatch() returns. So a raised exception here NEVER triggers
+            # redelivery -- it is silently absorbed and the message is gone.
+            #
+            # Fix: INLINE-RECOVER the winner's own batch right here instead of
+            # depending on redelivery. This leg already holds the locked row +
+            # its persisted entries -- publish them (idempotent: deterministic
+            # uuid5 ids collapse a duplicate re-publish) and CAS-finalize using
+            # the SAME helpers the is_redelivery resume branch above uses, so
+            # the winner's stalled/crashed leg is completed deterministically.
+            # Then report a conflict (row_count=0) so retry_on_optimistic_
+            # conflict re-attempts THIS leg in-process against the now-cleared
+            # lock -- it either runs the handler fresh or (if a genuinely
+            # concurrent third leg raced in) defers again, never depending on
+            # bus/engine redelivery semantics. No bus wired (test-only /
+            # legacy-adapter path; production always passes one, see the
+            # wiring call site) means we cannot publish from here -- the
+            # winner's finalize is left to the external applier or the
+            # periodic recovery sweep, unchanged from before.
+            if event_bus is not None:
+                await _publish_outbox_batch(entries)
+                await _finalize_outbox_row(
+                    cid,
+                    str(locked["tenant_id"]),
+                    str(locked["state"]),
+                    str(locked["payload_json"]),
+                    int(cast("int", locked["version"])),
+                )
             logger.warning(
-                "state_io in_flight-lock: deferring leg (cid=%s) — a prior leg's "
-                "outbox batch is committed but not yet finalized; not running the "
-                "handler to avoid clobbering its un-published intent.",
+                "state_io in_flight-lock: deferring leg (cid=%s) as a conflict "
+                "— a prior leg's outbox batch was committed but not yet "
+                "finalized; inline-recovered (published + finalized) the "
+                "winner's batch instead of relying on redelivery (OMN-14600 — "
+                "redelivery is a dead path on this runtime, see comment "
+                "above). Reported as row_count=0 so the caller retries this "
+                "leg against the now-cleared lock.",
                 cid,
             )
-            return 1, None
+            return 0, None
 
         loaded = await adapter.load(cid)
         payload_json, version = loaded if loaded is not None else (None, 0)
@@ -2629,12 +2883,22 @@ def _make_event_bus_callback(
                 correlation_id = envelope.correlation_id
             await _dispatch_with_bounded_retry(envelope)
         except (OptimisticConflictError, BoundaryPublishError) as exc:
-            # OMN-14403 §4.3: on the state_io / in-row-outbox path, conflict-retry
-            # exhaustion (fail-closed) and a publish-from-row failure must
-            # PROPAGATE — no offset commit, the message redelivers — never be
-            # log-and-discarded. Scoped to the outbox path by the flag; a
-            # non-outbox contract never sets it, so these ride the swallow arm
-            # below exactly as before (behavior UNCHANGED off the outbox path).
+            # OMN-14403 §4.3, OMN-14600 CORRECTION: this except-tuple's
+            # OptimisticConflictError arm is effectively DEAD for a dispatcher
+            # registered on MessageDispatchEngine (the state_io stateful
+            # callback IS such a dispatcher) — dispatch_engine.dispatch()
+            # catches every exception its per-dispatcher invocation loop sees
+            # and returns a HANDLER_ERROR status instead of re-raising, so an
+            # OptimisticConflictError raised inside _load_handle_persist's
+            # retry_on_optimistic_conflict call never survives to reach here.
+            # BoundaryPublishError IS live: it is raised by
+            # _dispatch_with_bounded_retry AFTER dispatch_engine.dispatch()
+            # already returned (from result_applier.apply() failing), which is
+            # outside that catch-all, so it genuinely propagates from this
+            # callback to its caller (no offset commit here). Whether that
+            # caller's non-commit actually produces a Kafka redelivery is a
+            # property of the OUTER consumer wiring, not verified at this
+            # layer — do not assume it without checking that caller.
             if propagate_publish_failures:
                 if isinstance(exc, BoundaryPublishError) and exc.__cause__:
                     raise exc.__cause__
@@ -4039,6 +4303,12 @@ def _prepare_contract_wiring(
                 ),
             ),
         )
+
+    # OMN-14403 §2C: prove every fan-out handler's emittable classes are declared
+    # in this contract's published_events BEFORE registering any dispatch route —
+    # an unmapped fan-out element would fall back to the single output_topic and
+    # silently misroute. Warn-only while the seam is OFF; fail-closed once ON.
+    _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:

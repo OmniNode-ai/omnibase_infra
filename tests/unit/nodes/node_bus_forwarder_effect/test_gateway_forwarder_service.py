@@ -201,14 +201,22 @@ async def test_inbound_cloud_message_is_published_to_local_canonical_topic() -> 
     assert forwarded.event_type == "DelegationInferenceRequest"
 
 
-async def test_inbound_payload_gets_verified_tenant_id_not_forged_or_missing() -> None:
-    """OMN-14345: the verified tenant identity must reach the payload, not just the envelope shell.
+async def test_inbound_payload_gets_verified_tenant_slug_not_forged_or_missing() -> (
+    None
+):
+    """OMN-14345/OMN-14367: the verified tenant identity must reach the payload, not just the envelope shell.
 
     ``ModelGatewayForwarderConfig.tenant_identity`` is config-bound per forwarder
     instance -- that binding IS the trust anchor (OMN-12908/12911 per-tenant
     OAuth cloud-broker credentials). A payload-supplied tenant_id (forged or
     absent) must never survive into the republished message; the config-bound
     identity always wins and is never a self-asserted fallback.
+
+    OMN-14367: the canonical stamped shape is the DNS-safe slug, not the raw
+    tenant UUID -- ``omnibase_infra.shared.tenant_stamp.stamp_verified_tenant_slug``
+    is the single source of truth both this producer and the runtime
+    auto-wiring stamp route through, matching what the real consumer
+    (omnimarket's ``ModelDelegateSkillRequest``, ``extra="forbid"``) expects.
 
     This also proves the republished message is actually consumable by the
     REAL ``omnibase_core.ModelEventEnvelope`` the local runtime dispatcher and
@@ -230,7 +238,11 @@ async def test_inbound_payload_gets_verified_tenant_id_not_forged_or_missing() -
     )
     await service.start()
 
-    forged_payload = {"prompt": "steal tenant data", "tenant_id": "evil-tenant-forged"}
+    forged_payload = {
+        "prompt": "steal tenant data",
+        "tenant_id": "evil-tenant-forged",
+        "tenant_slug": "evil-tenant-forged-slug",
+    }
     await cloud_bus.emit(
         WIRE_INBOUND_TOPIC,
         _envelope(
@@ -248,36 +260,14 @@ async def test_inbound_payload_gets_verified_tenant_id_not_forged_or_missing() -
     # inbound bus bytes as omnibase_core.ModelEventEnvelope[T], not the
     # gateway's own ModelGatewayEnvelope.
     consumer_view = ModelEventEnvelope[dict].model_validate_json(published.value)
-    assert consumer_view.payload["tenant_id"] == str(TENANT_ID)
+    assert consumer_view.payload["tenant_id"] == "acme"
+    assert consumer_view.payload["tenant_id"] != str(TENANT_ID)
     assert consumer_view.payload["tenant_id"] != "evil-tenant-forged"
     assert consumer_view.payload["prompt"] == "steal tenant data"
-
-
-async def test_inbound_payload_gets_tenant_slug_stamped_when_absent() -> None:
-    """The gateway stamps tenant_slug into the payload too, not just tenant_id."""
-    local_bus = _MockGatewayBus()
-    cloud_bus = _MockGatewayBus()
-    service = ServiceGatewayForwarder(
-        config=_config(),
-        local_bus=local_bus,
-        cloud_bus=cloud_bus,
-    )
-    await service.start()
-
-    await cloud_bus.emit(
-        WIRE_INBOUND_TOPIC,
-        _envelope(
-            event_type="DelegationInferenceRequest",
-            source_topic=WIRE_INBOUND_TOPIC,
-            wire_topic=WIRE_INBOUND_TOPIC,
-            canonical_topic=INBOUND_TOPIC,
-            payload={"prompt": "hi"},
-        ),
-    )
-
-    published = local_bus.published[0]
-    consumer_view = ModelEventEnvelope[dict].model_validate_json(published.value)
-    assert consumer_view.payload["tenant_slug"] == "acme"
+    # OMN-14367: canonical shape has no separate tenant_slug key -- tenant_id
+    # IS the slug. A stray tenant_slug key would signal drift back to the
+    # pre-reconciliation shape.
+    assert "tenant_slug" not in consumer_view.payload
 
 
 async def test_inbound_cross_tenant_forged_envelope_is_rejected_not_republished() -> (

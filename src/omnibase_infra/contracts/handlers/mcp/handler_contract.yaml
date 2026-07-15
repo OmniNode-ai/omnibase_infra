@@ -49,6 +49,10 @@ capability_outputs:
 input_model: omnibase_infra.handlers.models.mcp.ModelMcpToolCall
 output_model: omnibase_infra.handlers.models.mcp.ModelMcpToolResult
 handler_routing:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
   routing_strategy: "operation_match"
   handlers:
     - handler_type: "mcp"

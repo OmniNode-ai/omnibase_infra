@@ -29,7 +29,11 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.46.7",
+    # OMN-14600: bumped 0.46.7 -> 0.46.8; the [tool.uv.sources] git-rev override
+    # below pulls the merged core #1439 (terminal delegation classes) AND the
+    # merged core #1440 (runtime_fanout_resolver, OMN-14403) pre-release --
+    # #1440 is a strict descendant of #1439 on core dev.
+    "omnibase-core==0.46.8",
     "omnibase-spi==0.23.1",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.6",
@@ -181,7 +185,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.46.7",
+    "omnibase-core==0.46.8",
     "omnibase-spi==0.23.1",
     "omnibase-compat==0.5.6",
 ]
@@ -196,6 +200,17 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
 # the released exact versions, restoring a fully PyPI-sourced reproducible lock.
+#
+# OMN-14600 + OMN-14403 §6ii: TEMPORARY dev-build pin to omnibase_core#1440's
+# merged dev squash commit (ed0a45bf), which is a strict descendant of the
+# merged core #1439 squash commit (a9f25887) also on dev. #1439 adds the
+# terminal delegation classes (ModelDelegationCompleted/ModelDelegationFailed,
+# OMN-14600); #1440 adds runtime_fanout_resolver (the shared def-B fan-out
+# resolver this PR's fanout_seam imports, OMN-14403). Neither is yet on PyPI.
+# The version pins above are already bumped to 0.46.8 so the range stays
+# consistent. REMOVE WHEN RELEASED: once core publishes a version containing
+# #1440 (which supersedes #1439), delete this override and `uv lock`.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "ed0a45bf3deaf97d841427e44e0ba1d56a322fcb" }  # raw-override-ok: OMN-14403
 
 [tool.ruff]
 target-version = "py312"
