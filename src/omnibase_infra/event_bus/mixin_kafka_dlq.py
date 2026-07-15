@@ -229,6 +229,8 @@ class MixinKafkaDlq:
         *,
         consumer_group: str,
         dlq_topic: str | None = None,
+        failure_class: str | None = None,
+        validation_detail: str | None = None,
     ) -> None:
         """Publish failed message to dead letter queue with metrics and alerting.
 
@@ -253,6 +255,10 @@ class MixinKafkaDlq:
                 Required for DLQ traceability.
             dlq_topic: Optional category-specific DLQ topic. Explicit
                 ``dead_letter_topic`` config takes precedence when present.
+            failure_class: Optional OMN-14492 classification threaded into the
+                DLQ envelope's structured fields (see ``_publish_raw_to_dlq``).
+            validation_detail: Optional real pydantic ``ValidationError``
+                detail (OMN-14492) for the ``publisher_malformed`` case.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -301,7 +307,7 @@ class MixinKafkaDlq:
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
-        dlq_payload = {
+        dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
             "original_message": {
                 "key": key_str,
@@ -315,6 +321,12 @@ class MixinKafkaDlq:
             "retry_count": failed_message.headers.retry_count,
             "error_type": error_type,
         }
+        # OMN-14492: structured classification fields — only present when the
+        # caller supplied them.
+        if failure_class:
+            dlq_payload["failure_class"] = failure_class
+        if validation_detail:
+            dlq_payload["validation_detail"] = validation_detail
 
         # Create DLQ headers with failure metadata
         dlq_headers = ModelEventHeaders(
@@ -397,6 +409,10 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    if failure_class:
+                        kafka_headers.append(
+                            ("failure_class", failure_class.encode("utf-8"))
+                        )
                     producer = self._producer
 
             # Send and wait for completion with timeout (outside producer lock)
@@ -567,6 +583,8 @@ class MixinKafkaDlq:
         *,
         consumer_group: str,
         dlq_topic: str | None = None,
+        failure_class: str | None = None,
+        validation_detail: str | None = None,
     ) -> None:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
@@ -585,6 +603,15 @@ class MixinKafkaDlq:
                 Required for DLQ traceability.
             dlq_topic: Optional category-specific DLQ topic. Explicit
                 ``dead_letter_topic`` config takes precedence when present.
+            failure_class: Optional OMN-14492 classification (e.g.
+                ``"publisher_malformed"`` / ``"no_dispatcher"`` /
+                ``"valid_unrouted"`` / ``"consumer_error"``) — carried as a
+                top-level structured field on the DLQ envelope so a reader
+                does not have to parse ``failure_reason`` prose to know
+                whether the fix is the producer or the wiring.
+            validation_detail: Optional real pydantic ``ValidationError``
+                detail (OMN-14492) for the ``publisher_malformed`` case,
+                carried as its own structured field.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -641,7 +668,7 @@ class MixinKafkaDlq:
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
-        dlq_payload = {
+        dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
             "original_message": {
                 "key": key_str,
@@ -656,6 +683,13 @@ class MixinKafkaDlq:
             "retry_count": 0,
             "error_type": error_type,
         }
+        # OMN-14492: structured classification fields — only present when the
+        # caller supplied them, so an unclassified DLQ record (legacy callers)
+        # is unchanged.
+        if failure_class:
+            dlq_payload["failure_class"] = failure_class
+        if validation_detail:
+            dlq_payload["validation_detail"] = validation_detail
 
         # Create DLQ headers
         dlq_headers = ModelEventHeaders(
@@ -742,6 +776,10 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    if failure_class:
+                        kafka_headers.append(
+                            ("failure_class", failure_class.encode("utf-8"))
+                        )
                     producer = self._producer
 
             # Send and wait for completion with timeout (outside producer lock)

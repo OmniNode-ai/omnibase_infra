@@ -532,6 +532,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         error_category: str,
         consumer_group: str,
         dlq_topic: str | None = None,
+        failure_class: str | None = None,
+        validation_detail: str | None = None,
     ) -> None:
         """Publish failed message to Dead Letter Queue.
 
@@ -550,6 +552,12 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             dlq_topic: Optional category-specific DLQ topic. If omitted, the
                 topic is derived from the original topic before delegating to
                 the event bus.
+            failure_class: Optional OMN-14492 classification (e.g.
+                ``"publisher_malformed"`` / ``"no_dispatcher"``) threaded into
+                the DLQ envelope's structured fields so it is classifiable at
+                a glance instead of requiring a log dig.
+            validation_detail: Optional real pydantic ``ValidationError``
+                detail (OMN-14492) for the ``publisher_malformed`` case.
         """
         if not self._dlq_config.enabled:
             self._logger.debug(
@@ -573,15 +581,18 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     failure_type=f"{error_category}_error",
                     consumer_group=consumer_group,
                     dlq_topic=resolved_dlq_topic,
+                    failure_class=failure_class,
+                    validation_detail=validation_detail,
                 )
                 self._logger.warning(
                     "dlq_published topic=%s error_category=%s error_type=%s "
-                    "correlation_id=%s dlq_topic=%s",
+                    "correlation_id=%s dlq_topic=%s failure_class=%s",
                     topic,
                     error_category,
                     type(error).__name__,
                     str(correlation_id),
                     resolved_dlq_topic,
+                    failure_class or "unclassified",
                 )
             except Exception as dlq_error:
                 self._logger.exception(
@@ -820,6 +831,17 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     result is not None
                     and result.status == EnumDispatchStatus.NO_DISPATCHER
                 ):
+                    # OMN-14492: the dispatch engine already classified WHY no
+                    # dispatcher matched (publisher_malformed vs a true
+                    # no_dispatcher wiring gap) and carries the real pydantic
+                    # ValidationError detail in error_details. Thread both
+                    # through into the DLQ envelope's structured fields
+                    # instead of collapsing every case into the same
+                    # unclassifiable "No dispatcher found" record.
+                    dlq_failure_class = result.error_details.get("failure_class")
+                    dlq_validation_detail = result.error_details.get(
+                        "validation_detail"
+                    )
                     no_dispatcher_error = ProtocolConfigurationError(
                         result.error_message
                         or f"No dispatcher registered for message from topic '{topic}'",
@@ -838,6 +860,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         "content",
                         consumer_group,
                         dlq_topic=result.dlq_topic,
+                        failure_class=(
+                            str(dlq_failure_class) if dlq_failure_class else None
+                        ),
+                        validation_detail=(
+                            str(dlq_validation_detail)
+                            if dlq_validation_detail
+                            else None
+                        ),
                     )
                     if self._should_commit_after_handler():
                         await self._commit_offset(message, correlation_id)

@@ -46,8 +46,9 @@ from typing import (
     get_origin,
     runtime_checkable,
 )
+from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
@@ -677,50 +678,96 @@ def _make_dispatch_callback(
     return _callback
 
 
-def _make_payload_type_matcher(
-    event_model: ModelHandlerRef,
-) -> Callable[[object], bool]:
-    """Build a payload-type predicate from a contract-declared ``event_model``.
+def _format_validation_error_detail(exc: BaseException) -> str:
+    """Render a real, actionable detail string from a payload-validation failure.
 
-    The returned predicate answers "does this payload match the handler's
-    declared event_model?" — True when the payload is already an instance of
-    the model, or when it validates against the model (e.g. a dict / raw
-    envelope payload). It is used by the dispatch engine to type-scope routing
-    so a multi-handler contract delivers each message only to the handler whose
-    event_model matches the payload (OMN-12416).
+    A pydantic ``ValidationError`` carries structured per-field errors
+    (``loc``/``msg``/``type``); we flatten those into a compact
+    ``field: message`` list so the detail is useful in a log line or a DLQ
+    envelope without requiring the reader to re-run validation themselves.
+    Non-pydantic exceptions (e.g. a raising custom validator) fall back to
+    ``str(exc)``. Never raises.
+    """
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        try:
+            structured = errors()
+        except Exception:  # noqa: BLE001 — best-effort detail formatting only
+            structured = None
+        if structured:
+            parts = [
+                f"{'.'.join(str(loc) for loc in err.get('loc', ()))}: {err.get('msg', '')}"
+                for err in structured
+            ]
+            return "; ".join(parts) if parts else str(exc)
+    return str(exc)
 
-    The event_model class is imported lazily on first match and then cached, so
+
+class PayloadTypeMatcher:
+    """Callable payload-type predicate that records the real validation failure.
+
+    Built from a contract-declared ``event_model`` (OMN-12416). Answers "does
+    this payload match the handler's declared event_model?" — True when the
+    payload is already an instance of the model, or when it validates against
+    the model (e.g. a dict / raw envelope payload). Used by the dispatch
+    engine to type-scope routing so a multi-handler contract delivers each
+    message only to the handler whose event_model matches the payload.
+
+    OMN-14492: unlike a plain predicate function, a rejecting call leaves the
+    real pydantic ``ValidationError`` detail on ``last_validation_detail`` so
+    the dispatch engine can distinguish "payload failed THIS handler's
+    event_model validation" (publisher_malformed) from "no dispatcher was
+    ever a candidate" (no_dispatcher) instead of collapsing both into the
+    same unclassifiable "No dispatcher found" log line.
+
+    The event_model class is imported lazily on first call and then cached, so
     wiring stays consistent with ``_make_dispatch_callback`` (which also defers
     the event_model import to the per-message path) and a declared-but-not-yet-
     importable model does not change failure timing. A payload that does not
     validate yields False (not an exception): "not this handler's type".
     """
-    cached_model_cls: list[type[BaseModel]] = []
 
-    def _matches(payload: object) -> bool:
-        if not cached_model_cls:
+    def __init__(self, event_model: ModelHandlerRef) -> None:
+        self._event_model = event_model
+        self._cached_model_cls: type[BaseModel] | None = None
+        self.last_validation_detail: str | None = None
+
+    def __call__(self, payload: object) -> bool:
+        self.last_validation_detail = None
+        if self._cached_model_cls is None:
             try:
-                cached_model_cls.append(_import_event_model_class(event_model))
+                self._cached_model_cls = _import_event_model_class(self._event_model)
             except Exception:
                 if _is_delegation_inference_intent_ref(
-                    event_model
+                    self._event_model
                 ) and _payload_claims_delegation_inference_intent(payload):
                     return True
                 raise
-        model_cls = cached_model_cls[0]
+        model_cls = self._cached_model_cls
         if isinstance(payload, model_cls):
             return True
         try:
             model_cls.model_validate(payload)
-        except Exception:  # noqa: BLE001 — validation failure means "not my type"
+        except ValidationError as exc:
             if _is_delegation_inference_intent_ref(
-                event_model
+                self._event_model
             ) and _payload_claims_delegation_inference_intent(payload):
                 return True
+            self.last_validation_detail = _format_validation_error_detail(exc)
             return False
         return True
 
-    return _matches
+
+def _make_payload_type_matcher(
+    event_model: ModelHandlerRef,
+) -> Callable[[object], bool]:
+    """Build a payload-type predicate from a contract-declared ``event_model``.
+
+    Returns a ``PayloadTypeMatcher`` — a callable object satisfying
+    ``Callable[[object], bool]`` that additionally exposes
+    ``last_validation_detail`` (OMN-14492) after a rejecting call.
+    """
+    return PayloadTypeMatcher(event_model)
 
 
 def _build_inference_intent_validation_failure_result(
@@ -1545,7 +1592,7 @@ async def _route_projection_error_to_dlq(
     handler_name: str,
     failure_reason: str,
 ) -> bool:
-    """Publish a malformed/erroring projection event to its contract DLQ topic.
+    """Publish a malformed/erroring projection event to a DLQ/quarantine sink.
 
     OMN-13548 (D-03): when a projection handler raises (most commonly a
     ``ValidationError`` because the inbound event is missing a required field),
@@ -1557,37 +1604,53 @@ async def _route_projection_error_to_dlq(
     (hoisted to the top level so the failure is recoverable by correlation even
     when the payload itself is unparseable).
 
+    OMN-14492 (OMN-14487-class silent drop): when the contract declares NO
+    ``event_bus.dlq_topics``, this previously logged at ERROR and returned
+    ``False`` — the event never reached any topic, only a container log line.
+    That is the exact "quiet death" class OMN-14487 hit for
+    ``HandlerProjectionDelegationInferenceResponse``. This now falls back to
+    the platform-wide quarantine sink (``build_dlq_topic("quarantine")``) so
+    every drop reaches a declared, durable topic even when the contract has no
+    DLQ topic of its own.
+
     Generic for ALL projection handlers, not delegation-only. Best-effort:
-    returns ``True`` when the DLQ envelope was published, ``False`` when no DLQ
-    topic is declared, no publishable event bus is available, or the publish
-    itself fails (each logged at ERROR). A DLQ publish failure never propagates,
-    so it cannot wedge the consumer.
+    returns ``True`` when the DLQ/quarantine envelope was published, ``False``
+    when no publishable event bus is available or the publish itself fails
+    (each logged at ERROR). A DLQ publish failure never propagates, so it
+    cannot wedge the consumer.
     """
     import json
     from datetime import UTC, datetime
 
-    if not dlq_topics:
+    from omnibase_infra.enums import EnumDlqFailureClass
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
+    used_quarantine_fallback = not dlq_topics
+    if used_quarantine_fallback:
+        dlq_topic = build_dlq_topic("quarantine")
         logger.error(
-            "Projection handler %s dropped a malformed/erroring event with NO DLQ "
-            "topic declared in contract.event_bus.dlq_topics: %s",
+            "Projection handler %s has NO DLQ topic declared in "
+            "contract.event_bus.dlq_topics — routing malformed/erroring event "
+            "to the platform quarantine sink %s instead of dropping it: %s",
             handler_name,
+            dlq_topic,
             failure_reason,
         )
-        return False
+    else:
+        dlq_topic = dlq_topics[0]
     if event_bus is None or not hasattr(event_bus, "publish"):
         logger.error(
             "Projection handler %s would route malformed/erroring event to DLQ %s "
             "but no publishable event bus is bound: %s",
             handler_name,
-            dlq_topics[0],
+            dlq_topic,
             failure_reason,
         )
         return False
 
-    dlq_topic = dlq_topics[0]
     payload = _extract_dispatch_payload(envelope)
     correlation = _extract_dispatch_correlation_id(envelope, payload)
-    correlation_id = str(correlation) if correlation is not None else ""
+    correlation_id = str(correlation) if correlation is not None else str(uuid4())
     original_message: object
     model_dump = getattr(payload, "model_dump", None)
     if isinstance(payload, Mapping):
@@ -1599,10 +1662,12 @@ async def _route_projection_error_to_dlq(
     dlq_envelope = {
         "original_message": original_message,
         "failure_reason": failure_reason,
+        "failure_class": EnumDlqFailureClass.CONSUMER_ERROR.value,
         "correlation_id": correlation_id,
         "retry_count": 0,
         "failed_at": datetime.now(UTC).isoformat(),
         "handler": handler_name,
+        "quarantine_fallback": used_quarantine_fallback,
     }
     raw = json.dumps(dlq_envelope, default=str).encode("utf-8")
     publish = getattr(event_bus, "publish", None)

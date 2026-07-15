@@ -861,7 +861,16 @@ def test_projection_callback_emits_terminal_event_from_materialized_dict() -> No
 
 @pytest.mark.unit
 def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> None:
-    """When handler raises, no terminal event is emitted."""
+    """When handler raises, no terminal event is emitted.
+
+    OMN-14492: with no contract ``dlq_topics`` declared, the offending event
+    is no longer silently dropped (that was the OMN-14487-class quiet-death
+    bug) — it is routed to the platform quarantine sink instead. This test
+    now asserts the NEGATIVE half (no publish to the terminal topic) plus the
+    POSITIVE half (exactly one quarantine publish, not zero).
+    """
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
     published: list[tuple] = []
 
     class FailingHandler:
@@ -899,7 +908,12 @@ def test_projection_callback_does_not_emit_terminal_event_on_handler_error() -> 
         with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
             asyncio.run(callback(envelope))
 
-    assert len(published) == 0
+    # No terminal (success) event — the handler errored.
+    assert not any(topic == terminal_topic for topic, _key, _value in published)
+    # The error is durably captured on the quarantine sink, not dropped.
+    assert len(published) == 1
+    dlq_topic, _key, _value = published[0]
+    assert dlq_topic == build_dlq_topic("quarantine")
 
 
 @pytest.mark.unit
@@ -1170,6 +1184,8 @@ def test_projection_callback_routes_validation_error_to_dlq() -> None:
     assert dlq["handler"] == "_ValidatingHandler"
     assert "ValidationError" in dlq["failure_reason"]
     assert dlq["original_message"]["delegated_to"] == "glm"
+    assert dlq["failure_class"] == "consumer_error"
+    assert dlq["quarantine_fallback"] is False
 
 
 @pytest.mark.unit
@@ -1198,10 +1214,19 @@ def test_projection_callback_no_dlq_publish_on_success() -> None:
 
 
 @pytest.mark.unit
-def test_projection_callback_logs_error_when_no_dlq_topic_declared(
+def test_projection_callback_routes_to_quarantine_when_no_dlq_topic_declared(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """With no DLQ topic declared, the error is logged loudly (no silent drop)."""
+    """OMN-14492 (OMN-14487-class silent drop): with no contract DLQ topic
+    declared, the event is no longer silently dropped — it is durably routed
+    to the platform quarantine sink, loudly logged, and carries a structured
+    ``failure_class``. Before this fix, ``bus.published`` stayed empty and
+    only a container ERROR log line existed (the exact quiet-death class that
+    hid OMN-14487 for a full arc)."""
+    import json
+
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
     bus = _CapturingEventBus()
     callback = _make_projection_dispatch_callback(
         _raising_validation_handler(),
@@ -1222,5 +1247,16 @@ def test_projection_callback_logs_error_when_no_dlq_topic_declared(
             with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
                 asyncio.run(callback(envelope))
 
-    assert bus.published == []
     assert any("NO DLQ topic declared" in r.message for r in caplog.records)
+
+    # The event must reach a durable topic — never dropped silently.
+    assert len(bus.published) == 1, (
+        "a malformed event with no contract DLQ topic must still reach the "
+        "platform quarantine sink, not be dropped"
+    )
+    topic, _key, value = bus.published[0]
+    assert topic == build_dlq_topic("quarantine")
+    dlq = json.loads(value.decode("utf-8"))
+    assert dlq["correlation_id"] == "corr-nodlq-1"
+    assert dlq["failure_class"] == "consumer_error"
+    assert dlq["quarantine_fallback"] is True

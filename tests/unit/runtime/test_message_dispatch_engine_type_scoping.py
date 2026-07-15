@@ -21,10 +21,15 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _make_payload_type_matcher,
+)
+from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 
@@ -286,3 +291,77 @@ class TestTypeScopedRouting:
 
         assert invoked == []
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
+
+
+@pytest.mark.unit
+class TestDlqFailureClassification:
+    """OMN-14492: classify WHY no dispatcher matched, with real ValidationError detail.
+
+    Before this fix, both a genuinely-unregistered dispatcher and a payload
+    that failed its type-scoped ``event_model.model_validate`` collapsed into
+    the same ``EnumDispatchStatus.NO_DISPATCHER`` with a generic
+    "No dispatcher registered" message — no ``ValidationError`` detail
+    anywhere. These tests drive the REAL production matcher
+    (``_make_payload_type_matcher``, not a synthetic test lambda) against a
+    REAL core model (``ModelDelegationRequest``) so the assertion is against
+    an actual malformed-payload dispatch, not a stub.
+    """
+
+    @pytest.mark.asyncio
+    async def test_publisher_malformed_carries_real_validation_detail(self) -> None:
+        """A registered type-scoped dispatcher rejecting a malformed payload
+        must classify as publisher_malformed with the real pydantic detail —
+        not the generic, unclassifiable "No dispatcher found" message."""
+        engine = MessageDispatchEngine()
+
+        async def handler(envelope: ModelEventEnvelope[object]) -> None:
+            raise AssertionError("a malformed payload must never reach the handler")
+
+        event_model_ref = ModelHandlerRef(
+            name="ModelDelegationRequest",
+            module="omnibase_core.models.delegation.wire",
+        )
+        engine.register_dispatcher(
+            dispatcher_id="delegation-dispatcher",
+            dispatcher=handler,
+            category=EnumMessageCategory.COMMAND,
+            message_types={_EVENT_TYPE_ALIAS},
+            payload_type_matcher=_make_payload_type_matcher(event_model_ref),
+        )
+        _register_shared_topic_route(engine, "delegation-dispatcher")
+        engine.freeze()
+
+        # Malformed: missing every required field of ModelDelegationRequest
+        # (prompt, task_type, correlation_id, emitted_at) and carries an
+        # extra_forbidden field — mirrors the live OMN-14484 harness defect.
+        malformed_payload = {"not_a_real_field": "x"}
+        result = await engine.dispatch(_TOPIC, _make_envelope(malformed_payload))
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.error_code == EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED
+        assert result.error_details.get("failure_class") == "publisher_malformed"
+        validation_detail = result.error_details.get("validation_detail")
+        assert isinstance(validation_detail, str)
+        # Real pydantic field errors, not a generic placeholder.
+        assert "prompt" in validation_detail
+        assert "task_type" in validation_detail
+        assert validation_detail != "validation detail unavailable"
+        assert "publisher-malformed" in (result.error_message or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_when_zero_candidates_ever_matched(self) -> None:
+        """A topic with NO registered route at all classifies as no_dispatcher
+        (true wiring gap) — never publisher_malformed, and carries no
+        validation_detail since no type-scoped candidate was ever rejected."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        result = await engine.dispatch(
+            "onex.cmd.test-service.nobody-subscribed.v1",
+            _make_envelope(_PayloadA()),
+        )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.error_code == EnumCoreErrorCode.ITEM_NOT_REGISTERED
+        assert result.error_details.get("failure_class") == "no_dispatcher"
+        assert "validation_detail" not in result.error_details
