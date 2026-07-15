@@ -87,7 +87,9 @@ def test_terminal_event_emitted_after_successful_projection() -> None:
 
 @pytest.mark.integration
 def test_terminal_event_not_emitted_when_projection_fails() -> None:
-    """No terminal event is published when the projection handler raises an exception."""
+    """A failing projection emits no terminal event and is routed to quarantine."""
+    from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
     published: list[tuple] = []
 
     class FailingHandler:
@@ -120,9 +122,16 @@ def test_terminal_event_not_emitted_when_projection_fails() -> None:
         with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
             asyncio.run(callback(envelope))
 
-    assert len(published) == 0, (
+    assert not any(topic == TERMINAL_TOPIC for topic, _key, _value in published), (
         "No terminal event must be published when the handler raises"
     )
+    assert len(published) == 1, "Projection failure must publish one quarantine DLQ"
+    topic, _key, raw = published[0]
+    assert topic == build_dlq_topic("quarantine")
+
+    dlq = json.loads(raw.decode("utf-8"))
+    assert dlq["failure_class"] == "consumer_error"
+    assert dlq["quarantine_fallback"] is True
 
 
 @pytest.mark.integration
