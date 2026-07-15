@@ -284,9 +284,11 @@ repos:
         stages: [pre-commit]
       # OMN-14360 (OMN-14208 Path A): fail-closed gate on the
       # event_bus.tenant_scoped_ingress opt-in. A flag-true contract must bind
-      # ONLY tenant-<slug>.-prefixed subscribe_topics (so the OMN-14349 stamp
-      # covers every topic — a bare/mixed topic lets a client tenant_id survive
-      # unverified) AND be named in
+      # at least one tenant-<slug>.-prefixed subscribe_topic, and every other
+      # subscribe_topic must be prefixed (so the OMN-14349 stamp covers it — a
+      # bare/mixed topic lets a client tenant_id survive unverified) OR be an
+      # allowlisted, producer-free trusted_internal topic (OMN-14482 carve-out),
+      # AND the contract must be named in
       # config/validation/tenant_scoped_ingress_allowlist.yaml with a proving
       # seam test (no opt-in flip until a real cross-boundary test exists — the
       # OMN-14208 silent-no-op near-miss). SYNC with ci.yml step

@@ -20,8 +20,17 @@
 #       seam_test: <path to the seam test>  # the proving cross-boundary test
 #       ticket: OMN-XXXX                     # attestation provenance
 #       reason: <why the opt-in is proven safe>
+#       trusted_internal_topics:            # OPTIONAL (OMN-14482): bare subscribe
+#         - <bare topic>                    #   topics carved out of condition (c)
+#         # A bare (un-prefixed) subscribe topic on a flag-true contract is
+#         # normally a leak (client tenant_id survives unstamped). It may be kept
+#         # ONLY if it is a trusted-internal topic no untrusted producer can
+#         # reach. This designation lives HERE (a CODEOWNERS-protected file), not
+#         # as a self-declared contract flag, AND the gate mechanically rejects it
+#         # unless NO contract under the producer-scan root publishes to the topic.
 #
-# EMPTY by design today: no contract sets the flag yet. The first opt-in must
-# add its entry here (and land its seam test) in the same change, or the gate
-# blocks it.
+# EMPTY by design in THIS repo: no omnibase_infra contract sets the flag. The
+# delegate-skill opt-in lives in omnimarket's own allowlist (OMN-14482); the
+# first infra opt-in would add its entry here (and land its seam test) in the
+# same change, or the gate blocks it.
 allowlist: []
