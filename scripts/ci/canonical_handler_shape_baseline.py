@@ -10,7 +10,7 @@ the canonical typed-payload shape (definition B). It is monotonically
 NON-INCREASING: it may only shrink. A node leaves this set (flips canonical) ONLY
 with a committed adequacy receipt under ``scripts/ci/adequacy_receipts/`` — a shape
 flip alone is not proof of equivalence (the OMN-14208 trap). A NEW non-canonical
-node, or growth of this set, HARD-FAILS the CI ratchet. Retirement mechanism = the
+node, or growth of this set, HARD-FAILS CI + pre-commit. Retirement mechanism = the
 RSD canonical rewrite regenerating these handlers, each with an adequacy receipt.
 """
 
@@ -33,7 +33,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_checkpoint_validate_compute",
     "omnibase_infra.nodes.node_coding_agent_fsm_reducer",
     "omnibase_infra.nodes.node_coding_agent_orchestrator",
-    "omnibase_infra.nodes.node_coding_agent_workspace_compute",
     "omnibase_infra.nodes.node_context_audit_dlq_effect",
     "omnibase_infra.nodes.node_contract_loader_effect",
     "omnibase_infra.nodes.node_contract_persistence_effect",

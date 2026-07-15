@@ -1,0 +1,20 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "allowed_roots": [],
+    "correlation_id": "66666666-6666-6666-6666-666666666666",
+    "prompt": "do the thing",
+    "sandbox": "read_only",
+    "workspace_path": "/onex-golden-fixture-root/workspace"
+  },
+  "input_type": "ModelWorkspaceValidateCommand",
+  "output": {
+    "correlation_id": "66666666-6666-6666-6666-666666666666",
+    "rejection_reason": "no allowed roots configured; nothing is permitted",
+    "resolved_path": "",
+    "valid": false
+  },
+  "output_type": "ModelWorkspaceValidateResult",
+  "scenario": "no_allowed_roots",
+  "volatile_mask": []
+}

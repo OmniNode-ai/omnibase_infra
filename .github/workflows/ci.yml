@@ -57,7 +57,7 @@ jobs:
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
     # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@8a47e092002dd1338599fa0733feda469436acbf
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12
     permissions:
       contents: read
       pull-requests: read
@@ -260,11 +260,20 @@ jobs:
       # isn't importable that way) and language:script has no dependency isolation
       # (needs pydantic/pyyaml); real fix is OMN-14563 (relocate the classifier into
       # an installed omnibase_core module). CI-only matches the omnimarket precedent.
+      # --receipts-dir is mandatory here (OMN-14633 fix): the classifier's default
+      # for a non-core --package is a directory NEXT TO ITS OWN __file__ (i.e.
+      # inside the ephemeral .ci/omnibase_core sibling checkout above), which
+      # never contains this repo's committed receipts. Without this flag every
+      # proven flip (adequacy receipt + equivalence artifact committed under
+      # THIS repo's scripts/ci/adequacy_receipts/) reports as unproven and
+      # HARD-FAILS CI, defeating the whole flip-gate — caught while proving
+      # node_coding_agent_workspace_compute's first flip against this baseline.
       - name: Canonical handler-shape ratchet (OMN-14355 fan-out, OMN-14587)
         run: |
           uv run python .ci/omnibase_core/scripts/ci/canonical_handler_shape.py \
             --package omnibase_infra --src-root src \
             --baseline scripts/ci/canonical_handler_shape_baseline.py \
+            --receipts-dir scripts/ci/adequacy_receipts \
             --full
 
       - name: Run mypy type checking

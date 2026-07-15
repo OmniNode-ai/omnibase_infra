@@ -24,9 +24,13 @@ import asyncio
 import json
 from typing import cast
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_stateful_dispatch_callback,
 )
@@ -137,23 +141,39 @@ class _DedupGuardHandler:
     read-modify-write BEFORE emitting, so a racer that reloads an
     already-claimed row folds without re-emitting."""
 
-    async def handle(self, envelope: object) -> list[str]:
+    async def handle(self, envelope: object) -> ModelHandlerOutput[None] | None:
         current = CONTEXTVAR_STATE_IO_ROWS.get() or {}
         cid = next(iter(current))
         payload_json, version = current[cid]
         state = json.loads(payload_json) if payload_json else {}
         if state.get("in_flight"):
-            return []
+            return None
         new_state = {
             "tenant_id": "acme",
             "state": "IN_PROGRESS",
             "in_flight": True,
         }
         CONTEXTVAR_STATE_IO_ROWS.set({cid: (json.dumps(new_state), version)})
-        return ["inference-intent"]
+        correlation_id = UUID(cid)
+        intent = ModelIntent(
+            intent_type="extension",
+            target="state-io-test",
+            payload=ModelPayloadExtension(
+                extension_type="test.inference",
+                plugin_name="state-io-dedup-test",
+                data={"intent": "inference-intent"},
+            ),
+        )
+        return ModelHandlerOutput.for_orchestrator(
+            input_envelope_id=_Envelope.envelope_id,
+            correlation_id=correlation_id,
+            handler_id="dedup-guard-handler",
+            intents=(intent,),
+        )
 
 
 class _Envelope:
+    envelope_id = UUID("11111111-1111-4111-8111-111111111111")
     payload = {"correlation_id": "22222222-2222-2222-2222-222222222222"}
 
 
@@ -187,13 +207,14 @@ def test_concurrent_same_correlation_id_dispatch_emits_exactly_one_intent() -> N
 
         results = asyncio.run(_run())
 
-    non_empty = [r for r in results if r]
-    empty = [r for r in results if isinstance(r, list) and not r]
+    non_empty = [r for r in results if r and getattr(r, "output_intents", ())]
+    empty = [r for r in results if r is None]
     assert len(non_empty) == 1, (
         f"expected exactly one intent-emitting result, got {results!r}"
     )
     assert len(empty) == 1, f"expected exactly one no-op fold, got {results!r}"
-    assert non_empty[0] == ["inference-intent"]
+    (intent,) = non_empty[0].output_intents
+    assert intent.payload.data == {"intent": "inference-intent"}
 
     # Exactly one durable row landed — no duplicate/forked row was created by
     # the loser's retry.
@@ -246,5 +267,5 @@ def test_sequential_dispatch_after_completion_also_folds() -> None:
         )
         result = asyncio.run(callback(_Envelope()))  # type: ignore[arg-type]
 
-    assert result == []
+    assert result is None
     assert shared_adapter._rows[cid]["version"] == 0

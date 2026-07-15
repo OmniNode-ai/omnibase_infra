@@ -34,7 +34,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +87,11 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 )
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
+)
+from omnibase_infra.runtime.auto_wiring.fanout_seam import (
+    check_fanout_publish_coverage,
+    is_fanout_sequence,
+    normalize_fanout_sequence,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -231,6 +236,37 @@ def _legacy_delegation_envelope_unwrap(
     if isinstance(topic, str) and topic and isinstance(inner, dict):
         return topic, inner
     return None
+
+
+# OMN-14403 P3a §6ii — the def-B multi-event (fan-out) publish seam. Default OFF;
+# flipped in a separate PR once every wired fan-out handler is coverage-clean (repo
+# rule: a gate that tightens acceptance ships behind an env flag, default OFF). A
+# Sequence[BaseModel] return stops being silently dropped to output_events=[] /
+# SUCCESS and becomes the published batch. This is the ONE env read for the seam
+# (the OMN-11069 env-read gate approves this module); the pure logic + the mirror
+# read on the RuntimeLocal path (LocalRuntimeBusAdapter) both gate on this same
+# flag so the two runtimes agree. NOTE: this PR is §6ii ONLY — the §8.1
+# causation/tenant carry (seam_apply_context) is a separate lane.
+ENV_MULTI_EVENT_PUBLISH_SEAM = "ONEX_MULTI_EVENT_PUBLISH_SEAM"
+
+
+def multi_event_seam_enabled() -> bool:
+    """Return True when the def-B fan-out publish seam is enabled (default: False)."""
+    return os.environ.get(ENV_MULTI_EVENT_PUBLISH_SEAM, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _check_fanout_publish_coverage(contract: ModelDiscoveredContract) -> None:
+    """Prove fan-out handlers' emittable classes are contract-declared (§2C)."""
+    check_fanout_publish_coverage(
+        contract,
+        seam_enabled=multi_event_seam_enabled(),
+        env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+    )
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -562,8 +598,21 @@ def _make_dispatch_callback(
             )
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
-            if isinstance(raw_result, str | list):
+            if isinstance(raw_result, str):
                 return cast("ModelDispatchResult | None", raw_result)
+            if is_fanout_sequence(raw_result) and not any(
+                isinstance(element, BaseModel)
+                for element in cast("Sequence[object]", raw_result)
+            ):
+                # Legacy no-bus/state_io handlers use [] as a no-op fold and may
+                # return list[str] intent markers. OMN-14403 only normalizes
+                # actual BaseModel fan-out batches here.
+                return cast("ModelDispatchResult | None", raw_result)
+            # OMN-14403 §2A. A bare list/sequence used to be cast straight through
+            # AS IF it were a ModelDispatchResult — strictly worse than the sibling
+            # silent drop, since the applier then reads .output_events/.status off a
+            # list and finds neither. Route it through the one fan-out coercion so it
+            # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
             return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
@@ -1085,6 +1134,20 @@ def _normalize_handler_result(
             output_events.append(result.result)
     elif isinstance(result, BaseModel):
         output_events = [result]
+    elif is_fanout_sequence(result):
+        # OMN-14403 §2A — the def-B fan-out entry. Before this branch existed a
+        # Sequence return matched NEITHER branch above and fell through to
+        # output_events=[] / SUCCESS: the handler's N events were dropped and the
+        # dispatch reported success. That silent drop IS the defect. The applier
+        # resolves each element's topic via published_events (same short-name
+        # resolution the shared core resolver uses); the boot coverage gate keeps
+        # that fail-closed.
+        output_events = normalize_fanout_sequence(
+            cast("Sequence[object]", result),
+            message_type,
+            seam_enabled=multi_event_seam_enabled(),
+            env_flag=ENV_MULTI_EVENT_PUBLISH_SEAM,
+        )
 
     return ModelDispatchResult(
         status=EnumDispatchStatus.SUCCESS,
@@ -1120,6 +1183,40 @@ _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # projection write crashed, and — with no dlq_topics declared on that node's
 # contract — the erroring event was silently dropped.
 _JSONB_LIST_COLUMNS: frozenset[str] = frozenset({"corpus_errors", "recent_responses"})
+
+
+def _should_jsonb_wrap_list(key: str, value: list[object]) -> bool:
+    """Decide whether a ``list`` row value must be JSON-wrapped for psycopg2.
+
+    Three independent rules; any one triggers wrapping:
+
+    1. Column-name suffix convention (``_json`` / ``_jsonb``).
+    2. The ``_JSONB_LIST_COLUMNS`` allowlist -- legacy unsuffixed JSONB list
+       columns (``corpus_errors``, ``recent_responses``) that predate rule 3
+       and that the structural rule below does not cover on its own (e.g. a
+       JSONB column holding ``list[str]``, which is structurally
+       indistinguishable from a genuine ``text[]`` ARRAY).
+    3. STRUCTURAL heuristic (OMN-14494): any element of the list is itself a
+       ``dict``/``list``. A genuine Postgres scalar ARRAY (``text[]``,
+       ``int[]``, ...) can only ever hold scalars, so an element that is
+       itself a dict/list can NEVER be a valid ARRAY member -- this case is
+       unambiguously a JSONB list-of-objects/list-of-lists column. This rule
+       needs no allowlist maintenance and auto-covers every future
+       unsuffixed JSONB list-of-objects column, closing the recurring defect
+       class behind OMN-13350 and OMN-14487 (both required a manual
+       allowlist edit before this fix).
+
+    A flat scalar list (``list[str]`` / ``list[int]`` with no dict/list
+    elements) that matches none of the three rules returns ``False`` here
+    and is passed raw by the caller, preserving genuine ``text[]``/``int[]``
+    ARRAY semantics (e.g. ``swarm_runs.models_used`` / ``machines_used``).
+    """
+    if str(key).endswith(("_json", "_jsonb")):
+        return True
+    if str(key) in _JSONB_LIST_COLUMNS:
+        return True
+    return any(isinstance(item, (dict, list)) for item in value)
+
 
 # Authoritative source: docs/patterns/db_url_contract.md "Per-Service Database
 # URL Contract" — each OmniNode service owns its own PostgreSQL database and a
@@ -1387,24 +1484,18 @@ def _build_sync_db_adapter(db_url: str) -> object:
             )
             conflict_columns = ", ".join(f'"{key}"' for key in conflict_keys)
             # JSONB adaptation: a dict is always JSON-adapted. A list is
-            # JSON-adapted for a JSONB column (suffix _json/_jsonb, or the
-            # _JSONB_LIST_COLUMNS allowlist for unsuffixed JSONB list columns such
-            # as corpus_errors, OMN-13350) and otherwise passed raw so genuine
-            # Postgres text[] ARRAY columns (e.g. swarm_runs.models_used /
-            # machines_used) keep their array semantics. A JSONB list sent as a
-            # Postgres ARRAY literal fails the INSERT — which is what
-            # silently dropped node-generation-completed events before this fix.
+            # JSON-adapted per _should_jsonb_wrap_list (suffix convention,
+            # allowlist, or the OMN-14494 structural any-element-is-dict/list
+            # heuristic) and otherwise passed raw so genuine Postgres text[]
+            # ARRAY columns (e.g. swarm_runs.models_used / machines_used)
+            # keep their array semantics. A JSONB list sent as a Postgres
+            # ARRAY literal fails the INSERT — which is what silently
+            # dropped node-generation-completed events before this fix.
             adapted_row = {
                 key: (
                     psycopg2.extras.Json(value)
                     if isinstance(value, dict)
-                    or (
-                        isinstance(value, list)
-                        and (
-                            str(key).endswith(("_json", "_jsonb"))
-                            or str(key) in _JSONB_LIST_COLUMNS
-                        )
-                    )
+                    or (isinstance(value, list) and _should_jsonb_wrap_list(key, value))
                     else value
                 )
                 for key, value in row.items()
@@ -4304,6 +4395,12 @@ def _prepare_contract_wiring(
                 ),
             ),
         )
+
+    # OMN-14403 §2C: prove every fan-out handler's emittable classes are declared
+    # in this contract's published_events BEFORE registering any dispatch route —
+    # an unmapped fan-out element would fall back to the single output_topic and
+    # silently misroute. Warn-only while the seam is OFF; fail-closed once ON.
+    _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:

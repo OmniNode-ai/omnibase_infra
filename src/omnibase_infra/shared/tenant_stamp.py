@@ -41,5 +41,15 @@ def stamp_verified_tenant_slug(
     overwritten -- never merged-if-absent, never defaulted. Callers decide
     WHETHER to stamp (e.g. only when a trusted slug is actually present); this
     helper owns only the canonical resulting shape.
+
+    Also strips any client-supplied ``tenant_slug`` key from the input. The
+    canonical shape carries no separate ``tenant_slug`` key -- without this,
+    a forged or stale ``tenant_slug`` in the raw payload would survive
+    untouched (this helper only ever WRITES ``tenant_id``, so a pre-existing
+    ``tenant_slug`` key was never being cleared), reaching a downstream
+    ``extra="forbid"`` consumer or, worse, a laxer one that silently accepts
+    it as a second, unverified tenant signal.
     """
-    return {**payload, "tenant_id": slug}
+    stamped = {**payload, "tenant_id": slug}
+    stamped.pop("tenant_slug", None)
+    return stamped

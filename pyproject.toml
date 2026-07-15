@@ -30,7 +30,9 @@ dependencies = [
     # Remember to switch back to PyPI versions before merging to main.
     #
     # OMN-14600: bumped 0.46.7 -> 0.46.8; the [tool.uv.sources] git-rev override
-    # below pulls the merged core #1439 (terminal delegation classes) pre-release.
+    # below pulls the merged core #1439 (terminal delegation classes) AND the
+    # merged core #1440 (runtime_fanout_resolver, OMN-14403) pre-release --
+    # #1440 is a strict descendant of #1439 on core dev.
     "omnibase-core==0.46.8",
     "omnibase-spi==0.23.1",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
@@ -54,7 +56,7 @@ dependencies = [
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
     "fastapi>=0.120.1,<0.140.0",
-    "uvicorn>=0.32.0,<0.51.0",
+    "uvicorn>=0.32.0,<0.52.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
@@ -199,13 +201,16 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
 # the released exact versions, restoring a fully PyPI-sourced reproducible lock.
 #
-# OMN-14600: TEMPORARY git-rev override to import the terminal delegation
-# classes (ModelDelegationCompleted/ModelDelegationFailed) added by the MERGED
-# core #1439 squash commit a9f25887 on dev (self-reports 0.46.8), before that
-# commit is published to PyPI. The version pins above are already bumped to
-# 0.46.8 so the range stays consistent. REMOVE WHEN RELEASED: once core
-# publishes a version containing #1439, delete this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "a9f25887a51851ddf24258e6a7a507e7e56b28d8" }  # raw-override-ok: OMN-14600
+# OMN-14600 + OMN-14403 §6ii: TEMPORARY dev-build pin to omnibase_core#1440's
+# merged dev squash commit (ed0a45bf), which is a strict descendant of the
+# merged core #1439 squash commit (a9f25887) also on dev. #1439 adds the
+# terminal delegation classes (ModelDelegationCompleted/ModelDelegationFailed,
+# OMN-14600); #1440 adds runtime_fanout_resolver (the shared def-B fan-out
+# resolver this PR's fanout_seam imports, OMN-14403). Neither is yet on PyPI.
+# The version pins above are already bumped to 0.46.8 so the range stays
+# consistent. REMOVE WHEN RELEASED: once core publishes a version containing
+# #1440 (which supersedes #1439), delete this override and `uv lock`.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "ed0a45bf3deaf97d841427e44e0ba1d56a322fcb" }  # raw-override-ok: OMN-14403
 
 [tool.ruff]
 target-version = "py312"
