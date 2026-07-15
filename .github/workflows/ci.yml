@@ -240,6 +240,33 @@ jobs:
             --baseline config/validation/transport_mock_baseline.yaml \
             tests/
 
+      # Canonical handler-shape GROWTH RATCHET fan-out (OMN-14355/OMN-14368/OMN-14587).
+      # compliance_sweep checks handler hygiene but is blind to handler SHAPE, so a
+      # non-canonical handler passes green CI. This classifies each omnibase_infra
+      # node's contract-declared handler (definition B: typed-payload handle(request)
+      # -> response, adapted by the shared runtime, no envelope in the core), WARNs
+      # the committed baseline's debt (scripts/ci/canonical_handler_shape_baseline.py,
+      # OMN-14587: 92 non-canonical / 115 scanned), and HARD-FAILS a NEW non-canonical
+      # node or baseline-count growth. Sourced from the sibling omnibase_core checkout
+      # above (.ci/omnibase_core, already cloned for Transport-mock lint) since the
+      # classifier lives at omnibase_core's repo-root scripts/ci/, not the installed
+      # package. Runs --full (not the default --scope changed): the classifier's
+      # diff-scoped git-diff runs with cwd = the classifier's OWN repo
+      # (omnibase_core parents[2]), wrong for a fan-out invocation against this
+      # sibling checkout — --full is cheap here (~115 nodes, sub-second).
+      # No pre-commit mirror yet: same infeasibility already verified for the
+      # omnimarket fan-out (OMN-14372) — pre-commit's language:python remote-hook
+      # install only ships the installed src/omnibase_core/ package (classifier
+      # isn't importable that way) and language:script has no dependency isolation
+      # (needs pydantic/pyyaml); real fix is OMN-14563 (relocate the classifier into
+      # an installed omnibase_core module). CI-only matches the omnimarket precedent.
+      - name: Canonical handler-shape ratchet (OMN-14355 fan-out, OMN-14587)
+        run: |
+          uv run python .ci/omnibase_core/scripts/ci/canonical_handler_shape.py \
+            --package omnibase_infra --src-root src \
+            --baseline scripts/ci/canonical_handler_shape_baseline.py \
+            --full
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 

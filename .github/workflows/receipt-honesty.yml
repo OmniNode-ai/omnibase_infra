@@ -80,11 +80,14 @@ jobs:
           version: "latest"
       - name: Set up Python 3.12
         run: uv python install 3.12
-      - name: Install omnibase_core (validator package) into a uv venv
+      - name: Install receipt-honesty validator runtime dependencies
         run: |
           set -euo pipefail
-          uv venv .honesty-venv --python 3.12
-          uv pip install --python .honesty-venv/bin/python .ci/omnibase_core
+          uv venv .honesty-venv --python 3.12 --seed
+          uv pip install --python .honesty-venv/bin/python \
+            "pydantic>=2.11.7,<3.0.0" \
+            "pyyaml>=6.0.2,<7.0.0"
+          .honesty-venv/bin/python -m pip install --no-deps .ci/omnibase_core
       - name: Identify changed DoD receipt YAMLs
         id: receipts
         run: |

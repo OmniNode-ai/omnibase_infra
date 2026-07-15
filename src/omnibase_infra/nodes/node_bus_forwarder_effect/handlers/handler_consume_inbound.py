@@ -18,6 +18,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
     prefix_topic,
     strip_topic_prefix,
 )
+from omnibase_infra.shared.tenant_stamp import stamp_verified_tenant_slug
 
 
 class HandlerConsumeInbound:
@@ -81,11 +82,14 @@ class HandlerConsumeInbound:
         # forwarder's tenant_identity is config-bound at deploy time (the
         # trust anchor), never client-writable, so it always wins over
         # whatever the inbound payload happens to carry.
-        verified_payload: dict[str, object] = {
-            **envelope.payload,
-            "tenant_id": str(identity.tenant_id),
-            "tenant_slug": identity.tenant_slug,
-        }
+        #
+        # OMN-14367: route through the canonical shared helper so this
+        # producer cannot diverge from the runtime auto-wiring stamp again --
+        # ``payload["tenant_id"] = <slug>``, no separate ``tenant_slug`` key.
+        # See ``omnibase_infra.shared.tenant_stamp`` for the full rationale.
+        verified_payload: dict[str, object] = stamp_verified_tenant_slug(
+            envelope.payload, identity.tenant_slug
+        )
 
         return envelope.model_copy(
             update={
