@@ -28,6 +28,7 @@ import logging
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 import click
 import yaml
@@ -95,6 +96,13 @@ def _coerce_value(spec: ModelSkillArgSpec, raw: str) -> JsonValue:
             ) from exc
     if spec.arg_type is EnumSkillArgType.STRING_LIST:
         return [item.strip() for item in raw.split(",") if item.strip()]
+    if spec.arg_type is EnumSkillArgType.JSON:
+        try:
+            return cast("JsonValue", json.loads(raw))
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(
+                f"--{spec.name} expects valid JSON, got {raw!r}: {exc}"
+            ) from exc
     # BOOLEAN is a presence flag and never reaches value coercion.
     raise click.ClickException(
         f"--{spec.name}: value coercion not supported for {spec.arg_type}"

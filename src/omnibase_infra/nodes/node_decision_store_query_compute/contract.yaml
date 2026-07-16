@@ -21,11 +21,11 @@ node_name: "node_decision_store_query_compute"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 # Node type
 node_type: "COMPUTE_GENERIC"
 # Description
@@ -45,7 +45,7 @@ output_model:
 capabilities:
   - name: "decision_store.query_decisions"
     description: >
-      Query decisions from the decision_store table with cursor-based pagination and flexible scope filtering (ANY/ALL/EXACT modes).
+      Query decisions from the decision_store table with cursor-based pagination, flexible scope filtering (ANY/ALL/EXACT modes), and row shaping that emits omnibase_core-compatible decision entries from existing decision_store rows.
 
 # Handler routing
 handler_routing:
@@ -99,7 +99,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
-  description: "Provides cursor-paginated decision store queries with filtering by domain, layer, decision_type, tags, epic_id, status, and scope_services (ANY/ALL/EXACT modes)"
+  description: "Provides cursor-paginated decision store queries with filtering by domain, layer, decision_type, tags, epic_id, status, and scope_services (ANY/ALL/EXACT modes); normalizes stored decision_type values and omits non-contract row columns from result entries."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-25"

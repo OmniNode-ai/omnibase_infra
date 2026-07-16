@@ -38,6 +38,7 @@ import pytest
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions import (
     HandlerQueryDecisions,
+    _row_to_entry,
     decode_cursor,
     encode_cursor,
 )
@@ -97,6 +98,50 @@ class _MockEntry:
     def __init__(self, decision_id: UUID, created_at: datetime) -> None:
         self.decision_id = decision_id
         self.created_at = created_at
+
+
+# ============================================================================
+# _row_to_entry — real conversion (OMN-14529)
+#
+# Every test_handle_* below patches _row_to_entry with a mock, so the real
+# conversion body was never exercised end-to-end. It raised a Pydantic
+# ValidationError on any non-empty result set: ModelDecisionStoreEntry
+# (omnibase_core) declares neither "title" nor "epic_id" and uses
+# extra="forbid", but the real decision_store row (see _make_mock_row, which
+# mirrors migration 046's columns) carries both. This test exercises the
+# unpatched function directly against a realistic row.
+# ============================================================================
+
+
+def test_row_to_entry_converts_real_row_without_raising() -> None:
+    # _make_mock_row defaults to "TECH_STACK_CHOICE" (uppercase) — the same
+    # casing every known writer (the omnimarket orchestrator's own
+    # EnumDecisionType) actually persists to the decision_type TEXT column.
+    # This is the realistic row shape, not an isolated-fix fixture.
+    row = _make_mock_row()
+    entry = _row_to_entry(row)
+    assert entry.decision_id == row["decision_id"]
+    assert entry.rationale == "Test rationale"
+    assert entry.scope_domain == "data-model"
+    assert entry.scope_layer == "architecture"
+    assert entry.status == "ACTIVE"
+
+
+def test_row_to_entry_lowercases_decision_type_for_omnibase_core_enum() -> None:
+    """OMN-14529 full-CLI-seam-proof regression: omnibase_core's
+    EnumDecisionType uses LOWERCASE values ("tech_stack_choice") while the
+    decision_store TEXT column stores whatever case the writer used — every
+    known writer (the omnimarket orchestrator's EnumDecisionType) uses
+    UPPERCASE ("TECH_STACK_CHOICE"). Without the .lower() normalization in
+    _row_to_entry, any query against a domain/layer scope with an existing
+    row raised a ValidationError — invisible to the bare-handler row-proof
+    (which never queries a non-empty result set) and only surfaced when
+    `onex skill decision_store record` was driven end-to-end and its
+    conflict-detection query hit a real prior row.
+    """
+    row = _make_mock_row(decision_type="TECH_STACK_CHOICE")
+    entry = _row_to_entry(row)
+    assert entry.decision_type.value == "tech_stack_choice"
 
 
 # ============================================================================
