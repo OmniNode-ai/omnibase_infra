@@ -55,5 +55,5 @@ def test_release_backmerge_preserves_runner_identity_lock() -> None:
     # runner-image-build-smoke gate (baked image label == lock identity_digest).
     # Precedent: #2227 (prior uvicorn bump) and #2228 (fastapi bump) rebound the
     # same lock and updated this anchor in lockstep.
-    assert lock["identity_digest"] == "87239d2a9ea58d2fb961526f9745f144"
-    assert lock["shared_env_digest"] == "3b1bee43f2d16dd5df988cde"
+    assert lock["identity_digest"] == "e147a2a2274b88d0f721b3b53975bd3a"
+    assert lock["shared_env_digest"] == "e5a86bea4a4720c04f39fbfe"
