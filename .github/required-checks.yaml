@@ -7,6 +7,12 @@
 # Added: OMN-2184
 # Last verified: 2026-03-10
 # Architecture: OMN-4497 -- CI Summary is the single required gate across all repos
+#
+# Branch coverage (OMN-14696): scripts/audit-branch-protection.sh now audits BOTH
+# `main` and `dev`. The review-enforcement invariant (Check A, via GraphQL
+# requiresApprovingReviews) is asserted on both branches; the orphaned-context
+# audit (Check B) below remains main-scoped (it reads default-branch check-runs).
+# The audit's `--fix` remediation stays main-only and never mutates dev protection.
 required_checks:
   # -- test.yml (primary pipeline) -------------------------------------------
   - name: "CI Summary"

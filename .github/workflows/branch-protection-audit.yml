@@ -3,11 +3,17 @@
 #
 # Periodic audit of branch protection settings across all OmniNode-ai repos.
 #
-# Checks:
-#   A) required_approving_review_count > 0 (blocks solo-dev workflow)
-#   B) required status check contexts that no longer match any recent CI check-run
+# Audits BOTH `main` and `dev` per repo, with per-branch attribution (OMN-14696):
+#   A) reviews enforced (both branches) — GraphQL requiresApprovingReviews must be
+#      false (blocks solo-dev workflow); the phantom-prone REST count is NOT used.
+#   B) orphaned required status-check contexts (main only) — a required context
+#      that no longer matches any recent default-branch check-run.
 #
-# OMN-9034 — references overnight-failure-retrospective §4.1 and §7 P0
+# This step runs in --dry-run (report-only). It NEVER passes --fix, so it performs
+# zero mutation; --fix is main-only remediation for interactive/operator use.
+#
+# OMN-9034 (original gate), OMN-14696 (dev coverage), OMN-14683 —
+# references overnight-failure-retrospective §4.1 and §7 P0
 #
 # Token: uses CROSS_REPO_PAT if configured (required for cross-repo audit of 9
 # sibling repos). Falls back to GITHUB_TOKEN with a warning, in which case

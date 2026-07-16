@@ -41,18 +41,90 @@ repo (e.g. a renamed CI job) are still flagged because they are not in this
 allowlist."""
 
 
-def parse_required_approving_review_count(protection_json: str) -> int:
-    """Extract required_approving_review_count from a branch-protection API response.
+DEV_EXEMPT_REPOS: frozenset[str] = frozenset({"omnistream", "omniweb"})
+"""Repos audited on `main` only — `dev` is exempt (OMN-14696).
 
-    Returns 0 when the field is absent or the payload is malformed.
+Mirrors onex_change_control#4281 / OMN-14683 `DEV_EXEMPT_REPOS`: `omnistream`
+has no `dev` branch, and `omniweb`'s `dev` exists but is intentionally
+unprotected (PHP landing page). The shell wrapper skips the `dev` audit for
+these repos so a legitimately-unprotected `dev` does not false-fail. This is a
+read-side allowlist only — it never affects the main-only `--fix` path."""
+
+_REVIEW_ENFORCEMENT_QUERY = (
+    "query($owner:String!,$name:String!){"
+    "repository(owner:$owner,name:$name){"
+    "branchProtectionRules(first:50){nodes{pattern requiresApprovingReviews}}}}"
+)
+"""GraphQL query for the authoritative per-branch review-enforcement signal.
+
+`requiresApprovingReviews` is the source of truth for "are approving reviews
+enforced on this branch". The REST
+`required_pull_request_reviews.required_approving_review_count` is deliberately
+NOT used: REST reports a phantom count of 1 for a protected branch that carries
+a review object but does not actually enforce approvals, which false-fails a
+solo-dev branch — most importantly `dev` (OMN-14683 / onex_change_control#4281)."""
+
+
+def parse_requires_approving_reviews(graphql_json: str, branch: str) -> bool | None:
+    """Return whether approving reviews are ENFORCED on `branch` per GraphQL.
+
+    Reads the `branchProtectionRules` nodes from a
+    `_REVIEW_ENFORCEMENT_QUERY` response and returns the
+    `requiresApprovingReviews` boolean for the rule whose `pattern` equals
+    `branch`. This is the authoritative signal (see `_REVIEW_ENFORCEMENT_QUERY`).
+
+    Returns:
+        True  — reviews enforced on `branch` (a solo-dev violation).
+        False — reviews not enforced.
+        None  — no branch-protection rule matches `branch`, or the payload is
+                malformed. Callers MUST treat None as "unknown / not asserted"
+                (non-failing) and never infer enforcement from it.
     """
     try:
-        d = json.loads(protection_json)
+        data = json.loads(graphql_json)
     except json.JSONDecodeError:
-        return 0
-    prr = d.get("required_pull_request_reviews") or {}
-    rac = prr.get("required_approving_review_count", 0)
-    return int(rac) if isinstance(rac, int) else 0
+        return None
+    rules = ((data.get("data") or {}).get("repository") or {}).get(
+        "branchProtectionRules"
+    ) or {}
+    nodes = rules.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+    for node in nodes:
+        if isinstance(node, dict) and node.get("pattern") == branch:
+            val = node.get("requiresApprovingReviews")
+            if isinstance(val, bool):
+                return val
+    return None
+
+
+def fetch_requires_approving_reviews(
+    owner: str, repo: str, branch: str, gh: GhCaller
+) -> tuple[bool, bool | None]:
+    """Fetch the GraphQL review-enforcement signal for `branch`. READ-ONLY.
+
+    Returns `(reachable, enforced)`:
+        reachable — False when the GraphQL call itself failed (repo inaccessible,
+                    e.g. no `CROSS_REPO_PAT`). Callers use this to SKIP rather
+                    than falsely reporting a clean audit for an unreachable repo.
+        enforced  — True/False/None per `parse_requires_approving_reviews` (only
+                    meaningful when `reachable` is True).
+    """
+    rc, stdout = gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_REVIEW_ENFORCEMENT_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={repo}",
+        ]
+    )
+    if rc != 0 or not stdout.strip():
+        return False, None
+    return True, parse_requires_approving_reviews(stdout, branch)
 
 
 def parse_required_contexts(protection_json: str) -> list[str]:
@@ -154,40 +226,93 @@ def audit_repo(
     repo: str,
     gh: GhCaller,
     commits_to_scan: int = 5,
+    branch: str = "main",
 ) -> dict[str, Any]:
-    """Run Check A + Check B against a single repo.
+    """Run the READ/AUDIT branch-protection checks for one `branch`. NEVER mutates.
+
+    Both branches (`main` and `dev`):
+      - Check A (reviews): approving reviews must NOT be enforced. Judged via the
+        authoritative GraphQL `requiresApprovingReviews` signal, NOT the REST
+        `required_approving_review_count` (which is phantom-prone and would
+        false-fail a protected-but-no-review `dev`). See `_REVIEW_ENFORCEMENT_QUERY`.
+
+    `main` ONLY (these are main-scoped and are never run for a non-`main` branch):
+      - Check B (orphans): each `required_status_checks.contexts[]` must match a
+        check-run seen on recent DEFAULT-BRANCH commits. That read is inherently
+        main-scoped and the `main-target-guard` PR-only allowlist is main-specific.
+      - `protection_json`: the raw REST protection payload is returned ONLY for
+        `main`, so the main-only `--fix` path has a payload to PUT. For ANY
+        non-`main` branch `protection_json` is always "" — the fix path is
+        therefore structurally inert on `dev` (it can never build/PUT a payload).
 
     Returns a dict with:
       - status: "ok" | "skip" | "violation"
-      - rac: int (required_approving_review_count, 0 if skipped)
-      - required_contexts: list[str]
-      - orphan_contexts: list[str]
+      - branch: the audited branch
+      - review_enforced: bool | None (GraphQL requiresApprovingReviews)
+      - required_contexts / orphan_contexts: main only ([] otherwise)
+      - protection_json: main REST payload; "" for ANY non-main branch
       - message: human-readable summary
-      - protection_json: raw protection payload (empty if skipped)
     """
-    rc, protection = gh(["api", f"repos/{owner}/{repo}/branches/main/protection"])
-    if rc != 0:
+    is_main = branch == "main"
+
+    reachable, review_enforced = fetch_requires_approving_reviews(
+        owner, repo, branch, gh
+    )
+
+    protection = ""
+    required: list[str] = []
+    orphans: list[str] = []
+
+    # Non-main (dev): GraphQL-only, strictly READ-ONLY. No REST protection fetch,
+    # no Check B, no protection_json → the --fix path can never act on a non-main
+    # branch. If GraphQL could not reach the repo, SKIP rather than reporting a
+    # falsely-clean dev audit (mirrors main's inaccessible-branch SKIP below).
+    if not is_main and not reachable:
         return {
             "status": "skip",
-            "rac": 0,
+            "branch": branch,
+            "review_enforced": None,
             "required_contexts": [],
             "orphan_contexts": [],
             "protection_json": "",
-            "message": f"branch protection not enabled or inaccessible for {repo}",
+            "message": (
+                f"branch protection not enabled or inaccessible for {repo} ({branch})"
+            ),
         }
 
-    rac = parse_required_approving_review_count(protection)
-    required = parse_required_contexts(protection)
-    seen = (
-        collect_seen_check_run_names(owner, repo, commits_to_scan, gh)
-        if required
-        else set()
-    )
-    orphans = find_orphan_contexts(required, seen)
+    if is_main:
+        rc, protection_payload = gh(
+            ["api", f"repos/{owner}/{repo}/branches/main/protection"]
+        )
+        if rc != 0:
+            # main protection not enabled / inaccessible — preserve the historical
+            # SKIP (e.g. sibling repos audited without CROSS_REPO_PAT). No payload.
+            return {
+                "status": "skip",
+                "branch": branch,
+                "review_enforced": None,
+                "required_contexts": [],
+                "orphan_contexts": [],
+                "protection_json": "",
+                "message": (
+                    f"branch protection not enabled or inaccessible for {repo} (main)"
+                ),
+            }
+        protection = protection_payload
+        required = parse_required_contexts(protection)
+        seen = (
+            collect_seen_check_run_names(owner, repo, commits_to_scan, gh)
+            if required
+            else set()
+        )
+        orphans = find_orphan_contexts(required, seen)
 
     violations: list[str] = []
-    if rac > 0:
-        violations.append(f"Check A: required_approving_review_count={rac} (must be 0)")
+    if review_enforced is True:
+        violations.append(
+            f"Check A: approving reviews are enforced on '{branch}' "
+            "(GraphQL requiresApprovingReviews=true; must be disabled for solo-dev)"
+        )
     for ctx in orphans:
         violations.append(
             f"Check B: context '{ctx}' not found in last-{commits_to_scan}-commit check-runs"
@@ -196,7 +321,8 @@ def audit_repo(
     if violations:
         return {
             "status": "violation",
-            "rac": rac,
+            "branch": branch,
+            "review_enforced": review_enforced,
             "required_contexts": required,
             "orphan_contexts": orphans,
             "protection_json": protection,
@@ -204,11 +330,12 @@ def audit_repo(
         }
     return {
         "status": "ok",
-        "rac": rac,
+        "branch": branch,
+        "review_enforced": review_enforced,
         "required_contexts": required,
         "orphan_contexts": [],
         "protection_json": protection,
-        "message": f"{repo}: clean",
+        "message": f"{repo} ({branch}): clean",
     }
 
 
