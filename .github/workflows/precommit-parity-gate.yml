@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-14667 (WS7 fan-out #3, canary OMN-14655 / omnimarket#1783 / omniclaude#1904):
+# CI mirror of the two local pre-commit meta-gates over .pre-commit-config.yaml:
+#
+#   1. Fail-loud meta-gate — hard-rejects the exit-0-on-missing-path /
+#      WARN-SKIP-degrade shape (a skipped gate must be byte-indistinguishable
+#      from a failing gate), plus any hook `stages:` value that
+#      `default_install_hook_types` does not install (DRIFT-2 / DRIFT-2a).
+#   2. Pin-parity check — fails closed if the pre-commit `rev:` pin for a shared
+#      omnibase_core validator diverges from the SHA that validator's dedicated
+#      CI gate workflow pins (DRIFT-3).
+#
+# UNCONDITIONAL BY DESIGN (OMN-14666 canary lesson). This is a STANDALONE
+# workflow, NOT a job inside ci.yml, because in omnibase_infra EVERY ci.yml job
+# declares `needs: occ-preflight` (ci.yml defines its own occ-preflight job at
+# line ~58). On omnimarket#1783 the fail-loud gate shared a run with
+# occ-preflight and `needs:`-ed it, so an occ-preflight failure SKIPPED the
+# byte-match proof on attempt 1 — a skip-then-vacuous-green window in the very
+# gate meant to kill false-greens; only a manual rerun made it fire. Here the
+# gate:
+#   * lives in its own workflow file, so a cross-job `needs: occ-preflight` is
+#     structurally impossible;
+#   * has NO `needs:` of any kind and NO `paths:` filter, so it fires on EVERY
+#     PR to main/dev and passes/fails on its own byte-match evidence, never
+#     conditioned on another job's result.
+#
+# Enforcement, not detection (CLAUDE.md Rule #5): wired as the CI counterpart of
+# the precommit-fail-loud-meta-gate + precommit-pin-parity pre-commit hooks
+# added in the SAME PR, so the checks it encodes cannot regress silently.
+
+name: Precommit Parity Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, dev]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  precommit-parity-gate:
+    name: Precommit Parity Gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
+    # public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Fail-loud meta-gate (exit-0-on-missing / stages coverage)
+        run: |
+          uv run --no-project --with pyyaml \
+            python3 scripts/validation/validate_precommit_fail_loud.py
+
+      - name: Pin-parity check (pre-commit rev vs CI-pinned SHA)
+        run: |
+          uv run --no-project --with pyyaml \
+            python3 scripts/validation/validate_precommit_pin_parity.py

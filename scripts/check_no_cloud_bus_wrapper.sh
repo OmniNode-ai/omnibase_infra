@@ -22,5 +22,8 @@ if [[ -n "${OMNI_HOME:-}" ]]; then
   fi
 fi
 
-echo "SKIP: check_no_cloud_bus.sh not found" >&2
-exit 0
+# OMN-14667: fail loud when the underlying check cannot be resolved. Exiting 0
+# here made an unrunnable gate byte-indistinguishable from a passing one (the
+# DRIFT-2 false-green shape the precommit-fail-loud-meta-gate now rejects).
+echo "ERROR: check_no_cloud_bus.sh not found (looked in \$REPO_ROOT/scripts/validation and \$OMNI_HOME/scripts) -- cannot run cloud-bus guard; failing closed." >&2
+exit 1
