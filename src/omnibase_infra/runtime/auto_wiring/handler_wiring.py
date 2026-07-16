@@ -46,13 +46,14 @@ from typing import (
     get_origin,
     runtime_checkable,
 )
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.resolver.model_handler_resolver_context import (
     ModelHandlerResolverContext,
@@ -153,10 +154,11 @@ from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
 )
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_core.models.projectors.model_projection_intent import (
+        ModelProjectionIntent,
+    )
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
@@ -533,6 +535,7 @@ async def _skip_dispatcher(
 def _make_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None = None,
+    handler_node_kind: EnumNodeKind | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -540,6 +543,12 @@ def _make_dispatch_callback(
     handlers receive a validated payload model and may be sync or async. Handlers
     that declare an envelope-shaped signature keep receiving a typed envelope
     even when their contract declares ``event_model``.
+
+    ``handler_node_kind`` carries the contract's declared archetype (from
+    ``contract.node_type``). It is consulted only by ``_normalize_handler_result``
+    to classify a REDUCER's bare typed / Sequence return as ``projection_intents``
+    rather than events (OMN-14598); ``None`` preserves the archetype-agnostic
+    classification for every other caller.
 
     When a handler exposes ``handle_async`` in addition to ``handle``, the async
     variant is preferred for dispatch.  This allows orchestrator handlers that
@@ -614,7 +623,9 @@ def _make_dispatch_callback(
             # silent drop, since the applier then reads .output_events/.status off a
             # list and finds neither. Route it through the one fan-out coercion so it
             # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
-            return _normalize_handler_result(raw_result, envelope, None)
+            return _normalize_handler_result(
+                raw_result, envelope, None, handler_node_kind
+            )
 
         payload = _extract_dispatch_payload(envelope)
         handler_takes_envelope = _handler_accepts_event_envelope(
@@ -646,7 +657,7 @@ def _make_dispatch_callback(
                 if asyncio.iscoroutine(fallback_result):
                     fallback_result = await cast("Awaitable[object]", fallback_result)
                 return _normalize_handler_result(
-                    fallback_result, envelope, event_model.name
+                    fallback_result, envelope, event_model.name, handler_node_kind
                 )
             failure_result = _build_inference_intent_validation_failure_result(
                 event_model=event_model,
@@ -667,13 +678,15 @@ def _make_dispatch_callback(
             if asyncio.iscoroutine(envelope_result):
                 envelope_result = await cast("Awaitable[object]", envelope_result)
             return _normalize_handler_result(
-                envelope_result, envelope, event_model.name
+                envelope_result, envelope, event_model.name, handler_node_kind
             )
 
         typed_result = handle_method(typed_payload)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
-        return _normalize_handler_result(typed_result, envelope, event_model.name)
+        return _normalize_handler_result(
+            typed_result, envelope, event_model.name, handler_node_kind
+        )
 
     return _callback
 
@@ -1097,6 +1110,7 @@ def _normalize_handler_result(
     result: object,
     envelope: object,
     message_type: str | None,
+    handler_node_kind: EnumNodeKind | None = None,
 ) -> ModelDispatchResult | None:
     from datetime import UTC, datetime
     from uuid import UUID, uuid4
@@ -1124,6 +1138,19 @@ def _normalize_handler_result(
 
     output_events: list[BaseModel] = []
     output_intents: tuple[object, ...] = ()
+    projection_intents: tuple[ModelProjectionIntent, ...] = ()
+
+    # OMN-14598: a def-B REDUCER (contract node_type REDUCER_GENERIC) that returns
+    # a bare typed projection model OR a Sequence of projection models must be
+    # classified as projections — a reducer emits projections[] ONLY (core handler-
+    # output contract). Computed BEFORE the isinstance/fan-out branches below so a
+    # reducer's return is never misrouted to output_events or a fan-out event batch.
+    reducer_projection_models: tuple[BaseModel, ...] = ()
+    if handler_node_kind is EnumNodeKind.REDUCER and not isinstance(
+        result, ModelHandlerOutput
+    ):
+        reducer_projection_models = _coerce_projection_models(result)
+
     if isinstance(result, ModelHandlerOutput):
         output_events = [
             event for event in result.events if isinstance(event, BaseModel)
@@ -1133,6 +1160,20 @@ def _normalize_handler_result(
             output_intents = output_intents + (result.result,)
         elif isinstance(result.result, BaseModel):
             output_events.append(result.result)
+        if result.projections:
+            # OMN-14598: a ModelHandlerOutput carries projections[] only for a
+            # REDUCER (validator-enforced on ModelHandlerOutput). Route them to
+            # projection_intents so DispatchResultApplier's synchronous projection
+            # sink fires; before this branch projections were read by NEITHER the
+            # events/intents/result path and were silently dropped (e.g.
+            # HandlerCodingAgentFsm's two ``for_reducer`` projections per fold).
+            projection_intents = _build_projection_intents(
+                result.projections, correlation_id, message_type
+            )
+    elif reducer_projection_models:
+        projection_intents = _build_projection_intents(
+            reducer_projection_models, correlation_id, message_type
+        )
     elif isinstance(result, BaseModel):
         output_events = [result]
     elif is_fanout_sequence(result):
@@ -1156,12 +1197,82 @@ def _normalize_handler_result(
         message_type=message_type,
         started_at=datetime.now(UTC),
         completed_at=datetime.now(UTC),
-        output_count=len(output_events) + len(output_intents),
+        output_count=len(output_events) + len(output_intents) + len(projection_intents),
         output_events=output_events,
         # Why: Runtime wiring validates and narrows this payload shape before use.
         output_intents=output_intents,  # type: ignore[arg-type]
+        projection_intents=projection_intents,
         correlation_id=correlation_id,
     )
+
+
+def _coerce_projection_models(result: object) -> tuple[BaseModel, ...]:
+    """Coerce a def-B REDUCER return into its projection models (OMN-14598).
+
+    A reducer's canonical def-B return is either a single typed projection model
+    or a Sequence of projection models — the multi-projection case, e.g.
+    ``node_coding_agent_fsm_reducer`` folding to ``(advanced_state,
+    trace_projection)``. A non-model / non-Sequence return yields ``()`` so the
+    caller records an empty (no-op fold) dispatch result rather than
+    misclassifying it as an event.
+    """
+    if isinstance(result, BaseModel):
+        return (result,)
+    if is_fanout_sequence(result):
+        return tuple(
+            element
+            for element in cast("Sequence[object]", result)
+            if isinstance(element, BaseModel)
+        )
+    return ()
+
+
+def _derive_projector_key(model: BaseModel) -> str:
+    """Derive a deterministic projector-registry key from a projection model.
+
+    Canonical convention (OMN-14598): strip a leading ``Model`` from the class
+    name and convert the remaining CamelCase to snake_case, e.g.
+    ``ModelCodingAgentTraceProjection`` -> ``coding_agent_trace_projection``.
+    Deterministic and self-describing so a projector can register under the same
+    key without the reducer carrying routing metadata on its return value.
+    """
+    class_name = type(model).__name__
+    stem = class_name.removeprefix("Model") or class_name
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", stem).lower()
+    return snake or class_name.lower()
+
+
+def _build_projection_intents(
+    models: Sequence[object],
+    correlation_id: UUID,
+    message_type: str | None,
+) -> tuple[ModelProjectionIntent, ...]:
+    """Build ModelProjectionIntent entries from a reducer's projection models.
+
+    OMN-14598: converts each projection model into a ``ModelProjectionIntent`` so
+    ``ModelDispatchResult.projection_intents`` is populated (consumed by
+    ``DispatchResultApplier``'s synchronous projection sink). ``projector_key`` is
+    derived from the model type; ``event_type`` is the inbound message type (the
+    event the reducer folded), falling back to the projection model's class name
+    when the dispatch path carries no ``message_type``.
+    """
+    from omnibase_core.models.projectors.model_projection_intent import (
+        ModelProjectionIntent,
+    )
+
+    intents: list[ModelProjectionIntent] = []
+    for model in models:
+        if not isinstance(model, BaseModel):
+            continue
+        intents.append(
+            ModelProjectionIntent(
+                projector_key=_derive_projector_key(model),
+                event_type=message_type or type(model).__name__,
+                envelope=model,
+                correlation_id=correlation_id,
+            )
+        )
+    return tuple(intents)
 
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -3568,6 +3679,27 @@ def _derive_message_category(topic: str) -> str:
     return "event"
 
 
+def _node_kind_from_node_type(node_type: str | None) -> EnumNodeKind | None:
+    """Map a contract ``node_type`` (e.g. ``REDUCER_GENERIC``) to EnumNodeKind.
+
+    Only the archetype prefix matters. Returns ``None`` for an unrecognized or
+    empty node_type so the dispatch adapter keeps its archetype-agnostic
+    classification (events / intents / fan-out). Used to tell
+    ``_normalize_handler_result`` that a bare/Sequence return from a REDUCER is a
+    projection, not an event (OMN-14598).
+    """
+    prefix = (node_type or "").strip().upper()
+    if prefix.startswith("REDUCER"):
+        return EnumNodeKind.REDUCER
+    if prefix.startswith("EFFECT"):
+        return EnumNodeKind.EFFECT
+    if prefix.startswith("COMPUTE"):
+        return EnumNodeKind.COMPUTE
+    if prefix.startswith("ORCHESTRATOR"):
+        return EnumNodeKind.ORCHESTRATOR
+    return None
+
+
 def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     """Derive the dispatch-engine event_type alias from an ONEX topic."""
     parts = topic.split(".")
@@ -5148,7 +5280,11 @@ def _prepare_handler_wiring(
             else None
         )
     else:
-        callback = _make_dispatch_callback(handler_instance, entry.event_model)
+        callback = _make_dispatch_callback(
+            handler_instance,
+            entry.event_model,
+            handler_node_kind=_node_kind_from_node_type(contract.node_type),
+        )
         # Type-scope the dispatcher on its declared event_model so a
         # multi-handler contract routes each message to the single handler
         # whose event_model matches the payload (OMN-12416). Untyped
