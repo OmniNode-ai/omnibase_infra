@@ -105,7 +105,7 @@ if [ -z "${OMK_RESOLVED}" ]; then
     # this check via SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
     if [ "${SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE:-0}" = "1" ]; then
       echo "[sync-node-migrations] SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1 — skipping unresolvable-source error." >&2
-      exit 0
+      exit 0 # fail-loud-ok: OMN-13062 reviewed operator escape hatch; the default path is exit 2 (fail-closed), this exit 0 only fires on an explicit SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1 opt-in that logs to stderr — not a silent bypass.
     fi
     exit 2
   fi
