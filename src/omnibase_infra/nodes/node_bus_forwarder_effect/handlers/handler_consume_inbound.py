@@ -87,6 +87,9 @@ class HandlerConsumeInbound:
         # producer cannot diverge from the runtime auto-wiring stamp again --
         # ``payload["tenant_id"] = <slug>``, no separate ``tenant_slug`` key.
         # See ``omnibase_infra.shared.tenant_stamp`` for the full rationale.
+        # The prior hand-rolled shape stamped ``tenant_id`` as the raw tenant
+        # UUID plus a separate ``tenant_slug`` key, which extra="forbid"
+        # delegation payload contracts reject outright.
         verified_payload: dict[str, object] = stamp_verified_tenant_slug(
             envelope.payload, identity.tenant_slug
         )
