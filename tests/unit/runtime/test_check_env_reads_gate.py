@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,20 +13,43 @@ import pytest
 SCRIPT = Path(__file__).parents[3] / "scripts" / "check-env-reads.sh"
 
 
+def _hermetic_git_env() -> dict[str, str]:
+    """Environment with inherited ``GIT_*`` vars stripped.
+
+    When this suite runs inside a git hook (e.g. the local ``pre-push``
+    smart-tests hook), git exports ``GIT_DIR`` / ``GIT_INDEX_FILE`` /
+    ``GIT_PREFIX`` into the environment. Those leak into the subprocess ``git``
+    commands below and retarget them at the ambient repo instead of
+    ``tmp_path`` (``git commit --allow-empty`` then fails against the parent's
+    locked index). Stripping every ``GIT_*`` var makes the temp-repo operations
+    hermetic regardless of the caller's git context.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int, str]:
     """Set up a minimal git repo, stage files, run check-env-reads.sh --staged."""
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    git_env = _hermetic_git_env()
+    subprocess.run(
+        ["git", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env=git_env,
+    )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
+        env=git_env,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
+        env=git_env,
     )
     # Initial empty commit so staged diff has a base
     subprocess.run(
@@ -33,6 +57,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
         cwd=tmp_path,
         check=True,
         capture_output=True,
+        env=git_env,
     )
 
     for rel_path, content in staged_files.items():
@@ -44,6 +69,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
             cwd=tmp_path,
             check=True,
             capture_output=True,
+            env=git_env,
         )
 
     result = subprocess.run(
@@ -52,6 +78,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
         capture_output=True,
         text=True,
         check=False,
+        env=git_env,
     )
     return result.returncode, result.stdout + result.stderr
 
