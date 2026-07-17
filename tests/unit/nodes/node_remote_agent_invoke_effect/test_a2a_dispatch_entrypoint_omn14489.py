@@ -155,13 +155,21 @@ async def test_real_dispatch_callback_invokes_handler_and_emits_lifecycle_event(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_handler_receives_typed_command_not_raw_envelope() -> None:
-    """Seam check: the declared event_model must deliver a validated
-    ModelInvocationCommand to def-B ``handle``.
+    """Seam check: a def-B ``handle`` must receive a validated
+    ModelInvocationCommand, NOT a raw envelope — on BOTH dispatch arms.
 
-    The dispatch callback has two arms. With no ``event_model`` on the routing entry it
-    hands the handler the RAW ModelEventEnvelope; only a declared event_model routes
-    through the typed arm. A def-B handler on the untyped arm would silently receive an
-    envelope and break on attribute access — so the contract MUST declare event_model.
+    The dispatch callback has two arms. The typed arm (declared ``event_model``)
+    validates the payload against the declared model. Since OMN-14716 the untyped
+    arm (``operation_match``, no ``event_model`` — the shape the .201
+    finding-aggregator canary used) ALSO delivers a typed def-B payload: it
+    signature-introspects the ``handle(request: ModelX)`` annotation and coerces
+    the payload into ``ModelX`` at the adapter boundary, mirroring runtime_local
+    (``_coercion_target_model_type``, OMN-8724). Before OMN-14716 the untyped arm
+    handed the handler the RAW ModelEventEnvelope, which a def-B handler broke on
+    at first attribute access (``'dict' object has no attribute ...``) — the exact
+    incident. ``event_model`` remains load-bearing, but for TYPE-SCOPING
+    (``payload_type_matcher`` / multi-handler routing, OMN-12416), no longer as
+    the only thing that types a def-B handler's input.
     """
     command = _command()
 
@@ -184,8 +192,8 @@ async def test_handler_receives_typed_command_not_raw_envelope() -> None:
         )
         try:
             await callback(envelope)
-        except Exception:  # noqa: BLE001 — the untyped arm feeds the handler an
-            # envelope, which def-B code may reject; WHAT it received is the assertion.
+        except Exception:  # noqa: BLE001 — WHAT the handler received is the assertion,
+            # not whether the downstream transport stub succeeded.
             pass
         assert len(seen) == 1, "Handler was not invoked exactly once."
         return seen[0]
@@ -194,19 +202,24 @@ async def test_handler_receives_typed_command_not_raw_envelope() -> None:
     typed = await _dispatch_with(_EVENT_MODEL)
     assert isinstance(typed, ModelInvocationCommand), (
         "Handler received a raw envelope instead of a validated ModelInvocationCommand: "
-        f"{type(typed).__name__}. The contract's handler entry must declare event_model "
-        "for the typed def-B dispatch arm."
+        f"{type(typed).__name__}. The typed def-B dispatch arm must validate the payload "
+        "against the declared event_model."
     )
     assert typed.target_ref == _TARGET_REF
 
-    # Untyped arm — the contract as it stood BEFORE this fix (no event_model).
-    # Non-vacuity: proves the event_model declaration is load-bearing, not decorative.
+    # Untyped arm — operation_match / no event_model (the finding-aggregator shape).
+    # OMN-14716: this arm now ALSO delivers a validated ModelInvocationCommand via
+    # def-B signature-introspection coercion, so a def-B handler no longer receives a
+    # raw envelope and crashes. (Pre-OMN-14716 this handed back a raw
+    # ModelEventEnvelope — the incident this ticket fixes.)
     untyped = await _dispatch_with(None)
-    assert isinstance(untyped, ModelEventEnvelope), (
-        "Expected the no-event_model arm to hand the handler a raw ModelEventEnvelope "
-        f"(got {type(untyped).__name__}). If this ever changes, the contract's "
-        "event_model declaration is no longer what makes def-B dispatch typed."
+    assert isinstance(untyped, ModelInvocationCommand), (
+        "Expected the no-event_model (operation_match) arm to coerce the payload into "
+        f"the def-B handler's declared ModelInvocationCommand (got {type(untyped).__name__}). "
+        "OMN-14716 brings this arm to parity with runtime_local; a raw envelope here is "
+        "the 'dict object has no attribute config' regression."
     )
+    assert untyped.target_ref == _TARGET_REF
 
 
 @pytest.mark.unit

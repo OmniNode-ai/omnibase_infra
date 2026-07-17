@@ -149,6 +149,28 @@ class BoundaryPublishError(Exception):
     """
 
 
+class HandlerDispatchFailureError(Exception):
+    """A handler/coercion failure the engine reported as a FAILED dispatch RESULT.
+
+    OMN-14716. ``MessageDispatchEngine.dispatch()`` wraps every dispatcher call in
+    a catch-all (``except Exception``) that records the error and RETURNS a
+    ``HANDLER_ERROR`` result instead of re-raising. A def-B handler crash (or a
+    boundary coercion failure) therefore never propagates to the consume boundary
+    as an exception — it arrives as a FAILED result, and
+    ``DispatchResultApplier.apply()`` silently skips a non-SUCCESS result that
+    carries no applicable output. The message then vanishes at HWM=0 with nothing
+    terminalized (the .201 finding-aggregator incident).
+
+    ``_raise_if_silent_dispatch_failure`` raises this from
+    ``_dispatch_with_bounded_retry`` for exactly that shape so the failure flows
+    into the SAME ``_route_swallowed_exception`` path a raised handler exception
+    would take (loud structured metric log + best-effort DLQ under
+    ``ONEX_BOUNDARY_DLQ_ENABLED``). It is classified non-retryable at that
+    boundary: the FAILED result is deterministic, so retrying only burns the
+    backoff budget.
+    """
+
+
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
 )
@@ -600,7 +622,30 @@ def _make_dispatch_callback(
                 ModelDispatchResult,
             )
 
-            raw_result_obj = handle_method(envelope)
+            # OMN-14716: an operation_match def-B handler declares no contract
+            # ``event_model``, so the typed-coercion path below never runs and the
+            # engine hands the dispatcher the raw materialized wire dict. Passing
+            # that dict straight to ``handle(request: ModelX)`` crashes on the
+            # first attribute access (``'dict' object has no attribute ...`` — the
+            # .201 finding-aggregator incident). Reach parity with runtime_local's
+            # def-B coercion (``_coercion_target_model_type``, OMN-8724): when the
+            # handler is a bare typed def-B handler (not an envelope handler),
+            # validate the extracted domain payload into its declared input model
+            # at THIS adapter boundary — never inside the handler, never by
+            # wrapping the payload in a ModelEventEnvelope. Envelope-accepting and
+            # legacy ``**kwargs``/untyped handlers keep receiving the raw envelope
+            # dict unchanged.
+            dispatch_arg: object = envelope
+            if not _handler_accepts_event_envelope(handle_method):
+                target_model = _resolve_def_b_input_model_type(handle_method)
+                if target_model is not None:
+                    payload = _extract_dispatch_payload(envelope)
+                    if isinstance(payload, target_model):
+                        dispatch_arg = payload
+                    elif isinstance(payload, Mapping):
+                        dispatch_arg = target_model.model_validate(payload)
+
+            raw_result_obj = handle_method(dispatch_arg)
             raw_result = (
                 await cast("Awaitable[object]", raw_result_obj)
                 if asyncio.iscoroutine(raw_result_obj)
@@ -887,6 +932,59 @@ def _annotation_mentions_event_envelope(annotation: object) -> bool:
     if getattr(origin, "__name__", "") == "ModelEventEnvelope":
         return True
     return any(_annotation_mentions_event_envelope(arg) for arg in get_args(annotation))
+
+
+def _resolve_def_b_input_model_type(handle_method: object) -> type[BaseModel] | None:
+    """Resolve a def-B handler's declared input model from its ``handle()`` signature.
+
+    Mirrors runtime_local's ``_coercion_target_model_type`` (OMN-8724 /
+    ``omnibase_core.runtime.runtime_local_adapter``): a canonical def-B handler
+    ``handle(self, request: ModelX) -> ModelY`` reached via ``operation_match``
+    (no contract-declared ``event_model``) must receive a validated ``ModelX``
+    instance, not the raw materialized wire dict the engine hands the dispatcher.
+    The Kafka boundary has no ``event_model`` to read for such a handler, so it
+    recovers the target model the same way runtime_local does — by introspecting
+    the single positional parameter's annotation.
+
+    Returns that annotation when it is a concrete ``BaseModel`` subclass other
+    than ``ModelEventEnvelope``; ``None`` otherwise (envelope handlers, ``**kwargs``
+    handlers, multi-positional or unannotated params — every legacy shape keeps
+    receiving the raw envelope dict unchanged). ``eval_str=True`` resolves the
+    PEP 563 string annotation every node handler carries via
+    ``from __future__ import annotations`` (without it the annotation is the
+    literal string and the BaseModel check never matches — the OMN-8724 root
+    cause), with a fall back to unevaluated annotations if resolution raises.
+    """
+    try:
+        signature = inspect.signature(
+            cast("Callable[..., object]", handle_method), eval_str=True
+        )
+    except (TypeError, ValueError, NameError):
+        try:
+            signature = inspect.signature(cast("Callable[..., object]", handle_method))
+        except (TypeError, ValueError):
+            return None
+
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.name != "self"
+        and parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    if len(positional) != 1:
+        return None
+    annotation = positional[0].annotation
+    if (
+        isinstance(annotation, type)
+        and issubclass(annotation, BaseModel)
+        and annotation.__name__ != "ModelEventEnvelope"
+    ):
+        return annotation
+    return None
 
 
 def _coerce_uuid_or_none(value: object) -> object | None:
@@ -2790,6 +2888,55 @@ def _make_stateful_dispatch_callback(
     return _callback
 
 
+def _raise_if_silent_dispatch_failure(
+    result: object,
+    topic: str,
+) -> None:
+    """Raise ``HandlerDispatchFailureError`` for a FAILED dispatch result that
+    would otherwise vanish silently (OMN-14716).
+
+    ``MessageDispatchEngine.dispatch()`` converts a dispatcher crash (a def-B
+    handler AttributeError, a boundary coercion ``ValidationError``, ...) into a
+    ``HANDLER_ERROR``/``INTERNAL_ERROR`` result rather than re-raising, and
+    ``DispatchResultApplier.apply()`` silently skips a non-SUCCESS result that
+    carries no applicable output. That combination is the exact
+    "handler crashed, both terminal topics stayed HWM=0, nothing surfaced"
+    incident shape. Detect only that shape — an error status with NO
+    output_events / output_intents / projection_intents — and raise so the
+    boundary routes it through ``_route_swallowed_exception`` (loud metric log +
+    best-effort DLQ).
+
+    A partial-success ``HANDLER_ERROR`` (one sibling handler failed but another
+    produced output the applier publishes) is intentionally NOT surfaced here —
+    it is not a silent drop. Non-error statuses (SUCCESS/NO_DISPATCHER/... — the
+    latter has its own engine-side DLQ routing) are left untouched. Guarded on a
+    real ``ModelDispatchResult`` instance so a ``MagicMock`` result in a test
+    never trips it.
+    """
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    if not isinstance(result, ModelDispatchResult):
+        return
+    if result.status not in (
+        EnumDispatchStatus.HANDLER_ERROR,
+        EnumDispatchStatus.INTERNAL_ERROR,
+    ):
+        return
+    has_applicable_output = bool(
+        result.output_events or result.output_intents or result.projection_intents
+    )
+    if has_applicable_output:
+        return
+    raise HandlerDispatchFailureError(
+        f"dispatch to topic={topic} returned status={result.status.value} with no "
+        f"terminal output (dispatcher_id={result.dispatcher_id}): "
+        f"{result.error_message or 'handler/coercion failure'}"
+    )
+
+
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
@@ -2891,15 +3038,26 @@ def _make_event_bus_callback(
                                 "outbox publish failed"
                             ) from apply_exc
                         raise
+                # OMN-14716: the engine catch-all converts a dispatcher crash (a
+                # def-B handler AttributeError, a boundary coercion failure) into a
+                # FAILED result instead of re-raising, and the applier silently
+                # skips a non-SUCCESS result with no output. Surface that shape so
+                # it is logged + best-effort-DLQ'd here instead of vanishing at
+                # HWM=0 -- routed through the same _route_swallowed_exception path
+                # a raised handler exception takes.
+                _raise_if_silent_dispatch_failure(result, topic)
                 return
             except (
                 PydanticValidationError,
                 ProtocolConfigurationError,
                 BoundaryPublishError,
+                HandlerDispatchFailureError,
             ) as exc:
-                # Non-retryable: deterministic content/config error, or an outbox
-                # publish failure that must propagate (not retry). No backoff, no
-                # further attempts -- see docstring gap G2 + OMN-14403 §4.3.
+                # Non-retryable: deterministic content/config error, an outbox
+                # publish failure that must propagate (not retry), or a FAILED
+                # dispatch result the engine already produced deterministically
+                # (OMN-14716). No backoff, no further attempts -- see docstring
+                # gap G2 + OMN-14403 §4.3.
                 last_exc = exc
                 break
             except Exception as exc:  # noqa: BLE001 — bounded-retry loop; re-raised below on exhaustion
