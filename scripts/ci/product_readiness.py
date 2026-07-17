@@ -28,10 +28,9 @@ rather than reimplementing it (extended, not rewritten).
 
 Design invariants
 -----------------
-- **No network I/O.** The workflow resolves subcheck conclusions (the infra
-  shadow *polls* the head's LEAF product check-runs via the Checks API and maps
-  them with ``scripts/ci/product_leaf_poll.py``) and passes them in; this module
-  only classifies.
+- **No network I/O.** The shadow workflow RUNS its own occ-independent product
+  subchecks (ruff / mypy / a hermetic pytest slice) and passes their conclusions
+  in; this module only classifies.
 - **Stdlib only.** It runs under a bare ``setup-python`` step with no
   ``uv sync``, so it must not import ``omnibase_infra`` or third-party packages.
 - **Fail closed.** ``product_green`` is returned only when every product subcheck

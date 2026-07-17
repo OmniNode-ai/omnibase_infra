@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Phase 3 Product Readiness reason-graph + leaf-poller tests (OMN-14707, infra).
+"""Phase 3 Product Readiness reason-graph tests (OMN-14707, infra).
 
 This is the omnibase_infra slice of the design fixture matrix
 (``docs/plans/2026-07-17-product-first-ci-decouple-design.md`` §4). It proves:
@@ -8,11 +8,10 @@ This is the omnibase_infra slice of the design fixture matrix
 * A seeded product/standards failure surfaces in Product Readiness as a typed
   ``PRODUCT_FAILED`` root — independent of OCC (the #1450/#1451 collapse fix).
 * The reason-graph is single-rooted and replay-deterministic.
-* The infra LEAF poller maps the head's OCC-independent ci.yml product check-runs
-  onto the five product subchecks, self-excludes the shadow's own check-run, and
-  NEVER polls or maps ``occ-preflight``.
-* Structurally, the shadow surface is a NO-``needs`` poller with NO
-  ``occ-preflight`` in its needs-chain and mints NO OCC request.
+* Structurally, the shadow surface RUNS its OWN occ-independent product subchecks
+  (ruff / mypy / a hermetic pytest slice) with NO ``occ-preflight`` anywhere in
+  its needs-chain, and mints NO OCC request (RUN-OWN-SUBCHECKS, not a poller —
+  the omniclaude#1906 / omnibase_infra#2325 pattern correction).
 """
 
 from __future__ import annotations
@@ -24,12 +23,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci.product_leaf_poll import (
-    LEAF_CHECK_MAP,
-    POLLED_LEAVES,
-    all_leaves_terminal,
-    build_facts,
-)
 from scripts.ci.product_reason_graph import (
     DEPLOY_TRIGGER_FAILED,
     EVIDENCE_MISSING,
@@ -47,7 +40,6 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GRAPH_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "product_reason_graph.py"
-_POLL_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "product_leaf_poll.py"
 _SHADOW_WF = _REPO_ROOT / ".github" / "workflows" / "product-readiness-shadow.yml"
 
 _HEAD = "a" * 40
@@ -57,21 +49,6 @@ def _green_subchecks() -> dict[str, str]:
     return dict.fromkeys(
         ("change_detection", "lint", "typecheck", "tests", "coverage"), "success"
     )
-
-
-def _check_run(name: str, conclusion: str, status: str = "completed") -> dict:
-    return {
-        "name": name,
-        "status": status,
-        "conclusion": conclusion,
-        "started_at": "2026-07-17T00:00:00Z",
-        "id": abs(hash(name)) % 1_000_000,
-    }
-
-
-def _all_leaves(conclusion: str) -> list[dict]:
-    """One completed check-run per polled LEAF, all with ``conclusion``."""
-    return [_check_run(name, conclusion) for name in sorted(POLLED_LEAVES)]
 
 
 # --------------------------------------------------------------------------
@@ -259,120 +236,6 @@ def test_synchronize_new_head_supersedes_receipt() -> None:
 
 
 # --------------------------------------------------------------------------
-# Infra LEAF poller — maps OCC-independent ci.yml check-runs to product facts.
-# --------------------------------------------------------------------------
-
-
-def test_leaf_map_never_includes_occ_preflight() -> None:
-    all_leaves = {n for names in LEAF_CHECK_MAP.values() for n in names}
-    assert "occ-preflight" not in all_leaves
-    assert not any("occ" in n.lower() for n in all_leaves)
-    assert frozenset(all_leaves) == POLLED_LEAVES
-
-
-def test_leaf_poll_green_maps_to_ready_graph() -> None:
-    check_runs = _all_leaves("success")
-    facts = build_facts(_HEAD, check_runs)
-    assert facts["subchecks"] == _green_subchecks()
-    assert all_leaves_terminal(check_runs) is True
-    assert build_reason_graph(facts)["ready"] is True
-
-
-def test_seeded_standards_fail_infra_maps_to_product_failed() -> None:
-    # `seeded-standards-fail-infra`: the infra standards/validator LEAF
-    # ("ONEX Validators") concludes failure. It folds into the `lint` static
-    # dimension and surfaces as PRODUCT_FAILED — even under occ_eligibility=red.
-    check_runs = _all_leaves("success")
-    for run in check_runs:
-        if run["name"] == "ONEX Validators":
-            run["conclusion"] = "failure"
-    facts = build_facts(_HEAD, check_runs)
-    assert facts["subchecks"]["lint"] == "failure"
-    facts["occ_eligibility"] = "failure"
-    graph = build_reason_graph(facts)
-    assert graph["root"]["kind"] == PRODUCT_FAILED
-    assert graph["root"]["primary_signal"] == "lint=failure"
-
-
-def test_leaf_poll_pending_leaf_is_absent_and_nonterminal() -> None:
-    check_runs = _all_leaves("success")
-    # Make the tests gate still in-progress.
-    for run in check_runs:
-        if run["name"] == "CI Tests Gate":
-            run["status"] = "in_progress"
-            run["conclusion"] = None
-    facts = build_facts(_HEAD, check_runs)
-    # tests + coverage both fold from `CI Tests Gate` -> absent (fail-closed).
-    assert facts["subchecks"]["tests"] == ""
-    assert facts["subchecks"]["coverage"] == ""
-    assert all_leaves_terminal(check_runs) is False
-
-
-def test_leaf_poll_missing_leaf_is_absent() -> None:
-    # Only a subset of leaves present -> the rest are ABSENT, non-terminal.
-    check_runs = [_check_run("Lint", "success")]
-    facts = build_facts(_HEAD, check_runs)
-    assert facts["subchecks"]["change_detection"] == ""
-    assert facts["subchecks"]["tests"] == ""
-    assert all_leaves_terminal(check_runs) is False
-
-
-def test_leaf_poll_self_excludes_shadow_and_ignores_occ_check_run() -> None:
-    # The shadow's own check-run and a red occ-preflight check-run are present on
-    # the head but neither is polled/mapped (no self-deadlock, OCC-independent).
-    check_runs = _all_leaves("success") + [
-        _check_run("product-readiness (shadow)", None, status="in_progress"),
-        _check_run("occ-preflight / eligibility", "failure"),
-    ]
-    facts = build_facts(_HEAD, check_runs)
-    assert facts["subchecks"] == _green_subchecks()
-    assert all_leaves_terminal(check_runs) is True
-    # OCC-independent: a red occ-preflight does not appear in the product facts.
-    assert build_reason_graph(facts)["ready"] is True
-
-
-def test_leaf_poll_accepts_paginated_slurp_page_array() -> None:
-    # `gh api --paginate --slurp` yields an array of page objects; the CLI must
-    # flatten them.
-    pages = [
-        {"check_runs": [_check_run("Lint", "success")]},
-        {"check_runs": [_check_run("ONEX Validators", "success")]},
-        {
-            "check_runs": [
-                _check_run("Detect Changes", "success"),
-                _check_run("CI Tests Gate", "success"),
-            ]
-        },
-    ]
-    proc = subprocess.run(
-        [sys.executable, str(_POLL_SCRIPT), "map", "--head-sha", _HEAD],
-        input=json.dumps(pages),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0  # all leaves terminal
-    facts = json.loads(proc.stdout)
-    assert facts["subchecks"] == _green_subchecks()
-
-
-def test_leaf_poll_cli_pending_exit_code_two() -> None:
-    check_runs = _all_leaves("success")
-    for run in check_runs:
-        if run["name"] == "Detect Changes":
-            run["status"] = "queued"
-            run["conclusion"] = None
-    proc = subprocess.run(
-        [sys.executable, str(_POLL_SCRIPT), "map", "--head-sha", _HEAD],
-        input=json.dumps({"check_runs": check_runs}),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 2  # PENDING — workflow keeps polling
-
-
-# --------------------------------------------------------------------------
 # Reason-graph CLI — report-only, always exit 0.
 # --------------------------------------------------------------------------
 
@@ -397,7 +260,7 @@ def test_cli_graph_is_report_only_exit_zero_on_red() -> None:
 
 
 # --------------------------------------------------------------------------
-# STRUCTURAL — the shadow surface is a NO-needs poller, never couples to OCC.
+# STRUCTURAL — the shadow RUNS its own occ-independent subchecks, never OCC.
 # --------------------------------------------------------------------------
 
 
@@ -415,8 +278,27 @@ def test_shadow_workflow_has_no_occ_preflight_in_needs_chain() -> None:
         if isinstance(needs, str):
             needs = [needs]
         assert "occ-preflight" not in needs, f"job {name} must not need occ-preflight"
-        # Infra shadow is a strict NO-needs poller (reports FIRST on the head).
-        assert not needs, f"job {name} must be a NO-needs poller, got needs={needs}"
+        assert not any("occ" in str(n).lower() for n in needs), (
+            f"job {name} must not need any occ job"
+        )
+
+
+def test_shadow_subchecks_have_no_needs_and_graph_needs_only_subchecks() -> None:
+    # RUN-OWN-SUBCHECKS shape: the three product subcheck jobs run FIRST with NO
+    # `needs:` (so they execute regardless of occ-preflight), and the reason-graph
+    # depends ONLY on those three subchecks.
+    wf = _load_yaml(_SHADOW_WF)
+    jobs = wf["jobs"]
+    subcheck_jobs = {"lint-shadow", "typecheck-shadow", "tests-shadow"}
+    assert subcheck_jobs <= set(jobs), "expected the three occ-independent subchecks"
+    for name in subcheck_jobs:
+        assert not jobs[name].get("needs"), (
+            f"subcheck {name} must have NO needs (runs before OCC)"
+        )
+    graph_needs = jobs["reason-graph"].get("needs", [])
+    if isinstance(graph_needs, str):
+        graph_needs = [graph_needs]
+    assert set(graph_needs) == subcheck_jobs
 
 
 def test_shadow_workflow_never_triggers_occ_request() -> None:
@@ -428,17 +310,20 @@ def test_shadow_workflow_never_triggers_occ_request() -> None:
     assert not any("occ-preflight" in ln for ln in executable)
 
 
-def test_shadow_workflow_is_leaf_poller_not_job_rerun() -> None:
+def test_shadow_workflow_runs_own_subchecks_not_poller() -> None:
     text = _SHADOW_WF.read_text(encoding="utf-8")
-    # Extends the poller posture: it maps the head's LEAF check-runs and emits
-    # the reason graph — it does NOT re-run the heavy infra product jobs.
-    assert "scripts/ci/product_leaf_poll.py" in text
+    # It RUNS the real product toolchain (ruff / mypy / pytest) as occ-independent
+    # subchecks — it does NOT poll the head's occ-gated leaf check-runs.
+    assert "ruff check" in text
+    assert "mypy" in text
+    assert "pytest" in text
     assert "scripts/ci/product_reason_graph.py" in text
-    assert "commits/${REPO}" not in text  # sanity: templated path uses envs
-    assert "check-runs" in text
-    # No heavy re-run of the product surface inside the shadow.
-    assert "uv sync" not in text
-    assert "pytest" not in text
+    # The deprecated poller module must NOT be referenced in any executable line.
+    executable = [
+        ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    assert not any("product_leaf_poll" in ln for ln in executable)
+    assert not any("check-runs" in ln for ln in executable)
 
 
 def test_shadow_workflow_has_no_paths_filter() -> None:

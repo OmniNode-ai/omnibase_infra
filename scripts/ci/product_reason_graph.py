@@ -21,9 +21,9 @@ byte-identical). See design ``docs/plans/2026-07-17-product-first-ci-decouple-de
 Design invariants (mirror ``scripts/ci/product_readiness.py``)
 --------------------------------------------------------------
 - **No network I/O. Stdlib only.** Runs under a bare ``setup-python`` step; the
-  workflow polls the head's LEAF product check-runs via the Checks API and maps
-  them with ``scripts/ci/product_leaf_poll.py`` before passing them in. This
-  module only classifies and hashes.
+  shadow workflow RUNS its own occ-independent product subchecks (ruff / mypy /
+  a hermetic pytest slice) and passes their conclusions in. This module only
+  classifies and hashes.
 - **Single-rooted + deterministic.** When several signals are present the
   dominant root is chosen by a fixed precedence, so replay yields an identical
   graph. The root carries a content-addressed receipt id
