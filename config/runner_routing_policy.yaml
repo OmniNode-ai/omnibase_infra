@@ -21,3 +21,5 @@ hosted_runner_allowlist:
     reason: "Fork-only untrusted PR verification must not execute on self-hosted runners."
   - path: .github/workflows/runner-fleet-canary.yml
     reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
+  - path: .github/workflows/precommit-parity-gate.yml
+    reason: "OMN-14668: byte-match precommit parity proof is dependency-free and hosted-pinned so self-hosted fleet saturation cannot create a required-check false-green window."

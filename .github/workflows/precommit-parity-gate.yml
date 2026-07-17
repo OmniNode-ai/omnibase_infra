@@ -46,15 +46,17 @@ permissions:
 jobs:
   precommit-parity-gate:
     name: Precommit Parity Gate
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
-    # public forks default to ubuntu-latest.
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
+    # OMN-14668: canonical OMNI_RUNNER_SELECTOR_V1 form for the byte-match parity
+    # gate is HOSTED-PINNED — `runs-on: ubuntu-latest`, unconditionally, for every
+    # event. The prior form routed ONLY public-fork PRs to hosted and left every
+    # trusted internal PR / push / merge_group on the self-hosted omnibase-ci
+    # fleet — a saturated or absent fleet would leave this required check
+    # queued/cancelled = a false-green window in the very gate meant to kill
+    # false-greens. This gate is short and dependency-free (`uv run --no-project
+    # --with pyyaml` over local files), so it must never depend on self-hosted
+    # availability. Matches the already-hosted omnibase_spi / omnibase_compat
+    # parity gates.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
