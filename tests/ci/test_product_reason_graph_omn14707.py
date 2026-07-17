@@ -34,6 +34,7 @@ from scripts.ci.product_reason_graph import (
     STATUS_BLOCKED_UPSTREAM,
     STATUS_FAILED,
     build_reason_graph,
+    main,
     root_receipt_id,
 )
 
@@ -284,6 +285,188 @@ def test_cli_graph_is_report_only_exit_zero_on_red() -> None:
     assert proc.returncode == 0
     payload = json.loads(proc.stdout)
     assert payload["root"]["kind"] == PRODUCT_FAILED
+
+
+# --------------------------------------------------------------------------
+# ENFORCING mode (OMN-14709) — the load-bearing exit-code matrix.
+#
+# The shadow was report-only (always exit 0), so its check conclusion was
+# meaninglessly green. `--enforce` makes the reason-graph exit NON-ZERO ONLY on a
+# genuine PRODUCT_FAILED root while every non-product root and a green head stay
+# exit 0 — generating the red-side parity signal for a NON-required context.
+# --------------------------------------------------------------------------
+
+
+def _run_enforce(facts: dict) -> int:
+    """Invoke the CLI `graph --enforce` path in-process and return the exit code."""
+    return main(["graph", "--facts-json", json.dumps(facts), "--enforce"])
+
+
+@pytest.mark.parametrize(
+    "failing_check",
+    ["lint", "typecheck", "tests", "coverage"],
+)
+def test_enforce_exits_nonzero_on_product_failed_root(failing_check: str) -> None:
+    # A seeded PRODUCT_FAILED facts input must fail the enforcing shadow.
+    subchecks = _green_subchecks()
+    subchecks[failing_check] = "failure"
+    facts = {"head_sha": _HEAD, "subchecks": subchecks}
+    # Precondition: the elected root is genuinely PRODUCT_FAILED.
+    assert build_reason_graph(facts)["root"]["kind"] == PRODUCT_FAILED
+    assert _run_enforce(facts) != 0
+
+
+def test_enforce_exits_zero_on_green() -> None:
+    # A fully green facts input stays exit 0 under enforcement.
+    facts = {"head_sha": _HEAD, "subchecks": _green_subchecks()}
+    assert build_reason_graph(facts)["root"] is None
+    assert _run_enforce(facts) == 0
+
+
+@pytest.mark.parametrize(
+    ("facts", "expected_root"),
+    [
+        # RUNNER_INFRA: an unconfirmable (skipped) product subcheck with no OCC-red
+        # explanation — infra, not a product defect. Must stay non-fatal.
+        (
+            {
+                "head_sha": _HEAD,
+                "subchecks": {
+                    **dict.fromkeys(
+                        ("change_detection", "lint", "typecheck", "tests", "coverage"),
+                        "success",
+                    ),
+                    "lint": "skipped",
+                },
+            },
+            RUNNER_INFRA,
+        ),
+        # RUNNER_INFRA via explicit runner signal.
+        (
+            {
+                "head_sha": _HEAD,
+                "subchecks": dict.fromkeys(
+                    ("change_detection", "lint", "typecheck", "tests", "coverage"),
+                    "success",
+                ),
+                "runner_signal": "disk-preflight",
+            },
+            RUNNER_INFRA,
+        ),
+        # EVIDENCE_MISSING: OCC red while product checks are skipped — the OCC
+        # dimension, not a product defect. Must stay non-fatal.
+        (
+            {
+                "head_sha": _HEAD,
+                "subchecks": dict.fromkeys(
+                    (
+                        "change_detection",
+                        "lint",
+                        "typecheck",
+                        "tests",
+                        "coverage",
+                    ),
+                    "skipped",
+                ),
+                "occ_eligibility": "failure",
+            },
+            EVIDENCE_MISSING,
+        ),
+        # GITHUB_API_OUTAGE: infra/API root. Must stay non-fatal even with a
+        # co-present product failure (higher precedence non-product root wins).
+        (
+            {
+                "head_sha": _HEAD,
+                "subchecks": {
+                    **dict.fromkeys(
+                        ("change_detection", "lint", "typecheck", "tests", "coverage"),
+                        "success",
+                    ),
+                    "lint": "failure",
+                },
+                "gh_api": "5xx",
+            },
+            GITHUB_API_OUTAGE,
+        ),
+        # POLICY_HELD: an intentional hold. Must stay non-fatal.
+        (
+            {
+                "head_sha": _HEAD,
+                "subchecks": dict.fromkeys(
+                    ("change_detection", "lint", "typecheck", "tests", "coverage"),
+                    "success",
+                ),
+                "policy": "prod-hold",
+            },
+            POLICY_HELD,
+        ),
+    ],
+)
+def test_enforce_exits_zero_on_non_product_roots(
+    facts: dict, expected_root: str
+) -> None:
+    # Non-product roots report but never fail the enforcing shadow (exit 0).
+    assert build_reason_graph(facts)["root"]["kind"] == expected_root
+    assert _run_enforce(facts) == 0
+
+
+def test_default_graph_stays_report_only_exit_zero_on_product_failed() -> None:
+    # Without --enforce the surface is unchanged: report-only, exit 0 even on a
+    # PRODUCT_FAILED root (preserves the historical default for other callers).
+    subchecks = _green_subchecks()
+    subchecks["tests"] = "failure"
+    facts = {"head_sha": _HEAD, "subchecks": subchecks}
+    assert main(["graph", "--facts-json", json.dumps(facts)]) == 0
+
+
+def test_cli_subprocess_enforce_exits_nonzero_on_product_failed() -> None:
+    # End-to-end proof through the real `python -m ... --enforce` entrypoint the
+    # workflow invokes: a PRODUCT_FAILED head exits non-zero AND still prints the
+    # graph JSON on stdout (so the workflow can render its summary).
+    facts = {"head_sha": _HEAD, "subchecks": {"lint": "failure"}}
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.product_reason_graph",
+            "graph",
+            "--facts-json",
+            json.dumps(facts),
+            "--enforce",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["root"]["kind"] == PRODUCT_FAILED
+
+
+def test_cli_subprocess_enforce_exits_zero_on_non_product_root() -> None:
+    # End-to-end: a RUNNER_INFRA (skipped-lint) head reports but exits 0.
+    subchecks = _green_subchecks()
+    subchecks["lint"] = "skipped"
+    facts = {"head_sha": _HEAD, "subchecks": subchecks}
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.product_reason_graph",
+            "graph",
+            "--facts-json",
+            json.dumps(facts),
+            "--enforce",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["root"]["kind"] == RUNNER_INFRA
 
 
 # --------------------------------------------------------------------------

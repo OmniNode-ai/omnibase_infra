@@ -31,16 +31,31 @@
 #   2. This workflow NEVER references or triggers `call-occ-preflight.yml` and so
 #      mints NO OCC request. The authoritative OCC path is untouched and still runs
 #      from `ci.yml` exactly as before.
-#   3. REPORT-ONLY / NON-REQUIRED / STANDALONE. This is a SEPARATE workflow and is
-#      deliberately NOT folded into `ci.yml`'s required `CI Summary` rollup —
-#      folding it in would make it authoritative and violate the shadow invariant.
-#      The only branch-protection-required contexts on `dev` stay byte-identical;
-#      this workflow adds `product-readiness-shadow / reason-graph` (and the
-#      `lint (shadow)` / `typecheck (shadow)` / `tests+coverage (shadow)` subcheck
-#      contexts) as NON-required shadow contexts and cannot wedge a merge. Making
-#      any context here required (or removing `occ-preflight` from the 88
-#      authoritative occ-gated jobs) is a separate operator-gated WS4 step; do NOT
-#      do it here.
+#   3. ENFORCING-ON-PRODUCT-DEFECT / NON-REQUIRED / STANDALONE (OMN-14709, WS4
+#      step 1). This is a SEPARATE workflow and is deliberately NOT folded into
+#      `ci.yml`'s required `CI Summary` rollup — folding it in would make it
+#      authoritative and violate the shadow invariant. As of OMN-14709 the
+#      `reason-graph` job runs the classifier with `--enforce`, so it exits
+#      NON-ZERO (check conclusion = failure) when the single elected root is a
+#      genuine PRODUCT_FAILED defect (lint / typecheck / tests / coverage red);
+#      every NON-product root (RUNNER_INFRA / EVIDENCE_MISSING / GITHUB_API_OUTAGE
+#      / POLICY_HELD / DEPLOY_TRIGGER_FAILED) and a green head stay exit 0. This
+#      turns the meaninglessly-always-green shadow into a real red-side parity
+#      signal. It is STILL NON-required: the only branch-protection-required
+#      contexts on `dev` stay byte-identical, this workflow's contexts
+#      (`product-readiness-shadow / reason-graph` and the `lint (shadow)` /
+#      `typecheck (shadow)` / `tests+coverage (shadow)` subchecks) are NOT in
+#      `required_status_checks`, so a red reason-graph reports parity but CANNOT
+#      wedge a merge. Making any context here required (or removing `occ-preflight`
+#      from the 88 authoritative occ-gated jobs) is a separate operator-gated WS4
+#      step; do NOT do it here.
+#
+#      FIDELITY GAP (accepted for the non-required parity window): the `tests`
+#      subcheck is a HERMETIC module slice (tests/ci/test_product_reason_graph_
+#      omn14707.py), not the full authoritative suite, so an enforcing red here
+#      proves lint/typecheck/its-own-slice — not full test parity. That gap is
+#      acceptable precisely because the context is NON-required and cannot block;
+#      it is closed when the context is later promoted to required (separate step).
 #
 # During the shadow window, the reason-graph verdict is compared against the OLD
 # authoritative `CI Summary` outcome across live PR classes. Cutover to a required
@@ -217,7 +232,7 @@ jobs:
           TYPECHECK_CONCLUSION: ${{ needs.typecheck-shadow.result }}
           TESTS_CONCLUSION: ${{ needs.tests-shadow.result }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           facts="$(python - <<'PY'
           import json, os
           tests = os.environ.get("TESTS_CONCLUSION", "")
@@ -233,12 +248,27 @@ jobs:
           }))
           PY
           )"
-          graph="$(python -m scripts.ci.product_reason_graph graph --facts-json "$facts" --summary 2> summary.md)"
+          # ENFORCING (OMN-14709): --enforce makes the reason-graph exit NON-ZERO
+          # only when the elected root is a genuine PRODUCT_FAILED defect; every
+          # non-product root (RUNNER_INFRA / EVIDENCE_MISSING / GITHUB_API_OUTAGE /
+          # POLICY_HELD / DEPLOY_TRIGGER_FAILED) and a green head stay exit 0.
+          # The `if x=$(...)` guard captures stdout AND the exit code without the
+          # inherited `bash -e` aborting before we render the summary
+          # (reference_ci_shell_errexit_bash_e). The workflow stays NON-required,
+          # so a red conclusion here reports parity but cannot block any merge.
+          if graph="$(python -m scripts.ci.product_reason_graph graph --facts-json "$facts" --enforce --summary 2> summary.md)"; then
+            rc=0
+          else
+            rc=$?
+          fi
           echo "$graph"
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
           root_kind="$(printf '%s' "$graph" | python -c 'import json,sys; r=json.load(sys.stdin)["root"]; print(r["kind"] if r else "READY")')"
           if [ "$root_kind" = "READY" ]; then
-            echo "::notice title=CI Reason Graph::READY — product dimension is green (report-only)"
+            echo "::notice title=CI Reason Graph::READY — product dimension is green"
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error title=CI Reason Graph::ROOT ${root_kind} — enforcing shadow FAILS on a genuine product defect (NON-required; reports parity, does not block merges)"
           else
-            echo "::warning title=CI Reason Graph::ROOT ${root_kind} (report-only shadow; not merge-blocking)"
+            echo "::warning title=CI Reason Graph::ROOT ${root_kind} (non-product root; non-fatal, does not fail the shadow)"
           fi
+          exit "$rc"
