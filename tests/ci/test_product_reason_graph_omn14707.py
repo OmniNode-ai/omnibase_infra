@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci.product_readiness import EnumSubcheckOutcome, categorize_conclusion
 from scripts.ci.product_reason_graph import (
     DEPLOY_TRIGGER_FAILED,
     EVIDENCE_MISSING,
@@ -39,7 +40,6 @@ from scripts.ci.product_reason_graph import (
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_GRAPH_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "product_reason_graph.py"
 _SHADOW_WF = _REPO_ROOT / ".github" / "workflows" / "product-readiness-shadow.yml"
 
 _HEAD = "a" * 40
@@ -99,14 +99,39 @@ def test_product_failed_is_occ_independent() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_green_all_pass_is_ready_single_node() -> None:
+def test_green_all_pass_is_ready_without_blocked_dependents() -> None:
     graph = build_reason_graph({"head_sha": _HEAD, "subchecks": _green_subchecks()})
     assert graph["root"] is None
     assert graph["ready"] is True
     assert graph["freeze_eligible"] is True
     assert graph["blocked_candidate_count"] == 0
     assert graph["blocked_upstream_count"] == 0
+    assert len(graph["nodes"]) == 5
     assert all(n["status"] != STATUS_BLOCKED_UPSTREAM for n in graph["nodes"])
+
+
+def test_neutral_and_non_string_conclusions_fail_closed() -> None:
+    assert categorize_conclusion("neutral") is EnumSubcheckOutcome.INFRA
+    assert categorize_conclusion({"bad": "shape"}) is EnumSubcheckOutcome.INFRA
+
+    subchecks = _green_subchecks()
+    subchecks["lint"] = "neutral"
+    graph = build_reason_graph({"head_sha": _HEAD, "subchecks": subchecks})
+    assert graph["root"]["kind"] == RUNNER_INFRA
+    assert graph["root"]["primary_signal"] == "product_infra:lint"
+
+
+def test_malformed_subchecks_fail_closed_without_crashing() -> None:
+    graph = build_reason_graph({"head_sha": _HEAD, "subchecks": []})
+    assert graph["root"]["kind"] == RUNNER_INFRA
+    assert graph["root"]["primary_signal"] == (
+        "product_infra:change_detection,lint,typecheck,tests,coverage"
+    )
+
+
+def test_head_sha_is_required_for_content_addressed_receipts() -> None:
+    with pytest.raises(ValueError, match="head_sha is required"):
+        build_reason_graph({"head_sha": "", "subchecks": _green_subchecks()})
 
 
 # --------------------------------------------------------------------------
@@ -245,11 +270,13 @@ def test_cli_graph_is_report_only_exit_zero_on_red() -> None:
     proc = subprocess.run(
         [
             sys.executable,
-            str(_GRAPH_SCRIPT),
+            "-m",
+            "scripts.ci.product_reason_graph",
             "graph",
             "--facts-json",
             json.dumps(facts),
         ],
+        cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
@@ -317,7 +344,10 @@ def test_shadow_workflow_runs_own_subchecks_not_poller() -> None:
     assert "ruff check" in text
     assert "mypy" in text
     assert "pytest" in text
-    assert "scripts/ci/product_reason_graph.py" in text
+    assert "python -m scripts.ci.product_reason_graph" in text
+    assert "--cov=scripts.ci.product_readiness" in text
+    assert "--cov=scripts.ci.product_reason_graph" in text
+    assert "--cov-fail-under=60" in text
     # The deprecated poller module must NOT be referenced in any executable line.
     executable = [
         ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")

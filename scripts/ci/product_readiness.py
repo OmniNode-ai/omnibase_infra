@@ -70,7 +70,7 @@ class EnumSubcheckOutcome(StrEnum):
     ABSENT = "absent"
 
 
-_PASS_CONCLUSIONS = frozenset({"success", "neutral"})
+_PASS_CONCLUSIONS = frozenset({"success"})
 _FAIL_CONCLUSIONS = frozenset({"failure", "action_required"})
 _INFRA_CONCLUSIONS = frozenset(
     {
@@ -110,7 +110,12 @@ _SUBCHECK_ORDER: tuple[tuple[str, str], ...] = (
 
 def categorize_conclusion(conclusion: str | None) -> EnumSubcheckOutcome:
     """Map a raw GitHub check conclusion to a coarse outcome (fail-closed)."""
-    value = (conclusion or "").strip().lower()
+    if conclusion is None:
+        value = ""
+    elif isinstance(conclusion, str):
+        value = conclusion.strip().lower()
+    else:
+        return EnumSubcheckOutcome.INFRA
     if value in _PASS_CONCLUSIONS:
         return EnumSubcheckOutcome.PASS
     if value in _FAIL_CONCLUSIONS:

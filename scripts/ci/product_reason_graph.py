@@ -46,38 +46,22 @@ import json
 import sys
 from typing import Any
 
-# Import the WS1 product classifier without reimplementing it. Works both when
-# run as a bare script (`python scripts/ci/product_reason_graph.py`, where the
-# script's own directory is on sys.path[0]) and when imported as a package
-# (`scripts.ci.product_reason_graph`, as the pytest suite does).
-try:  # pragma: no cover - import shim, both branches exercised across contexts
-    from scripts.ci.product_readiness import (
-        CHANGE_DETECTION_FAILED,
-        COVERAGE_FAILED,
-        LINT_FAILED,
-        PRODUCT_GREEN,
-        PRODUCT_INFRA,
-        TEST_FAILED,
-        TYPE_FAILED,
-        EnumSubcheckOutcome,
-        ProductFacts,
-        categorize_conclusion,
-        classify,
-    )
-except ImportError:  # pragma: no cover - script-run fallback
-    from product_readiness import (  # type: ignore[no-redef]
-        CHANGE_DETECTION_FAILED,
-        COVERAGE_FAILED,
-        LINT_FAILED,
-        PRODUCT_GREEN,
-        PRODUCT_INFRA,
-        TEST_FAILED,
-        TYPE_FAILED,
-        EnumSubcheckOutcome,
-        ProductFacts,
-        categorize_conclusion,
-        classify,
-    )
+# Import the WS1 product classifier without reimplementing it. The workflow runs
+# this module with `python -m scripts.ci.product_reason_graph` so the canonical
+# package import is always available.
+from scripts.ci.product_readiness import (
+    CHANGE_DETECTION_FAILED,
+    COVERAGE_FAILED,
+    LINT_FAILED,
+    PRODUCT_GREEN,
+    PRODUCT_INFRA,
+    TEST_FAILED,
+    TYPE_FAILED,
+    EnumSubcheckOutcome,
+    ProductFacts,
+    categorize_conclusion,
+    classify,
+)
 
 SCHEMA_VERSION = "ci-reason-graph/v1"
 
@@ -166,8 +150,13 @@ def build_reason_graph(facts: dict[str, Any]) -> dict[str, Any]:
       - ``runner_signal`` / ``gh_api`` / ``policy`` / ``deploy_trigger``
         (optional): non-product signals for full-fleet reuse.
     """
-    head_sha = str(facts.get("head_sha", "") or "")
-    subchecks_raw: dict[str, Any] = dict(facts.get("subchecks", {}) or {})
+    head_sha = str(facts.get("head_sha", "") or "").strip()
+    if not head_sha:
+        raise ValueError("head_sha is required")
+    subchecks_input = facts.get("subchecks", {})
+    subchecks_raw: dict[str, Any] = (
+        dict(subchecks_input) if isinstance(subchecks_input, dict) else {}
+    )
 
     # Product dimension via the canonical WS1 classifier (not reimplemented).
     product = classify(ProductFacts.from_dict(subchecks_raw))
@@ -328,7 +317,7 @@ def _render_summary(graph: dict[str, Any]) -> str:
         lines.append(
             f"> READY — product dimension `{graph['product_outcome']}`, "
             f"freeze_eligible=`{str(graph['freeze_eligible']).lower()}`. "
-            "Single-node graph, no BLOCKED_UPSTREAM dependents."
+            "No root cause and no BLOCKED_UPSTREAM dependents."
         )
     else:
         lines += [

@@ -170,11 +170,14 @@ jobs:
         # second broad CI gate and pulls unrelated runtime/release-identity
         # flakes into the Product Readiness signal. The authoritative product
         # suite remains unchanged in ci.yml; this shadow proves only its own
-        # classifier, reason graph, and workflow wiring.
+        # classifier, reason graph, workflow wiring, and focused coverage floor.
         run: |
           uv run pytest tests/ci/test_product_reason_graph_omn14707.py \
             -q --no-header \
-            --timeout=60 --timeout-method=signal
+            --timeout=60 --timeout-method=signal \
+            --cov=scripts.ci.product_readiness \
+            --cov=scripts.ci.product_reason_graph \
+            --cov-report=term-missing --cov-fail-under=60
 
   # --- Typed reason-graph (report-only) ------------------------------------
   # NO occ-preflight in this needs-chain. Consumes the product subchecks'
@@ -224,7 +227,7 @@ jobs:
           }))
           PY
           )"
-          graph="$(python scripts/ci/product_reason_graph.py graph --facts-json "$facts" --summary 2> summary.md)"
+          graph="$(python -m scripts.ci.product_reason_graph graph --facts-json "$facts" --summary 2> summary.md)"
           echo "$graph"
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
           root_kind="$(printf '%s' "$graph" | python -c 'import json,sys; r=json.load(sys.stdin)["root"]; print(r["kind"] if r else "READY")')"
