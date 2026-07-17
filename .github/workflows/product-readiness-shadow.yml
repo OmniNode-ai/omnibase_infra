@@ -165,12 +165,21 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
       - name: Unit tests (fast, hermetic slice — no broker/db deps)
+        # OMN-14708: use --timeout-method=signal, not thread. thread-method
+        # calls os._exit(1) on the FIRST hanging test, hard-killing the pytest
+        # process and MASKING every downstream result (one hang hid the whole
+        # slice). signal-method fires SIGALRM on the main thread, so pytest
+        # interrupts ONLY the hanging test, records it as a failure, and
+        # continues running the rest of the suite — one hang is reported, not
+        # cascaded. (This hermetic unit slice is single-process/no-xdist, so
+        # SIGALRM lands on the test-running main thread as required.) Marker
+        # exclusions and the 60s per-test timeout are unchanged.
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration \
             -m "unit and not integration and not postgres and not kafka and not consul and not database and not slow and not chaos and not performance and not replay" \
             -q --no-header \
-            --timeout=60 --timeout-method=thread
+            --timeout=60 --timeout-method=signal
 
   # --- Typed reason-graph (report-only) ------------------------------------
   # NO occ-preflight in this needs-chain. Consumes the product subchecks'
