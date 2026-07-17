@@ -349,6 +349,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also print a Markdown summary block to stderr.",
     )
+    p.add_argument(
+        "--enforce",
+        action="store_true",
+        help=(
+            "Enforcing mode (OMN-14709): exit non-zero when the single elected "
+            "root is a PRODUCT_FAILED defect (lint / typecheck / tests / coverage "
+            "affirmatively red). Every NON-product root — RUNNER_INFRA, "
+            "EVIDENCE_MISSING, GITHUB_API_OUTAGE, POLICY_HELD, "
+            "DEPLOY_TRIGGER_FAILED — and a green (rootless) head stay exit 0, so "
+            "the surface only turns red on a genuine product defect. Default off "
+            "keeps the historical report-only behavior."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -365,7 +378,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(graph, sort_keys=True))
         if args.summary:
             print(_render_summary(graph), file=sys.stderr)
-        # Report-only: this surface never fails the check.
+        # Enforcing mode fails the check ONLY when the reason-graph root is a
+        # genuine PRODUCT defect. Non-product roots stay non-fatal (they report
+        # but never block), and a green head is exit 0. Without --enforce the
+        # surface is fully report-only (always exit 0), preserving prior behavior.
+        root = graph["root"]
+        if args.enforce and root is not None and root["kind"] == PRODUCT_FAILED:
+            print(
+                f"::error title=Product Readiness (enforcing)::PRODUCT_FAILED root "
+                f"— signal `{root['primary_signal']}` (receipt "
+                f"{root['root_receipt_id']}). This is a genuine product defect.",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
     parser.error(f"unknown command: {args.command}")
