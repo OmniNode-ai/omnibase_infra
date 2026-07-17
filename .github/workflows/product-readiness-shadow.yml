@@ -1,0 +1,137 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Product Readiness — SHADOW poller (OMN-14707 / OMN-14644 Phase 3, CI-01/CI-02).
+#
+# Phase 3 FINAL fan-out (omnibase_infra — the worst OCC cascade, runtime-critical).
+# This workflow is an ADDITIVE, report-only surface that runs the substantive
+# product proof INDEPENDENTLY of `occ-preflight` and emits the typed reason-graph.
+#
+# Unlike the omnimarket canary (which re-runs lint/typecheck/tests as shadow
+# jobs), infra's product jobs are heavy and runtime-critical, so this shadow
+# instead extends the `ci-summary` NO-`needs` poller posture: it self-instantiates
+# its check-run immediately on the exact head SHA and POLLS the head's already-
+# running LEAF product check-runs via the Checks API (mapped by
+# `scripts/ci/product_leaf_poll.py`), then classifies + emits the reason-graph.
+#
+# LOAD-BEARING INVARIANTS (do not weaken — see design §1.1):
+#   1. NO `occ-preflight` anywhere in this workflow's needs-chain. This is a
+#      single NO-`needs` poller job, so Product Readiness reports FIRST on the
+#      exact head SHA, before any OCC evidence exists. The polled LEAF set is the
+#      OCC-independent ci.yml product surface only; `occ-preflight` is NEVER
+#      polled and NEVER mapped.
+#   2. This workflow NEVER references or triggers `call-occ-preflight.yml` and so
+#      mints NO OCC request. The authoritative OCC path is untouched.
+#   3. REPORT-ONLY / NON-REQUIRED / ADDITIVE. The dev required-status-check set is
+#      unchanged (CI Summary + the OCC/receipt/merge family remain the merge-
+#      blocking authorities). This workflow adds only NON-required shadow contexts
+#      and cannot wedge a merge. Making any of these required, or removing
+#      `occ-preflight` from the 88 authoritative occ-gated jobs, is a separate
+#      operator-gated WS4 step; do NOT do it here.
+#
+# During the shadow window the `product-readiness-shadow` verdict is compared
+# against the OLD authoritative `CI Summary` outcome across live PR classes.
+# Cutover happens only after a zero-disagreement window + maintainer approval.
+
+name: product-readiness-shadow
+
+# No `paths:` filter — the shadow MUST fire on every PR (including its own),
+# per the omniclaude#1906 self-exclusion lesson (a paths filter that excludes
+# the PR's own changed files silently prevents the workflow from running).
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+  checks: read
+
+# Shadow surface: a newer head supersedes an in-flight shadow run for the same ref.
+concurrency:
+  group: product-readiness-shadow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Single NO-`needs` poller. Instantiates its check-run immediately and polls
+  # the head's LEAF product check-runs via the Checks API — never occ-preflight.
+  product-readiness:
+    name: product-readiness (shadow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve exact head SHA
+        id: head
+        env:
+          # For pull_request use the PR head (github.sha is the ephemeral merge
+          # commit); for merge_group use the queued head; else the pushed SHA.
+          HEAD_SHA: >-
+            ${{ github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+              || github.sha }}
+        run: |
+          set -euo pipefail
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Resolved head SHA: ${HEAD_SHA}"
+
+      - name: Poll LEAF product check-runs (Checks API) and map to facts
+        id: poll
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.head.outputs.head_sha }}
+        run: |
+          set -uo pipefail
+          runs='{"check_runs":[]}'
+          facts=""
+          attempts=24            # ~12 min ceiling at 30s cadence (report-only)
+          for i in $(seq 1 "$attempts"); do
+            if page="$(gh api --paginate \
+                  "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+                  --jq '.check_runs[]' 2>/dev/null | jq -s '{check_runs: .}')"; then
+              runs="$page"
+            fi
+            if facts="$(python scripts/ci/product_leaf_poll.py map \
+                  --head-sha "${HEAD_SHA}" --check-runs-file - <<<"$runs")"; then
+              echo "All LEAF product check-runs are terminal."
+              break
+            fi
+            echo "LEAF product check-runs still pending (attempt ${i}/${attempts})."
+            sleep 30
+          done
+          # Final map regardless of terminal state — report-only, never blocks.
+          facts="$(python scripts/ci/product_leaf_poll.py map \
+            --head-sha "${HEAD_SHA}" --check-runs-file - <<<"$runs" || true)"
+          echo "Product facts: ${facts}"
+          {
+            echo "facts<<FACTS_EOF"
+            echo "${facts}"
+            echo "FACTS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Emit typed reason graph (report-only)
+        env:
+          FACTS: ${{ steps.poll.outputs.facts }}
+        run: |
+          set -euo pipefail
+          graph="$(python scripts/ci/product_reason_graph.py graph \
+            --facts-json "${FACTS}" --summary 2> summary.md)"
+          echo "${graph}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          root_kind="$(printf '%s' "${graph}" | python -c 'import json,sys; r=json.load(sys.stdin)["root"]; print(r["kind"] if r else "READY")')"
+          if [ "${root_kind}" = "READY" ]; then
+            echo "::notice title=CI Reason Graph::READY — product dimension is green (report-only)"
+          else
+            echo "::warning title=CI Reason Graph::ROOT ${root_kind} (report-only shadow; not merge-blocking)"
+          fi
