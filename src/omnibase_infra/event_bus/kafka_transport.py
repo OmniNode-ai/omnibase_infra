@@ -156,49 +156,53 @@ class KafkaTransport:
         if self._started:
             return
 
-        self._producer = AIOKafkaProducer(
-            bootstrap_servers=self._config.bootstrap_servers,
-            acks=self._config.acks_aiokafka,
-            enable_idempotence=self._config.enable_idempotence,
-            max_request_size=self._config.max_request_size,
-            retry_backoff_ms=self._config.reconnect_backoff_ms,
-            **self._client_version_kwargs(AIOKafkaProducer),
-            **self._auth_kwargs(),
-        )
-        await self._producer.start()
-
-        if self._topics:
-            # Group ``subscribe`` (topics passed positionally): the consumer joins
-            # the group and, on join, NATIVELY resumes each partition from its
-            # group-committed offset (a fresh group starts at ``auto_offset_reset``).
-            # This is what makes "restart resumes from the committed offset" and
-            # "uncommitted offsets redeliver on restart" hold, with no manual
-            # ``seek`` dance. A single transport instance is the sole group member,
-            # so it is assigned every partition of its topics — matching the unified
-            # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
-            # is the S6 boot invariant, R1). The one-time join latency is absorbed by
-            # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
-            self._consumer = AIOKafkaConsumer(
-                *self._topics,
+        try:
+            self._producer = AIOKafkaProducer(
                 bootstrap_servers=self._config.bootstrap_servers,
-                group_id=self._group,
-                # FORCED for the new transport consumers (plan S3): the runtime, not
-                # the client, decides when an offset is durable. Legacy push
-                # consumers keep their per-consumer config setting untouched.
-                enable_auto_commit=False,
-                auto_offset_reset=self._auto_offset_reset,
-                session_timeout_ms=self._config.session_timeout_ms,
-                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-                max_poll_interval_ms=self._config.max_poll_interval_ms,
+                acks=self._config.acks_aiokafka,
+                enable_idempotence=self._config.enable_idempotence,
+                max_request_size=self._config.max_request_size,
                 retry_backoff_ms=self._config.reconnect_backoff_ms,
-                **self._client_version_kwargs(AIOKafkaConsumer),
+                **self._client_version_kwargs(AIOKafkaProducer),
                 **self._auth_kwargs(),
             )
-            await self._consumer.start()
-            # Trigger the group join + first fetch now, buffering the first batch, so
-            # the runtime's first poll() returns the available records instead of
-            # racing the lazy rebalance.
-            await self._prime(self._consumer)
+            await self._producer.start()
+
+            if self._topics:
+                # Group ``subscribe`` (topics passed positionally): the consumer joins
+                # the group and, on join, NATIVELY resumes each partition from its
+                # group-committed offset (a fresh group starts at ``auto_offset_reset``).
+                # This is what makes "restart resumes from the committed offset" and
+                # "uncommitted offsets redeliver on restart" hold, with no manual
+                # ``seek`` dance. A single transport instance is the sole group member,
+                # so it is assigned every partition of its topics — matching the unified
+                # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
+                # is the S6 boot invariant, R1). The one-time join latency is absorbed by
+                # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
+                self._consumer = AIOKafkaConsumer(
+                    *self._topics,
+                    bootstrap_servers=self._config.bootstrap_servers,
+                    group_id=self._group,
+                    # FORCED for the new transport consumers (plan S3): the runtime, not
+                    # the client, decides when an offset is durable. Legacy push
+                    # consumers keep their per-consumer config setting untouched.
+                    enable_auto_commit=False,
+                    auto_offset_reset=self._auto_offset_reset,
+                    session_timeout_ms=self._config.session_timeout_ms,
+                    heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                    max_poll_interval_ms=self._config.max_poll_interval_ms,
+                    retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._client_version_kwargs(AIOKafkaConsumer),
+                    **self._auth_kwargs(),
+                )
+                await self._consumer.start()
+                # Trigger the group join + first fetch now, buffering the first batch, so
+                # the runtime's first poll() returns the available records instead of
+                # racing the lazy rebalance.
+                await self._prime(self._consumer)
+        except BaseException:
+            await self.close()
+            raise
 
         self._started = True
 
@@ -239,13 +243,25 @@ class KafkaTransport:
     async def close(self) -> None:
         """Stop the consumer and producer; safe to call more than once."""
         self._buffer.clear()
+        first_error: BaseException | None = None
         if self._consumer is not None:
-            await self._consumer.stop()
-            self._consumer = None
+            try:
+                await self._consumer.stop()
+            except BaseException as exc:  # noqa: BLE001 — cleanup must attempt both clients.
+                first_error = exc
+            finally:
+                self._consumer = None
         if self._producer is not None:
-            await self._producer.stop()
-            self._producer = None
+            try:
+                await self._producer.stop()
+            except BaseException as exc:  # noqa: BLE001 — cleanup must attempt both clients.
+                if first_error is None:
+                    first_error = exc
+            finally:
+                self._producer = None
         self._started = False
+        if first_error is not None:
+            raise first_error
 
     # -- consumer protocol ------------------------------------------------------
 
@@ -312,10 +328,22 @@ class KafkaTransport:
     ) -> ModelTransportMessage:
         """Map an aiokafka ``ConsumerRecord`` to the transport-agnostic model."""
         raw_headers = getattr(record, "headers", None) or ()
-        headers: dict[str, bytes] = {
-            key: (value if isinstance(value, bytes) else bytes(value))
-            for key, value in raw_headers
-        }
+        headers: dict[str, bytes] = {}
+        for key, value in raw_headers:
+            if value is None:
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="poll",
+                    target_name="kafka_transport",
+                )
+                raise ProtocolConfigurationError(
+                    "KafkaTransport cannot map a nullable Kafka header into "
+                    "ModelTransportMessage.headers, which requires bytes.",
+                    context=context,
+                    parameter=f"headers[{key!r}]",
+                    value=None,
+                )
+            headers[key] = value if isinstance(value, bytes) else bytes(value)
         offset = int(record.offset)  # type: ignore[attr-defined]
         return ModelTransportMessage(
             topic=record.topic,  # type: ignore[attr-defined]

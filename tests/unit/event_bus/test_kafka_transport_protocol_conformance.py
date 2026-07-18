@@ -15,13 +15,18 @@ the parametrized conformance suite in ``tests/integration/transport``.
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
+import pytest
+
+import omnibase_infra.event_bus.kafka_transport as kafka_transport_module
 from omnibase_core.protocols.runtime.protocol_transport_consumer import (
     ProtocolTransportConsumer,
 )
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 
@@ -74,3 +79,88 @@ def test_legacy_eventbuskafka_consumer_setting_untouched() -> None:
     # (True) for the legacy push path — this face changes nothing about it.
     bus = EventBusKafka.default()
     assert bus._config.enable_auto_commit is True
+
+
+def test_to_model_rejects_nullable_kafka_headers() -> None:
+    record = SimpleNamespace(
+        topic="unit.topic.v1",
+        partition=0,
+        offset=7,
+        key=None,
+        value=b"payload",
+        headers=[("nullable", None)],
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="nullable Kafka header"):
+        KafkaTransport._to_model(
+            SimpleNamespace(topic="unit.topic.v1", partition=0), record
+        )
+
+
+@pytest.mark.asyncio
+async def test_start_rolls_back_producer_when_consumer_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopped: list[str] = []
+
+    class FakeProducer:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            stopped.append("producer")
+
+    class FakeConsumer:
+        def __init__(self, *_topics: str, **_kwargs: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            raise RuntimeError("consumer boom")
+
+        async def stop(self) -> None:
+            stopped.append("consumer")
+
+    monkeypatch.setattr(kafka_transport_module, "AIOKafkaProducer", FakeProducer)
+    monkeypatch.setattr(kafka_transport_module, "AIOKafkaConsumer", FakeConsumer)
+
+    transport = KafkaTransport.from_bootstrap(
+        "unit-kafka.invalid:9092", group="unit-conformance", topics=["unit.topic.v1"]
+    )
+
+    with pytest.raises(RuntimeError, match="consumer boom"):
+        await transport.start()
+
+    assert stopped == ["consumer", "producer"]
+    assert transport._consumer is None
+    assert transport._producer is None
+    assert transport._started is False
+
+
+@pytest.mark.asyncio
+async def test_close_attempts_producer_stop_after_consumer_stop_fails() -> None:
+    stopped: list[str] = []
+
+    class FailingConsumer:
+        async def stop(self) -> None:
+            stopped.append("consumer")
+            raise RuntimeError("consumer stop boom")
+
+    class StoppingProducer:
+        async def stop(self) -> None:
+            stopped.append("producer")
+
+    transport = KafkaTransport.from_bootstrap("unit-kafka.invalid:9092")
+    transport._consumer = FailingConsumer()  # type: ignore[assignment]
+    transport._producer = StoppingProducer()  # type: ignore[assignment]
+    transport._started = True
+
+    with pytest.raises(RuntimeError, match="consumer stop boom"):
+        await transport.close()
+
+    assert stopped == ["consumer", "producer"]
+    assert transport._consumer is None
+    assert transport._producer is None
+    assert transport._started is False

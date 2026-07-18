@@ -13,7 +13,7 @@ Broker selection precedence (first non-empty wins):
    ``.201`` run is unambiguous and never collides with the local-docker default
    the shared conftest pins for ``tests/integration/event_bus``.
 2. ``KAFKA_BOOTSTRAP_SERVERS`` — the standard runtime bootstrap var.
-3. ``localhost:19092`` — local Docker Redpanda default.
+3. no fallback — tests skip when no configured broker is reachable.
 
 Admin discipline: all metadata reads are **topic-scoped** (``describe_topics``),
 never the all-topics ``list_topics``. On a shared broker with hundreds/thousands
@@ -27,6 +27,10 @@ import asyncio
 import os
 import socket
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 __all__ = [
     "committed_offset",
@@ -42,12 +46,18 @@ _ERR_TOPIC_ALREADY_EXISTS = 36
 _ERR_INVALID_PARTITIONS = 37
 
 
+@lru_cache(maxsize=1)
+def _load_test_env() -> None:
+    load_dotenv(Path.home() / ".omnibase" / ".env", override=False)
+
+
 def transport_bootstrap() -> str:
     """Resolve the broker bootstrap-servers string for the transport tests."""
+    _load_test_env()
     return (
         os.environ.get("ONEX_TRANSPORT_KAFKA_BOOTSTRAP")
         or os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
-        or "localhost:19092"
+        or ""
     )
 
 
@@ -61,7 +71,7 @@ def _can_reach(host: str, port: int, timeout: float = 2.0) -> bool:
 
 def kafka_available() -> bool:
     """True when the resolved bootstrap broker is TCP-reachable."""
-    first = transport_bootstrap().split(",")[0]
+    first = transport_bootstrap().split(",")[0].strip()
     host, _, port = first.partition(":")
     if not host or not port.isdigit():
         return False
@@ -139,6 +149,8 @@ async def recreate_topic(
                     "topic-create headroom."
                 )
             raise RuntimeError(f"create_topics {topic!r} failed error_code={code}")
+        else:
+            raise TimeoutError(f"topic {topic!r} was not created on {bootstrap}")
 
         async def _present() -> bool:
             return await _topic_error_code(admin, topic) == _ERR_NONE
