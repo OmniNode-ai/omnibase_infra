@@ -47,6 +47,9 @@ from omnibase_core.runtime.transport.runtime_in_memory_broker import InMemoryBro
 from omnibase_core.runtime.transport.runtime_in_memory_transport import (
     InMemoryTransport,
 )
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
     ModelContractVersion,
 )
@@ -67,20 +70,22 @@ from omnibase_infra.runtime.core_runtime.dlq_resolver import (
 )
 from omnibase_infra.runtime.core_runtime.routing_map_builder import build_routing_map
 from omnibase_infra.runtime.core_runtime.single_owner import assert_single_owner_split
-from omnibase_infra.topics.platform_topic_suffixes import (
-    SUFFIX_DELEGATION_INFERENCE_REQUEST,
-    SUFFIX_DELEGATION_INFERENCE_RESPONSE,
-    SUFFIX_DELEGATION_REQUEST,
-    SUFFIX_DELEGATION_ROUTING_DECISION,
-    SUFFIX_DELEGATION_ROUTING_REQUEST,
-)
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+_TOPIC_REGISTRY = ServiceTopicRegistry.from_defaults()
+
+
+def _topic(key: str) -> str:
+    return _TOPIC_REGISTRY.resolve(key)
+
 
 # --- topics (the real delegation command spine) --------------------------------------
-REQUEST_TOPIC = SUFFIX_DELEGATION_REQUEST
-DECISION_TOPIC = SUFFIX_DELEGATION_ROUTING_DECISION
-ROUTING_REQUEST_TOPIC = SUFFIX_DELEGATION_ROUTING_REQUEST
-INFERENCE_REQUEST_TOPIC = SUFFIX_DELEGATION_INFERENCE_REQUEST
-INFERENCE_RESPONSE_TOPIC = SUFFIX_DELEGATION_INFERENCE_RESPONSE
+REQUEST_TOPIC = _topic(topic_keys.DELEGATION_REQUEST)
+DECISION_TOPIC = _topic(topic_keys.DELEGATION_ROUTING_DECISION)
+ROUTING_REQUEST_TOPIC = _topic(topic_keys.DELEGATION_ROUTING_REQUEST)
+INFERENCE_REQUEST_TOPIC = _topic(topic_keys.DELEGATION_INFERENCE_REQUEST)
+INFERENCE_RESPONSE_TOPIC = _topic(topic_keys.DELEGATION_INFERENCE_RESPONSE)
 GROUP = "onex.core-runtime.delegation"
 FIXED_CLOCK = datetime(2026, 7, 18, 12, 0, 0, tzinfo=UTC)
 
@@ -144,8 +149,16 @@ class _DelegationFsmFixture:
                 max_tokens=256,
                 correlation_id=corr,
             )
+        correlation_id = getattr(request, "correlation_id", None)
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id if isinstance(correlation_id, UUID) else None,
+            operation="s8_delegation_fsm_seam",
+            target_name=type(request).__name__,
+        )
         raise ModelOnexError(  # fail closed on an undeclared payload type
             message=f"unexpected payload type {type(request).__name__} at FSM seam",
+            correlation_id=context.correlation_id,
+            infra_context=context.model_dump(mode="json"),
         )
 
 

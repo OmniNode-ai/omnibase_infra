@@ -39,7 +39,9 @@ def _route() -> DispatchRoute:
     return DispatchRoute(name="H", handler=_H(), published_events={})
 
 
-def _contract(name: str, subscribe: tuple[str, ...]) -> ModelDiscoveredContract:
+def _contract(
+    name: str, subscribe: tuple[str, ...], *, plugin_managed: bool = False
+) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
         node_type="REDUCER_GENERIC",
@@ -47,7 +49,9 @@ def _contract(name: str, subscribe: tuple[str, ...]) -> ModelDiscoveredContract:
         contract_path=Path(f"/nonexistent/{name}.yaml"),
         entry_point_name=name,
         package_name="omnimarket",
-        event_bus=ModelEventBusWiring(subscribe_topics=subscribe),
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=subscribe, plugin_managed=plugin_managed
+        ),
     )
 
 
@@ -77,6 +81,16 @@ def test_raises_when_routing_map_incomplete() -> None:
             routing_map={},  # missing route
             legacy_subscribed_topics=frozenset(),
             contracts=[_contract("owner", (TOPIC,))],
+        )
+
+
+def test_raises_when_plugin_managed_contract_is_allowlisted() -> None:
+    with pytest.raises(ModelOnexError, match="plugin-managed contract"):
+        assert_single_owner_split(
+            core_runtime_topics=frozenset({TOPIC}),
+            routing_map={TOPIC: _route()},
+            legacy_subscribed_topics=frozenset(),
+            contracts=[_contract("plugin_owner", (TOPIC,), plugin_managed=True)],
         )
 
 

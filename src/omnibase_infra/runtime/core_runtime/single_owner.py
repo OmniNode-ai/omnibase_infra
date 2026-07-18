@@ -99,6 +99,19 @@ def assert_single_owner_split(
     for contract in contracts:
         if contract.event_bus is None:
             continue
+        if contract.event_bus.plugin_managed and (
+            core_runtime_topics & set(contract.event_bus.subscribe_topics)
+        ):
+            raise ModelOnexError(
+                message=(
+                    "S8 single-owner (4b): plugin-managed contract "
+                    f"{contract.name!r} subscribes to allowlist topic(s) "
+                    f"{sorted(core_runtime_topics & set(contract.event_bus.subscribe_topics))}. "
+                    "Plugin-managed subscription paths do not yet expose ownership-aware "
+                    "consumer group validation; fail closed."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
         for topic in contract.event_bus.subscribe_topics:
             if topic in core_runtime_topics:
                 subscribers_by_topic.setdefault(topic, []).append(contract)
