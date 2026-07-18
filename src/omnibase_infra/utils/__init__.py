@@ -17,6 +17,7 @@ This package provides common utilities used across the infrastructure:
     - util_retry_optimistic: Optimistic locking retry helper with exponential backoff
     - util_semver: Semantic versioning validation utilities
     - util_consumer_restart: Process-level restart-with-backoff for standalone Kafka consumers
+    - util_topic_event_type: Derive the ONEX event_type routing key from a topic name
     - util_topic_validation: Kafka topic name validation (non-empty, max 255 chars, valid chars)
 """
 
@@ -95,6 +96,7 @@ from omnibase_infra.utils.util_semver import (
     validate_semver,
     validate_version_lenient,
 )
+from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
 from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 __all__: list[str] = [
@@ -112,6 +114,7 @@ __all__: list[str] = [
     "assert_producer_emitted",
     "clear_correlation_id",
     "compute_consumer_group_id",
+    "derive_event_type_from_topic",
     "ensure_timezone_aware",
     "generate_correlation_id",
     "get_correlation_id",

@@ -62,7 +62,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
-from omnibase_infra.utils import sanitize_error_message
+from omnibase_infra.utils import derive_event_type_from_topic, sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.models.projectors.model_projection_intent import (
@@ -371,33 +371,15 @@ class DispatchResultApplier:
     def _derive_event_type_from_topic(topic: str) -> str | None:
         """Derive the event_type routing key from an ONEX topic name.
 
-        ONEX topics follow the convention::
+        Thin delegation to the shared ``derive_event_type_from_topic`` helper so
+        this applier and the state_io in-row outbox publish path
+        (``_publish_outbox_batch``) stamp ``event_type`` from ONE canonical
+        derivation and cannot diverge (OMN-14743 — the outbox previously omitted
+        the stamp entirely, leaving ``event_type=None`` and stalling delegation).
 
-            onex.{kind}.{producer}.{event-name}.v{n}
-
-        This method extracts ``{producer}.{event-name}`` as a dot-path routing
-        key suitable for ``ModelEventEnvelope.event_type``, which is the alias
-        format used by dispatcher registration (e.g.
-        ``omnimarket.swarm-endpoint-health-completed``).
-
-        Args:
-            topic: Full topic name following ONEX naming convention
-                (e.g., ``'onex.evt.omnimarket.swarm-endpoint-health-completed.v1'``).
-
-        Returns:
-            Derived event_type as ``'{producer}.{event-name}'``
-            (e.g., ``'omnimarket.swarm-endpoint-health-completed'``), or ``None``
-            if the topic does not follow the expected ONEX format.
-
-        .. versionadded:: 0.41.0 (OMN-12116)
+        .. versionadded:: 0.41.0 (OMN-12116); lifted to shared helper OMN-14743.
         """
-        parts = topic.split(".")
-        if len(parts) >= 5 and parts[0] == "onex":
-            # onex.{kind}.{producer}.{event-name}.v{n}
-            producer = parts[2]
-            event_name = parts[3]
-            return f"{producer}.{event_name}"
-        return None
+        return derive_event_type_from_topic(topic)
 
     def _execute_projection(
         self,
