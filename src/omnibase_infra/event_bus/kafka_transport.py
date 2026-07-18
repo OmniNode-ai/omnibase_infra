@@ -350,14 +350,33 @@ class KafkaTransport:
         Does NOT advance the committed offset; seeks the live consumer's fetch
         position back to ``msg.offset`` so the next ``poll`` refetches it and every
         later offset on that partition.
+
+        Sibling partitions are NOT touched (OMN-14757). ``_prime`` eagerly prefetches
+        one bounded batch across EVERY assigned partition, advancing every partition's
+        fetch position. A ``seek`` rewinds only the nacked partition, so its buffered
+        records are stale and must be refetched — but the buffered records from OTHER
+        partitions are the ONLY remaining copy at their (already-advanced) fetch
+        position. Clearing the whole buffer here (the prior behaviour) dropped them:
+        they became invisible until a consumer restart even though the runtime never
+        touched them — an at-least-once liveness bug and a substitutability break vs
+        the per-partition-lazy in-memory transport, whose ``nack`` touches only the
+        nacked partition. So we discard ONLY the nacked partition's stale residue,
+        RETAIN the sibling residue, and re-prime to refill the sought partition.
         """
         msg = cast("ModelTransportMessage", message)
         consumer = self._require_consumer()
         topic_partition = TopicPartition(msg.topic, msg.partition)
         consumer.seek(topic_partition, msg.offset)
-        # Any prefetched records are pre-seek and now stale; drop them and re-prime
-        # from the sought position so the next poll() returns the redelivered tail.
-        self._buffer.clear()
+        # Keep prefetched residue from OTHER (topic, partition)s — dropping it strands
+        # those messages until restart. Only the nacked partition's buffered records
+        # are stale post-seek; drop just those and re-prime to refill from the sought
+        # position. Per-partition offset order is preserved: retained siblings stay
+        # ascending, and the re-primed nacked-partition records append after them.
+        self._buffer = [
+            buffered
+            for buffered in self._buffer
+            if (buffered.topic, buffered.partition) != (msg.topic, msg.partition)
+        ]
         await self._prime(consumer)
 
     # -- producer protocol ------------------------------------------------------

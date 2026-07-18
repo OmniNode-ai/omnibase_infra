@@ -64,8 +64,13 @@ class TestKafkaTransportConformance(TransportConformanceSuite):
     @pytest.fixture(autouse=True)
     async def _fresh_topic(self, _bootstrap: str) -> None:
         # A fresh topic per test resets offsets + committed cursors, matching the
-        # suite's documented "fresh Kafka topic" isolation.
-        await recreate_topic(_bootstrap, CONFORMANCE_TOPIC, partitions=1)
+        # suite's documented "fresh Kafka topic" isolation. Provisioned with >=2
+        # partitions so the shared suite's multi-partition nack test
+        # (test_nack_on_one_partition_does_not_strand_sibling_partitions, OMN-14757)
+        # has real sibling partitions to strand on the real broker; the same-key
+        # single-partition tests still land on one partition, so their assertions
+        # are unaffected.
+        await recreate_topic(_bootstrap, CONFORMANCE_TOPIC, partitions=2)
 
     @pytest.fixture
     async def transport_producer(
