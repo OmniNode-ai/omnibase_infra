@@ -4471,6 +4471,7 @@ async def subscribe_wired_contract_topics(
     provisioner: ProtocolTopicProvisioner | None = None,
     readiness_config: ModelTopicReadinessConfig | None = None,
     attach_results_out: list[ModelContractAttachResult] | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
@@ -4542,6 +4543,7 @@ async def subscribe_wired_contract_topics(
                 result_applier=(result_appliers_by_contract or {}).get(name),
                 provisioner=provisioner,
                 readiness_config=knobs,
+                core_runtime_topics=core_runtime_topics,
             )
 
     attach_results = await asyncio.gather(
@@ -4568,6 +4570,7 @@ async def _interleave_contract(
     result_applier: ProtocolDispatchResultApplier | None,
     provisioner: ProtocolTopicProvisioner | None,
     readiness_config: ModelTopicReadinessConfig,
+    core_runtime_topics: frozenset[str] = frozenset(),
 ) -> ModelContractAttachResult:
     """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
 
@@ -4631,6 +4634,7 @@ async def _interleave_contract(
             event_bus=event_bus,
             environment=environment,
             result_applier=result_applier,
+            core_runtime_topics=core_runtime_topics,
         )
     except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
         logger.warning(
@@ -5000,8 +5004,16 @@ async def _subscribe_contract_topics(
     event_bus: object,
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None = None,
+    core_runtime_topics: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Subscribe all declared event-bus topics for a wired contract."""
+    """Subscribe all declared event-bus topics for a wired contract.
+
+    OMN-14758 (S6): topics in ``core_runtime_topics`` are owned by the ONE core
+    ``RuntimeDispatch`` loop, not the legacy push path. The legacy callback is NOT
+    built/subscribed for those topics — this split is the mechanism that makes the S6
+    ``RuntimeDispatch ⟂ legacy`` single-owner assertion hold. Default EMPTY ⇒ every
+    topic is subscribed by the legacy path exactly as before (zero behavior change).
+    """
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
 
@@ -5060,6 +5072,16 @@ async def _subscribe_contract_topics(
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
     for topic in contract.event_bus.subscribe_topics:
+        # OMN-14758 (S6): the ONE core RuntimeDispatch owns this topic — skip the
+        # legacy push callback so ownership is disjoint (single-owner invariant §c.3).
+        if topic in core_runtime_topics:
+            logger.info(
+                "Auto-wiring: skipping legacy subscription for topic=%s node=%s "
+                "(ownership=core-runtime, OMN-14758)",
+                topic,
+                contract.name,
+            )
+            continue
         if _is_raw_event_projection_contract(contract):
             if effective_result_applier is None:
                 raise ModelOnexError(

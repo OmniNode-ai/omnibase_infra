@@ -73,6 +73,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
     "ProtocolTopicProvisioner": "protocols/protocol_topic_provisioner.py",  # [RUNTIME] OMN-13237 per-contract boot interleave provisioner boundary (provision+readiness); fake-swappable for the no-global-gather regression test
     "DispatchTarget": "runtime/intent_effects/intent_effect_dispatch_bridge.py",  # [RUNTIME] OMN-14516 local bridge target for contract-derived projection intent dispatch
+    "CoreTransport": "runtime/core_runtime/composition.py",  # [DI] OMN-14758 S6 combined consumer+producer transport face injected into the ONE core RuntimeDispatch
+    "DefBTarget": "runtime/core_runtime/routing_map_builder.py",  # [DI] OMN-14758 S6 def-B handler target (handle(request)->response) returned by the injected handler resolver
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",

@@ -3151,6 +3151,16 @@ async def bootstrap() -> int:
             from omnibase_infra.protocols.protocol_topic_provisioner import (
                 ProtocolTopicProvisioner,
             )
+            from omnibase_infra.runtime.core_runtime.composition import (
+                parse_core_runtime_topics,
+            )
+
+            # OMN-14758 (S6): the ONEX_CORE_RUNTIME_TOPICS allowlist (default EMPTY ⇒
+            # zero behavior change). Threaded into the legacy subscribe path so the
+            # legacy push callback is NOT built for any core-runtime topic (single-owner
+            # split, §c.4). The core RuntimeDispatch loop is built + started below only
+            # when the allowlist is non-empty.
+            core_runtime_topics = parse_core_runtime_topics(os.environ)
 
             _attach_results: list[ModelContractAttachResult] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
@@ -3163,6 +3173,7 @@ async def bootstrap() -> int:
                 provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
                 readiness_config=resolve_topic_readiness_config(),
                 attach_results_out=_attach_results,
+                core_runtime_topics=core_runtime_topics,
             )
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
@@ -3189,6 +3200,41 @@ async def bootstrap() -> int:
                                 pattern,
                                 correlation_id,
                             )
+
+            # OMN-14758 (S6): build + start the ONE core RuntimeDispatch loop for the
+            # allowlisted delegation command topics. Dormant unless the allowlist is
+            # non-empty; the legacy subscribe path above already skipped these topics so
+            # ownership is disjoint (single-owner split, §c). The loop is registered for
+            # clean shutdown alongside the plugin unsubscribe callbacks.
+            if core_runtime_topics:
+                from omnibase_infra.runtime.core_runtime.kernel_glue import (
+                    build_and_start_core_runtime,
+                )
+
+                _legacy_subscribed = frozenset(
+                    topic
+                    for topics in auto_wired_subscriptions.values()
+                    for topic in topics
+                )
+                _core_runtime_handle = build_and_start_core_runtime(
+                    core_runtime_topics=core_runtime_topics,
+                    contracts=auto_wiring_manifest_for_subscriptions.contracts,
+                    legacy_subscribed_topics=_legacy_subscribed,
+                    use_kafka=use_kafka,
+                    kafka_bootstrap_servers=(
+                        kafka_bootstrap_servers if use_kafka else None
+                    ),
+                    environment=environment,
+                    container=container,
+                )
+                plugin_unsubscribe_callbacks.append(_core_runtime_handle.stop)
+                logger.info(
+                    "S6 core runtime loop active: topics=%s dlq_provision=%s "
+                    "(correlation_id=%s)",
+                    sorted(core_runtime_topics),
+                    sorted(_core_runtime_handle.dlq_provision_topics),
+                    correlation_id,
+                )
 
         # --- Pass 2: Start consumers for ready plugins only ---
         # ready_plugins is a subset of activated_plugins: only plugins that
