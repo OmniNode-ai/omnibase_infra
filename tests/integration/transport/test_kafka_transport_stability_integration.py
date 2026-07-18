@@ -29,6 +29,7 @@ from ._kafka_env import (
     kafka_available,
     recreate_topic,
     transport_bootstrap,
+    transport_topic_prefix,
 )
 
 pytestmark = [
@@ -66,7 +67,7 @@ def broker_bootstrap() -> str:
 
 @pytest.fixture
 async def throwaway_topic(broker_bootstrap: str) -> AsyncIterator[str]:
-    topic = f"transport.s3.integration.{uuid.uuid4().hex[:8]}.v1"
+    topic = f"{transport_topic_prefix()}.{uuid.uuid4().hex[:8]}.v1"
     await recreate_topic(broker_bootstrap, topic, partitions=1)
     try:
         yield topic

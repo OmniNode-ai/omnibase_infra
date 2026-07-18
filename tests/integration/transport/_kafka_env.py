@@ -37,6 +37,7 @@ __all__ = [
     "kafka_available",
     "recreate_topic",
     "transport_bootstrap",
+    "transport_topic_prefix",
 ]
 
 # Kafka protocol error codes used here.
@@ -59,6 +60,18 @@ def transport_bootstrap() -> str:
         or os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
         or ""
     )
+
+
+def transport_topic_prefix() -> str:
+    """Resolve the live transport-test topic prefix from environment config."""
+    _load_test_env()
+    prefix = os.environ.get("ONEX_TRANSPORT_KAFKA_TOPIC_PREFIX", "").strip().strip(".")
+    if not prefix:
+        raise RuntimeError(
+            "ONEX_TRANSPORT_KAFKA_TOPIC_PREFIX must be set for live Kafka "
+            "transport tests"
+        )
+    return prefix
 
 
 def _can_reach(host: str, port: int, timeout: float = 2.0) -> bool:
