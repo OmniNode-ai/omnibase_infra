@@ -21,7 +21,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -47,6 +47,7 @@ from omnibase_infra.runtime.core_runtime.routing_map_builder import (
     DefBTarget,
     HandlerResolver,
 )
+from omnibase_infra.runtime.core_runtime.single_owner import CORE_RUNTIME_GROUP
 from omnibase_infra.utils import compute_consumer_group_id
 
 if TYPE_CHECKING:
@@ -58,8 +59,9 @@ __all__ = ["build_and_start_core_runtime", "build_kernel_handler_resolver"]
 
 # Dedicated consumer group for the ONE core-runtime loop (single group member ⇒ all
 # partitions assigned). Distinct from the per-node legacy groups so offsets are
-# independent (rollback safety, R-4).
-_CORE_RUNTIME_GROUP = "onex.core-runtime.delegation"
+# independent (rollback safety, R-4). Canonical constant lives in ``single_owner`` so the
+# §4b fan-out gate asserts non-collision against the SAME string the transport joins.
+_CORE_RUNTIME_GROUP = CORE_RUNTIME_GROUP
 
 
 def _param_wants_container(param: inspect.Parameter) -> bool:
@@ -227,6 +229,7 @@ async def build_and_start_core_runtime(
     core_runtime_topics: frozenset[str],
     contracts: Sequence[ModelDiscoveredContract],
     legacy_subscribed_topics: frozenset[str],
+    owners: Mapping[str, str] | None = None,
     use_kafka: bool,
     kafka_bootstrap_servers: str | None,
     environment: str,
@@ -294,6 +297,7 @@ async def build_and_start_core_runtime(
         transport=cast("CoreTransport", transport),
         handler_resolver=build_kernel_handler_resolver(container),
         legacy_subscribed_topics=legacy_subscribed_topics,
+        owners=owners,
         lag_zero_provider=_lag_zero_topics,
     )
     # R-6: DLQ targets must exist before the first dead-letter send — provision BEFORE

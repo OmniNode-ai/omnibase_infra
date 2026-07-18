@@ -3152,15 +3152,32 @@ async def bootstrap() -> int:
                 ProtocolTopicProvisioner,
             )
             from omnibase_infra.runtime.core_runtime.composition import (
+                parse_core_runtime_topic_owners,
                 parse_core_runtime_topics,
+                resolve_core_runtime_owners,
             )
 
             # OMN-14758 (S6): the ONEX_CORE_RUNTIME_TOPICS allowlist (default EMPTY ⇒
             # zero behavior change). Threaded into the legacy subscribe path so the
-            # legacy push callback is NOT built for any core-runtime topic (single-owner
-            # split, §c.4). The core RuntimeDispatch loop is built + started below only
-            # when the allowlist is non-empty.
+            # legacy push callback is NOT built for a core-runtime topic's OWNER
+            # (single-owner split, §c.4). The core RuntimeDispatch loop is built +
+            # started below only when the allowlist is non-empty.
             core_runtime_topics = parse_core_runtime_topics(os.environ)
+            # OMN-14771 (S8 §D1=4b): resolve the ONE owning contract per allowlist topic.
+            # A single-subscriber topic auto-owns; a genuine fan-out topic requires an
+            # explicit ONEX_CORE_RUNTIME_TOPIC_OWNERS designation (fail-closed). The map
+            # is passed to BOTH the legacy skip (skip only the owner's subscription) and
+            # the core-runtime build (route + single-owner gate). Empty when the allowlist
+            # is empty ⇒ zero behavior change.
+            core_runtime_owners = (
+                resolve_core_runtime_owners(
+                    auto_wiring_manifest_for_subscriptions.contracts,
+                    core_runtime_topics,
+                    designated_owners=parse_core_runtime_topic_owners(os.environ),
+                )
+                if core_runtime_topics
+                else {}
+            )
 
             _attach_results: list[ModelContractAttachResult] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
@@ -3174,6 +3191,7 @@ async def bootstrap() -> int:
                 readiness_config=resolve_topic_readiness_config(),
                 attach_results_out=_attach_results,
                 core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
             )
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
                 tuple(_attach_results)
@@ -3220,6 +3238,7 @@ async def bootstrap() -> int:
                     core_runtime_topics=core_runtime_topics,
                     contracts=auto_wiring_manifest_for_subscriptions.contracts,
                     legacy_subscribed_topics=_legacy_subscribed,
+                    owners=core_runtime_owners,
                     use_kafka=use_kafka,
                     kafka_bootstrap_servers=(
                         kafka_bootstrap_servers if use_kafka else None

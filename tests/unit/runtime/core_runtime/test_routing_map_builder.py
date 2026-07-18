@@ -150,6 +150,33 @@ def test_multi_handler_same_topic_fails_closed() -> None:
         )
 
 
+def test_fanout_owner_designation_builds_only_owner_route() -> None:
+    """S8 §4b: a designated owner binds the ONLY route; other subscribers are skipped."""
+    entry = ModelHandlerRoutingEntry(handler=ModelHandlerRef(name="HOwner", module="m"))
+    owner = _make_contract(
+        name="node_delegation_orchestrator",
+        subscribe_topics=(ROUTING_TOPIC,),
+        entries=(entry,),
+    )
+    # A second + third subscriber on the same topic that MUST NOT produce a route.
+    legacy_a = _make_contract(
+        name="node_projection_a", subscribe_topics=(ROUTING_TOPIC,), entries=(entry,)
+    )
+    legacy_b = _make_contract(
+        name="node_projection_b", subscribe_topics=(ROUTING_TOPIC,), entries=(entry,)
+    )
+    routing_map = build_routing_map(
+        [owner, legacy_a, legacy_b],
+        frozenset({ROUTING_TOPIC}),
+        handler_resolver=_resolver,
+        owners={ROUTING_TOPIC: "node_delegation_orchestrator"},
+        model_resolver=_model_resolver,
+        published_events_loader=_pe_loader,
+    )
+    assert set(routing_map) == {ROUTING_TOPIC}
+    assert routing_map[ROUTING_TOPIC].name == "HOwner"
+
+
 def test_non_allowlisted_topic_is_not_built() -> None:
     other = "onex.cmd.omnibase-infra.other-command.v1"
     entry = ModelHandlerRoutingEntry(handler=ModelHandlerRef(name="H", module="m"))

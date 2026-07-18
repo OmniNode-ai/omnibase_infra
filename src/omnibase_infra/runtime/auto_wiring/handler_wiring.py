@@ -4472,6 +4472,7 @@ async def subscribe_wired_contract_topics(
     readiness_config: ModelTopicReadinessConfig | None = None,
     attach_results_out: list[ModelContractAttachResult] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
@@ -4544,6 +4545,7 @@ async def subscribe_wired_contract_topics(
                 provisioner=provisioner,
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
+                core_runtime_owners=core_runtime_owners,
             )
 
     attach_results = await asyncio.gather(
@@ -4571,6 +4573,7 @@ async def _interleave_contract(
     provisioner: ProtocolTopicProvisioner | None,
     readiness_config: ModelTopicReadinessConfig,
     core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> ModelContractAttachResult:
     """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
 
@@ -4635,6 +4638,7 @@ async def _interleave_contract(
             environment=environment,
             result_applier=result_applier,
             core_runtime_topics=core_runtime_topics,
+            core_runtime_owners=core_runtime_owners,
         )
     except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
         logger.warning(
@@ -5005,15 +5009,24 @@ async def _subscribe_contract_topics(
     environment: str,
     result_applier: ProtocolDispatchResultApplier | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
+    core_runtime_owners: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Subscribe all declared event-bus topics for a wired contract.
 
     OMN-14758 (S6): topics in ``core_runtime_topics`` are owned by the ONE core
     ``RuntimeDispatch`` loop, not the legacy push path. The legacy callback is NOT
-    built/subscribed for those topics — this split is the mechanism that makes the S6
+    built/subscribed for those topics — this split is the mechanism that makes the
     ``RuntimeDispatch ⟂ legacy`` single-owner assertion hold. Default EMPTY ⇒ every
     topic is subscribed by the legacy path exactly as before (zero behavior change).
+
+    OMN-14771 (S8 §D1=4b): ``core_runtime_owners`` maps an allowlisted topic to the ONE
+    contract whose consumption MOVED to the core runtime. For a genuine fan-out topic the
+    legacy callback is skipped ONLY for the OWNER; the topic's OTHER subscribers stay
+    legacy fan-out consumers on their own distinct consumer groups. When a topic has no
+    owner entry (a single-owner allowlist topic, or owners unavailable), the S6 behavior
+    is preserved: the sole subscriber's legacy callback is skipped.
     """
+    owner_by_topic = dict(core_runtime_owners or {})
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
 
@@ -5072,16 +5085,30 @@ async def _subscribe_contract_topics(
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
     for topic in contract.event_bus.subscribe_topics:
-        # OMN-14758 (S6): the ONE core RuntimeDispatch owns this topic — skip the
-        # legacy push callback so ownership is disjoint (single-owner invariant §c.3).
+        # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
+        # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
+        # ownership is disjoint (single-owner invariant §c.3). A designated-but-different
+        # owner means this contract is a legacy fan-out consumer that KEEPS its
+        # subscription on its own distinct consumer group. No owner entry ⇒ S6 behavior
+        # (skip the sole subscriber).
         if topic in core_runtime_topics:
+            owner = owner_by_topic.get(topic)
+            if owner is None or owner == contract.name:
+                logger.info(
+                    "Auto-wiring: skipping legacy subscription for topic=%s node=%s "
+                    "(ownership=core-runtime, OMN-14758/OMN-14771)",
+                    topic,
+                    contract.name,
+                )
+                continue
             logger.info(
-                "Auto-wiring: skipping legacy subscription for topic=%s node=%s "
-                "(ownership=core-runtime, OMN-14758)",
+                "Auto-wiring: keeping legacy fan-out subscription for topic=%s node=%s "
+                "(core-runtime owner=%s, non-owner stays legacy on its own group, "
+                "OMN-14771 §4b)",
                 topic,
                 contract.name,
+                owner,
             )
-            continue
         if _is_raw_event_projection_contract(contract):
             if effective_result_applier is None:
                 raise ModelOnexError(
