@@ -3216,7 +3216,7 @@ async def bootstrap() -> int:
                     for topics in auto_wired_subscriptions.values()
                     for topic in topics
                 )
-                _core_runtime_handle = build_and_start_core_runtime(
+                _core_runtime_handle = await build_and_start_core_runtime(
                     core_runtime_topics=core_runtime_topics,
                     contracts=auto_wiring_manifest_for_subscriptions.contracts,
                     legacy_subscribed_topics=_legacy_subscribed,
@@ -3226,6 +3226,13 @@ async def bootstrap() -> int:
                     ),
                     environment=environment,
                     container=container,
+                    # R-6: DLQ topics are provisioned via the boot provisioner before the
+                    # loop starts; §c.5/§d: fold loop-health + phantom alarm into /ready.
+                    provisioner=_cast(
+                        "ProtocolTopicProvisioner | None", topic_provisioner
+                    ),
+                    runtime=runtime,
+                    correlation_id=correlation_id,
                 )
                 plugin_unsubscribe_callbacks.append(_core_runtime_handle.stop)
                 logger.info(

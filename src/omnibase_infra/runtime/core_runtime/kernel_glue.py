@@ -21,8 +21,9 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
-from collections.abc import Mapping, Sequence
-from typing import cast
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, cast
+from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -31,6 +32,9 @@ from omnibase_core.models.dispatch.model_handler_ref import ModelHandlerRef
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.protocols.protocol_topic_provisioner import (
+    ProtocolTopicProvisioner,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
     ModelDiscoveredContract,
 )
@@ -45,6 +49,9 @@ from omnibase_infra.runtime.core_runtime.routing_map_builder import (
 )
 from omnibase_infra.utils import compute_consumer_group_id
 
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["build_and_start_core_runtime", "build_kernel_handler_resolver"]
@@ -55,13 +62,78 @@ __all__ = ["build_and_start_core_runtime", "build_kernel_handler_resolver"]
 _CORE_RUNTIME_GROUP = "onex.core-runtime.delegation"
 
 
-def build_kernel_handler_resolver(container: ModelONEXContainer) -> HandlerResolver:
-    """Return a resolver that imports + instantiates a contract handler class.
+def _param_wants_container(param: inspect.Parameter) -> bool:
+    """True when ``param`` is the ONEX container-injection parameter.
 
-    R-7 (parity): a handler whose ``__init__`` accepts a container is constructed WITH the
-    shared kernel container so it wires the same dependencies as the legacy path; a
-    no-arg handler is constructed directly. This is best-effort shared-construction; full
-    dispatch-engine instance reuse is verified at the canary (steps 8-9, operator-gated).
+    Matched by the canonical name ``container`` or by a ``ModelONEXContainer`` annotation
+    (string annotations are compared by substring because ``from __future__ import
+    annotations`` defers them to strings).
+    """
+    if param.name == "container":
+        return True
+    annotation = param.annotation
+    if annotation is ModelONEXContainer:
+        return True
+    return isinstance(annotation, str) and "ModelONEXContainer" in annotation
+
+
+def _construct_handler(cls: type, container: ModelONEXContainer) -> object:
+    """Construct ``cls`` by EXPLICIT constructor binding — never a positional guess (R-7).
+
+    Deterministic, fail-closed:
+
+    * no required constructor parameter → ``cls()``;
+    * exactly one required parameter that is the ONEX container (by name or annotation)
+      → bound by keyword (or positionally when positional-only);
+    * anything else → :class:`ModelOnexError`. A ``TypeError`` is NOT swallowed and a
+      differently-named required argument is NOT silently fed the container.
+    """
+    try:
+        parameters = list(inspect.signature(cls).parameters.values())
+    except (TypeError, ValueError):
+        parameters = []
+    required = [
+        p
+        for p in parameters
+        if p.default is inspect.Parameter.empty
+        and p.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    ]
+    if not required:
+        return cls()
+    if len(required) == 1 and _param_wants_container(required[0]):
+        param = required[0]
+        if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            return cls(container)
+        return cls(**{param.name: container})
+    raise ModelOnexError(
+        message=(
+            f"S6 kernel glue: handler {cls.__module__}.{cls.__qualname__} has an "
+            f"unsupported constructor signature (required params "
+            f"{[p.name for p in required]}). The core-runtime resolver only constructs a "
+            "no-arg handler or one taking a single ONEX container parameter. Register "
+            "the handler instance in the shared container service registry for R-7 "
+            "instance reuse, or give it a container-only constructor — refusing to guess "
+            "constructor arguments."
+        ),
+        error_code=EnumCoreErrorCode.INVALID_STATE,
+    )
+
+
+def build_kernel_handler_resolver(container: ModelONEXContainer) -> HandlerResolver:
+    """Return a resolver that reuses shared handler instances, else builds fail-closed.
+
+    R-7 (parity): a handler already registered as an INSTANCE in the shared container's
+    service registry — i.e. the same object the legacy dispatch path wired — is REUSED
+    verbatim so a moved node runs with identical dependency wiring. When no shared
+    instance exists, the handler class is constructed by EXPLICIT, fail-closed
+    constructor binding (see :func:`_construct_handler`), never a positional guess and
+    never a swallowed ``TypeError``. Full dispatch-engine instance reuse for every
+    handler is verified at the canary (steps 8-9, operator-gated).
     """
 
     def _resolve(ref: ModelHandlerRef) -> DefBTarget:
@@ -84,28 +156,73 @@ def build_kernel_handler_resolver(container: ModelONEXContainer) -> HandlerResol
                 ),
                 error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
             )
-        # Constructor signature EXCLUDING self (signature(cls) resolves __init__).
-        params: Mapping[str, inspect.Parameter]
+        # R-7 shared-instance reuse: prefer the instance the legacy wiring already
+        # constructed and registered in the shared container (sync resolution — the
+        # RuntimeDispatch routing map is built synchronously). A miss raises and falls
+        # through to deterministic construction.
+        shared: object | None
         try:
-            params = inspect.signature(cls).parameters
-        except (TypeError, ValueError):
-            params = {}
-        # __init__(self, container) style vs no-arg style.
-        wants_container = "container" in params or len(params) >= 1
-        instance: object
-        if wants_container:
-            try:
-                instance = cls(container)
-            except TypeError:
-                instance = cls()
-        else:
-            instance = cls()
-        return cast("DefBTarget", instance)
+            shared = container.get_service_sync(cls)
+        except Exception:  # noqa: BLE001 — registry miss must not break resolution
+            shared = None
+        if shared is not None:
+            logger.info(
+                "S6 kernel glue: reusing shared %s.%s instance from the container "
+                "(R-7 parity).",
+                ref.module,
+                ref.name,
+            )
+            return cast("DefBTarget", shared)
+        return cast("DefBTarget", _construct_handler(cls, container))
 
     return _resolve
 
 
-def build_and_start_core_runtime(
+async def _provision_dlq_topics(
+    dlq_topics: frozenset[str],
+    *,
+    provisioner: ProtocolTopicProvisioner | None,
+    correlation_id: UUID | None,
+) -> None:
+    """Ensure every resolved DLQ topic exists BEFORE the dispatch loop starts (R-6).
+
+    Fail-closed: the dispatch loop must not start with an unprovisioned dead-letter
+    target (the first poison message would silently lose its DLQ send). An absent
+    provisioner or a failed creation raises rather than starting a lossy loop.
+    """
+    if not dlq_topics:
+        return
+    ordered = sorted(dlq_topics)
+    if provisioner is None:
+        raise ModelOnexError(
+            message=(
+                f"S6 core runtime: DLQ topics {ordered} must be provisioned before the "
+                "dispatch loop starts, but no topic provisioner is available. Refusing "
+                "to start the loop with unprovisioned dead-letter targets (R-6)."
+            ),
+            error_code=EnumCoreErrorCode.INVALID_STATE,
+        )
+    for topic in ordered:
+        created = await provisioner.ensure_topic_exists(
+            topic, correlation_id=correlation_id
+        )
+        if not created:
+            raise ModelOnexError(
+                message=(
+                    f"S6 core runtime: failed to provision DLQ topic {topic!r} before "
+                    "loop start. Refusing to start the dispatch loop with an "
+                    "unprovisioned dead-letter target (R-6)."
+                ),
+                error_code=EnumCoreErrorCode.INVALID_STATE,
+            )
+    logger.info(
+        "S6 core runtime: provisioned %d DLQ topic(s) before loop start: %s",
+        len(ordered),
+        ordered,
+    )
+
+
+async def build_and_start_core_runtime(
     *,
     core_runtime_topics: frozenset[str],
     contracts: Sequence[ModelDiscoveredContract],
@@ -114,10 +231,19 @@ def build_and_start_core_runtime(
     kafka_bootstrap_servers: str | None,
     environment: str,
     container: ModelONEXContainer,
+    provisioner: ProtocolTopicProvisioner | None = None,
+    runtime: RuntimeHostProcess | None = None,
+    correlation_id: UUID | None = None,
 ) -> CoreRuntimeHandle:
     """Construct the Kafka transport + ``RuntimeDispatch`` and start the loop (§c.1-c.5).
 
     Precondition: ``core_runtime_topics`` non-empty (the kernel short-circuits on empty).
+
+    Ordering (R-6): resolved DLQ topics are provisioned via ``provisioner`` BEFORE the
+    dispatch loop starts, so the first dead-letter send always targets an existing topic.
+    When ``runtime`` is supplied, the handle's readiness snapshot (loop health + phantom
+    alarm, §c.5/§d) is registered as a supplemental readiness probe so a crashed loop or a
+    phantom subscription flips ``/ready`` FAIL.
     """
     if not core_runtime_topics:
         raise ValueError("build_and_start_core_runtime requires a non-empty allowlist")
@@ -156,6 +282,11 @@ def build_and_start_core_runtime(
         sorted(core_runtime_topics),
     )
 
+    async def _lag_zero_topics() -> frozenset[str]:
+        """LAG-zero readback for the phantom alarm (§d): topics whose consumer position
+        has caught up to the broker high-water mark."""
+        return await transport.caught_up_topics(core_runtime_topics)
+
     handle = build_core_runtime(
         core_runtime_topics=core_runtime_topics,
         contracts=contracts,
@@ -163,6 +294,17 @@ def build_and_start_core_runtime(
         transport=cast("CoreTransport", transport),
         handler_resolver=build_kernel_handler_resolver(container),
         legacy_subscribed_topics=legacy_subscribed_topics,
+        lag_zero_provider=_lag_zero_topics,
+    )
+    # R-6: DLQ targets must exist before the first dead-letter send — provision BEFORE
+    # the loop starts.
+    await _provision_dlq_topics(
+        handle.dlq_provision_topics,
+        provisioner=provisioner,
+        correlation_id=correlation_id,
     )
     handle.start()
+    # §c.5/§d: fold loop-health + phantom-alarm into the live runtime readiness surface.
+    if runtime is not None:
+        runtime.register_readiness_probe("core_runtime_loop", handle.readiness_snapshot)
     return handle

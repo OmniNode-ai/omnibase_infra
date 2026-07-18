@@ -263,6 +263,35 @@ class KafkaTransport:
         if first_error is not None:
             raise first_error
 
+    async def caught_up_topics(self, topics: frozenset[str]) -> frozenset[str]:
+        """Return the subset of ``topics`` whose consumer has caught up (LAG=0).
+
+        Used by the S6 phantom-subscription alarm (OMN-14758, §d): a topic is
+        "caught up" when, for every ASSIGNED partition of that topic, the consumer's
+        fetch position has reached the broker high-water mark. A topic with no assigned
+        partition (or unknown high-water) is NOT reported caught-up. Best-effort and
+        side-effect-free: a probe failure yields an empty set rather than raising.
+        """
+        consumer = self._consumer
+        if consumer is None:
+            return frozenset()
+        partitions_by_topic: dict[str, list[TopicPartition]] = {}
+        for tp in consumer.assignment():
+            if tp.topic in topics:
+                partitions_by_topic.setdefault(tp.topic, []).append(tp)
+        caught_up: set[str] = set()
+        for topic, partitions in partitions_by_topic.items():
+            all_caught = True
+            for tp in partitions:
+                high_water = consumer.highwater(tp)
+                position = await consumer.position(tp)
+                if high_water is None or position < high_water:
+                    all_caught = False
+                    break
+            if all_caught:
+                caught_up.add(topic)
+        return frozenset(caught_up)
+
     # -- consumer protocol ------------------------------------------------------
 
     def _require_consumer(self) -> AIOKafkaConsumer:
