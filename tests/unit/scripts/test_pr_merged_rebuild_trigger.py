@@ -10,6 +10,7 @@ instead of the deploy-agent rebuild command with a hardcoded origin/main.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,26 @@ import pytest
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[3] / "scripts" / "trigger_rebuild_on_merge.py"
 )
+
+
+def _script_env() -> dict[str, str]:
+    """Subprocess env with a shadowing ``PYTHONPATH`` stripped (OMN-14744).
+
+    The ``TestRedeployStartCLI`` cases spawn ``trigger_rebuild_on_merge.py`` via
+    ``sys.executable``, which must resolve ``omnibase_infra`` from THIS worktree
+    (its editable install) so dev-only modules like
+    ``omnibase_infra.utils.util_producer_effect_assertion`` are importable. But
+    ``scripts/monitor_logs.py`` (imported by the ``test_monitor_*`` suites earlier
+    in the session) runs ``_load_omnibase_env()`` at import, copying the
+    ``PYTHONPATH`` line from ``~/.omnibase/.env`` -- which points at the CANONICAL
+    ``$OMNI_HOME/omnibase_infra/src`` clone (frequently behind ``dev``) -- into the
+    global ``os.environ`` when it is not already set. That entry lands ahead of the
+    editable ``.pth`` and shadows the worktree, so the child import fails with
+    ``ModuleNotFoundError``. Stripping ``PYTHONPATH`` here makes the child resolve
+    the worktree package deterministically, independent of collection order.
+    Mirrors the OMN-14504 ``_CLEAN_ENV`` guard in tests/scripts/test_check_release_identity.py.
+    """
+    return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
 
 
 def _import_trigger_module():
@@ -194,6 +215,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "no rebuild trigger" in result.stdout.lower()
@@ -218,6 +240,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "runtime_lane=dev" in result.stdout
@@ -243,6 +266,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "runtime_lane=stability-test" in result.stdout
@@ -268,6 +292,7 @@ class TestRedeployStartCLI:
             text=True,
             timeout=30,
             check=False,
+            env=_script_env(),
         )
         assert result.returncode != 0
         assert "release" in (result.stdout + result.stderr)

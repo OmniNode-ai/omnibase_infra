@@ -58,6 +58,25 @@ def _write_env(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_infisical_addr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate ``provision-infisical``'s ``--addr`` default from the ambient env.
+
+    ``scripts/provision-infisical.py`` resolves ``--addr`` from
+    ``os.environ.get("INFISICAL_ADDR", "http://localhost:8880")``. On a developer
+    machine that sources ``~/.omnibase/.env``, ``INFISICAL_ADDR`` is PRESENT but
+    EMPTY (``""``), so the argparse default becomes ``""`` and ``main()`` rejects
+    it ("error: --addr must start with 'http://' or 'https://', got: ''") -- a
+    deterministic rc=1 that has nothing to do with the provisioning logic these
+    tests exercise (they call ``main()`` without ``--addr``). On a clean CI runner
+    ``INFISICAL_ADDR`` is simply unset, so the fallback applies and the tests pass;
+    the failure only reproduces where the ambient var is empty. Delete the var so
+    the script's own valid fallback default always applies, making these tests
+    hermetic with respect to the host env. (OMN-14744)
+    """
+    monkeypatch.delenv("INFISICAL_ADDR", raising=False)
+
+
 # ---------------------------------------------------------------------------
 # Tests: _create_infisical_folders idempotency logging
 # ---------------------------------------------------------------------------
