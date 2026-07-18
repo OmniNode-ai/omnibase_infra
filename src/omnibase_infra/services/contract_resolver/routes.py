@@ -4,7 +4,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Route implementations for the Contract Resolver Bridge.
 
-Wraps NodeContractResolveCompute.resolve() exactly — no bespoke API surface.
+Wraps NodeContractResolveCompute.handle() exactly — no bespoke API surface.
 Only routes that mirror the node contracts are provided.
 
 Routes:
@@ -93,7 +93,7 @@ async def contract_resolve(
     """Resolve a contract by applying ordered patches onto a base profile.
 
     Validates the request body against ``ModelContractResolveInput`` (Pydantic
-    rejects unknown fields), then calls ``NodeContractResolveCompute.resolve()``
+    rejects unknown fields), then calls ``NodeContractResolveCompute.handle()``
     directly — no Kafka round-trip in the MVP path.
 
     After resolution, emits ``onex.contract.resolve.completed`` to Kafka
@@ -127,7 +127,11 @@ async def contract_resolve(
 
     try:
         node = NodeContractResolveCompute(correlation_id=correlation_id)
-        output = node.resolve(body)
+        # OMN-14756: core OMN-14629 flipped this compute node to def-B; the public
+        # entrypoint renamed .resolve(input) -> .handle(input) (same input/output
+        # models). Adapted here because this PR is the first to advance the infra
+        # core pin past that flip (see pyproject [tool.uv.sources] note).
+        output = node.handle(body)
     except Exception as exc:
         logger.exception(
             "contract.resolve failed",
