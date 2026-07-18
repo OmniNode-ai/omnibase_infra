@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Managed-staging canary topic/group catalog namespace declaration (OMN-14727, B7).
+#
+# This is the *declarative input* consumed by
+# ``omnibase_infra.topics.managed_staging_canary_catalog`` to generate the
+# concrete canary topic/group catalog from the immutable candidate contract.
+#
+# The candidate's application topic SUFFIXES (``onex.<kind>.<producer>.<event>.v<n>``)
+# are contract-owned and are extracted from the candidate's node contracts at
+# generation time -- they are NOT re-declared here. This file declares only the
+# canary *namespace*: the prefix, the IAM policy patterns the prefix must fall
+# inside, and the conservative topic-sizing / group-start defaults.
+#
+# HARD INVARIANT (see ``iam_pattern_authorizes``):
+#   ``topic_prefix`` and ``group_prefix`` MUST fall inside one of
+#   ``iam_topic_patterns`` / ``iam_group_patterns``. A prefix outside the IAM
+#   policy patterns fails MSK AUTH (AccessDenied), not a topic collision -- so
+#   the prefix is validated against the patterns at construction time and
+#   fails closed.
+ticket: "OMN-14727"
+# Managed-staging epoch. Bump (mstg2, mstg3, ...) to mint a fresh, provably
+# disjoint namespace for a re-run; the plan calls this the "unique MSK epoch".
+epoch: "mstg1"
+description: >-
+  Canary namespace for the managed-staging cutover. Every canary topic and consumer group is minted under a single common prefix so it is provably disjoint from the 1089 inert topics and every existing consumer group on the shared omninode-dev-msk cluster, while still falling inside the onex.* / omninode.* MSK IAM resource patterns delivered by A1.
+# The common prefix prepended to every candidate topic suffix. Starts with
+# "onex." so it is authorized by the "onex.*" MSK IAM topic pattern; the
+# "mstg1." segment makes the whole namespace disjoint from every pre-existing
+# topic. The trailing "onex." of a resolved name is the realm-agnostic suffix
+# (e.g. onex.mstg1.onex.evt.platform.node-registration.v1).
+topic_prefix: "onex.mstg1."
+# The common prefix prepended to every canary consumer group. Same rationale as
+# topic_prefix: authorized by "onex.*" and disjoint from every existing group.
+group_prefix: "onex.mstg1."
+# MSK IAM resource patterns delivered by A1 (docs/plans/2026-07-17-managed-
+# staging-verified-state-and-task-split.md, node-role omninode-dev-msk-client-
+# policy). "onex.*"/"omninode.*" are glob patterns: "*" is a wildcard, "." is
+# literal, so "onex.*" authorizes any name starting with "onex.".
+iam_topic_patterns:
+  - "onex.*"
+  - "omninode.*"
+iam_group_patterns:
+  - "onex.*"
+  - "omninode.*"
+# Consumer group start policy for the canary (T27). "earliest" so the canary
+# reads its own freshly-created topics from the beginning of the epoch; there is
+# no drain/migration from the inert dev topics (project memory: MSK starts the
+# canary with a fresh topic namespace).
+group_start_policy: "earliest"
+# Conservative per-topic sizing defaults. The 2x kafka.t3.small managed cluster
+# is already ~2.7x over AWS partition guidance (1624 partitions), so the canary
+# adds the minimum. FINAL partition/replication sizing is the SS2.8 partition-
+# pressure decision and is applied at Phase 3 (apply-to-cluster), NOT here.
+default_partitions: 1
+default_replication_factor: 2
+# Where the candidate's contract-owned topic suffixes are extracted from at
+# generation time. Repo-relative roots scanned by ContractTopicExtractor. The
+# authoritative candidate topic set is pinned when the candidate tuple is frozen
+# (B1 / T24); this root is the in-repo source used to generate + prove the
+# catalog for Phase 1.
+candidate_contract_roots:
+  - "src/omnibase_infra/nodes"
