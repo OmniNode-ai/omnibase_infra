@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.6" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=ed0a45bf3deaf97d841427e44e0ba1d56a322fcb" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=aca32f2446f73cc2a8c903429e2a1f636722366e" },
     { name = "omnibase-spi", specifier = "==0.23.1" },
 ]
 
@@ -2112,7 +2112,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.46.8"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=ed0a45bf3deaf97d841427e44e0ba1d56a322fcb#ed0a45bf3deaf97d841427e44e0ba1d56a322fcb" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=aca32f2446f73cc2a8c903429e2a1f636722366e#aca32f2446f73cc2a8c903429e2a1f636722366e" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2121,6 +2121,7 @@ dependencies = [
     { name = "dependency-injector" },
     { name = "httpx" },
     { name = "jsonschema" },
+    { name = "pathspec" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
@@ -2232,7 +2233,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.6" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=ed0a45bf3deaf97d841427e44e0ba1d56a322fcb" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=aca32f2446f73cc2a8c903429e2a1f636722366e" },
     { name = "omnibase-spi", specifier = "==0.23.1" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
