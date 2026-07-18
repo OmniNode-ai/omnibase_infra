@@ -129,8 +129,17 @@ def test_print_env_emits_evalable_exports(
     assert f"export OMNIMARKET_PATH={fake_home}/omnimarket" in result.stdout
 
 
-def test_real_worktree_autoresolves_without_env() -> None:
-    """From the real checkout the wrapper derives env with NOTHING exported."""
-    result = _run(WRAPPER, "--check", env=_clean_env())
+def test_omni_worktree_layout_autoresolves_without_env(tmp_path: Path) -> None:
+    """From the mandated omni_worktrees layout the wrapper derives env."""
+    fake_home = tmp_path / "omni_home"
+    (fake_home / "omnimarket").mkdir(parents=True)
+    scripts = fake_home / "omni_worktrees" / "OMN-14462" / "omnibase_infra" / "scripts"
+    scripts.mkdir(parents=True)
+    wrapper = scripts / "merge-proof"
+    shutil.copy2(WRAPPER, wrapper)
+    wrapper.chmod(0o755)
+
+    result = _run(wrapper, "--check", env=_clean_env())
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert "OMNIMARKET_PATH=" in result.stdout
+    assert f"OMNI_HOME={fake_home}" in result.stdout
+    assert f"OMNIMARKET_PATH={fake_home}/omnimarket" in result.stdout
