@@ -201,20 +201,18 @@ onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_contro
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
 # the released exact versions, restoring a fully PyPI-sourced reproducible lock.
 #
-# OMN-14756 (epic OMN-14717, S3): TEMPORARY dev-build pin bumped from #1440's
-# squash (ed0a45bf) to core dev HEAD (aca32f24), a strict descendant that adds
-# the unified-runtime transport foundation this PR's Kafka face requires and
-# imports: S1 net-new transport protocols + ModelTransportMessage (#1463,
-# OMN-14719), S2 InMemoryTransport + the parametrized TransportConformanceSuite
-# (#1464, OMN-14720) that this PR subclasses to prove Kafka substitutability, and
-# S4 RuntimeDispatch (#1466). ed0a45bf predates S1/S2 (verified: the transport
-# module is absent there), so the pin MUST advance for the conformance import to
-# resolve. Both revs are core version 0.46.8, so the ==0.46.8 pins above stay
-# consistent. #1440's runtime_fanout_resolver + #1439's terminal delegation
-# classes remain present (aca32f24 is a descendant). Neither rev is on PyPI.
-# REMOVE WHEN RELEASED: once core publishes a version containing S1/S2, delete
+# OMN-14758 (epic OMN-14717, S6): TEMPORARY dev-build pin advanced from S3's
+# aca32f24 to core dev HEAD (a2562165), a strict descendant (verified
+# `git merge-base --is-ancestor`). S6 wires the delegation command spine onto
+# S4 RuntimeDispatch, which is DEV-ONLY / UNRELEASED (latest core release is
+# 0.46.7). This pin carries S1 transport protocols + ModelTransportMessage
+# (#1463), S2 InMemoryTransport + TransportConformanceSuite (#1464), S4
+# RuntimeDispatch + DispatchRoute + runtime_envelope_router + EnumDeliveryDisposition
+# (#1466), and S3 conformance (#1467). a2562165 is version 0.46.8, so the
+# ==0.46.8 pins above stay consistent. Not on PyPI.
+# REMOVE WHEN RELEASED: once core publishes a version containing S1/S2/S4, delete
 # this override and `uv lock`.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "aca32f2446f73cc2a8c903429e2a1f636722366e" }  # raw-override-ok: OMN-14756
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "a2562165d7ab1358efb87df8ef8757064eef5ce7" }  # raw-override-ok: OMN-14758
 
 [tool.ruff]
 target-version = "py312"

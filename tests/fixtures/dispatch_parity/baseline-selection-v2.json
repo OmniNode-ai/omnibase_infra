@@ -1652,11 +1652,11 @@
     "core_message_category_from_topic": "<enum 'EnumMessageCategory'>",
     "corpus": {
       "contracts_by_package": {
-        "omnibase_core": 7,
+        "omnibase_core": 15,
         "omnibase_infra": 112,
         "onex-change-control": 4
       },
-      "contracts_discovered": 123,
+      "contracts_discovered": 131,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 91,
       "probe_count": 385,
@@ -1702,9 +1702,9 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-13T21:26:57.170603+00:00",
+    "generated_at_utc": "2026-07-18T11:09:20.890335+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.46.7",
+      "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.4",
       "omniclaude": null,
       "omniintelligence": null,

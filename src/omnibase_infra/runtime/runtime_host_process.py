@@ -1334,6 +1334,14 @@ class RuntimeHostProcess:
         # True when stop() has been called and we're waiting for messages to drain
         self._is_draining: bool = False
 
+        # Supplemental readiness probes (OMN-14758, S6): synchronous callables that
+        # contribute an extra AND-term to /ready beyond event-bus readiness. Each returns
+        # ``(ready, detail)``; any False term flips overall readiness. Used to fold the
+        # S6 core-runtime loop health + phantom-subscription alarm into /ready.
+        self._supplemental_readiness_probes: list[
+            tuple[str, Callable[[], tuple[bool, dict[str, object]]]]
+        ] = []
+
         # Live contract materialization lock (OMN-1989)
         # Guards handler graph mutations during live materialization.
         # Separate from _pending_lock to avoid priority inversion between
@@ -5436,7 +5444,28 @@ class RuntimeHostProcess:
             }
             event_bus_ready = False
 
-        ready = self._is_running and not self._is_draining and event_bus_ready
+        # OMN-14758 (S6): fold supplemental readiness probes (core-runtime loop health +
+        # phantom-subscription alarm) into the readiness AND-term. Any False probe flips
+        # readiness FAIL; a raising probe is treated as not-ready (fail closed).
+        supplemental_readiness: dict[str, object] = {}
+        supplemental_ready = True
+        # ``getattr`` default guards instances constructed via ``__new__`` (some unit
+        # tests bypass ``__init__``); no probes ⇒ no supplemental constraint.
+        for probe_name, probe in getattr(self, "_supplemental_readiness_probes", []):
+            try:
+                probe_ready, probe_detail = probe()
+            except Exception as probe_exc:  # noqa: BLE001 — fail closed on probe error
+                probe_ready, probe_detail = False, {"error": str(probe_exc)}
+            supplemental_readiness[probe_name] = {"ready": probe_ready, **probe_detail}
+            if not probe_ready:
+                supplemental_ready = False
+
+        ready = (
+            self._is_running
+            and not self._is_draining
+            and event_bus_ready
+            and supplemental_ready
+        )
 
         if not ready:
             failure_context = ModelInfraErrorContext.with_correlation(
@@ -5451,6 +5480,7 @@ class RuntimeHostProcess:
                     "is_running": self._is_running,
                     "is_draining": self._is_draining,
                     "event_bus_ready": event_bus_ready,
+                    "supplemental_ready": supplemental_ready,
                 },
             )
             return {
@@ -5458,6 +5488,7 @@ class RuntimeHostProcess:
                 "is_running": self._is_running,
                 "is_draining": self._is_draining,
                 "event_bus_readiness": event_bus_readiness,
+                "supplemental_readiness": supplemental_readiness,
                 "correlation_id": str(failure_context.correlation_id),
             }
 
@@ -5466,7 +5497,27 @@ class RuntimeHostProcess:
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "event_bus_readiness": event_bus_readiness,
+            "supplemental_readiness": supplemental_readiness,
         }
+
+    def register_readiness_probe(
+        self,
+        name: str,
+        probe: Callable[[], tuple[bool, dict[str, object]]],
+    ) -> None:
+        """Register a supplemental readiness probe (OMN-14758, S6).
+
+        The probe is a cheap, synchronous callable returning ``(ready, detail)`` that is
+        AND-ed into the ``/ready`` result. Used to fold the S6 core-runtime dispatch-loop
+        health and the phantom-subscription alarm into runtime readiness so a crashed loop
+        or a phantom subscription flips ``/ready`` FAIL.
+        """
+        self._supplemental_readiness_probes.append((name, probe))
+        logger.info(
+            "Registered supplemental readiness probe: %s",
+            name,
+            extra={"probe_name": name},
+        )
 
     def register_handler(
         self, handler_type: str, handler: ProtocolContainerAware
