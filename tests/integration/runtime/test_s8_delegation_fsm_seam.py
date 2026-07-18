@@ -67,13 +67,20 @@ from omnibase_infra.runtime.core_runtime.dlq_resolver import (
 )
 from omnibase_infra.runtime.core_runtime.routing_map_builder import build_routing_map
 from omnibase_infra.runtime.core_runtime.single_owner import assert_single_owner_split
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_DELEGATION_INFERENCE_REQUEST,
+    SUFFIX_DELEGATION_INFERENCE_RESPONSE,
+    SUFFIX_DELEGATION_REQUEST,
+    SUFFIX_DELEGATION_ROUTING_DECISION,
+    SUFFIX_DELEGATION_ROUTING_REQUEST,
+)
 
 # --- topics (the real delegation command spine) --------------------------------------
-REQUEST_TOPIC = "onex.cmd.omnibase-infra.delegation-request.v1"
-DECISION_TOPIC = "onex.evt.omnibase-infra.routing-decision.v1"
-ROUTING_REQUEST_TOPIC = "onex.cmd.omnibase-infra.delegation-routing-request.v1"
-INFERENCE_REQUEST_TOPIC = "onex.cmd.omnibase-infra.delegation-inference-request.v1"
-INFERENCE_RESPONSE_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"  # fan-out
+REQUEST_TOPIC = SUFFIX_DELEGATION_REQUEST
+DECISION_TOPIC = SUFFIX_DELEGATION_ROUTING_DECISION
+ROUTING_REQUEST_TOPIC = SUFFIX_DELEGATION_ROUTING_REQUEST
+INFERENCE_REQUEST_TOPIC = SUFFIX_DELEGATION_INFERENCE_REQUEST
+INFERENCE_RESPONSE_TOPIC = SUFFIX_DELEGATION_INFERENCE_RESPONSE
 GROUP = "onex.core-runtime.delegation"
 FIXED_CLOCK = datetime(2026, 7, 18, 12, 0, 0, tzinfo=UTC)
 

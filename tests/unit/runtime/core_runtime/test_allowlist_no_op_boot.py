@@ -109,7 +109,9 @@ def test_build_core_runtime_guards_empty_allowlist() -> None:
 # --- S8 §D1=4b: topic-owner parse + resolution + fan-out legacy skip ------------------
 
 
-def _fanout_contract(name: str) -> ModelDiscoveredContract:
+def _fanout_contract(
+    name: str, *, plugin_managed: bool = False
+) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
         node_type="ORCHESTRATOR_GENERIC",
@@ -117,7 +119,10 @@ def _fanout_contract(name: str) -> ModelDiscoveredContract:
         contract_path=Path(f"/nonexistent/{name}.yaml"),
         entry_point_name=name,
         package_name="omnimarket",
-        event_bus=ModelEventBusWiring(subscribe_topics=(FANOUT_TOPIC,)),
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=(FANOUT_TOPIC,),
+            plugin_managed=plugin_managed,
+        ),
     )
 
 
@@ -150,6 +155,24 @@ def test_resolve_owners_single_subscriber_auto() -> None:
         [_contract()], frozenset({ROUTING_TOPIC}), designated_owners={}
     )
     assert owners == {ROUTING_TOPIC: "node_delegation_routing_reducer"}
+
+
+def test_resolve_owners_single_subscriber_rejects_wrong_designation() -> None:
+    with pytest.raises(ModelOnexError, match="does not match its sole subscriber"):
+        resolve_core_runtime_owners(
+            [_contract()],
+            frozenset({ROUTING_TOPIC}),
+            designated_owners={ROUTING_TOPIC: "not_the_subscriber"},
+        )
+
+
+def test_resolve_owners_rejects_plugin_managed_allowlist_subscriber() -> None:
+    with pytest.raises(ModelOnexError, match="plugin-managed subscribers"):
+        resolve_core_runtime_owners(
+            [_fanout_contract("plugin_owner", plugin_managed=True)],
+            frozenset({FANOUT_TOPIC}),
+            designated_owners={FANOUT_TOPIC: "plugin_owner"},
+        )
 
 
 def test_resolve_owners_fanout_requires_designation() -> None:

@@ -180,10 +180,37 @@ def resolve_core_runtime_owners(
 
     owners: dict[str, str] = {}
     for topic, subscribers in subscribers_by_topic.items():
+        chosen = designated.get(topic)
+        plugin_managed_subscribers = [
+            contract.name
+            for contract in contracts
+            if contract.event_bus is not None
+            and contract.event_bus.plugin_managed
+            and topic in contract.event_bus.subscribe_topics
+        ]
+        if plugin_managed_subscribers:
+            raise ModelOnexError(
+                message=(
+                    f"S8 single-owner (4b): allowlist topic {topic!r} includes "
+                    f"plugin-managed subscribers {sorted(plugin_managed_subscribers)}. "
+                    "Plugin-managed contracts own their subscription path outside the "
+                    "legacy auto-wiring skip, so core-runtime ownership must fail closed "
+                    "until plugin subscription ownership is explicitly wired."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
         if len(subscribers) == 1:
+            if chosen is not None and chosen != subscribers[0]:
+                raise ModelOnexError(
+                    message=(
+                        f"S8 single-owner (4b): designated owner {chosen!r} for topic "
+                        f"{topic!r} does not match its sole subscriber "
+                        f"{subscribers[0]!r}. Refusing to silently transfer ownership."
+                    ),
+                    error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+                )
             owners[topic] = subscribers[0]
             continue
-        chosen = designated.get(topic)
         if chosen is None:
             raise ModelOnexError(
                 message=(
