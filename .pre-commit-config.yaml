@@ -157,6 +157,17 @@ repos:
         stages: [pre-commit]
         # Note: --exit-non-zero-on-fix ensures pre-commit fails if files were modified,
         # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.
+      # Shell hygiene gate (OMN-14761 / F-22). Fail-closed shellcheck over changed
+      # shell scripts; same script the shellcheck-gate CI job runs, so local and CI
+      # enforcement cannot drift. scripts/lib/** is held to --severity=style; the
+      # rest of the tree to --severity=error.
+      - id: shell-hygiene
+        name: Shell hygiene (shellcheck, OMN-14761)
+        entry: scripts/ci/check_shell_hygiene.sh
+        language: script
+        types: [shell]
+        pass_filenames: true
+        stages: [pre-commit]
       - id: mypy-type-check
         name: mypy (type checking)
         entry: bash -c 'uv run --frozen mypy "$@" --show-error-codes --no-error-summary' --
