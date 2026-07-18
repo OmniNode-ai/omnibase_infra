@@ -18,13 +18,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[3] / "scripts" / "trigger_rebuild_on_merge.py"
-)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
 
 
 def _script_env() -> dict[str, str]:
-    """Subprocess env with a shadowing ``PYTHONPATH`` stripped (OMN-14744).
+    """Subprocess env with hostile ambient ``PYTHONPATH`` replaced (OMN-14744).
 
     The ``TestRedeployStartCLI`` cases spawn ``trigger_rebuild_on_merge.py`` via
     ``sys.executable``, which must resolve ``omnibase_infra`` from THIS worktree
@@ -35,12 +34,14 @@ def _script_env() -> dict[str, str]:
     ``PYTHONPATH`` line from ``~/.omnibase/.env`` -- which points at the CANONICAL
     ``$OMNI_HOME/omnibase_infra/src`` clone (frequently behind ``dev``) -- into the
     global ``os.environ`` when it is not already set. That entry lands ahead of the
-    editable ``.pth`` and shadows the worktree, so the child import fails with
-    ``ModuleNotFoundError``. Stripping ``PYTHONPATH`` here makes the child resolve
-    the worktree package deterministically, independent of collection order.
-    Mirrors the OMN-14504 ``_CLEAN_ENV`` guard in tests/scripts/test_check_release_identity.py.
+    editable ``.pth`` and shadows the worktree, so the child import resolves the
+    wrong checkout. Replacing ``PYTHONPATH`` with this worktree's ``src`` directory
+    makes the child resolve the checked-out package deterministically, independent
+    of collection order.
     """
-    return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    return env
 
 
 def _import_trigger_module():
