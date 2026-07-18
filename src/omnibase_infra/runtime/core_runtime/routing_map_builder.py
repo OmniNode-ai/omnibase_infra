@@ -156,6 +156,7 @@ def build_routing_map(
     allowlist: frozenset[str],
     *,
     handler_resolver: HandlerResolver,
+    owners: Mapping[str, str] | None = None,
     model_resolver: ModelResolver = import_model_cls,
     published_events_loader: PublishedEventsLoader = load_published_events_map,
 ) -> dict[str, DispatchRoute]:
@@ -164,13 +165,26 @@ def build_routing_map(
     For every discovered contract that subscribes an allowlisted topic, resolve exactly
     one route. The build RAISES on a duplicate topic key (single-owner build gate) and
     on any allowlist topic that no discovered contract owns.
+
+    ``owners`` (S8 §D1=4b) designates the single core-runtime OWNER per topic. When a
+    topic has a designated owner, only that owner's contract produces the route; the
+    topic's OTHER subscribers are genuine fan-out consumers that stay on the legacy
+    kernel (their own distinct consumer groups) and are skipped here. When ``owners`` is
+    empty / omits a topic, behavior is unchanged: the sole subscriber owns the route and
+    a duplicate subscriber still RAISES (the pre-4b single-owner build gate).
     """
+    owner_by_topic = dict(owners or {})
     routing_map: dict[str, DispatchRoute] = {}
     for contract in contracts:
         if contract.event_bus is None:
             continue
         for topic in contract.event_bus.subscribe_topics:
             if topic not in allowlist:
+                continue
+            owner = owner_by_topic.get(topic)
+            if owner is not None and contract.name != owner:
+                # Fan-out (§D1=4b): a different contract owns the core-runtime route for
+                # this topic; this subscriber remains a legacy consumer on its own group.
                 continue
             if topic in routing_map:
                 raise ModelOnexError(

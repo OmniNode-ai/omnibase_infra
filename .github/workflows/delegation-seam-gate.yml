@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# delegation-seam-gate.yml — OMN-14771 (S8 wave-2, epic OMN-14717)
+#
+# The ONE cross-boundary delegation seam gate (OMN-14208 two-green-no-op doctrine).
+# Runs the single test that drives the ACTUAL runtime seam end-to-end:
+#   Kafka topic (InMemoryTransport) -> build_routing_map route -> ModelEventEnvelope
+#   decode -> typed def-B input_model coercion -> delegation FSM advance (RECEIVED ->
+#   ROUTED) -> correlated outbound ModelEventEnvelope.
+# A green here proves the seam FIRES; two independently-green unit suites do NOT.
+#
+# Enforcement, not detection (CLAUDE.md Rule 5): wired as a CI job in the SAME PR as the
+# test. Runs on every PR touching the delegation runtime seam surface, plus merge_group.
+# It ALWAYS reports (merge_group short-circuits to exit 0, per the deploy-gate pattern) so
+# it can be promoted to a REQUIRED context without wedging the merge queue.
+#
+# Promoting "delegation-seam-gate" to a required status check is a SERIAL OPERATOR
+# FOLLOW-UP (branch-protection mutation) — NOT done in this PR. See the PR body.
+#
+# Design: docs/plans/2026-07-18-s8-orchestrator-defb-conversion-design.md
+# Ticket:  OMN-14771 | Epic: OMN-14717
+
+name: Delegation Seam Gate
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      # The runtime seam surface the cross-boundary test covers. Keep in sync with the
+      # single-owner boot gate + routing map + dispatch boundary the seam drives.
+      - "src/omnibase_infra/runtime/core_runtime/**"
+      - "src/omnibase_infra/runtime/auto_wiring/handler_wiring.py"
+      - "src/omnibase_infra/runtime/service_kernel.py"
+      - "tests/integration/runtime/test_s8_delegation_fsm_seam.py"
+      - ".github/workflows/delegation-seam-gate.yml"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: delegation-seam-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.6.14"
+  CACHE_VERSION: "0.6.0"
+  # Force inmemory event bus (no Kafka in CI); the seam drives RuntimeDispatch over the
+  # in-process InMemoryTransport — it never touches a broker.
+  ONEX_EVENT_BUS_TYPE: "inmemory"
+  # Dummy value for MixinLlmHttpTransport import paths pulled in transitively; no LLM
+  # calls happen in the seam test.
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+
+jobs:
+  delegation-seam-gate:
+    name: delegation-seam-gate
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted; public forks use ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      # merge_group short-circuit (deploy-gate pattern): the queue commit is already
+      # proven by the per-PR run; a required context must still report a green result on
+      # merge_group SHAs so it does not wedge the queue.
+      - name: Skip on merge_group
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "::notice::delegation-seam-gate short-circuits on merge_group (proven on the PR run)."
+          exit 0
+
+      - name: Checkout code
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        if: github.event_name != 'merge_group'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run delegation cross-boundary seam test
+        if: github.event_name != 'merge_group'
+        run: |
+          uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v

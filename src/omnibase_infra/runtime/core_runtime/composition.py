@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_core.protocols.runtime.protocol_transport_message import (
     ProtocolTransportMessage,
 )
@@ -55,13 +57,23 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
 logger = logging.getLogger(__name__)
 
 CORE_RUNTIME_TOPICS_ENV = "ONEX_CORE_RUNTIME_TOPICS"
+# Operator designation of the single core-runtime OWNER for a genuine multi-consumer
+# (fan-out) allowlist topic — the S8 §D1=4b lever. Comma-separated ``topic=owner``
+# entries, default EMPTY. A single-subscriber allowlist topic needs NO entry (its sole
+# subscriber is the auto-owner). A fan-out topic REQUIRES an entry naming which one of
+# its subscribers MOVES to the core runtime while the others stay on the legacy kernel
+# (their own distinct consumer groups). See :func:`resolve_core_runtime_owners`.
+CORE_RUNTIME_TOPIC_OWNERS_ENV = "ONEX_CORE_RUNTIME_TOPIC_OWNERS"
 
 __all__ = [
     "CORE_RUNTIME_TOPICS_ENV",
+    "CORE_RUNTIME_TOPIC_OWNERS_ENV",
     "CoreRuntimeHandle",
     "CoreTransport",
     "build_core_runtime",
+    "parse_core_runtime_topic_owners",
     "parse_core_runtime_topics",
+    "resolve_core_runtime_owners",
 ]
 
 
@@ -94,6 +106,135 @@ def parse_core_runtime_topics(env: Mapping[str, str]) -> frozenset[str]:
     raw = env.get(CORE_RUNTIME_TOPICS_ENV, "")
     topics = {piece.strip() for piece in raw.split(",")}
     return frozenset(t for t in topics if t)
+
+
+def parse_core_runtime_topic_owners(env: Mapping[str, str]) -> dict[str, str]:
+    """Parse ``ONEX_CORE_RUNTIME_TOPIC_OWNERS`` into a topic -> owner map (default EMPTY).
+
+    Format: comma-separated ``topic=owner_contract_name`` entries, whitespace-stripped,
+    empties dropped. This is the operator's explicit designation of which subscriber of a
+    genuine fan-out allowlist topic MOVES to the single core runtime (§D1=4b); a
+    single-subscriber allowlist topic needs no entry. Fail-closed on a malformed entry
+    (missing ``=``, blank topic, blank owner) or a conflicting duplicate designation —
+    an ambiguous designation must not silently pick one.
+    """
+    raw = env.get(CORE_RUNTIME_TOPIC_OWNERS_ENV, "")
+    owners: dict[str, str] = {}
+    for piece in raw.split(","):
+        entry = piece.strip()
+        if not entry:
+            continue
+        topic, sep, owner = entry.partition("=")
+        topic = topic.strip()
+        owner = owner.strip()
+        if not sep or not topic or not owner:
+            raise ModelOnexError(
+                message=(
+                    f"{CORE_RUNTIME_TOPIC_OWNERS_ENV}: malformed entry {entry!r}; expected "
+                    "'topic=owner_contract_name'."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
+        if topic in owners and owners[topic] != owner:
+            raise ModelOnexError(
+                message=(
+                    f"{CORE_RUNTIME_TOPIC_OWNERS_ENV}: conflicting owner designations for "
+                    f"topic {topic!r} ({owners[topic]!r} vs {owner!r}). Refusing to guess."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
+        owners[topic] = owner
+    return owners
+
+
+def resolve_core_runtime_owners(
+    contracts: Sequence[ModelDiscoveredContract],
+    core_runtime_topics: frozenset[str],
+    *,
+    designated_owners: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve the ONE owning contract per allowlist topic (§c.3, S8 §D1=4b).
+
+    For each allowlist topic, gather the discovered contracts that subscribe it:
+
+    * **Single subscriber** -> that contract is the auto-owner (no designation needed;
+      this is the pre-4b single-owner topic and reproduces the S6 behavior exactly).
+    * **Multiple subscribers (genuine fan-out)** -> ``designated_owners[topic]`` MUST name
+      exactly one of the subscribers. That subscriber MOVES to the core runtime; the
+      others stay on the legacy kernel with their own distinct consumer groups. A fan-out
+      topic with NO designation is AMBIGUOUS and fails closed — allowlisting it without an
+      owner would silently no-op (skip) its non-designated legacy consumers (§c.3).
+
+    Returns ``{topic: owner_contract_name}`` for every allowlist topic that has at least
+    one subscriber. A zero-subscriber allowlist topic is intentionally omitted so
+    :func:`build_routing_map`'s ``missing`` check surfaces it as the fail-closed error.
+    """
+    designated = dict(designated_owners or {})
+    subscribers_by_topic: dict[str, list[str]] = {}
+    for contract in contracts:
+        if contract.event_bus is None:
+            continue
+        for topic in contract.event_bus.subscribe_topics:
+            if topic in core_runtime_topics:
+                subscribers_by_topic.setdefault(topic, []).append(contract.name)
+
+    owners: dict[str, str] = {}
+    for topic, subscribers in subscribers_by_topic.items():
+        chosen = designated.get(topic)
+        plugin_managed_subscribers = [
+            contract.name
+            for contract in contracts
+            if contract.event_bus is not None
+            and contract.event_bus.plugin_managed
+            and topic in contract.event_bus.subscribe_topics
+        ]
+        if plugin_managed_subscribers:
+            raise ModelOnexError(
+                message=(
+                    f"S8 single-owner (4b): allowlist topic {topic!r} includes "
+                    f"plugin-managed subscribers {sorted(plugin_managed_subscribers)}. "
+                    "Plugin-managed contracts own their subscription path outside the "
+                    "legacy auto-wiring skip, so core-runtime ownership must fail closed "
+                    "until plugin subscription ownership is explicitly wired."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
+        if len(subscribers) == 1:
+            if chosen is not None and chosen != subscribers[0]:
+                raise ModelOnexError(
+                    message=(
+                        f"S8 single-owner (4b): designated owner {chosen!r} for topic "
+                        f"{topic!r} does not match its sole subscriber "
+                        f"{subscribers[0]!r}. Refusing to silently transfer ownership."
+                    ),
+                    error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+                )
+            owners[topic] = subscribers[0]
+            continue
+        if chosen is None:
+            raise ModelOnexError(
+                message=(
+                    f"S8 single-owner (4b): allowlist topic {topic!r} is subscribed by "
+                    f"multiple contracts {sorted(subscribers)} (fan-out) but no owner is "
+                    f"designated in {CORE_RUNTIME_TOPIC_OWNERS_ENV}. Exactly one subscriber "
+                    "may move to the core runtime; designate it (the others stay legacy on "
+                    "distinct consumer groups). Fail closed rather than silently no-op the "
+                    "non-designated consumers."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
+        if chosen not in subscribers:
+            raise ModelOnexError(
+                message=(
+                    f"S8 single-owner (4b): designated owner {chosen!r} for topic "
+                    f"{topic!r} does not subscribe it; actual subscribers are "
+                    f"{sorted(subscribers)}. The core-runtime owner must be one of the "
+                    "topic's own subscribers."
+                ),
+                error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
+            )
+        owners[topic] = chosen
+    return owners
 
 
 # Cadence of the background phantom-subscription probe (§d.3). The probe reads the
@@ -238,6 +379,7 @@ def build_core_runtime(
     transport: CoreTransport,
     handler_resolver: HandlerResolver,
     legacy_subscribed_topics: frozenset[str],
+    owners: Mapping[str, str] | None = None,
     model_resolver: ModelResolver = import_model_cls,
     published_events_loader: Callable[
         [Path], Mapping[str, str]
@@ -261,6 +403,7 @@ def build_core_runtime(
         contracts,
         core_runtime_topics,
         handler_resolver=handler_resolver,
+        owners=owners,
         model_resolver=model_resolver,
         published_events_loader=published_events_loader,
     )
@@ -274,6 +417,7 @@ def build_core_runtime(
         routing_map=routing_map,
         legacy_subscribed_topics=legacy_subscribed_topics,
         contracts=contracts,
+        owners=owners,
     )
 
     monitor = PhantomAlarmMonitor(
