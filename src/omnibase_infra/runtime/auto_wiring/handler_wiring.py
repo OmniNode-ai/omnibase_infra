@@ -50,6 +50,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
@@ -61,6 +62,7 @@ from omnibase_core.models.resolver.model_handler_resolver_context import (
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
 )
+from omnibase_core.runtime.runtime_fanout_resolver import resolve_published_topic
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
@@ -216,6 +218,14 @@ _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
 # cheap empty partial-index scan in steady state (docstring above), so a
 # 30s interval costs nothing while bounding the self-heal window.
 _STATE_IO_RECOVERY_SWEEP_INTERVAL_SECONDS = 30.0
+# OMN-14721: terminal FSM states for the state_io emission-completeness guard.
+# Mirrors the adapter's give-up sweep predicate (state_store_adapter.py
+# recover_stale_rows: ``state NOT IN ('COMPLETED', 'FAILED')``) and migration
+# 090's partial staleness index. A fresh seed into any NON-terminal state MUST
+# carry a durable emission (a pending_emissions batch OR an in_flight marker) —
+# a fresh non-terminal row committed with neither is structurally unrecoverable
+# by ``select_recoverable_batches`` and silently strands the workflow.
+_STATE_IO_TERMINAL_STATE_NAMES = frozenset({"COMPLETED", "FAILED"})
 _TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
@@ -2367,7 +2377,38 @@ def _make_stateful_dispatch_callback(
         entries: list[dict[str, object]] = []
         for idx, event in enumerate(output_events):
             if not isinstance(event, BaseModel):
-                continue
+                # OMN-14721: fail closed on a non-model element rather than the
+                # prior silent ``continue``. A non-BaseModel in output_events
+                # cannot be durably captured into a recoverable outbox entry;
+                # dropping it silently shrinks the batch (K returned > K
+                # captured) — the exact silent-emission-loss class this seam
+                # exists to eliminate. Upstream ``_normalize_handler_result``
+                # only ever hands BaseModel events here, so this is a fail-
+                # closed invariant assertion, not a live filter.
+                raise ModelOnexError(
+                    message=(
+                        "handler_wiring: state_io outbox capture received a "
+                        f"non-BaseModel fan-out element {type(event).__name__!r} "
+                        f"at index {idx} for correlation_id={cid} — cannot "
+                        "durably capture the emission; failing closed rather "
+                        "than silently shrinking the batch (OMN-14721)."
+                    ),
+                    error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
+                )
+            if publish_topic_map:
+                # OMN-14721: resolve every captured emission's publish topic
+                # through the SHARED core fan-out resolver at CAPTURE time
+                # (the same resolver LocalRuntimeBusAdapter and the publish-
+                # from-row path use). This fail-closes an unmapped emitted
+                # class HERE, on the commit path, instead of seeding an
+                # unpublishable batch the recovery sweep can never heal — it
+                # mirrors ``_publish_outbox_batch``'s publish-time topic check,
+                # moved one step earlier so capture and publish cannot diverge.
+                resolve_published_topic(
+                    publish_topic_map,
+                    event,
+                    message_type=type(event).__name__,
+                )
             entries.append(
                 {
                     "module": type(event).__module__,
@@ -2786,6 +2827,43 @@ def _make_stateful_dispatch_callback(
         # Pass pending_emissions only to an outbox-capable adapter; a legacy
         # adapter's seed/cas_update have no such kwarg (backward-compat).
         pending = entries or None
+
+        # OMN-14721: fail-closed emission-completeness guard. A leg that NEWLY
+        # seeds a fresh workflow (``loaded is None``) into a NON-terminal FSM
+        # state MUST carry a durable emission — either a committed outbox batch
+        # (``pending_emissions``) or an ``in_flight`` marker awaiting a follow-up
+        # leg. A fresh, non-terminal row committed with in_flight=False AND an
+        # empty batch (``not commit_in_flight``) is STRUCTURALLY unrecoverable:
+        # ``select_recoverable_batches`` only re-publishes rows that are
+        # ``in_flight AND jsonb_array_length(pending_emissions) > 0``, and
+        # ``recover_stale_rows`` only give-up-FAILs it after the stale TTL — so
+        # the emission the handler was supposed to produce to progress the
+        # workflow is silently dropped forever and the row stalls (the OMN-14721
+        # delegation routing-intent regression: RECEIVED / in_flight=false /
+        # pending=∅). Convert that silent permanent drop into a LOUD dispatch
+        # failure so it is surfaced + DLQ'd (via the OMN-14716 silent-dispatch-
+        # failure guard) and can never recur unobserved.
+        if (
+            loaded is None
+            and outbox_supported
+            and not commit_in_flight
+            and metadata.state not in _STATE_IO_TERMINAL_STATE_NAMES
+        ):
+            raise ModelOnexError(
+                message=(
+                    "handler_wiring: state_io refused to seed an unrecoverable "
+                    f"dead row for correlation_id={cid} — a fresh workflow "
+                    f"committing NON-terminal state={metadata.state!r} with "
+                    "in_flight=False and an EMPTY outbox batch can never be "
+                    "re-published by the recovery sweep "
+                    "(select_recoverable_batches requires in_flight AND a "
+                    "non-empty pending_emissions batch). The handler captured no "
+                    "durable emission for a state that must emit to progress; "
+                    "failing closed so the drop is surfaced and DLQ'd rather "
+                    "than silently stranding the workflow (OMN-14721)."
+                ),
+                error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
+            )
 
         if loaded is None:
             if outbox_supported:
