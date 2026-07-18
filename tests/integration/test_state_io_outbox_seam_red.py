@@ -118,6 +118,7 @@ from omnibase_infra.runtime.state_io.state_store_adapter import (
     CONTEXTVAR_STATE_IO_ROWS,
 )
 from omnibase_infra.utils.util_retry_optimistic import OptimisticConflictError
+from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
 
 # --------------------------------------------------------------------------
 # Fixture identities. These are FIXED, not random: the whole suite turns on
@@ -1501,3 +1502,126 @@ def test_sweep_heals_legacy_row_and_is_not_choked_by_an_unresolvable_poison_row(
     assert not bus.envelopes_for(POISON_ROW_CID), (
         "nothing should have been published for the unresolvable row"
     )
+
+
+# ==========================================================================
+# OMN-14743 — the in-row outbox must STAMP event_type on every emission.
+# ==========================================================================
+#
+# Live trace (docs/tracking/2026-07-17-delegation-emit-live-trace.md): the
+# orchestrator's bare ``ModelRoutingIntent`` reached
+# ``onex.cmd.omnibase-infra.delegation-routing-request.v1`` with
+# ``event_type=null``. Proven by the uuid5 id formula unique to
+# ``_publish_outbox_batch`` (three-part causation-prefixed name), NOT the
+# applier's two-part name — the state_io winner branch returns ``(1, None)`` so
+# the applier's OMN-12116 stamp never runs for this emit. A null event_type is
+# dropped by the routing reducer's type-scoped dispatcher (OMN-12294), so
+# routing-decision.v1 never publishes and delegation stalls at RECEIVED.
+#
+# The fix stamps event_type in ``_publish_outbox_batch`` from the resolved
+# topic using the SAME shared ``derive_event_type_from_topic`` the applier now
+# delegates to. These tests drive the REAL outbox path (has-bus wrapper -> row
+# publish) and assert the published envelope carries the correctly-derived,
+# non-null event_type, at parity with the applier.
+# ---------------------------------------------------------------------------
+
+
+def _published_pairs(bus: _RecordingBus) -> list[tuple[str, ModelEventEnvelope[Any]]]:
+    """(topic, envelope) pairs for CID, in publish order."""
+    return [(t, e) for t, e in bus.published if e.correlation_id == CID]
+
+
+@pytest.mark.integration
+def test_outbox_stamps_event_type_from_resolved_topic_at_parity_with_applier() -> None:
+    """OMN-14743: every outbox emission carries the topic-derived event_type.
+
+    RED (pre-fix): ``_publish_outbox_batch`` built ``_Envelope(envelope_id=,
+    payload=, correlation_id=)`` with NO ``event_type``, so every emission left
+    the outbox with ``event_type=None`` — the exact null-typed
+    ``ModelRoutingIntent`` live-traced on .201. The assertion below fails on the
+    pre-fix code (``None != 'test-seam.routing-request'``), against an EXISTS-
+    but-WRONG state: the envelope is published, it just carries the wrong (null)
+    event_type. This is not a vacuous "symbol missing" RED.
+
+    The fix derives event_type from the already-resolved outbox topic via the
+    shared ``derive_event_type_from_topic`` — the SAME function the applier's
+    ``_derive_event_type_from_topic`` now delegates to — so parity is structural,
+    not merely coincidental. This test pins BOTH: (1) the derived value is
+    non-null and correct per topic, and (2) it equals what the applier would
+    stamp for the same topic.
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus()
+    handler = _FanOutHandler(_fanout_batch())
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+
+    async def _run() -> None:
+        result = await callback(_input_envelope())
+        assert result is None, (
+            "has-bus wrapper must publish-from-row and return None (outbox path)"
+        )
+
+    asyncio.run(_run())
+
+    pairs = _published_pairs(bus)
+    assert [t for t, _ in pairs] == [TOPIC_ROUTING, TOPIC_INFERENCE, TOPIC_QUALITY], (
+        "precondition: the 3-event fan-out published on its resolved topics"
+    )
+
+    for topic, env in pairs:
+        expected = derive_event_type_from_topic(topic)
+        # These are real ONEX topics — the derivation MUST be non-null, or the
+        # type-scoped consumer has nothing to key on.
+        assert expected is not None, f"topic {topic!r} must derive an event_type"
+        assert env.event_type == expected, (
+            "OMN-14743: the outbox envelope must carry the topic-derived "
+            f"event_type. Pre-fix it was None (dropped by the routing reducer's "
+            f"type-scoped dispatcher, OMN-12294). topic={topic!r} "
+            f"got={env.event_type!r} expected={expected!r}"
+        )
+        # PARITY: the outbox stamp must equal what the external applier would
+        # stamp for the same topic (same canonical derivation, no divergence).
+        assert env.event_type == DispatchResultApplier._derive_event_type_from_topic(
+            topic
+        ), (
+            "outbox event_type must match the applier's derivation field-for-"
+            f"field (topic={topic!r}); the two publish sites cannot diverge."
+        )
+
+
+@pytest.mark.integration
+def test_type_scoped_consumer_alias_matches_outbox_event_type() -> None:
+    """Cross-boundary: a dispatcher keyed on the topic-alias MATCHES the emission.
+
+    The routing reducer's dispatcher registers under the topic-derived alias
+    (``derive_event_type_from_topic(topic)``, OMN-12116) and routes by the
+    incoming envelope's ``event_type`` (OMN-12294). This test proves the seam
+    closes end-to-end: the alias a consumer registers on == the event_type the
+    outbox now stamps. Pre-fix, ``event_type`` was ``None`` and no registered
+    alias could match — the exact drop that stalled delegation at RECEIVED.
+    """
+    store = _DurableRows()
+    adapter = _FakeStateStoreAdapter(store)
+    bus = _RecordingBus()
+    handler = _FanOutHandler(_fanout_batch())
+    callback = _stateful_callback(handler, adapter, event_bus=bus)
+
+    asyncio.run(callback(_input_envelope()))
+
+    pairs = _published_pairs(bus)
+    assert pairs, "precondition: the outbox published the fan-out"
+
+    # A minimal type-scoped router: {alias -> handler}, keyed on the SAME topic
+    # derivation the reducer's dispatcher registers under.
+    registry = {derive_event_type_from_topic(t): f"handler-for-{t}" for t, _ in pairs}
+    assert None not in registry, "every resolved ONEX topic must yield an alias"
+
+    for topic, env in pairs:
+        matched = registry.get(env.event_type)
+        assert matched == f"handler-for-{topic}", (
+            "a type-scoped consumer registered on the topic-alias must MATCH the "
+            f"emitted envelope's event_type. topic={topic!r} "
+            f"event_type={env.event_type!r} — a None event_type (the pre-fix "
+            "outbox emission) matches nothing and is silently dropped."
+        )

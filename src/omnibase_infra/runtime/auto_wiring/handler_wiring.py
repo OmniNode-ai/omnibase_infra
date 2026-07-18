@@ -126,6 +126,7 @@ from omnibase_infra.utils.util_retry_optimistic import (
     OptimisticConflictError,
     retry_on_optimistic_conflict,
 )
+from omnibase_infra.utils.util_topic_event_type import derive_event_type_from_topic
 
 
 class BoundaryPublishError(Exception):
@@ -2508,10 +2509,21 @@ def _make_stateful_dispatch_callback(
             idx = int(cast("int", entry["index"]))
             envelope_id = uuid5(cid_uuid, f"{causation}:{class_name}:{idx}")
             payload = _rebuild_outbox_event(entry)
+            # OMN-14743: stamp event_type from the resolved topic using the SAME
+            # derivation the external applier uses (shared
+            # ``derive_event_type_from_topic``). Without this the outbox emitted
+            # ``event_type=None`` — this path bypasses the applier's OMN-12116
+            # stamp (the state_io winner branch returns ``(1, None)``) — so the
+            # routing reducer's type-scoped dispatcher (OMN-12294) dropped the
+            # emission and delegation stalled at RECEIVED. A non-ONEX topic
+            # derives ``None`` (the field default), so this is safe for every
+            # topic shape the outbox can resolve.
+            event_type = derive_event_type_from_topic(topic)
             out_envelope: _Envelope[BaseModel] = _Envelope(
                 envelope_id=envelope_id,
                 payload=payload,
                 correlation_id=cid_uuid,
+                event_type=event_type,
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
