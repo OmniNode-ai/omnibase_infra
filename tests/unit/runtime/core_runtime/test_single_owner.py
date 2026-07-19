@@ -94,6 +94,48 @@ def test_raises_when_plugin_managed_contract_is_allowlisted() -> None:
         )
 
 
+def test_plugin_managed_owner_of_fanout_topic_fails_closed_omn14795() -> None:
+    """OMN-14795 latent trap: a plugin_managed contract that is the SOLE designated
+    fan-out owner of an allowlist topic STILL fails closed.
+
+    This reproduces the exact delegation-orchestrator shape the S8 wave-3
+    ``ONEX_CORE_RUNTIME_TOPICS`` move trips over: ``node_delegation_orchestrator`` is
+    ``plugin_managed: true`` AND the designated core-runtime owner of the genuine
+    fan-out ``inference-response.v1`` (also subscribed by
+    ``node_projection_delegation_inference_response``). The ONLY thing separating this
+    case from ``test_passes_fanout_with_owner_and_distinct_legacy_group`` (which passes)
+    is ``plugin_managed=True`` on the owner.
+
+    The plugin-managed guard MUST preempt the otherwise-valid fan-out-with-owner path:
+    were the gate to silently admit a plugin_managed owner, its subscription would be
+    wired onto NEITHER the core-runtime route (plugin-managed) NOR the legacy path
+    (skipped for allowlist topics), leaving the topic with no owner and stranding the
+    orchestrator consumer group Empty/Dead after boot (the OMN-14795 symptom). Locking
+    this in prevents a future refactor from regressing the fail-closed into a silent
+    no-op. Full resolution is an ownership-model decision (drop plugin_managed and let
+    the core-runtime group own it, or fold the plugin subscription into that group) —
+    this test only guards the invariant, not the chosen model.
+    """
+    with pytest.raises(ModelOnexError, match="plugin-managed contract"):
+        assert_single_owner_split(
+            core_runtime_topics=frozenset({FANOUT_TOPIC}),
+            routing_map={FANOUT_TOPIC: _route()},
+            legacy_subscribed_topics=frozenset({FANOUT_TOPIC}),
+            contracts=[
+                _contract(
+                    "node_delegation_orchestrator",
+                    (FANOUT_TOPIC,),
+                    plugin_managed=True,
+                ),
+                _contract(
+                    "node_projection_delegation_inference_response", (FANOUT_TOPIC,)
+                ),
+            ],
+            # A VALID owner is designated — proving the plugin_managed guard wins anyway.
+            owners={FANOUT_TOPIC: "node_delegation_orchestrator"},
+        )
+
+
 # --- S8 §D1=4b: fan-out enablement (was: outright refusal) ----------------------------
 
 

@@ -108,7 +108,16 @@ def assert_single_owner_split(
                     f"{contract.name!r} subscribes to allowlist topic(s) "
                     f"{sorted(core_runtime_topics & set(contract.event_bus.subscribe_topics))}. "
                     "Plugin-managed subscription paths do not yet expose ownership-aware "
-                    "consumer group validation; fail closed."
+                    "consumer group validation, so a plugin-managed subscriber cannot be "
+                    "allowlisted even when it is the sole designated fan-out owner; fail "
+                    "closed. Resolution (OMN-14795): keep these topic(s) OUT of "
+                    "ONEX_CORE_RUNTIME_TOPICS while this contract stays plugin_managed, or "
+                    "move it off plugin_managed (or fold its subscription into the "
+                    "core-runtime owner) BEFORE allowlisting the topic. Allowlisting a "
+                    "plugin-managed subscriber without doing one of these would leave the "
+                    "topic with no wired owner (neither the core-runtime route nor the "
+                    "skipped legacy path consumes it), stranding its consumer group "
+                    "Empty/Dead after boot."
                 ),
                 error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR,
             )
