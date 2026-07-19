@@ -73,9 +73,6 @@ known_entrypointless:
   - contract: node_llm_embedding_effect
     handler: HandlerEmbeddingOpenaiCompatible
     module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible
-  - contract: node_llm_inference_effect
-    handler: HandlerLlmCliSubprocess
-    module: omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess
   - contract: node_model_health_effect
     handler: HandlerProbeHealth
     module: omnibase_infra.nodes.node_model_health_effect.handlers.handler_probe_health

@@ -2648,6 +2648,12 @@ pattern_exemptions:
       'handle' is the canonical ONEX handler method name (definition B, OMN-14355/OMN-14407) that the shared runtime adapter binds. This node was refactored from the legacy scripts/check_release_identity.py gate into the canonical CONTRACT+NODE+HANDLER shape, which requires the core method be named 'handle'.
 
     ticket: OMN-14471
+  - file_pattern: 'handler_llm_cli_subprocess\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      'handle' is the canonical ONEX def-B dispatch entrypoint name that auto-wiring's _make_dispatch_callback binds; a handler exposing neither handle nor handle_async is bound to _missing_handle and raises ModelOnexError on every dispatch (OMN-14510 missing-handle burn-down). HandlerLlmCliSubprocess was regenerated to def-B under OMN-14804 to add this entrypoint, matching the ProtocolMessageHandler convention used by every other node handler on node_llm_inference_effect.
+
+    ticket: OMN-14804
   - file_pattern: 'evaluator_invariant\.py'
     class_pattern: "Class 'InvariantEvaluator'"
     violation_pattern: 'has \d+ methods'
