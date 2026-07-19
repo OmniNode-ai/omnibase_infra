@@ -569,6 +569,7 @@ def _make_dispatch_callback(
     handler_instance: ProtocolHandleable,
     event_model: ModelHandlerRef | None = None,
     handler_node_kind: EnumNodeKind | None = None,
+    published_event_names: frozenset[str] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -582,6 +583,14 @@ def _make_dispatch_callback(
     to classify a REDUCER's bare typed / Sequence return as ``projection_intents``
     rather than events (OMN-14598); ``None`` preserves the archetype-agnostic
     classification for every other caller.
+
+    ``published_event_names`` carries the short-name keys of the contract's
+    ``published_events`` map (OMN-14794). It refines the OMN-14598 REDUCER
+    classification: a REDUCER return whose model class IS a declared published
+    event is emitted as an EVENT (``output_events``) instead of being captured as
+    a projection — the live delegation-routing drop that stalled the FSM at
+    RECEIVED. ``None`` (non-REDUCER, or a REDUCER declaring no published events)
+    leaves the projection classification unchanged.
 
     When a handler exposes ``handle_async`` in addition to ``handle``, the async
     variant is preferred for dispatch.  This allows orchestrator handlers that
@@ -680,7 +689,7 @@ def _make_dispatch_callback(
             # list and finds neither. Route it through the one fan-out coercion so it
             # either becomes a validated batch (seam ON) or is dropped LOUDLY (OFF).
             return _normalize_handler_result(
-                raw_result, envelope, None, handler_node_kind
+                raw_result, envelope, None, handler_node_kind, published_event_names
             )
 
         payload = _extract_dispatch_payload(envelope)
@@ -713,7 +722,11 @@ def _make_dispatch_callback(
                 if asyncio.iscoroutine(fallback_result):
                     fallback_result = await cast("Awaitable[object]", fallback_result)
                 return _normalize_handler_result(
-                    fallback_result, envelope, event_model.name, handler_node_kind
+                    fallback_result,
+                    envelope,
+                    event_model.name,
+                    handler_node_kind,
+                    published_event_names,
                 )
             failure_result = _build_inference_intent_validation_failure_result(
                 event_model=event_model,
@@ -734,14 +747,22 @@ def _make_dispatch_callback(
             if asyncio.iscoroutine(envelope_result):
                 envelope_result = await cast("Awaitable[object]", envelope_result)
             return _normalize_handler_result(
-                envelope_result, envelope, event_model.name, handler_node_kind
+                envelope_result,
+                envelope,
+                event_model.name,
+                handler_node_kind,
+                published_event_names,
             )
 
         typed_result = handle_method(typed_payload)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
         return _normalize_handler_result(
-            typed_result, envelope, event_model.name, handler_node_kind
+            typed_result,
+            envelope,
+            event_model.name,
+            handler_node_kind,
+            published_event_names,
         )
 
     return _callback
@@ -1220,6 +1241,7 @@ def _normalize_handler_result(
     envelope: object,
     message_type: str | None,
     handler_node_kind: EnumNodeKind | None = None,
+    published_event_names: frozenset[str] | None = None,
 ) -> ModelDispatchResult | None:
     from datetime import UTC, datetime
     from uuid import UUID, uuid4
@@ -1255,8 +1277,10 @@ def _normalize_handler_result(
     # output contract). Computed BEFORE the isinstance/fan-out branches below so a
     # reducer's return is never misrouted to output_events or a fan-out event batch.
     reducer_projection_models: tuple[BaseModel, ...] = ()
-    if handler_node_kind is EnumNodeKind.REDUCER and not isinstance(
-        result, ModelHandlerOutput
+    if (
+        handler_node_kind is EnumNodeKind.REDUCER
+        and not isinstance(result, ModelHandlerOutput)
+        and not _is_declared_published_event_model(result, published_event_names)
     ):
         reducer_projection_models = _coerce_projection_models(result)
 
@@ -1312,6 +1336,44 @@ def _normalize_handler_result(
         output_intents=output_intents,  # type: ignore[arg-type]
         projection_intents=projection_intents,
         correlation_id=correlation_id,
+    )
+
+
+def _is_declared_published_event_model(
+    result: object,
+    published_event_names: frozenset[str] | None,
+) -> bool:
+    """True when *result* is a single typed model the contract declares as a
+    published event (OMN-14794).
+
+    OMN-14598 classifies EVERY bare-model / ``Sequence`` return from a REDUCER
+    (``node_type: REDUCER_GENERIC``) as ``projections[]``. That is correct for a
+    pure FSM fold, but a REDUCER that ALSO declares a ``published_events`` entry
+    for the model it returns emits that model as an EVENT — e.g.
+    ``node_delegation_routing_reducer`` returns ``ModelRoutingDecision``, which its
+    contract maps (``event_type: RoutingDecision``) to
+    ``onex.evt.omnibase-infra.routing-decision.v1``. Without this exception the
+    decision was captured into ``projection_intents`` and NEVER published as an
+    event, so the delegation orchestrator's ``handle_routing_decision`` never fired
+    and the workflow stalled at RECEIVED (routing-decision.v1 high-watermark flat).
+    That live drop was hotpatch-validated on the stability-test runtime: excluding
+    the declared-event return from the REDUCER->projection branch advanced the FSM
+    RECEIVED->ROUTED->COMPLETED and moved the routing-decision.v1 HW by exactly one.
+
+    Membership mirrors the applier's own topic resolver (``_outbox_topic_for`` /
+    ``resolve_published_topic``): the class name with a leading ``Model`` stripped
+    (the canonical ``event_type`` short-name), then the full class name.
+    ``published_event_names`` is the key set of the contract's ``published_events``
+    map (``load_published_events_map``). A ``None`` / empty set — every non-REDUCER
+    caller, and any REDUCER that declares no published events — preserves the
+    OMN-14598 projection classification unchanged.
+    """
+    if not published_event_names or not isinstance(result, BaseModel):
+        return False
+    class_name = type(result).__name__
+    return (
+        class_name.removeprefix("Model") in published_event_names
+        or class_name in published_event_names
     )
 
 
@@ -5577,10 +5639,31 @@ def _prepare_handler_wiring(
             else None
         )
     else:
+        _handler_node_kind = _node_kind_from_node_type(contract.node_type)
+        # OMN-14794: a REDUCER that DECLARES a published event and returns that
+        # event model must emit it as an EVENT, not a projection. Thread the
+        # contract's published_events short-names so _normalize_handler_result
+        # routes a declared-event return to output_events instead of the
+        # OMN-14598 REDUCER->projection capture (live delegation-routing drop that
+        # stalled the FSM at RECEIVED). Only loaded for REDUCERs — the sole
+        # archetype whose projection classification the set can refine.
+        _published_event_names: frozenset[str] | None = None
+        if (
+            _handler_node_kind is EnumNodeKind.REDUCER
+            and contract.event_bus is not None
+        ):
+            from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                load_published_events_map,
+            )
+
+            _published_event_names = frozenset(
+                load_published_events_map(contract.contract_path)
+            )
         callback = _make_dispatch_callback(
             handler_instance,
             entry.event_model,
-            handler_node_kind=_node_kind_from_node_type(contract.node_type),
+            handler_node_kind=_handler_node_kind,
+            published_event_names=_published_event_names,
         )
         # Type-scope the dispatcher on its declared event_model so a
         # multi-handler contract routes each message to the single handler
