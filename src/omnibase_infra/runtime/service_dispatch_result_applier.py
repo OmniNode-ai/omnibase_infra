@@ -94,6 +94,23 @@ _DELEGATION_INTENT_TOPIC_BY_CLASS: dict[str, str] = {
     "ModelQualityGateIntent": _TOPIC_REGISTRY.resolve(
         topic_keys.DELEGATION_QUALITY_GATE_REQUEST
     ),
+    # OMN-14794: the routing reducer's OUTPUT (ModelRoutingDecision) must resolve
+    # to routing-decision.v1 through ANY applier, not just the reducer's own
+    # auto-wired applier. When the decision is applied through an applier whose
+    # per-node allowed topics do NOT include routing-decision.v1 (e.g. the
+    # delegation orchestrator's plugin-managed applier, whose fallback
+    # ``output_topic`` is the delegation terminal), a ModelRoutingDecision with no
+    # class-name mapping silently fell back to that terminal topic — leaving
+    # routing-decision.v1 with zero records, so the orchestrator's
+    # handle_routing_decision never fired and the FSM stalled at RECEIVED and
+    # redelivered every session-timeout. Mapping the class here routes it to its
+    # canonical topic regardless of which applier publishes it (and adds
+    # routing-decision.v1 to ``_allowed_output_topics``). The reducer's own
+    # applier already resolved it via output_topic_map; this closes the gap for
+    # the generic/plugin-managed path.
+    "ModelRoutingDecision": _TOPIC_REGISTRY.resolve(
+        topic_keys.DELEGATION_ROUTING_DECISION
+    ),
     "ModelRoutingIntent": _TOPIC_REGISTRY.resolve(
         topic_keys.DELEGATION_ROUTING_REQUEST
     ),
