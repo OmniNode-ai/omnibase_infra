@@ -997,6 +997,35 @@ repos:
         always_run: true
         verbose: true
         stages: [pre-push]
+  # Deploy-scope DoD parity at PRE-PUSH (OMN-14681 / WS7 fan-out of the OMN-14655
+  # canary). Shifts the hosted required `deploy-gate` check left: it runs the
+  # deterministic, locally-decidable half of that gate at `git push` time so the
+  # omnibase_infra#2319 gap (a deploy-scoped surface -- e.g. handler wiring --
+  # touched with NO deploy-scope DoD item in its OCC contract) is caught before
+  # the push, not only at CI. DRY, NOT a re-implementation (root CLAUDE.md Rule
+  # #7a / OMN-14655 DRIFT-3): the script imports the SAME canonical validator CI
+  # runs (omniclaude/.github/actions/deploy-gate/validate_pr_deploy_required.py,
+  # resolved from the OMNI_HOME sibling clone) and calls its find_runtime_paths /
+  # has_deploy_evidence functions -- there is one rule set, no local copy of the
+  # runtime patterns. Tri-state, NEVER a false-red: no deploy-scoped file -> pass
+  # (parity with the hosted skip); deploy-scoped + no ticket cited -> FAIL;
+  # deploy-scoped + cited ticket whose local OCC contract has no deploy DoD ->
+  # FAIL (the #2319 gap); deploy-scoped + evidence present -> pass; deploy-scoped
+  # + companion OCC contract not merged locally -> loud NOTICE + pass (the full
+  # PR-body + Evidence-Source OCC-ref resolution stays a CI-only concern, so
+  # absence-locally is never treated as proof-of-absence). FAIL-LOUD (root
+  # CLAUDE.md Rule #8 / OMN-14655 principle #4): hard-errors (exit 1) if the diff
+  # base or the canonical validator cannot resolve; never a green skip.
+  - repo: local
+    hooks:
+      - id: prepush-deploy-scope-dod
+        name: Deploy-scope DoD parity (pre-push, OMN-14681)
+        entry: uv run --frozen python scripts/ci/check_deploy_scope_dod.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-push]
 # Configuration
 # OMN-14667 (DRIFT-2a fix): every stage a hook uses MUST be installed by
 # `pre-commit install`. Previously [pre-commit, pre-push] only, so the
