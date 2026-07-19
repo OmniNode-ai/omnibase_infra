@@ -29,16 +29,38 @@ REDUCER return keeps the OMN-14598 projection classification.
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
+from omnibase_core.services.service_local_handler_ownership_query import (
+    ServiceLocalHandlerOwnershipQuery,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _is_declared_published_event_model,
     _normalize_handler_result,
+    _prepare_handler_wiring,
 )
+from omnibase_infra.runtime.auto_wiring.models import (
+    ModelContractVersion,
+    ModelDiscoveredContract,
+    ModelEventBusWiring,
+    ModelHandlerRef,
+    ModelHandlerRouting,
+    ModelHandlerRoutingEntry,
+)
+
+
+class ModelDelegationRoutingRequest(BaseModel):
+    """Stand-in for the reducer's contract-declared command payload."""
+
+    correlation_id: str
+    prompt: str
 
 
 class ModelRoutingDecision(BaseModel):
@@ -64,6 +86,14 @@ class ModelDelegationTraceProjection(BaseModel):
 _PUBLISHED = frozenset({"RoutingDecision"})
 
 
+class HandlerDelegationRoutingReducer:
+    def handle(self, command: ModelDelegationRoutingRequest) -> ModelRoutingDecision:
+        return ModelRoutingDecision(
+            selected_agent=f"agent-for-{command.prompt}",
+            confidence_score=1.0,
+        )
+
+
 def _envelope() -> dict[str, object]:
     """A minimal transport envelope carrying a valid hex correlation_id."""
     return {
@@ -75,8 +105,109 @@ def _envelope() -> dict[str, object]:
     }
 
 
+def _write_reducer_contract_manifest(tmp_path: Path) -> Path:
+    contract_path = tmp_path / "contract.yaml"
+    contract_path.write_text(
+        "\n".join(
+            (
+                "name: node_delegation_routing_reducer",
+                "node_type: REDUCER_GENERIC",
+                "published_events:",
+                "  - event_type: RoutingDecision",
+                "    topic: onex.evt.omnibase-infra.routing-decision.v1",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return contract_path
+
+
+def _reducer_contract(contract_path: Path) -> ModelDiscoveredContract:
+    return ModelDiscoveredContract(
+        name="node_delegation_routing_reducer",
+        node_type="REDUCER_GENERIC",
+        contract_version=ModelContractVersion(major=1, minor=0, patch=0),
+        contract_path=contract_path,
+        entry_point_name="node_delegation_routing_reducer",
+        package_name="omnibase_infra",
+        event_bus=ModelEventBusWiring(
+            subscribe_topics=("onex.cmd.omnibase-infra.delegation-routing-request.v1",),
+            publish_topics=("onex.evt.omnibase-infra.routing-decision.v1",),
+        ),
+        handler_routing=ModelHandlerRouting(
+            routing_strategy="payload_type_match",
+            handlers=(
+                ModelHandlerRoutingEntry(
+                    handler=ModelHandlerRef(
+                        name="HandlerDelegationRoutingReducer",
+                        module=__name__,
+                    ),
+                    event_model=ModelHandlerRef(
+                        name="ModelDelegationRoutingRequest",
+                        module=__name__,
+                    ),
+                    event_type="omnibase-infra.delegation-routing-request",
+                    message_category="COMMAND",
+                ),
+            ),
+        ),
+    )
+
+
 @pytest.mark.unit
 class TestReducerDeclaredPublishedEventEmitsEvent:
+    @pytest.mark.asyncio
+    async def test_prepare_handler_wiring_threads_contract_published_events(
+        self, tmp_path: Path
+    ) -> None:
+        """Production wiring loads the reducer contract map before dispatch.
+
+        This covers the auto-wiring path CodeRabbit called out: a real contract
+        manifest supplies ``published_events``, ``_prepare_handler_wiring`` builds
+        the runtime dispatcher, and the dispatcher emits the declared reducer
+        model instead of capturing it as a projection.
+        """
+        contract = _reducer_contract(_write_reducer_contract_manifest(tmp_path))
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        resolver = ServiceHandlerResolver()
+        ownership_query = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerDelegationRoutingReducer,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership_query,
+                event_bus=object(),
+                container=None,
+            )
+
+        result = await prepared.dispatcher(
+            {
+                "payload": {
+                    "correlation_id": str(uuid4()),
+                    "prompt": "route",
+                },
+                "partition_key": None,
+                "correlation_id": str(uuid4()),
+                "event_type": "omnibase-infra.delegation-routing-request",
+                "envelope_id": str(uuid4()),
+            }
+        )
+
+        assert result is not None
+        assert len(result.output_events) == 1
+        assert isinstance(result.output_events[0], ModelRoutingDecision)
+        assert result.output_events[0].selected_agent == "agent-for-route"
+        assert result.projection_intents == ()
+        assert result.output_count == 1
+
     def test_reducer_declared_event_without_threading_drops_to_projection(self) -> None:
         """RED / EXISTS-but-WRONG: the pre-fix live drop.
 
