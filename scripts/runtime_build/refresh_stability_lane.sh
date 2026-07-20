@@ -58,6 +58,30 @@ DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_stability_refresh.py"
 CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 
+# Source the same contract-rendered runtime policy + operator env that
+# deploy-runtime.sh sources at its own top (docker/runtime-policy.env, then
+# ~/.omnibase/.env). deploy-runtime.sh's OWN docker compose calls already do
+# this internally, but this script ALSO issues a direct `docker compose`
+# invocation for the rollback targeted-recreate (step 6 below) -- without
+# these vars in scope, that compose invocation fails at config-interpolation
+# time (e.g. BIFROST_VERIFY_ENDPOINTS) before it can even attempt the
+# recreate. Preserve any operator-set OMNI_HOME/HEALTH_CHECK_URL exactly the
+# way deploy-runtime.sh's own header does.
+_OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
+if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${REPO_ROOT}/docker/runtime-policy.env"
+    if [[ -f "${HOME}/.omnibase/.env" ]]; then
+        # shellcheck source=/dev/null
+        source "${HOME}/.omnibase/.env"
+    fi
+    set +a
+fi
+if [[ -n "${_OPERATOR_OMNI_HOME}" ]]; then
+    export OMNI_HOME="${_OPERATOR_OMNI_HOME}"
+fi
+
 # --- hardcoded lane identity (no --lane flag; stability-test ONLY) ---------
 readonly LANE="stability-test"
 readonly COMPOSE_PROJECT="omnibase-infra-stability-test"
@@ -318,7 +342,17 @@ run_verify \
     --consumer-groups-file "${CONSUMER_GROUPS_FILE}" \
     --json > "${GATE1_JSON}" || GATE_EXIT=$?
 
-GATE1_OVERALL="$(jq -r '.overall' "${GATE1_JSON}")"
+# Defensive: if the health-gate crashed before printing valid JSON (should not
+# happen -- run_verify's own main() always emits JSON on every documented exit
+# path -- but a receipt-writing script must never itself crash on a malformed
+# upstream artifact), fall back to a minimal INFRA_ERROR placeholder so the
+# jq reads below (and the final receipt assembly) always have valid JSON.
+if ! jq -e . "${GATE1_JSON}" >/dev/null 2>&1; then
+    err "health-gate did not produce valid JSON (exit ${GATE_EXIT}) -- writing INFRA_ERROR placeholder"
+    jq -n --arg lane "${LANE}" '{lane: $lane, overall: "INFRA_ERROR", errors: ["health-gate produced no valid JSON output"]}' > "${GATE1_JSON}"
+fi
+
+GATE1_OVERALL="$(jq -r '.overall // "INFRA_ERROR"' "${GATE1_JSON}" 2>/dev/null || echo "INFRA_ERROR")"
 log "health-gate result: ${GATE1_OVERALL} (exit ${GATE_EXIT})"
 cat "${GATE1_JSON}" >&2
 
@@ -349,12 +383,19 @@ else
 
     # Targeted recreate against the rolled-back images (same command shape as
     # deploy-runtime.sh's restart_services(), scoped to the 4 core services).
+    # Guarded (never let a compose failure here abort the script under set -e
+    # -- a rollback-recreate failure must still reach the health-gate +
+    # receipt below, not crash silently with no receipt at all).
+    ROLLBACK_RECREATE_EXIT=0
     docker compose -p "${COMPOSE_PROJECT}" \
         -f "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
         -f "${INFRA_CLONE}/docker/docker-compose.stability-test.yml" \
         --profile runtime \
         up -d --no-deps --no-build --force-recreate \
-        "${CORE_SERVICES[@]}"
+        "${CORE_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?
+    if [[ "${ROLLBACK_RECREATE_EXIT}" -ne 0 ]]; then
+        err "rollback targeted-recreate exited ${ROLLBACK_RECREATE_EXIT} -- proceeding to health-gate anyway (it will report the true state)"
+    fi
 
     log "=== Re-verifying health after rollback ==="
     GATE2_JSON="${WORKDIR}/gate2.json"
@@ -371,7 +412,12 @@ else
         --no-require-digest-change \
         --json > "${GATE2_JSON}" || GATE2_EXIT=$?
 
-    GATE2_OVERALL="$(jq -r '.overall' "${GATE2_JSON}")"
+    if ! jq -e . "${GATE2_JSON}" >/dev/null 2>&1; then
+        err "post-rollback health-gate did not produce valid JSON (exit ${GATE2_EXIT}) -- writing INFRA_ERROR placeholder"
+        jq -n --arg lane "${LANE}" '{lane: $lane, overall: "INFRA_ERROR", errors: ["post-rollback health-gate produced no valid JSON output"]}' > "${GATE2_JSON}"
+    fi
+
+    GATE2_OVERALL="$(jq -r '.overall // "INFRA_ERROR"' "${GATE2_JSON}" 2>/dev/null || echo "INFRA_ERROR")"
     log "post-rollback health-gate result: ${GATE2_OVERALL} (exit ${GATE2_EXIT})"
     cat "${GATE2_JSON}" >&2
 
