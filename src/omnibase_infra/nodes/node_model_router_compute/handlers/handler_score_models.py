@@ -179,9 +179,7 @@ class HandlerScoreModels:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    def score_candidates(
-        self, scoring_input: ModelScoringInput
-    ) -> ModelRoutingDecision:
+    def handle(self, scoring_input: ModelScoringInput) -> ModelRoutingDecision:
         health_map: dict[str, ModelEndpointHealth] = {
             e.model_key: e for e in scoring_input.health
         }
