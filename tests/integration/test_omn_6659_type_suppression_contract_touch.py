@@ -19,7 +19,7 @@ _NODE_CONTRACTS = (
 
 _EXPECTED_UPDATED_DATES = {
     "node_artifact_change_detector_effect": "2026-05-22",
-    "node_impact_analyzer_compute": "2026-05-22",
+    "node_impact_analyzer_compute": "2026-07-20",
     "node_llm_inference_effect": "2026-07-19",
     "node_runtime_error_triage_effect": "2026-05-22",
     "node_session_state_effect": "2026-05-22",
