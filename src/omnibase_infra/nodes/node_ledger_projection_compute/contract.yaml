@@ -17,6 +17,8 @@
 #   - OMN-1646: Event Ledger Schema and Models
 #   - OMN-1647: Ledger Write Effect Node
 #   - OMN-1648: Ledger Projection Compute Node
+#   - OMN-14823: HandlerLedgerProjection exposes the canonical def-B handle()
+#     dispatch entrypoint while preserving ledger.append intent routing.
 # Contract identifiers
 name: "node_ledger_projection_compute"
 contract_name: "node_ledger_projection_compute"
@@ -24,13 +26,13 @@ node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "0.1.1"
+  patch: 2
+node_version: "0.1.2"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 7 platform event topics for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events.
+  COMPUTE node that subscribes to 7 platform event topics for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract patch 2 records the OMN-14823 canonical def-B handler entrypoint flip while preserving ledger.append intent routing.
 
 # Event bus configuration
 event_bus:
