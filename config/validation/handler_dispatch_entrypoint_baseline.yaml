@@ -40,9 +40,6 @@ known_entrypointless:
   - contract: node_artifact_reconciliation_orchestrator
     handler: HandlerPlanToYaml
     module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_yaml
-  - contract: node_broker_disk_watermark_compute
-    handler: HandlerBrokerDiskWatermark
-    module: omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark
   - contract: node_chain_verify_reducer
     handler: HandlerChainVerify
     module: omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify
@@ -58,15 +55,9 @@ known_entrypointless:
   - contract: node_checkpoint_validate_compute
     handler: HandlerCheckpointValidate
     module: omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate
-  - contract: node_contract_validate_compute
-    handler: HandlerContractValidate
-    module: omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate
   - contract: node_impact_analyzer_compute
     handler: HandlerImpactAnalysis
     module: omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis
-  - contract: node_invariant_evaluate_compute
-    handler: HandlerInvariantEvaluate
-    module: omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate
   - contract: node_llm_embedding_effect
     handler: HandlerEmbeddingOpenaiCompatible
     module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible

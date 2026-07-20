@@ -2677,6 +2677,12 @@ pattern_exemptions:
       'handle' is the canonical ONEX handler method name (definition B, OMN-14355/OMN-14407) that the shared runtime adapter binds. OMN-14818 hand-flips node_auth_gate_compute to canonical def-B via a pure rename evaluate->handle (the 10-step authorization cascade is preserved byte-identically); the core method must be named 'handle' to be the dispatch entrypoint auto-wiring binds.
 
     ticket: OMN-14818
+  - file_pattern: 'handler_broker_disk_watermark\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      'handle' is the canonical ONEX handler method name (definition B, OMN-14355) that auto-wiring's _make_dispatch_callback binds. OMN-14816 hand-flipped this node's op-method probe_disk_watermark() to the canonical handle() dispatch entrypoint; the name is protocol-defined and renaming it would break the canonical shape this flip establishes. Mirrors the handler_release_identity handle exemption.
+
+    ticket: OMN-14816
   - file_pattern: 'evaluator_invariant\.py'
     class_pattern: "Class 'InvariantEvaluator'"
     violation_pattern: 'has \d+ methods'

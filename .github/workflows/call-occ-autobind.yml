@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# call-occ-autobind.yml
+#
+# Per-repo OCC-autobind trigger for omnibase_infra (OMN-14811, canary before
+# fan-out to core/omniclaude). Thin caller — all publish logic lives in the
+# omniclaude reusable, which in turn runs omnimarket's canonical publisher; this
+# file only wires the trigger and picks the lane.
+#
+# On a ticketed product PR (opened/synchronize) the reusable publishes
+# `onex.cmd.omnimarket.occ-autobind.v1`; the .201 effects runtime
+# (node_pr_lifecycle_fix_effect -> OccCompanionEmitter) mints the OCC evidence
+# companion and PATCHes `Evidence-Source: OCC#<n>` onto this PR, so occ-preflight
+# resolves without a hand-authored companion.
+#
+# ADDITIVE / REJECTS NOTHING: this workflow is NOT a required status check. It
+# publishes a command; it never fails a PR's merge. A fail-loud exit 1 on the
+# trusted runner (missing/mismatched dev broker) is a non-blocking red signal,
+# not a merge gate.
+#
+# LANE / SECRET (OMN-14801 / OMN-14800): lane=dev is resolved against omnimarket's
+# config/ci_bus_lanes.yaml@main overlay (contract-owned, authoritative). `dev` is
+# `from-secret` there, so the trusted-runner publish requires a repo-level
+# `KAFKA_BOOTSTRAP_SERVERS` secret on omnibase_infra pointed at the DEV broker
+# (never stability). See the reusable header for the full broker decision.
+#
+# Ticket: OMN-14811
+
+name: OCC Autobind Publisher
+
+on:
+  pull_request:
+    branches: [main, dev, "hotfix/**"]
+    types: [opened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  occ-autobind:
+    # Skip dependency bots and PRs with no OMN ticket token (same gate the
+    # reusable enforces defensively). Gating here means the reusable is not even
+    # invoked for non-OMN / bot PRs.
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'renovate[bot]' &&
+      (contains(github.event.pull_request.title, 'OMN-') ||
+       contains(github.event.pull_request.head.ref, 'OMN-'))
+    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-autobind-reusable.yml@main
+    secrets: inherit
+    with:
+      lane: dev

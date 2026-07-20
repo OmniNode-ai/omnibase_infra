@@ -30,11 +30,11 @@ name: "node_runner_fleet_health_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 node_type: "COMPUTE_GENERIC"
 description: >
-  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: per-runner state, fleet aggregates, and recorded (never executed) recommended actions.
+  Pure, deterministic classifier of a runner-fleet snapshot into a typed health verdict: per-runner state, fleet aggregates, and recorded (never executed) recommended actions. Uses the canonical def-B typed ModelRunnerFleetHealthEvaluateCommand handler entrypoint.
 
 input_model:
   name: "ModelRunnerFleetHealthEvaluateCommand"
@@ -79,12 +79,15 @@ published_events:
         "retention.ms": "604800000"
         "cleanup.policy": "delete"
 metadata:
-  description: "Runner-fleet health classifier (OMN-13942 Increment 1 -- read-only detection core)"
+  description: "Runner-fleet health classifier (OMN-13942 Increment 1 -- read-only detection core) with canonical def-B typed handler entrypoint."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-07-04"
+  updated: "2026-07-20"
+  ticket: "OMN-14830"
   tags:
     - compute
+    - def-b
     - health
     - runner
     - fleet-maintain
