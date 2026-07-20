@@ -15,10 +15,12 @@ from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.models.projection import ModelSequenceInfo
+from omnibase_infra.nodes.node_kafka_replay_compute.deserializers.deserializer_default import (
+    default_envelope_deserializer,
+)
 from omnibase_infra.nodes.node_kafka_replay_compute.models import (
     ModelKafkaReplayInput,
     ModelKafkaReplayOutput,
@@ -30,6 +32,7 @@ from omnibase_infra.nodes.node_kafka_replay_compute.protocols import (
     ProgressCallback,
     ProtocolKafkaMessage,
     ProtocolKafkaReplayConsumer,
+    ProtocolReplayEnvelope,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,18 +58,13 @@ def _default_consumer_factory(
     return cast("ProtocolKafkaReplayConsumer", consumer)
 
 
-def _deserialize_event_envelope(value: bytes) -> ModelEventEnvelope[object]:
-    """Deserialize canonical event-bus envelope bytes."""
-    return ModelEventEnvelope[object].model_validate_json(value)
-
-
 class HandlerKafkaReplay:
     """Replay Kafka event envelopes from an explicitly injected target cluster."""
 
     def __init__(
         self,
         consumer_factory: ConsumerFactory | None = None,
-        envelope_deserializer: EnvelopeDeserializer = _deserialize_event_envelope,
+        envelope_deserializer: EnvelopeDeserializer = default_envelope_deserializer,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         """Initialize the replay handler.
@@ -253,7 +251,7 @@ class HandlerKafkaReplay:
 
     def _decode_record(
         self, record: ProtocolKafkaMessage, failed_event_offsets: list[int]
-    ) -> ModelEventEnvelope[object] | None:
+    ) -> ProtocolReplayEnvelope | None:
         if record.value is None:
             failed_event_offsets.append(record.offset)
             return None

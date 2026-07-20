@@ -125,10 +125,7 @@ class TestRunnerFleetMaintainWorkflowIntegration:
 
         # Step 4: Evaluate health (COMPUTE) -- pure, no I/O.
         evaluate_handler = HandlerRunnerFleetHealthEvaluate()
-        verdict = await evaluate_handler.handle(
-            correlation_id=evaluate_command.correlation_id,
-            snapshot=evaluate_command.snapshot,
-        )
+        verdict = await evaluate_handler.handle(evaluate_command)
         assert verdict.online_count == 2
         assert verdict.saturation_ratio == 1.0
         assert all(
@@ -168,10 +165,7 @@ class TestRunnerFleetMaintainWorkflowIntegration:
         evaluate_command = await HandlerRunnerFleetSnapshotComplete().handle(
             snapshot=snapshot
         )
-        verdict = await HandlerRunnerFleetHealthEvaluate().handle(
-            correlation_id=evaluate_command.correlation_id,
-            snapshot=evaluate_command.snapshot,
-        )
+        verdict = await HandlerRunnerFleetHealthEvaluate().handle(evaluate_command)
         completed = await HandlerRunnerFleetHealthVerdictComplete().handle(
             verdict=verdict
         )
