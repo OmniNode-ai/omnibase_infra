@@ -1,0 +1,33 @@
+{
+  "base_ref": "a87e5057f1b930c31bbad5e1e5fa215f962629d4",
+  "canonical_handler_module": "omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models",
+  "legacy_handler_module": "omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models",
+  "node_id": "omnibase_infra.nodes.node_model_router_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:1fafe196504d954c7a2ceb4189e4c9ff9e943fd9508229435d403194b03d7d4b",
+      "sha256:95a94c4db487c77e3b6f8dac94d2237f6ba8e28257140e02b834eaad064e7f5b",
+      "sha256:69d42fd7417f1162362a63da06aa892156715e4fa6e2a2f38d3e61d747d5c043",
+      "sha256:eda6bf7ca95e765816dc81059d90033b86049cfb89652b2f1f2f5bde5b7467a8",
+      "sha256:b1b7f8d27abb387363e8d0410ab19e0f3ac795bff2bf58882a0cb43f99aa29ff",
+      "sha256:3307bfa257f8eb127f2b1e808778c660166132767b8631ebcaf6c39638220cdd",
+      "sha256:80038766312f579f667536cc061c1e3817257ba52fad6fa8dfc61e5c478c5776",
+      "sha256:45e9ecd1e409c4929e6d0f4c843d379c12419ff4d759fdb9ea391d677209a087",
+      "sha256:fded21763b6bee5d0dad438ff1db32f6591743fe5edd29a57f111ffec57dccf0"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_model_router/test_score_models_defb_omn14825.py::TestModelRouterDefBFlip::test_handle_entrypoint_exists",
+      "tests/unit/nodes/test_model_router/test_score_models_defb_omn14825.py::TestModelRouterDefBFlip::test_defb_handle_reproduces_legacy_goldens",
+      "tests/unit/nodes/test_model_router/test_score_models_defb_omn14825.py::TestModelRouterDefBFlip::test_golden_equivalence_is_non_vacuous"
+    ]
+  },
+  "preserved_symbols": [
+    "_capability_match",
+    "_effective_cost_per_1k",
+    "_passes_hard_constraints",
+    "_compute_score",
+    "ScoringContext.__init__"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

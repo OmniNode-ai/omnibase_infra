@@ -281,6 +281,23 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
     ticket: OMN-14805
   # ==========================================================================
+  # Canonical def-B handler dispatch entrypoint (OMN-14355 / OMN-14825)
+  # ==========================================================================
+  # `handle` is the ProtocolMessageHandler dispatch entrypoint that auto-wiring's
+  # _make_dispatch_callback binds (definition B, operator-locked OMN-14355). It is a
+  # protocol-defined name, not a candidate for domain-specific renaming. The generic-
+  # pattern checker only misses the equivalent `handle` on other canonical handlers
+  # because it visits ast.FunctionDef but not ast.AsyncFunctionDef; a SYNCHRONOUS def-B
+  # handle is equally canonical and equally mandated.
+  - file_pattern: 'node_model_router_compute/handlers/handler_score_models\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      OMN-14825 hand-flip to canonical def-B: handle(scoring_input: ModelScoringInput) -> ModelRoutingDecision is the architecturally-mandated dispatch entrypoint that auto-wiring binds (definition B, OMN-14355). The name is protocol-defined; renaming it would break the canonical shape this flip establishes.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
+    ticket: OMN-14825
+  # ==========================================================================
   # RuntimeHostProcess Exemptions (OMN-756)
   # ==========================================================================
   # Central coordinator class that legitimately requires multiple methods for:

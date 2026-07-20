@@ -76,9 +76,6 @@ known_entrypointless:
   - contract: node_model_health_effect
     handler: HandlerProbeHealth
     module: omnibase_infra.nodes.node_model_health_effect.handlers.handler_probe_health
-  - contract: node_model_router_compute
-    handler: HandlerScoreModels
-    module: omnibase_infra.nodes.node_model_router_compute.handlers.handler_score_models
   - contract: node_registration_storage_effect
     handler: HandlerRegistrationStorageMock
     module: omnibase_infra.handlers.registration_storage.handler_registration_storage_mock
