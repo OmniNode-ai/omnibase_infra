@@ -78,7 +78,7 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.success
         assert decision.selected_model_key == "qwen3-coder-30b"
@@ -97,7 +97,7 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.success
         assert decision.selected_model_key == "claude-sonnet"
@@ -116,7 +116,7 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert not decision.success
         assert decision.selected_model_key == ""
@@ -143,7 +143,7 @@ class TestHandlerScoreModels:
             health=health,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.success
         assert decision.selected_model_key != "qwen3-coder-30b"
@@ -159,7 +159,7 @@ class TestHandlerScoreModels:
             context_length_estimate=4096,
             registry=registry,
         )
-        decision_no_chain = handler.score_candidates(input_no_chain)
+        decision_no_chain = handler.handle(input_no_chain)
         score_no_chain = decision_no_chain.scores.get("deepseek-r1-32b", 0)
 
         input_chain = ModelScoringInput(
@@ -171,7 +171,7 @@ class TestHandlerScoreModels:
             chain_hit=True,
             chain_hit_model_key="deepseek-r1-32b",
         )
-        decision_chain = handler.score_candidates(input_chain)
+        decision_chain = handler.handle(input_chain)
         score_chain = decision_chain.scores.get("deepseek-r1-32b", 0)
 
         assert score_chain > score_no_chain
@@ -188,7 +188,7 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.success
         assert decision.selected_model_key in ("qwen3-coder-30b", "deepseek-r1-32b")
@@ -218,7 +218,7 @@ class TestHandlerScoreModels:
             live_metrics=live_metrics,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.scores["deepseek-r1-32b"] > 0
 
@@ -246,7 +246,7 @@ class TestHandlerScoreModels:
             live_metrics=live_metrics,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         qwen_score = decision.scores["qwen3-coder-30b"]
         deepseek_score = decision.scores["deepseek-r1-32b"]
@@ -264,7 +264,7 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        decision = handler.score_candidates(scoring_input)
+        decision = handler.handle(scoring_input)
 
         assert decision.success
         assert decision.selected_model_key == "claude-sonnet"
@@ -282,8 +282,8 @@ class TestHandlerScoreModels:
             registry=registry,
         )
 
-        d1 = handler.score_candidates(scoring_input)
-        d2 = handler.score_candidates(scoring_input)
+        d1 = handler.handle(scoring_input)
+        d2 = handler.handle(scoring_input)
 
         assert d1.selected_model_key == d2.selected_model_key
         assert d1.scores == d2.scores

@@ -7,14 +7,18 @@
 #
 # Tickets: OMN-7267, OMN-7841
 #
+# Related Tickets:
+#   - OMN-14825: HandlerScoreModels exposes the canonical def-B handle()
+#     dispatch entrypoint while preserving deterministic model scoring.
+#
 name: "node_model_router_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
-description: "Pure scoring of candidate models by quality, measured cost tier, live speed metrics, and availability."
+  patch: 2
+node_version: "1.0.2"
+description: "Pure scoring of candidate models by quality, measured cost tier, live speed metrics, and availability. Contract patch 2 records the OMN-14825 canonical def-B handler entrypoint flip while preserving deterministic model scoring."
 input_model:
   name: "ModelScoringInput"
   module: "omnibase_infra.nodes.node_model_router_compute.models.model_scoring_input"
