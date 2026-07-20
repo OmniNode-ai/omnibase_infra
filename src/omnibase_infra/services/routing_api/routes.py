@@ -160,7 +160,7 @@ async def route_request(body: ModelRouteRequestBody) -> ModelRoutingDecision:
     )
 
     handler = HandlerScoreModels()
-    decision = handler.score_candidates(scoring_input)
+    decision = handler.handle(scoring_input)
 
     if not decision.success:
         raise HTTPException(

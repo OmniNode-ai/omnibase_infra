@@ -281,6 +281,23 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
     ticket: OMN-14805
   # ==========================================================================
+  # Canonical def-B handler dispatch entrypoint (OMN-14355 / OMN-14825)
+  # ==========================================================================
+  # `handle` is the ProtocolMessageHandler dispatch entrypoint that auto-wiring's
+  # _make_dispatch_callback binds (definition B, operator-locked OMN-14355). It is a
+  # protocol-defined name, not a candidate for domain-specific renaming. The generic-
+  # pattern checker only misses the equivalent `handle` on other canonical handlers
+  # because it visits ast.FunctionDef but not ast.AsyncFunctionDef; a SYNCHRONOUS def-B
+  # handle is equally canonical and equally mandated.
+  - file_pattern: 'node_model_router_compute/handlers/handler_score_models\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      OMN-14825 hand-flip to canonical def-B: handle(scoring_input: ModelScoringInput) -> ModelRoutingDecision is the architecturally-mandated dispatch entrypoint that auto-wiring binds (definition B, OMN-14355). The name is protocol-defined; renaming it would break the canonical shape this flip establishes.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
+    ticket: OMN-14825
+  # ==========================================================================
   # RuntimeHostProcess Exemptions (OMN-756)
   # ==========================================================================
   # Central coordinator class that legitimately requires multiple methods for:
@@ -2671,6 +2688,12 @@ pattern_exemptions:
       'handle' is the canonical ONEX def-B dispatch entrypoint name that auto-wiring's _make_dispatch_callback binds; a handler exposing neither handle nor handle_async is bound to _missing_handle and raises ModelOnexError on every dispatch (OMN-14510 missing-handle burn-down). HandlerLlmCliSubprocess was regenerated to def-B under OMN-14804 to add this entrypoint, matching the ProtocolMessageHandler convention used by every other node handler on node_llm_inference_effect.
 
     ticket: OMN-14804
+  - file_pattern: 'handler_broker_disk_watermark\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      'handle' is the canonical ONEX handler method name (definition B, OMN-14355) that auto-wiring's _make_dispatch_callback binds. OMN-14816 hand-flipped this node's op-method probe_disk_watermark() to the canonical handle() dispatch entrypoint; the name is protocol-defined and renaming it would break the canonical shape this flip establishes. Mirrors the handler_release_identity handle exemption.
+
+    ticket: OMN-14816
   - file_pattern: 'evaluator_invariant\.py'
     class_pattern: "Class 'InvariantEvaluator'"
     violation_pattern: 'has \d+ methods'
