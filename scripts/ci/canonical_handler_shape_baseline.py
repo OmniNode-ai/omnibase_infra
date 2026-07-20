@@ -23,7 +23,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_build_loop_write_effect",
     "omnibase_infra.nodes.node_bus_forwarder_effect",
     "omnibase_infra.nodes.node_chain_orchestrator",
-    "omnibase_infra.nodes.node_chain_replay_compute",
     "omnibase_infra.nodes.node_chain_retrieval_effect",
     "omnibase_infra.nodes.node_chain_store_effect",
     "omnibase_infra.nodes.node_chain_verify_reducer",
