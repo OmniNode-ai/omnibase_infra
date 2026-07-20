@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for node_invariant_evaluate_compute."""
+"""Tests for node_invariant_evaluate_compute (canonical def-B handlers)."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from omnibase_infra.nodes.node_invariant_evaluate_compute.evaluator_invariant im
     InvariantEvaluator,
 )
 from omnibase_infra.nodes.node_invariant_evaluate_compute.handlers import (
-    handle_invariant_evaluate,
-    handle_invariant_evaluate_all,
-    handle_invariant_evaluate_batch,
+    HandlerInvariantEvaluate,
+    HandlerInvariantEvaluateAll,
+    HandlerInvariantEvaluateBatch,
 )
 from omnibase_infra.nodes.node_invariant_evaluate_compute.models import (
     ModelInvariantEvaluateAllInput,
@@ -56,9 +56,26 @@ def test_node_invariant_evaluate_compute_is_declarative_shell() -> None:
 
 
 @pytest.mark.unit
+def test_handlers_expose_canonical_handle_entrypoint() -> None:
+    """Every def-B handler must expose a callable ``handle`` dispatch entrypoint.
+
+    Auto-wiring's ``_make_dispatch_callback`` binds ``handle_async`` then ``handle``;
+    a handler exposing neither binds ``_missing_handle`` and raises on first dispatch.
+    """
+    for handler_cls in (
+        HandlerInvariantEvaluate,
+        HandlerInvariantEvaluateBatch,
+        HandlerInvariantEvaluateAll,
+    ):
+        assert callable(getattr(handler_cls, "handle", None)), (
+            f"{handler_cls.__name__} exposes no callable handle() entrypoint."
+        )
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_handle_invariant_evaluate_returns_single_result() -> None:
-    result = await handle_invariant_evaluate(
+    result = await HandlerInvariantEvaluate().handle(
         ModelInvariantEvaluateInput(
             invariant=_field_presence_invariant(),
             output={"status": "ok"},
@@ -81,7 +98,7 @@ async def test_handle_invariant_evaluate_batch_preserves_order() -> None:
         ],
     )
 
-    results = await handle_invariant_evaluate_batch(
+    results = await HandlerInvariantEvaluateBatch().handle(
         ModelInvariantEvaluateBatchInput(
             invariant_set=invariant_set,
             output={"status": "ok", "score": 0.8},
@@ -107,7 +124,7 @@ async def test_handle_invariant_evaluate_all_summarizes_failures() -> None:
         ],
     )
 
-    summary = await handle_invariant_evaluate_all(
+    summary = await HandlerInvariantEvaluateAll().handle(
         ModelInvariantEvaluateAllInput(
             invariant_set=invariant_set,
             output={"score": 0.2},

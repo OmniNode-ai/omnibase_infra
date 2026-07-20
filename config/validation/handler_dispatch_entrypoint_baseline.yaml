@@ -64,9 +64,6 @@ known_entrypointless:
   - contract: node_impact_analyzer_compute
     handler: HandlerImpactAnalysis
     module: omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis
-  - contract: node_invariant_evaluate_compute
-    handler: HandlerInvariantEvaluate
-    module: omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate
   - contract: node_llm_embedding_effect
     handler: HandlerEmbeddingOpenaiCompatible
     module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible
