@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.reducer.model_intent import ModelIntent
@@ -63,7 +65,19 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 
 pytestmark = [pytest.mark.unit]
 
-_TOPIC = "onex.evt.github.pr-status.v1"
+
+def _contract_topic() -> str:
+    contract_path = (
+        Path(__file__).resolve().parents[4]
+        / "src/omnibase_infra/nodes/node_pr_state_projection_compute/contract.yaml"
+    )
+    contract = yaml.safe_load(contract_path.read_text())
+    topics = contract["event_bus"]["subscribe_topics"]
+    assert len(topics) == 1
+    return str(topics[0])
+
+
+_TOPIC = _contract_topic()
 # Deterministic header fields so the SELECTED input corpus hashes reproducibly —
 # the adequacy receipt + hand-flip proof pin these exact payloads via input_hash.
 _FIXED_TS = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
