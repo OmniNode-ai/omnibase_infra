@@ -1,0 +1,14 @@
+{
+  "node_id": "omnibase_infra.nodes.node_merge_sweep_classify_compute",
+  "provenance": {
+    "authored_by": "proof-author@omninode.local",
+    "base_ref_exec_sha": "ab7a6bf4dd24668e52b16fa0705bb5e4e5c35f93",
+    "def_b_commit": "5d7caff593c269926ff285b9a8773b12863853be"
+  },
+  "selected_input_hashes": [
+    "sha256:515d28aac2916d8b86aeafcc9e188de17e7d45d1e4b9bf096ede4607b219631c",
+    "sha256:f67bc27fd36998a538961580c4d98fc4f158799b94c5c49ca5a71fe314871da1",
+    "sha256:91f44d960e64086263922fbe84e10c85e40e6fee8e9389a16e180e882ef7ee87"
+  ],
+  "status": "pass"
+}

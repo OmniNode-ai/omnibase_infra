@@ -1,0 +1,55 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "correlation_id": "22222222-2222-4222-8222-222222222222",
+    "prs": [
+      {
+        "author": "",
+        "base_ref": "main",
+        "ci_status": "SUCCESS",
+        "has_auto_merge": false,
+        "head_ref": "",
+        "is_draft": false,
+        "labels": [],
+        "mergeable": "MERGEABLE",
+        "number": 7,
+        "repo": "OmniNode-ai/test",
+        "review_decision": "",
+        "title": "test PR",
+        "updated_at": ""
+      }
+    ],
+    "require_approval": false
+  },
+  "input_type": "ModelClassifyInput",
+  "output": {
+    "correlation_id": "22222222-2222-4222-8222-222222222222",
+    "skipped": [],
+    "total_classified": 1,
+    "track_a": [
+      {
+        "pr": {
+          "author": "",
+          "base_ref": "main",
+          "ci_status": "SUCCESS",
+          "has_auto_merge": false,
+          "head_ref": "",
+          "is_draft": false,
+          "labels": [],
+          "mergeable": "MERGEABLE",
+          "number": 7,
+          "repo": "OmniNode-ai/test",
+          "review_decision": "",
+          "title": "test PR",
+          "updated_at": ""
+        },
+        "reason": "CI green, approved, mergeable",
+        "track": "A"
+      }
+    ],
+    "track_b": []
+  },
+  "output_type": "ModelClassifyResult",
+  "scenario": "no_approval_required",
+  "volatile_mask": []
+}

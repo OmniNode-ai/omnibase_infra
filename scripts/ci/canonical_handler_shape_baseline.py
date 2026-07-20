@@ -47,7 +47,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_llm_embedding_effect",
     "omnibase_infra.nodes.node_merge_gate_effect",
     "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect",
-    "omnibase_infra.nodes.node_merge_sweep_classify_compute",
     "omnibase_infra.nodes.node_merge_sweep_pr_list_effect",
     "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator",
     "omnibase_infra.nodes.node_merge_sweep_workflow_reducer",
