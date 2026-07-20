@@ -85,11 +85,12 @@ jobs:
           set -euo pipefail
 
           RUNNER_NAME="${RUNNER_NAME:-${HOSTNAME:-unknown}}"
-          WARN_GB="${RUNNER_DISK_WARN_GB}"
-          if [[ "${OMNI_RUNNER_ENVIRONMENT:-${RUNNER_ENVIRONMENT:-}}" == "github-hosted" && "${WARN_GB}" == "5" ]]; then
-            WARN_GB="1"
-            echo "GitHub-hosted runner detected; using 1 GB free-space floor instead of the self-hosted 5 GB default."
+          if [[ "${OMNI_RUNNER_ENVIRONMENT:-${RUNNER_ENVIRONMENT:-}}" == "github-hosted" ]]; then
+            echo "::notice title=Runner disk preflight skipped::GitHub-hosted ephemeral runner detected; self-hosted disk attribution gate is not applicable."
+            exit 0
           fi
+
+          WARN_GB="${RUNNER_DISK_WARN_GB}"
           WARN_KB=$(( WARN_GB * 1024 * 1024 ))
 
           echo "Runner: ${RUNNER_NAME}"
