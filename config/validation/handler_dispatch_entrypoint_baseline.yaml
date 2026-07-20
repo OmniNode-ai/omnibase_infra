@@ -40,9 +40,6 @@ known_entrypointless:
   - contract: node_artifact_reconciliation_orchestrator
     handler: HandlerPlanToYaml
     module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_yaml
-  - contract: node_auth_gate_compute
-    handler: HandlerAuthGate
-    module: omnibase_infra.nodes.node_auth_gate_compute.handlers.handler_auth_gate
   - contract: node_chain_verify_reducer
     handler: HandlerChainVerify
     module: omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify
