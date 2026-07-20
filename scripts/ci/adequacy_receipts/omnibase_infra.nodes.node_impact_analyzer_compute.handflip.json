@@ -1,0 +1,32 @@
+{
+  "base_ref": "71ab1bf6deb4252edd9593f547dd5a4b4e60939b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis",
+  "legacy_handler_module": "omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis",
+  "node_id": "omnibase_infra.nodes.node_impact_analyzer_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:3b1bda30a3276e6810c3cc65246f2536bf0046737255dd1a55cdbf1dffe1852b",
+      "sha256:c822fdcc32fb4b68780faf1a4e760a5b679536acf51cc6d2d08ea28142ac9bbd",
+      "sha256:3c17ce76a6412aea628027dfa2234519b5c97fffcbe61553ca0b538ce3a0fc67",
+      "sha256:0278acfbdac15d10db5476bb4fecc2e52325688c941d8c937f20bf3e6823fde1",
+      "sha256:e2e95f086a3deeb7d112573f8d5b4c766835c03fa2234a2ade9fd6b4dae897c8"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handle_matches_scoring_table[C10_reason_codes_all]",
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handle_matches_scoring_table[C7_manual_reconciliation]",
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handle_matches_scoring_table[C8_none_policy_filtered]",
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handle_matches_scoring_table[C11_require_low_review]",
+      "tests/unit/nodes/node_impact_analyzer_compute/test_impact_analysis_defb_omn14817.py::test_handle_matches_scoring_table[C12_empty_source_triggers]"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerImpactAnalysis._score_artifact",
+    "HandlerImpactAnalysis._count_matches",
+    "HandlerImpactAnalysis._assign_action",
+    "_level_to_policy",
+    "_pattern_to_reason_code"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

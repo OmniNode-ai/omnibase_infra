@@ -264,7 +264,7 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Protocol Resolution section)
     ticket: OMN-2510
   # ==========================================================================
-  # Canonical def-B handler dispatch entrypoint (OMN-14355 / OMN-14805)
+  # Canonical def-B handler dispatch entrypoint (OMN-14355 / OMN-14805 / OMN-14817)
   # ==========================================================================
   # `handle` is the ProtocolMessageHandler dispatch entrypoint that auto-wiring's
   # _make_dispatch_callback binds (definition B, operator-locked OMN-14355). It is a
@@ -280,6 +280,14 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
     ticket: OMN-14805
+  - file_pattern: 'node_impact_analyzer_compute/handlers/handler_impact_analysis\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      OMN-14817 hand-flip to canonical def-B: handle(request: ModelImpactAnalysisRequest) -> ModelImpactAnalysisResult is the architecturally-mandated dispatch entrypoint that auto-wiring binds (definition B, OMN-14355). The name is protocol-defined; renaming it would break the canonical shape this flip establishes.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - canonical def-B handler entrypoint, OMN-14355)
+    ticket: OMN-14817
   # ==========================================================================
   # Canonical def-B handler dispatch entrypoint (OMN-14355 / OMN-14825)
   # ==========================================================================
