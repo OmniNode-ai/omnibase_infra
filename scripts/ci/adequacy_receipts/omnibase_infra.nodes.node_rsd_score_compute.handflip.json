@@ -1,0 +1,31 @@
+{
+  "base_ref": "426b92b2e8d414eb7be21b43d780181417cbf7df",
+  "canonical_handler_module": "omnibase_infra.nodes.node_rsd_score_compute.handlers.handler_rsd_score_calculate",
+  "legacy_handler_module": "omnibase_infra.nodes.node_rsd_score_compute.handlers.handler_rsd_score_calculate",
+  "node_id": "omnibase_infra.nodes.node_rsd_score_compute",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:e21556af1ef9f8cdbf78bfc6894e8b64e18c1bfea1e545db4bf2208fdd9f67c5",
+      "sha256:2c0eb3714d82ecbe8e190de02e16ae6d8ca26662be951f1d1e8ac07e12dfe94b"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_handle_is_canonical_def_b_typed_entrypoint",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_real_dispatch_callback_computes_scores[C1_rich_graph]",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_real_dispatch_callback_computes_scores[C2_old_boost]",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_real_dispatch_callback_computes_scores[C3_empty]",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_real_dispatch_callback_computes_scores[C4_overrides]",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_rich_graph_ranks_bottleneck_ticket_first",
+      "tests/unit/nodes/node_rsd_score_compute/test_rsd_score_dispatch_entrypoint_omn14828.py::test_missing_typed_entrypoint_is_the_red"
+    ]
+  },
+  "preserved_symbols": [
+    "_count_downstream",
+    "_calculate_dependency_distance",
+    "_calculate_failure_surface",
+    "_calculate_time_decay",
+    "_calculate_agent_utility",
+    "_calculate_user_weighting"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

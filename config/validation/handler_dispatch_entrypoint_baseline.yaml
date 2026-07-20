@@ -61,21 +61,12 @@ known_entrypointless:
   - contract: node_checkpoint_validate_compute
     handler: HandlerCheckpointValidate
     module: omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate
-  - contract: node_contract_validate_compute
-    handler: HandlerContractValidate
-    module: omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate
   - contract: node_impact_analyzer_compute
     handler: HandlerImpactAnalysis
     module: omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis
-  - contract: node_invariant_evaluate_compute
-    handler: HandlerInvariantEvaluate
-    module: omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate
   - contract: node_llm_embedding_effect
     handler: HandlerEmbeddingOpenaiCompatible
     module: omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible
-  - contract: node_llm_inference_effect
-    handler: HandlerLlmCliSubprocess
-    module: omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess
   - contract: node_model_health_effect
     handler: HandlerProbeHealth
     module: omnibase_infra.nodes.node_model_health_effect.handlers.handler_probe_health
@@ -103,9 +94,6 @@ known_entrypointless:
   - contract: node_routing_score_reducer
     handler: HandlerUpdateScores
     module: omnibase_infra.nodes.node_routing_score_reducer.handlers.handler_update_scores
-  - contract: node_runtime_source_attestor_effect
-    handler: HandlerSourceAttestation
-    module: omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation
   - contract: node_setup_infisical_effect
     handler: HandlerInfisicalFullSetup
     module: omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup

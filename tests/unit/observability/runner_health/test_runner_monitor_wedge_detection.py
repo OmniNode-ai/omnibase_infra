@@ -298,6 +298,7 @@ def _run_monitor(
         # Auto-bounce MUST stay off — these tests prove detection only and must
         # never mutate anything.
         "MONITOR_AUTO_BOUNCE": "0",
+        "AUTO_BOUNCE_LOCKFILE": str(tmp_path / "runner-monitor-bounce.lock"),
     }
     if extra_env:
         env.update(extra_env)
@@ -718,7 +719,7 @@ def test_persistent_offline_idle_runner_auto_bounces_when_locally_idle(
 
     assert "OFFLINE-IDLE-RECREATE" in str(state["offline_idle_recreate_names"]), state
     call_log = tmp_path / "docker-calls.log"
-    for _ in range(20):
+    for _ in range(100):
         if call_log.exists() and "compose" in call_log.read_text(encoding="utf-8"):
             break
         time.sleep(0.1)

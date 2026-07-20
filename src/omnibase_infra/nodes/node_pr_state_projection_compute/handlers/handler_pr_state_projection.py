@@ -128,46 +128,24 @@ class HandlerPrStateProjection:
 
     async def handle(
         self,
-        message: object,
+        message: ModelEventMessage,
     ) -> ModelHandlerOutput[ModelIntent]:
-        """Contract-typed auto-wiring entry point."""
+        """Canonical def-B dispatch entrypoint (OMN-14826).
+
+        The shared runtime adapter validates the wire payload into the
+        contract-declared ``ModelEventMessage`` input model and hands it here —
+        the envelope boundary lives in the runtime adapter, not in this core
+        (definition B, OMN-14355). ``_coerce_event_message`` is a no-op
+        pass-through for an already-typed model and only does real work for a
+        direct dict/object call in a unit test. This projects the GitHub PR
+        status event into a ``pr_state.upsert`` intent for
+        ``NodePrStateWriteEffect`` to persist.
+        """
         raw_message = self._coerce_event_message(message)
         intent = self.project(raw_message)
         return ModelHandlerOutput.for_compute(
             input_envelope_id=uuid4(),
             correlation_id=raw_message.headers.correlation_id,
-            handler_id=HANDLER_ID_PR_STATE_PROJECTION,
-            result=intent,
-        )
-
-    async def execute(
-        self,
-        envelope: dict[str, object],
-    ) -> ModelHandlerOutput[ModelIntent]:
-        """ProtocolHandler entry point — extract message, delegate to project()."""
-        correlation_id = self._safe_correlation_id(envelope.get("correlation_id"))
-        input_envelope_id = uuid4()
-
-        payload_raw = envelope.get("payload")
-        if not isinstance(payload_raw, dict):
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="pr_state_projection.execute",
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'payload' in envelope: expected dict, "
-                f"got {type(payload_raw).__name__}",
-                error_code=EnumCoreErrorCode.INVALID_INPUT,
-                context=context,
-            )
-
-        message = ModelEventMessage.model_validate(payload_raw)
-        intent = self.project(message)
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
             handler_id=HANDLER_ID_PR_STATE_PROJECTION,
             result=intent,
         )
@@ -218,7 +196,6 @@ class HandlerPrStateProjection:
                 context=context,
             )
 
-        # Events may arrive raw or wrapped in a ModelEventEnvelope; unwrap.
         body: dict[str, JsonType] = (
             decoded["payload"] if isinstance(decoded.get("payload"), dict) else decoded
         )
@@ -255,21 +232,6 @@ class HandlerPrStateProjection:
         if isinstance(raw, dict):
             payload = raw.get("payload", raw)
         return ModelEventMessage.model_validate(payload)
-
-    @staticmethod
-    def _safe_correlation_id(raw: object) -> UUID:
-        """Parse a correlation ID from envelope-supplied raw input.
-
-        Returns a fresh UUID if `raw` is missing, empty, or unparseable —
-        we never want a malformed envelope to surface as ValueError to the
-        runtime, since pr_state projection is best-effort read-model refresh.
-        """
-        if not raw:
-            return uuid4()
-        try:
-            return UUID(str(raw))
-        except (ValueError, TypeError):
-            return uuid4()
 
     @staticmethod
     def _first_str(body: dict[str, JsonType], keys: tuple[str, ...]) -> str | None:
