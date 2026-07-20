@@ -124,6 +124,11 @@ jobs:
             avail_gb=$(( avail_kb / 1024 / 1024 ))
             avail_gb_frac="$(awk "BEGIN {printf \"%.1f\", ${avail_kb}/1024/1024}")"
 
+            if [[ "${OMNI_RUNNER_ENVIRONMENT:-${RUNNER_ENVIRONMENT:-}}" == "github-hosted" && ( "${mount}" == "/boot" || "${mount}" == "/boot/efi" ) ]]; then
+              echo "OK  ${mount}: ${avail_gb_frac} GB free (${used_pct}% used; ignored fixed GitHub-hosted boot partition)"
+              continue
+            fi
+
             if (( avail_kb < WARN_KB )); then
               echo "::error title=RUNNER-DISK:${avail_gb_frac}GB::Runner '${RUNNER_NAME}' mount '${mount}' has only ${avail_gb_frac} GB free (${used_pct}% used). Below threshold of ${WARN_GB} GB. Infra failure — do not attribute downstream job failures to domain bugs until disk is freed. Drain or recycle ${RUNNER_NAME}."
               failed=1
