@@ -43,9 +43,6 @@ known_entrypointless:
   - contract: node_auth_gate_compute
     handler: HandlerAuthGate
     module: omnibase_infra.nodes.node_auth_gate_compute.handlers.handler_auth_gate
-  - contract: node_broker_disk_watermark_compute
-    handler: HandlerBrokerDiskWatermark
-    module: omnibase_infra.nodes.node_broker_disk_watermark_compute.handlers.handler_broker_disk_watermark
   - contract: node_chain_verify_reducer
     handler: HandlerChainVerify
     module: omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify

@@ -14,13 +14,17 @@
 # Related Tickets:
 #   - OMN-13009: P0 Redpanda broker storage exhaustion (error system:28)
 #   - OMN-13008: Automated worktree GC + .201 docker/disk GC + disk watermark alert ratchet
+#   - OMN-14816: HandlerBrokerDiskWatermark now exposes the canonical def-B
+#     handle() dispatch entrypoint via a behavior-preserving hand-flip from
+#     probe_disk_watermark(); business-logic helpers preserved byte-identically
+#     (canonical-shape ratchet OMN-14355, hand-flip proof path OMN-14781).
 name: "node_broker_disk_watermark_compute"
 contract_name: "node_broker_disk_watermark_compute"
 node_name: "node_broker_disk_watermark_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
