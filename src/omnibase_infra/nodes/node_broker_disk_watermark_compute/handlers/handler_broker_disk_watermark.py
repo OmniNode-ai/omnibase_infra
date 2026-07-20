@@ -33,6 +33,7 @@ Ticket: OMN-13009
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -303,6 +304,18 @@ class HandlerBrokerDiskWatermark:
             min_free_bytes_floor=min_free_bytes_floor,
             below_min_free_floor=below_floor,
         )
+
+    async def handle_async(
+        self, inp: ModelBrokerDiskWatermarkInput
+    ) -> ModelBrokerDiskWatermarkOutput:
+        """Run the blocking probe implementation off the event loop.
+
+        Auto-wiring prefers ``handle_async`` over ``handle`` when both exist, so
+        runtime dispatch avoids executing docker subprocess and disk-usage calls
+        inline on the event loop while preserving the synchronous handler
+        contract for direct callers and tests.
+        """
+        return await asyncio.to_thread(self.handle, inp)
 
 
 __all__ = ["HandlerBrokerDiskWatermark"]

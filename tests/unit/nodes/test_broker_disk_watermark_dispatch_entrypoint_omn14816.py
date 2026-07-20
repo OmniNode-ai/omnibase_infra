@@ -25,6 +25,7 @@ Ticket: OMN-14816
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -82,6 +83,10 @@ def test_handler_exposes_handle_entrypoint() -> None:
     assert callable(getattr(HandlerBrokerDiskWatermark, "handle", None)), (
         "HandlerBrokerDiskWatermark exposes no handle(); auto-wiring binds "
         "_missing_handle and every dispatch raises ModelOnexError."
+    )
+    assert callable(getattr(HandlerBrokerDiskWatermark, "handle_async", None)), (
+        "HandlerBrokerDiskWatermark must expose handle_async(); auto-wiring runs "
+        "the synchronous docker/disk probes through the event-loop dispatch path."
     )
 
 
@@ -141,3 +146,34 @@ async def test_real_dispatch_callback_returns_clean_output() -> None:
     assert out.max_severity is EnumDiskSeverity.CLEAN
     assert out.p0_labels == ()
     assert out.warn_labels == ()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_real_dispatch_callback_runs_blocking_probe_in_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime callback binds handle_async, which delegates handle via to_thread."""
+    cid = uuid4()
+    delegated: list[object] = []
+
+    async def _record_to_thread(
+        func: object, /, *args: object, **kwargs: object
+    ) -> object:
+        delegated.append(func)
+        return func(*args, **kwargs)  # type: ignore[misc]
+
+    monkeypatch.setattr(asyncio, "to_thread", _record_to_thread)
+
+    handler = HandlerBrokerDiskWatermark()
+    callback = _make_dispatch_callback(handler)
+    envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+        payload=_input(cid, _healthy_disk_usage),
+        correlation_id=cid,
+        event_type="ModelBrokerDiskWatermarkInput",
+    )
+
+    result = await callback(envelope)
+
+    assert result is not None
+    assert delegated == [handler.handle]

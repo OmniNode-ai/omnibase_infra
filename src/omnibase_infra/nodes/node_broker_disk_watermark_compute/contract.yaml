@@ -18,17 +18,19 @@
 #     handle() dispatch entrypoint via a behavior-preserving hand-flip from
 #     probe_disk_watermark(); business-logic helpers preserved byte-identically
 #     (canonical-shape ratchet OMN-14355, hand-flip proof path OMN-14781).
+#     Runtime auto-wiring uses handle_async() to execute blocking docker/disk
+#     probes off the event loop while preserving the typed handle() contract.
 name: "node_broker_disk_watermark_compute"
 contract_name: "node_broker_disk_watermark_compute"
 node_name: "node_broker_disk_watermark_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
+  patch: 2
 node_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_type: "COMPUTE_GENERIC"
 description: >
   Compute node that probes the docker data-root filesystem (via docker info -> DockerRootDir, NOT host /) and per-broker-volume disk usage, then classifies each against warn (85%) and p0 (95%) watermarks. Also cross-checks that remaining free bytes exceed redpanda storage_min_free_bytes (default 10 MiB). Returns a list of ModelBrokerDiskCheck records — one per volume plus one for the data-root — each with severity CLEAN / WARN / P0. A downstream orchestrator creates Linear tickets on P0 and Slack alerts on WARN. docker info and shutil.disk_usage are injected seams for testability.
