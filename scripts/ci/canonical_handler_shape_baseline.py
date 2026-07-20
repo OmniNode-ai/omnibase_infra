@@ -19,7 +19,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_architecture_validator.handlers",
     "omnibase_infra.nodes.node_artifact_change_detector_effect",
     "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
-    "omnibase_infra.nodes.node_auth_gate_compute",
     "omnibase_infra.nodes.node_broker_disk_watermark_compute",
     "omnibase_infra.nodes.node_build_loop_projection_compute",
     "omnibase_infra.nodes.node_build_loop_write_effect",
