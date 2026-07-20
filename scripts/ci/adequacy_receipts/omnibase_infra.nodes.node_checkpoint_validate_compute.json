@@ -1,0 +1,22 @@
+{
+  "branch_coverage_pct": 32.26,
+  "candidate_count": 5,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate",
+  "handler_module_sha256": "sha256:e5c31d20b58aceb46c4d30ec4b7d6435c679075bf9da54455144204204721996",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_checkpoint_validate_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T14:55:42.946752+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:b99816f92facec9dfd5386973cb13fb6a2a7e5ca12cf89ada3bebdd987d1d1ef",
+    "sha256:c59556b0e8b87671c5b9a361f51697ab491c153debd5421234cf6b7e17deb2f0"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14820 hand-flips node_checkpoint_validate_compute to canonical def-B via the OMN-14781 path (mirrors OMN-14826/OMN-14823): a typed def-B entrypoint handle(request: ModelCheckpointValidateInput) is added and the pure validate() business logic is preserved byte-identical base_ref<->HEAD (git-re-derived by the ratchet). The selected corpus is valid checkpoints only, because validate()'s error branches (absolute path, invalid SHA, phase mismatch, attempt<1) are pre-empted by ModelCheckpoint's own field/model validators \u2014 an invalid checkpoint can never be constructed into the ModelCheckpointValidateInput the canonical def-B adapter path hands the handler, so those branches (and the legacy execute() deserialize/guard branches) are unreachable via def-B and remain covered by the existing envelope-dict suite test_handler_checkpoint_validate.py rather than re-driven through this SUCCESS-only dispatch corpus. Equivalence is proven by that git-verbatim validate() preservation plus green handle==validate==execute parity over the corpus, not by a broad branch-coverage claim.",
+    "uncovered_branch_count": 8
+  },
+  "volatile_mask": []
+}
