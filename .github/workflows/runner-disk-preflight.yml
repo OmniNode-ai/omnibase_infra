@@ -91,6 +91,10 @@ jobs:
           fi
 
           WARN_GB="${RUNNER_DISK_WARN_GB}"
+          if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" && "${WARN_GB}" == "5" ]]; then
+            WARN_GB="1"
+            echo "GitHub-hosted runner detected; using 1 GB free-space floor instead of the self-hosted 5 GB default."
+          fi
           WARN_KB=$(( WARN_GB * 1024 * 1024 ))
 
           echo "Runner: ${RUNNER_NAME}"
