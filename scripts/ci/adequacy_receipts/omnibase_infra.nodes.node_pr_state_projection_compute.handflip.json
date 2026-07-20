@@ -1,0 +1,33 @@
+{
+  "node_id": "omnibase_infra.nodes.node_pr_state_projection_compute",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection",
+  "legacy_handler_module": "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection",
+  "base_ref": "108e7a9efb2f11209f1bb88e2483acac0a293eda",
+  "preserved_symbols": [
+    "HandlerPrStateProjection.project",
+    "HandlerPrStateProjection._extract_payload",
+    "HandlerPrStateProjection._first_str",
+    "HandlerPrStateProjection._extract_timestamp",
+    "HandlerPrStateProjection._extract_correlation_id",
+    "HandlerPrStateProjection._coerce_event_message",
+    "_require_str",
+    "_require_int"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_handle_is_canonical_def_b_typed_entrypoint",
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_real_dispatch_callback_projects_intent[P1_full]",
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_real_dispatch_callback_projects_intent[P2_envelope_wrapped]",
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_real_dispatch_callback_projects_intent[P3_minimal]",
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_real_dispatch_callback_projects_intent[P4_isdraft_alt_keys]",
+      "tests/unit/nodes/node_pr_state_projection_compute/test_pr_state_projection_dispatch_entrypoint_omn14826.py::test_missing_typed_entrypoint_is_the_red"
+    ],
+    "selected_input_hashes": [
+      "sha256:c2e30324c59f9d35089e77927aaeb568f506ad540d28d1fab5d508ecb6dc7912",
+      "sha256:78119b5e415f4162cc3d53d857385f3dd385c987c527167a95a372c57b1dd83b",
+      "sha256:bff10b433bd7533e7484c3a420e179150dab28bd664b60ac3e48ad9c1a5aeecc"
+    ]
+  }
+}
