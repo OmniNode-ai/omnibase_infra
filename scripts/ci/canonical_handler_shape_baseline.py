@@ -78,7 +78,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_rsd_orchestrator",
     "omnibase_infra.nodes.node_rsd_score_compute",
     "omnibase_infra.nodes.node_rsd_state_reducer",
-    "omnibase_infra.nodes.node_runner_fleet_health_compute",
     "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator",
     "omnibase_infra.nodes.node_runner_health_snapshot_effect",
     "omnibase_infra.nodes.node_runtime_error_triage_effect",
