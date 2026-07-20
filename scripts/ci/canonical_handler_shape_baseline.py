@@ -48,8 +48,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_impact_analyzer_compute",
     "omnibase_infra.nodes.node_invariant_evaluate_compute",
     "omnibase_infra.nodes.node_kafka_replay_compute",
-    "omnibase_infra.nodes.node_ledger_projection_compute",
-    "omnibase_infra.nodes.node_ledger_projection_compute.handlers",
     "omnibase_infra.nodes.node_ledger_write_effect",
     "omnibase_infra.nodes.node_llm_embedding_effect",
     "omnibase_infra.nodes.node_merge_gate_effect",

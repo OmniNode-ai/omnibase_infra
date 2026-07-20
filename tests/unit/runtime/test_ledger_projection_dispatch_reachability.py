@@ -334,18 +334,23 @@ def test_handler_exposes_dispatch_entrypoint() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_projects_dict_envelope_to_ledger_append_intent() -> None:
-    """Drive handle() with the DICT envelope the live dispatch path delivers.
+    """Drive the REAL engine with the dict-payload envelope the live path delivers.
 
-    ``MessageDispatchEngine._materialize_envelope_with_bindings`` hands the
-    handler a dict, not an attribute-bearing envelope. A handle() that only did
-    ``getattr(envelope, "payload")`` would silently no-op on the real runtime path
-    while passing an object-shaped unit test — the OMN-14140 trap. So the envelope
-    here is a dict on purpose.
+    The live dispatch path hands the wiring a transport envelope whose ``payload``
+    is a dumped ``ModelEventMessage`` dict. Post def-B flip (OMN-14823), the SHARED
+    runtime dispatch adapter (``handler_wiring._make_dispatch_callback``) owns the
+    dict -> typed materialization: it reads the contract-declared
+    ``event_model`` (``ModelEventMessage``, OMN-14594) and validates the dict into
+    it BEFORE invoking the canonical def-B ``handle(request: ModelEventMessage)``.
+    So the faithful "live dict envelope produces the ledger.append intent"
+    assertion drives the engine end-to-end, not a per-handler dict coercion (the
+    OMN-14140 trap is now closed at the adapter boundary, not inside the handler).
     """
-    handler = HandlerLedgerProjection(ModelONEXContainer())
+    engine = await _wire_and_freeze()
+    topic = "onex.evt.platform.node-registration.v1"
     correlation_id = uuid4()
     message = ModelEventMessage(
-        topic="onex.evt.platform.node-registration.v1",
+        topic=topic,
         value=b'{"node_id": "abc"}',
         headers=ModelEventHeaders(
             correlation_id=correlation_id,
@@ -356,10 +361,19 @@ async def test_handle_projects_dict_envelope_to_ledger_append_intent() -> None:
         partition=3,
         offset="42",
     )
+    envelope = ModelEventEnvelope[object](
+        payload=message.model_dump(mode="json"),
+        correlation_id=correlation_id,
+        event_type="platform.node-registration",
+    )
 
-    output = await handler.handle({"payload": message.model_dump()})
+    result = await engine.dispatch(topic, envelope)
 
-    intent = output.result
+    assert result.status == EnumDispatchStatus.SUCCESS, result.error_message
+    # The ledger.append intent MUST land in output_intents (not output_events) so
+    # the intent_routing_table reaches node_ledger_write_effect.
+    assert len(result.output_intents) == 1
+    intent = result.output_intents[0]
     assert isinstance(intent, ModelIntent)
     # The intent_type is the routing key the kernel's IntentExecutor dispatches on
     # — it must match the "ledger.append" write-effect operation exactly, or the
