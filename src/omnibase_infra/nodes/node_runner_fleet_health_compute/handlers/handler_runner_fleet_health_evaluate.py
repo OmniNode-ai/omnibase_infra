@@ -36,7 +36,6 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_recommended_action_type import (
@@ -48,6 +47,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_fl
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_recommended_action import (
     ModelRecommendedAction,
 )
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_evaluate_command import (
+    ModelRunnerFleetHealthEvaluateCommand,
+)
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import (
     ModelRunnerFleetHealthVerdict,
 )
@@ -56,9 +58,6 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_h
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
     ModelRunnerFleetRunnerFact,
-)
-from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import (
-    ModelRunnerFleetSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,18 +214,27 @@ class HandlerRunnerFleetHealthEvaluate:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self, correlation_id: UUID, snapshot: ModelRunnerFleetSnapshot
+        self, request: ModelRunnerFleetHealthEvaluateCommand
     ) -> ModelRunnerFleetHealthVerdict:
-        """Classify ``snapshot`` into a ``ModelRunnerFleetHealthVerdict``.
+        """Classify the command's snapshot into a ``ModelRunnerFleetHealthVerdict``.
+
+        Canonical ONEX definition B (OMN-14355): a single typed-payload
+        ``request`` the shared runtime adapter binds via the contract
+        ``input_model``. The correlation id and facts-only snapshot are unpacked
+        from the command; classification is byte-identical to the pre-flip
+        two-argument entrypoint (OMN-14781 signature adaptation -- no behavior
+        change).
 
         Args:
-            correlation_id: Workflow correlation ID.
-            snapshot: Facts-only snapshot gathered by the EFFECT node.
+            request: Command carrying the workflow correlation id and the
+                facts-only snapshot gathered upstream by the EFFECT node.
 
         Returns:
             ModelRunnerFleetHealthVerdict with per-runner states, fleet
             aggregates, and recorded (never executed) recommended actions.
         """
+        correlation_id = request.correlation_id
+        snapshot = request.snapshot
         online_count = sum(1 for r in snapshot.runners if r.github_status == "online")
         offline_count = sum(1 for r in snapshot.runners if r.github_status != "online")
         busy_count = sum(

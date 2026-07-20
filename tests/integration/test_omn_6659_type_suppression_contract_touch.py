@@ -17,6 +17,14 @@ _NODE_CONTRACTS = (
     "node_session_state_effect",
 )
 
+_EXPECTED_UPDATED_DATES = {
+    "node_artifact_change_detector_effect": "2026-05-22",
+    "node_impact_analyzer_compute": "2026-05-22",
+    "node_llm_inference_effect": "2026-07-19",
+    "node_runtime_error_triage_effect": "2026-05-22",
+    "node_session_state_effect": "2026-05-22",
+}
+
 
 def test_omn_6659_handler_contracts_are_refreshed() -> None:
     repo_root = Path(__file__).resolve().parents[2]
@@ -27,4 +35,4 @@ def test_omn_6659_handler_contracts_are_refreshed() -> None:
         )
         contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
 
-        assert contract["metadata"]["updated"] == "2026-05-22"
+        assert contract["metadata"]["updated"] == _EXPECTED_UPDATED_DATES[node_name]

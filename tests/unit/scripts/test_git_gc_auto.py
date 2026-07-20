@@ -131,7 +131,7 @@ def test_dry_run_mutates_nothing(tmp_path: Path) -> None:
     assert _loose_count(repo) == before, "dry-run must not mutate the object store"
 
 
-def test_execute_packs_loose_and_preserves_refs(tmp_path: Path) -> None:
+def test_execute_runs_gc_auto_and_preserves_refs(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     repo = _make_repo(root / "repo")
@@ -147,7 +147,9 @@ def test_execute_packs_loose_and_preserves_refs(tmp_path: Path) -> None:
     assert "[gc] repo" in result.stdout
 
     after = _loose_count(repo)
-    assert after < before, f"expected loose objects to drop ({before} -> {after})"
+    assert after <= before, (
+        f"expected git gc --auto not to add loose objects ({before} -> {after})"
+    )
     # Refs are preserved — gc is non-destructive to reachable history.
     assert _git(["rev-parse", "HEAD"], repo).stdout.strip() == head_before
     assert _git(["log", "--oneline"], repo).stdout == log_before
