@@ -80,12 +80,13 @@ jobs:
         env:
           # Configurable via workflow_dispatch; defaults to 5 GB.
           RUNNER_DISK_WARN_GB: ${{ inputs.warn_gb || '5' }}
+          OMNI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
 
           RUNNER_NAME="${RUNNER_NAME:-${HOSTNAME:-unknown}}"
           WARN_GB="${RUNNER_DISK_WARN_GB}"
-          if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" && "${WARN_GB}" == "5" ]]; then
+          if [[ "${OMNI_RUNNER_ENVIRONMENT:-${RUNNER_ENVIRONMENT:-}}" == "github-hosted" && "${WARN_GB}" == "5" ]]; then
             WARN_GB="1"
             echo "GitHub-hosted runner detected; using 1 GB free-space floor instead of the self-hosted 5 GB default."
           fi
