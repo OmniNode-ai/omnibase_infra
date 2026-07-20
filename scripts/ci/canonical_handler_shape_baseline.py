@@ -19,7 +19,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_architecture_validator.handlers",
     "omnibase_infra.nodes.node_artifact_change_detector_effect",
     "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
-    "omnibase_infra.nodes.node_auth_gate_compute",
     "omnibase_infra.nodes.node_build_loop_write_effect",
     "omnibase_infra.nodes.node_bus_forwarder_effect",
     "omnibase_infra.nodes.node_chain_orchestrator",
@@ -72,7 +71,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_runtime_error_triage_effect",
     "omnibase_infra.nodes.node_runtime_manifest_reducer",
     "omnibase_infra.nodes.node_runtime_orchestrator",
-    "omnibase_infra.nodes.node_scope_extract_compute",
     "omnibase_infra.nodes.node_scope_file_read_effect",
     "omnibase_infra.nodes.node_scope_manifest_write_effect",
     "omnibase_infra.nodes.node_scope_workflow_reducer",
@@ -89,7 +87,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_update_plan_reducer",
     "omnibase_infra.nodes.node_validation_adjudicator",
     "omnibase_infra.nodes.node_validation_executor",
-    "omnibase_infra.nodes.node_validation_ledger_projection_compute",
     "omnibase_infra.nodes.node_validation_ledger_write_effect",
     "omnibase_infra.nodes.node_validation_orchestrator",
 )

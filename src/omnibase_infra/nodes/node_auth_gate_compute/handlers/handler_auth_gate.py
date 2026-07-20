@@ -4,8 +4,10 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler for auth gate — 10-step authorization decision cascade.
 
-Pure COMPUTE handler: receives auth state + tool request, returns
-allow/deny/soft_deny. No I/O, no side effects.
+Canonical definition-B COMPUTE handler: the runtime adapts the wire payload
+into ModelAuthGateRequest and calls handle(request) -> ModelAuthGateDecision.
+Receives auth state + tool request, returns allow/deny/soft_deny. No I/O and
+no side effects; the envelope boundary lives in the shared runtime adapter.
 
 Decision Cascade (evaluated top-to-bottom, first match wins):
      1. Whitelisted paths -> allow (plans, memory)
@@ -30,21 +32,9 @@ import logging
 import posixpath
 import re
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 
-from pydantic import ValidationError
-
-from omnibase_core.models.dispatch import ModelHandlerOutput
-from omnibase_infra.enums import (
-    EnumHandlerType,
-    EnumHandlerTypeCategory,
-    EnumInfraTransportType,
-)
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
-from omnibase_infra.errors.error_infra import RuntimeHostError
-from omnibase_infra.models.errors.model_infra_error_context import (
-    ModelInfraErrorContext,
-)
 from omnibase_infra.nodes.node_auth_gate_compute.models.model_auth_gate_decision import (
     ModelAuthGateDecision,
 )
@@ -56,12 +46,6 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
 logger = logging.getLogger(__name__)
-
-HANDLER_ID_AUTH_GATE: str = "auth-gate-handler"
-
-# The only operation this handler supports, as declared in contract.yaml
-# under handler_routing.handlers[0].supported_operations.
-EXPECTED_OPERATION: str = "auth_gate.evaluate"
 
 # Tools that target files and therefore require a non-empty target_path.
 # If a file-targeting tool is invoked with an empty target_path, the auth
@@ -123,9 +107,8 @@ class HandlerAuthGate:
 
     CRITICAL INVARIANTS:
     - Pure computation: no I/O, no side effects, no event bus access
-    - Deterministic: ``evaluate()`` always produces same output for same input.
-      ``execute()`` generates envelope metadata (correlation_id, envelope_id)
-      which may differ across calls.
+    - Deterministic: ``handle()`` always produces the same output for the same
+      input (pure function; the runtime adapter owns the envelope boundary).
     - Cascade order is fixed and must not be reordered
 
     Attributes:
@@ -178,7 +161,7 @@ class HandlerAuthGate:
         self._initialized = False
         logger.info("HandlerAuthGate shutdown complete")
 
-    def evaluate(self, request: ModelAuthGateRequest) -> ModelAuthGateDecision:
+    def handle(self, request: ModelAuthGateRequest) -> ModelAuthGateDecision:
         """Evaluate the 10-step authorization cascade.
 
         This is the core pure function. Each step returns a decision or
@@ -336,79 +319,6 @@ class HandlerAuthGate:
             step=10,
             reason="All authorization checks passed.",
             reason_code="all_checks_passed",
-        )
-
-    async def execute(
-        self,
-        envelope: dict[str, object],
-    ) -> ModelHandlerOutput[ModelAuthGateDecision]:
-        """Execute auth gate from envelope (ProtocolHandler interface).
-
-        Args:
-            envelope: Request envelope containing:
-                - operation: "auth_gate.evaluate"
-                - payload: ModelAuthGateRequest as dict
-                - correlation_id: Optional correlation ID
-
-        Returns:
-            ModelHandlerOutput wrapping ModelAuthGateDecision.
-        """
-        correlation_id_raw = envelope.get("correlation_id")
-        try:
-            correlation_id = (
-                UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
-            )
-        except ValueError:
-            correlation_id = uuid4()
-        input_envelope_id = uuid4()
-
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="auth_gate.evaluate",
-        )
-
-        operation = envelope.get("operation")
-        if operation != EXPECTED_OPERATION:
-            raise RuntimeHostError(
-                f"[{HANDLER_ID_AUTH_GATE}] Unsupported operation: {operation!r}. "
-                f"This handler only supports '{EXPECTED_OPERATION}'.",
-                context=context,
-            )
-
-        payload_raw = envelope.get("payload")
-        if payload_raw is None:
-            raise RuntimeHostError(
-                f"[{HANDLER_ID_AUTH_GATE}] Envelope missing required 'payload' "
-                f"key for auth gate evaluation.",
-                context=context,
-            )
-
-        if isinstance(payload_raw, ModelAuthGateRequest):
-            request = payload_raw
-        elif isinstance(payload_raw, dict):
-            try:
-                request = ModelAuthGateRequest.model_validate(payload_raw)
-            except ValidationError as exc:
-                raise RuntimeHostError(
-                    f"[{HANDLER_ID_AUTH_GATE}] Invalid payload for auth gate "
-                    f"evaluation: {exc.error_count()} validation error(s).",
-                    context=context,
-                ) from exc
-        else:
-            raise RuntimeHostError(
-                f"[{HANDLER_ID_AUTH_GATE}] Expected dict or ModelAuthGateRequest payload, "
-                f"got {type(payload_raw).__name__}.",
-                context=context,
-            )
-
-        decision = self.evaluate(request)
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_AUTH_GATE,
-            result=decision,
         )
 
     # Maximum directory depth for whitelisted paths. Paths with more than

@@ -11,6 +11,9 @@ import pytest
 from omnibase_infra.nodes.node_scope_extract_compute.handlers.handler_scope_extract import (
     HandlerScopeExtract,
 )
+from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input import (
+    ModelScopeExtractInput,
+)
 
 
 @pytest.mark.unit
@@ -32,7 +35,9 @@ Also update `config/settings.yaml`.
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert "src/api.py" in result.files
@@ -47,7 +52,9 @@ Changes in `plugins/onex/hooks/` and `src/omniclaude/`.
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert "plugins/onex/hooks/" in result.directories
@@ -61,7 +68,9 @@ This affects omniclaude and omnibase_core repositories.
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert "omniclaude" in result.repos
@@ -75,7 +84,9 @@ Modify the hooks system and update CLAUDE.md.
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert "hooks" in result.systems
@@ -94,7 +105,9 @@ Files affected:
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert "src/handler.py" in result.files
@@ -106,7 +119,9 @@ Files affected:
         """Empty content returns empty scope."""
         cid = uuid4()
         result = await handler.handle(
-            content="", plan_file_path="empty.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content="", plan_file_path="empty.md", correlation_id=cid
+            )
         )
 
         assert result.files == ()
@@ -122,7 +137,9 @@ Edit `src/api.py` then update `src/api.py` again.
 """
         cid = uuid4()
         result = await handler.handle(
-            content=content, plan_file_path="plan.md", correlation_id=cid
+            ModelScopeExtractInput(
+                content=content, plan_file_path="plan.md", correlation_id=cid
+            )
         )
 
         assert result.files.count("src/api.py") == 1

@@ -19,6 +19,9 @@
 #     declares intent_consumption.intent_routing_table so the kernel's
 #     generic intent-routing derivation (OMN-14516) wires a real result
 #     applier with NO by-name allowlist entry.
+#   - OMN-14831: HandlerValidationLedgerProjection exposes the canonical
+#     def-B ModelEventMessage handle(request) entrypoint while preserving
+#     validation_ledger.append intent projection semantics.
 # Contract identifiers
 name: "node_validation_ledger_projection_compute"
 contract_name: "node_validation_ledger_projection_compute"
@@ -26,13 +29,13 @@ node_name: "node_validation_ledger_projection_compute"
 contract_version:
   major: 1
   minor: 1
-  patch: 0
-node_version: "0.2.0"
+  patch: 1
+node_version: "0.2.1"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger for deterministic replay. Uses consumer_purpose="projection" and auto_offset_reset="earliest" to capture all historical validation events.
+  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger for deterministic replay. Uses consumer_purpose="projection" and auto_offset_reset="earliest" to capture all historical validation events. Contract patch 1 records the OMN-14831 canonical def-B ModelEventMessage handle(request) entrypoint while preserving validation_ledger.append intent routing.
 
 # Event bus configuration
 event_bus:
@@ -126,12 +129,12 @@ dependencies:
     optional: false
 # Metadata
 metadata:
-  description: "Subscribes to 3 cross-repo validation event topics for validation ledger persistence, projecting validation events for deterministic replay"
+  description: "Subscribes to 3 cross-repo validation event topics for validation ledger persistence, projecting validation events for deterministic replay through the canonical def-B typed ModelEventMessage handler entrypoint"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-06"
   updated: "2026-07-13"
-  ticket: "OMN-1908"
+  ticket: "OMN-14831"
   tags:
     - compute
     - validation-ledger
@@ -142,3 +145,4 @@ metadata:
     - "OMN-1908"
     - "OMN-9151"
     - "OMN-14524"
+    - "OMN-14831"
