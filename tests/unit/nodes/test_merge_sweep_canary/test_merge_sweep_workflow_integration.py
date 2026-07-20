@@ -16,6 +16,9 @@ from omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.handlers.handler_au
 from omnibase_infra.nodes.node_merge_sweep_classify_compute.handlers.handler_classify_prs import (
     HandlerClassifyPRs,
 )
+from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input import (
+    ModelClassifyInput,
+)
 from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.handlers.handler_pr_list import (
     HandlerPRList,
 )
@@ -114,11 +117,7 @@ class TestMergeSweepWorkflowIntegration:
 
         # Step 4: Classify (COMPUTE)
         classify_handler = HandlerClassifyPRs()
-        classify_result = await classify_handler.handle(
-            prs=classify_input.prs,
-            correlation_id=classify_input.correlation_id,
-            require_approval=classify_input.require_approval,
-        )
+        classify_result = await classify_handler.handle(classify_input)
         assert len(classify_result.track_a) == 1  # PR #1
         assert len(classify_result.track_b) == 1  # PR #2 (CI failure)
         assert len(classify_result.skipped) == 1  # PR #3 (draft)
@@ -189,8 +188,7 @@ class TestMergeSweepWorkflowIntegration:
         # Classify empty
         classify_handler = HandlerClassifyPRs()
         classify_result = await classify_handler.handle(
-            prs=pr_list_result.prs,
-            correlation_id=cid,
+            ModelClassifyInput(prs=pr_list_result.prs, correlation_id=cid)
         )
         assert classify_result.total_classified == 0
 
