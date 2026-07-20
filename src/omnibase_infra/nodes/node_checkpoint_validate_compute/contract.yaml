@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
 # Ticket: OMN-2143
+# Related Tickets:
+#   - OMN-14820: HandlerCheckpointValidate added canonical def-B
+#     handle(request) entrypoint over ModelCheckpointValidateInput.
 name: "node_checkpoint_validate_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  COMPUTE node that performs pure structural validation on checkpoint data. Verifies schema version, required fields, path normalization, phase-payload consistency, and commit SHA format.  No filesystem I/O.
+  COMPUTE node that performs pure structural validation on checkpoint data through the canonical def-B ModelCheckpointValidateInput request. Verifies schema version, required fields, path normalization, phase-payload consistency, and commit SHA format. No filesystem I/O.
 
 input_model:
   name: "ModelCheckpointValidateInput"
@@ -27,7 +30,14 @@ handler_routing:
       handler:
         name: "HandlerCheckpointValidate"
         module: "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate"
+      input_model:
+        name: "ModelCheckpointValidateInput"
+        module: "omnibase_infra.nodes.node_checkpoint_validate_compute.models.model_checkpoint_validate_input"
+        description: "Typed def-B request for checkpoint structural validation."
 capabilities:
   - "checkpoint.validate"
 metadata:
-  description: "Performs pure structural validation on checkpoint data, verifying field completeness, type correctness, and invariant compliance without side effects"
+  description: "Performs pure structural validation on checkpoint data via canonical def-B handle(request), verifying field completeness, type correctness, and invariant compliance without side effects"
+  updated: "2026-07-20"
+  related_tickets:
+    - "OMN-14820"
