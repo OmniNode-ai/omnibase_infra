@@ -140,11 +140,6 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" || -z "${KAFKA_SASL_USERNAME:-}" || -z "${KAFKA_SASL_PASSWORD:-}" ]]; then
-            echo "::notice title=PR webhook not published::Kafka webhook secrets are unavailable on this runner/event; skipping non-authoritative PR webhook publication."
-            exit 0
-          fi
-
           uv run python scripts/publish_pr_webhook_event.py \
             --action "$PR_ACTION" \
             --repo "$PR_REPO" \
