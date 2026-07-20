@@ -51,7 +51,7 @@ class TestHandlerSourceAttestationIntegration:
         friction_dir: Path,
     ) -> None:
         event = self._boot_event("unknown")
-        result = handler.attest(event)
+        result = handler.handle(event)
 
         assert result.verdict == "unknown_hash"
         assert result.friction_path is not None
@@ -63,7 +63,7 @@ class TestHandlerSourceAttestationIntegration:
         friction_dir: Path,
     ) -> None:
         event = self._boot_event("unknown")
-        result = handler.attest(event)
+        result = handler.handle(event)
 
         assert result.friction_path is not None
         content = Path(result.friction_path).read_text()
@@ -76,7 +76,7 @@ class TestHandlerSourceAttestationIntegration:
         friction_dir: Path,
     ) -> None:
         event = self._boot_event("")
-        result = handler.attest(event)
+        result = handler.handle(event)
 
         assert result.verdict == "unknown_hash"
         assert result.friction_path is not None
@@ -94,7 +94,7 @@ class TestHandlerSourceAttestationIntegration:
     ) -> None:
         """A hash that is clearly stale (all zeros) should produce drifted verdict."""
         event = self._boot_event("0000000000000000000000000000000000000000")
-        result = handler.attest(event)
+        result = handler.handle(event)
 
         # When git ls-remote is unavailable in CI sandbox, verdict is drifted
         # because the hash won't match main HEAD short form.

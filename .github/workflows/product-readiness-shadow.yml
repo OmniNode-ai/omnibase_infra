@@ -89,7 +89,8 @@ env:
   OMNI_CI_SHARED_ENV_ENABLED: >-
     ${{
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
+       (github.event.pull_request.head.repo.full_name != github.repository ||
+        github.event.pull_request.base.ref == 'dev'))
       && 'false'
       || 'true'
     }}
@@ -112,8 +113,9 @@ jobs:
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -137,8 +139,9 @@ jobs:
     name: typecheck (shadow)
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -163,8 +166,9 @@ jobs:
     name: tests+coverage (shadow)
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -204,8 +208,9 @@ jobs:
     if: always()
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}

@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ""
+      pr-base-ref:
+        description: "Pull request base branch, passed by the caller for runner-policy selection."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   occ-preflight:
@@ -42,8 +47,9 @@ jobs:
     name: CodeRabbit Thread Check
     runs-on: >-
       ${{
-        (github.event.pull_request &&
-         github.event.pull_request.head.repo.full_name != github.repository)
+        (inputs.pr-base-ref == 'dev' ||
+         (github.event.pull_request &&
+          github.event.pull_request.head.repo.full_name != github.repository))
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}

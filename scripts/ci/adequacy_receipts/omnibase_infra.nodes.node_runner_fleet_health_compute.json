@@ -1,0 +1,26 @@
+{
+  "branch_coverage_pct": 80.67,
+  "candidate_count": 17,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_runner_fleet_health_compute.handlers.handler_runner_fleet_health_evaluate",
+  "handler_module_sha256": "sha256:521297d503f9efa4c5879269eb8051a5128403f115105b7f61807d5d04f31d0d",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_runner_fleet_health_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T05:34:57.682418+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 9,
+  "selected_input_hashes": [
+    "sha256:417282720dab4036ac8ebd1f8366cafa152ec9b2018e2330eb13153e7ccde972",
+    "sha256:df52a84157445fab2d0bc621c6469e04c6717911aaed04afced80bcf320b0f61",
+    "sha256:9448a3ffc5de0e9ea71bf310f7bfdf160d4fa9b2747359608c624f9babd72903",
+    "sha256:9283b33ea2d37421bb39d2b80e545c21f36f738418d7dcbca9d639666416781c",
+    "sha256:253c682105a45d8380c31de8eeb0981e3090416f566197daa95e85f453c85ff8",
+    "sha256:9abadaa2b1d881f14b2c561e53e96f3453f4a4447ddccede6043b1c450143c64",
+    "sha256:83864536efebbf49db80ec91ed4e335de940c8650b8b3012561d84b1a3a1454f",
+    "sha256:578f43255f6fd6db46693d3748374c1739515d3fb949df10789aa337b817a2a7",
+    "sha256:fda1e6b3995c79834845b7a97a547bda0afcf69671c118e61cce44bce8766dec"
+  ],
+  "uncovered_waiver": null,
+  "volatile_mask": []
+}
