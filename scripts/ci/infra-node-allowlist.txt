@@ -100,6 +100,7 @@ src/omnibase_infra/nodes/node_impact_analyzer_compute/handlers/handler_impact_an
 src/omnibase_infra/nodes/node_invariant_evaluate_compute/handlers/__init__.py  # invariant evaluation is CI/governance validation; migrated from omnibase_core service boundary.
 src/omnibase_infra/nodes/node_invariant_evaluate_compute/handlers/handler_invariant_evaluate.py  # invariant evaluation is CI/governance validation; migrated from omnibase_core service boundary.
 src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
+src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/deserializer_default.py  # approved def-B (OMN-14819) envelope-deserializer boundary for the existing infra-owned deterministic replay node; relocated out of handler_replay.py to keep the canonical handler core free of ModelEventEnvelope (C-core).
 src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/handler_replay.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_projection_compute/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_ledger_projection_compute/handlers/handler_ledger_projection.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
