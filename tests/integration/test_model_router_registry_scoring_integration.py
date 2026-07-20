@@ -75,7 +75,7 @@ def test_registry_loads_without_seed_fields_and_routes_by_live_metrics(
         ),
     )
 
-    decision = HandlerScoreModels().score_candidates(scoring_input)
+    decision = HandlerScoreModels().handle(scoring_input)
 
     assert decision.success
     assert decision.selected_model_key == measured_model

@@ -1,0 +1,33 @@
+{
+  "node_id": "omnibase_infra.nodes.node_validation_ledger_projection_compute",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection",
+  "legacy_handler_module": "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection",
+  "base_ref": "426b92b2e8d414eb7be21b43d780181417cbf7df",
+  "preserved_symbols": [
+    "HandlerValidationLedgerProjection.project",
+    "HandlerValidationLedgerProjection._extract_metadata",
+    "HandlerValidationLedgerProjection._extract_uuid",
+    "HandlerValidationLedgerProjection._extract_timestamp",
+    "HandlerValidationLedgerProjection._extract_version_from_topic",
+    "HandlerValidationLedgerProjection._extract_header_correlation_id",
+    "HandlerValidationLedgerProjection._parse_offset"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_handle_is_canonical_defb_signature",
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_real_dispatch_callback_returns_expected_intent[c0_started_full]",
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_real_dispatch_callback_returns_expected_intent[c1_batch_partial]",
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_real_dispatch_callback_returns_expected_intent[c2_completed_nonjson]",
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_real_dispatch_callback_returns_expected_intent[c3_started_listjson]",
+      "tests/unit/nodes/node_validation_ledger_projection_compute/test_validation_ledger_projection_dispatch_entrypoint_omn14831.py::test_handle_matches_project_equivalence"
+    ],
+    "selected_input_hashes": [
+      "sha256:8c908fe9190b92f4f2104b4d9dd1018ac350f1d26a8e090615593929e84d6dc9",
+      "sha256:373fd00ae6785241a722ecc9e74632773002fccb540e28ba88de3e1ac3460461",
+      "sha256:b9ffae8a4aaad01e947f08bb5e75dd6687b9dc9fb1207cc2a175a8ebf2ad3f40",
+      "sha256:8bc0e42c8f5016701509da3c9105decb0d2ec9734e88080264dd79839a78d989"
+    ]
+  }
+}

@@ -11,6 +11,9 @@ import pytest
 from omnibase_infra.nodes.node_scope_extract_compute.handlers.handler_scope_extract import (
     HandlerScopeExtract,
 )
+from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input import (
+    ModelScopeExtractInput,
+)
 from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read import (
     HandlerScopeFileRead,
 )
@@ -59,9 +62,11 @@ The hooks system needs updating.
         # Step 2: Scope extraction (COMPUTE)
         extractor = HandlerScopeExtract()
         extracted = await extractor.handle(
-            content=read_result.content,
-            plan_file_path=str(plan_file),
-            correlation_id=cid,
+            ModelScopeExtractInput(
+                content=read_result.content,
+                plan_file_path=str(plan_file),
+                correlation_id=cid,
+            )
         )
         assert len(extracted.files) > 0
         assert "omniclaude" in extracted.repos

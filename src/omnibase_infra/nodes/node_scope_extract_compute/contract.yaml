@@ -2,14 +2,18 @@
 # SPDX-License-Identifier: MIT
 # ONEX Node Contract - Scope Extract Compute
 #
+# Related Tickets:
+#   - OMN-14832: HandlerScopeExtract exposes the canonical def-B
+#     ModelScopeExtractInput handle(request) entrypoint while preserving scope
+#     extraction semantics and golden outputs.
 name: "node_scope_extract_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 1
-  patch: 0
-node_version: "1.1.0"
-description: "Pure computation: extracts scope items (files, directories, repos, systems) from plan content."
+  patch: 1
+node_version: "1.1.1"
+description: "Pure computation: extracts scope items (files, directories, repos, systems) from plan content. Contract patch 1 records the OMN-14832 canonical def-B ModelScopeExtractInput handle(request) entrypoint while preserving extraction semantics."
 input_model:
   name: "ModelScopeExtractInput"
   module: "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input"
@@ -26,10 +30,14 @@ handler_routing:
         name: "HandlerScopeExtract"
         module: "omnibase_infra.nodes.node_scope_extract_compute.handlers.handler_scope_extract"
 metadata:
-  description: "Scope extraction compute node for scope-check workflow"
+  description: "Scope extraction compute node for scope-check workflow using the canonical def-B typed ModelScopeExtractInput handler entrypoint"
   author: "OmniNode Team"
   created: "2026-04-01"
+  updated: "2026-07-20"
+  ticket: "OMN-14832"
   tags:
     - "compute"
     - "scope-check"
     - "canary"
+  related_tickets:
+    - "OMN-14832"
