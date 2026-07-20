@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-14873: declared consumer-group health check list for the stability-test
+# lane refresh health-gate (verify_stability_refresh.py). Contract-as-data
+# (matching this repo's topic/service-catalog convention) instead of a
+# hardcoded Python list.
+#
+# Each entry is a full rpk consumer-group name as seen via:
+#   docker exec <stability-test-redpanda-container> rpk group list \
+#     -X brokers=redpanda:9092
+#
+# The health-gate asserts `state == "Stable"` for every group listed here
+# (via `rpk group describe <group> -X brokers=redpanda:9092 -f json`) after a
+# refresh. A group that drops to Empty/Dead/PreparingRebalance/etc. after a
+# refresh is a wiring regression the digest-changed + manifest-count checks
+# alone would not catch (OMN-14208-class silent wiring death).
+#
+# Chosen to span all 4 core services this refresh targets
+# (omninode-runtime / runtime-effects / runtime-worker / projection-api):
+# registration (kernel-owned), delegation pipeline (routing/inference/
+# projection), and ticket-classify (the def-B canary this OMN-14873 refresh
+# is also proving live). Extend this list as new load-bearing consumer
+# groups come online; never silently drop an entry without a reason recorded
+# in the PR that removes it.
+consumer_groups:
+  - name: stability-test.omnibase_infra.node_registration_orchestrator.consume.1.1.1
+    description: kernel-owned node-registration orchestrator (registration/introspection/heartbeat fan-in)
+  - name: stability-test.omnibase_infra.node_ledger_projection_compute.consume.1.0.2
+    description: node-registration ledger projection (registration-snapshots)
+  - name: stability-test.omnimarket.projection_delegation.consume.1.0.0
+    description: delegation projection consumer (carries the OMN-14855 judge-verdict DLQ fix this refresh lands)
+  - name: stability-test.omnimarket.node_llm_delegation_call_effect.consume.0.1.0
+    description: delegation LLM-call effect (inference dispatch)
+  - name: stability-test.omnimarket.node_delegation_routing_reducer.consume.0.3.0
+    description: delegation routing reducer (FSM routing decisions)
+  - name: stability-test.omnimarket.node_ticket_classify_compute.consume.1.0.0
+    description: ticket-classify def-B compute (OMN-14799 Tier-1 fan-out canary)
