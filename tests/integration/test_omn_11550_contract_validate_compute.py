@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from omnibase_infra.nodes.node_contract_validate_compute.handlers import (
-    handle_contract_validate,
+    HandlerContractValidate,
 )
 from omnibase_infra.nodes.node_contract_validate_compute.models import (
     ModelContractValidateInput,
@@ -50,9 +50,9 @@ async def test_contract_validate_compute_contract_routes_to_handler() -> None:
 
     handler = contract["handler_routing"]["handlers"][0]["handler"]
     assert handler["module"].endswith("handler_contract_validate")
-    assert handler["function"] == "handle_contract_validate"
+    assert handler["name"] == "HandlerContractValidate"
 
-    result = await handle_contract_validate(
+    result = await HandlerContractValidate().handle(
         ModelContractValidateInput(
             contract_content=_VALID_EFFECT_CONTRACT,
             contract_type="effect",

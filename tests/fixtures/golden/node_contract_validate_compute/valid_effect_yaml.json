@@ -1,0 +1,34 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "base_dir": null,
+    "contract_content": "\nname: DatabaseWriterEffect\ncontract_version:\n  major: 1\n  minor: 0\n  patch: 0\ndescription: Effect node for writing data to PostgreSQL database\nnode_type: effect_generic\ninput_model: omnibase_core.models.ModelDatabaseWriteInput\noutput_model: omnibase_core.models.ModelDatabaseWriteOutput\nio_operations:\n  - operation_type: WRITE\n    operation_target: DATABASE\n    atomic: true\n    validation_enabled: true\n    error_handling_strategy: RETRY\n",
+    "contract_type": "effect",
+    "file_path": null,
+    "model_code": null
+  },
+  "input_type": "ModelContractValidateInput",
+  "output": {
+    "contract_type": "effect",
+    "interface_version": {
+      "build": null,
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": null
+    },
+    "is_valid": true,
+    "score": 0.9,
+    "suggestions": [
+      "Consider naming contract with 'Effect_generic' suffix (e.g., 'DatabaseWriterEffectEffect_generic')"
+    ],
+    "violations": [],
+    "warnings": [
+      "Input model 'omnibase_core.models.ModelDatabaseWriteInput' should follow ONEX naming (Model*)",
+      "Output model 'omnibase_core.models.ModelDatabaseWriteOutput' should follow ONEX naming (Model*)"
+    ]
+  },
+  "output_type": "ModelContractValidationResult",
+  "scenario": "valid_effect_yaml",
+  "volatile_mask": []
+}
