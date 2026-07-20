@@ -38,7 +38,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_contract_persistence_effect",
     "omnibase_infra.nodes.node_contract_registry_reducer",
     "omnibase_infra.nodes.node_contract_resolver_bridge",
-    "omnibase_infra.nodes.node_contract_validate_compute",
     "omnibase_infra.nodes.node_decision_store_effect",
     "omnibase_infra.nodes.node_delta_bundle_effect",
     "omnibase_infra.nodes.node_delta_metrics_effect",
