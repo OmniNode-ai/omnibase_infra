@@ -1,89 +1,176 @@
-# Required Status Checks for `main` Branch Protection
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# required-checks.yaml v3 (OMN-14865)
+# Location: .github/required-checks.yaml
 #
-# This manifest documents the canonical list of required checks.
-# If you rename a CI job, you MUST update both this file and the
-# branch protection settings (Settings > Branches > main).
+# Upgraded to schema v3 (fan-out of OMN-14854's omniclaude canary, PR #1917
+# merged to omniclaude dev): this file is now the OPERATIONAL input to the
+# Required-Check Skip-Vector Guard (validate_no_required_check_skip_vectors.py,
+# invoked via required-check-skip-guard-caller.yml -> omniclaude's reusable
+# workflow). It SUPERSEDES the prior v1 prose-only manifest, which documented
+# `test.yml` (a workflow that no longer exists — CI is now `ci.yml`) and was
+# never read by any script: `scripts/audit-branch-protection.py` fetches
+# required_status_checks live via `gh api`, and the separate parity ratchet
+# (scripts/enforcement_parity_manifest.yaml, OMN-14288) is its own
+# machine-asserted config-as-data file, untouched by this change.
 #
-# Added: OMN-2184
-# Last verified: 2026-03-10
-# Architecture: OMN-4497 -- CI Summary is the single required gate across all repos
+# Exhaustive: every context in required_status_checks.contexts for
+# omnibase_infra's `dev` branch has a `mode: REQUIRED` row below (fetched via
+# `gh api repos/OmniNode-ai/omnibase_infra/branches/dev/protection/required_status_checks`,
+# 17 contexts, verified 2026-07-20). The privileged reconcile job
+# (required-check-manifest-reconcile.yml, not yet added in this PR — see ticket
+# OMN-14865 follow-up) will fail closed if this file and live branch protection
+# diverge in either direction, once wired.
 #
-# Branch coverage (OMN-14696): scripts/audit-branch-protection.sh now audits BOTH
-# `main` and `dev`. The review-enforcement invariant (Check A, via GraphQL
-# requiresApprovingReviews) is asserted on both branches; the orphaned-context
-# audit (Check B) below remains main-scoped (it reads default-branch check-runs).
-# The audit's `--fix` remediation stays main-only and never mutates dev protection.
-required_checks:
-  # -- test.yml (primary pipeline) -------------------------------------------
+# `main`'s required_status_checks set is verifiably NOT identical to `dev`'s
+# (verified 2026-07-20: main has only 5 contexts — "CI Summary", "Handler
+# Contract Compliance", "verify / verify", "call-reject-skip-token / scan /
+# reject-skip-gate-token", "main-target-guard" — a strict subset of dev's 17
+# plus main-target-guard). Per the omniclaude canary's own scope note, this
+# manifest is single-branch (dev); a `main`-scoped section is an explicit open
+# follow-up, not resolved here.
+#
+# Do NOT rename/remove a REQUIRED row without following the Branch Protection
+# Migration Safety procedure — flip branch protection first (or same PR), then
+# update this file, so the reconcile job never observes a divergence window.
+#
+# NOTE on `workflow`/`job_path`/`caller_workflow`/`reusable_workflow` fields
+# below: these are documentation only. The validator's context->job resolution
+# (both Shape A direct-job and Shape B/C composed-context matching) walks the
+# live `.github/workflows/*.yml` files by job name/id — it does not consume
+# these manifest fields. Only `name`, `mode`, `producer_kind`, `skip_semantics`,
+# and `rationale` are functionally load-bearing.
+schema_version: 3
+classification: toolchain
+repo: omnibase_infra
+gates:
   - name: "CI Summary"
-    workflow: test.yml
-    job_id: ci-summary
-    rationale: >
-      Umbrella correctness gate (OMN-4497). Aggregates ALL sub-jobs in test.yml via `needs:` -- tests-gate, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check. Fails if any required sub-job fails. This is the single branch protection check required across all repos per OMN-4497.
-
-# -- Sub-jobs (feed into CI Summary -- not required directly in branch protection) -
-sub_jobs:
-  - name: "Lint"
-    workflow: test.yml
-    job_id: lint
-    rationale: "Ruff format, lint, and mypy type checking -- gated by CI Summary"
-  - name: "ONEX Validators"
-    workflow: test.yml
-    job_id: onex-validation
-    rationale: "Architecture layers, ONEX rules, I/O purity audit, markdown links -- gated by CI Summary"
-  - name: "Infra Node Handler Ownership"
-    workflow: test.yml
-    job_id: infra-node-handler-ownership
-    rationale: "Rejects unallowlisted omnibase_infra node handler implementations that belong in omnimarket -- gated by CI Summary"
-  - name: "Migration Freeze Check"
-    workflow: test.yml
-    job_id: migration-freeze
-    rationale: "Blocks new migrations during DB-SPLIT freeze (OMN-2055) -- gated by CI Summary"
-  - name: "Fingerprint Check"
-    workflow: test.yml
-    job_id: fingerprint-check
-    rationale: "CI twins for runtime assertions B2 (schema) and B3 (event registry) -- gated by CI Summary"
-  - name: "CI Tests Gate"
-    workflow: test.yml
-    job_id: tests-gate
-    rationale: "Aggregator for 10-split test matrix -- gated by CI Summary"
-# -- Explicitly excluded ------------------------------------------------------
-excluded_checks:
-  - name: "Tests (Split 1/10) through Tests (Split 10/10)"
-    reason: "Individual matrix legs -- aggregated by CI Tests Gate, which feeds CI Summary"
-  - name: "Check architecture handshake"
-    workflow: check-handshake.yml
-    reason: "paths: filter skips this on most PRs -- requiring it would block unrelated PRs"
-  - name: "Build Runtime Image"
-    workflow: docker-build.yml
-    reason: "paths: filter skips this on non-Docker PRs"
-  - name: "Docker Integration Tests"
-    workflow: docker-build.yml
-    reason: "paths: filter skips this on non-Docker PRs"
-  - name: "Security Scan (Trivy)"
-    workflow: docker-build.yml
-    reason: "Only runs on main branch pushes, never on PRs"
-  - name: "Image Size Analysis"
-    workflow: docker-build.yml
-    reason: "Only runs on main branch pushes, never on PRs"
-  - name: "Build Summary"
-    workflow: docker-build.yml
-    reason: "paths: filter skips this on non-Docker PRs"
-  - name: "Slow & Chaos Tests"
-    workflow: nightly-tests.yml
-    reason: "Nightly schedule only -- never runs on PRs"
-  - name: "Nightly Summary"
-    workflow: nightly-tests.yml
-    reason: "Nightly schedule only -- never runs on PRs"
-  - name: "Trigger Runtime Image Rebuild"
-    workflow: release.yml
-    reason: "Post-release only -- triggers omninode_infra rebuild (OMN-2751)"
-  - name: "Dependency Cascade"
-    workflow: release.yml
-    reason: "Post-release only -- opens bump PRs in downstream repos (OMN-2751)"
-  - name: "Compute Downstream Matrix"
-    workflow: dependency-cascade.yml
-    reason: "Post-release only -- part of dependency cascade (OMN-2751)"
-  - name: "Bump *"
-    workflow: dependency-cascade.yml
-    reason: "Post-release only -- matrix legs for downstream bump PRs (OMN-2751)"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: ci.yml
+    job_path: ["ci-summary"]
+    skip_semantics: never
+    rationale: "Umbrella fail-closed poller aggregating all ci.yml job conclusions (OMN-14127); job-level `if: always()`. Live required status check on omnibase_infra dev branch protection."
+  - name: "Handler Contract Compliance"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: omni-standards-compliance.yml
+    job_path: ["handler-contract-compliance"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "verify / verify"
+    mode: REQUIRED
+    producer_kind: cross_repo
+    caller_workflow: call-receipt-gate.yml
+    caller_job: verify
+    cross_repo_ref: "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@main"
+    skip_semantics: never
+    rationale: "Central Receipt Gate (Enforcement by Receipt) — cross-repo reusable hosted in omnibase_core. Caller job has no if:, no path filter, pull_request+merge_group trigger present."
+  - name: "call-reject-skip-token / scan / reject-skip-gate-token"
+    mode: REQUIRED
+    producer_kind: cross_repo
+    caller_workflow: call-reject-skip.yml
+    caller_job: call-reject-skip-token
+    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/reject-deploy-gate-skip.yml@ff230264ac3300d7ced43564dc921f44558110fe"
+    skip_semantics: never
+    rationale: "Skip-token bypass scanner (OMN-10347/10422/10971) — the gate this guard's own design is modeled on. Caller job has no if:, no path filter, pull_request+merge_group trigger present."
+  - name: "URL Authority Gate"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: url-authority-gate.yml
+    job_path: ["url-authority-gate"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "deploy-gate / deploy-gate"
+    mode: REQUIRED
+    producer_kind: cross_repo
+    caller_workflow: deploy-gate.yml
+    caller_job: deploy-gate
+    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@ff230264ac3300d7ced43564dc921f44558110fe"
+    skip_semantics: never
+    rationale: "Runtime-change PRs must cite a ticket with deploy evidence (OMN-8912/DGM-Phase6). Caller job has no if:, no path filter, pull_request+merge_group trigger present."
+  - name: "Topic Enum Drift Check"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: ci.yml
+    job_path: ["topic-enum-drift"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if: (only needs: occ-preflight, no explicit conditional), no path filter."
+  - name: "Topic Naming Lint"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: ci.yml
+    job_path: ["topic-naming-lint"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter."
+  - name: "Topic Drift Check"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: ci.yml
+    job_path: ["topic-drift-check"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter."
+  - name: "dispatcher-route-coverage"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: dispatcher-route-coverage.yml
+    job_path: ["dispatcher-route-coverage"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "Canonical Inference Gate"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: canonical-inference-gate.yml
+    job_path: ["canonical-inference-gate"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "Dep Provenance Gate"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: dep-provenance-gate.yml
+    job_path: ["dep-provenance-gate"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "reason-graph"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: product-readiness-shadow.yml
+    job_path: ["reason-graph"]
+    skip_semantics: never
+    rationale: "Product Readiness shadow reason-graph aggregator (OMN-14707/OMN-14644 Phase 3) — job-level `if: always()`, needs the 3 occ-independent subcheck jobs only (never occ-preflight, by design). Live required status check on omnibase_infra dev branch protection."
+  - name: "shell-hygiene"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: shellcheck-gate.yml
+    job_path: ["shell-hygiene"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request trigger present (no merge_group on this workflow, but pull_request alone satisfies the PR-reachable-trigger requirement)."
+  - name: "node-migration-sync"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: node-migration-sync.yml
+    job_path: ["node-migration-sync"]
+    skip_semantics: never
+    rationale: "Vendored-node migration drift gate (golden-chain sweep run12 finding). No job-level if:, no path filter, pull_request trigger present (no merge_group on this workflow, but pull_request alone satisfies the PR-reachable-trigger requirement). Live required status check on omnibase_infra dev branch protection."
+  - name: "contract-validation"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: contract-validation.yml
+    job_path: ["contract-validation"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present. Intentionally lenient on missing contracts (skips rather than fails when no ticket/contract is present) — that leniency is internal to the job's own steps, not a job-level if: skip vector."
+  - name: "receipt-honesty"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: receipt-honesty.yml
+    job_path: ["receipt-honesty"]
+    skip_semantics: never
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
+  - name: "required-check-skip-guard / check-skip-vectors"
+    mode: ADVISORY
+    producer_kind: cross_repo
+    caller_workflow: required-check-skip-guard-caller.yml
+    caller_job: required-check-skip-guard
+    cross_repo_ref: "OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@4d60e9363728eed52a238cd5b47bb15808d51ca0"
+    skip_semantics: never
+    rationale: "OMN-14865 fan-out of OMN-14854: this guard's own required check. Runs on every PR/merge_group but is NOT YET in required_status_checks — per the canary's design spec section 5 ordering, the branch-protection flip happens only after 2 independent green runs on dev, tracked as a follow-up ticket. mode stays ADVISORY until that flip lands (same PR as the flip, per schema-v3 rule: mode changes and branch-protection changes land together)."
