@@ -42,7 +42,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_dlq_replay_effect",
     "omnibase_infra.nodes.node_emit_daemon_runtime",
     "omnibase_infra.nodes.node_github_pr_poller_effect",
-    "omnibase_infra.nodes.node_impact_analyzer_compute",
     "omnibase_infra.nodes.node_ledger_write_effect",
     "omnibase_infra.nodes.node_llm_embedding_effect",
     "omnibase_infra.nodes.node_merge_gate_effect",

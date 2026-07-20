@@ -30,6 +30,9 @@ from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.constants import
     SCOPE_MULTIPLIER_STRUCTURAL,
     STRUCTURAL_TRIGGER_TYPES,
 )
+from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request import (
+    ModelImpactAnalysisRequest,
+)
 from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_result import (
     ModelImpactAnalysisResult,
 )
@@ -47,6 +50,7 @@ logger = logging.getLogger(__name__)
 class HandlerImpactAnalysis:
     """Compute impact of a change trigger against the artifact registry.
 
+    Canonical definition-B handler: ``handle(request) -> response``.
     Pure function: deterministic, no external I/O.
 
     Implements the scoring table from OMN-3925:
@@ -77,21 +81,22 @@ class HandlerImpactAnalysis:
         """Behavioral classification: pure deterministic compute."""
         return EnumHandlerTypeCategory.COMPUTE
 
-    def analyze(
-        self,
-        trigger: ModelUpdateTrigger,
-        registry: ModelArtifactRegistry,
-    ) -> ModelImpactAnalysisResult:
+    def handle(self, request: ModelImpactAnalysisRequest) -> ModelImpactAnalysisResult:
         """Analyze the impact of a change trigger against the registry.
 
+        Canonical definition-B entrypoint: a single typed request in, the
+        scoring result out. Pure and deterministic -- no external I/O.
+
         Args:
-            trigger: The change trigger with file list and trigger type.
-            registry: The artifact registry to match against.
+            request: Typed request carrying the change trigger and the
+                artifact registry to score it against.
 
         Returns:
             ModelImpactAnalysisResult containing impacted artifacts and
             the highest merge policy across all impacted artifacts.
         """
+        trigger = request.trigger
+        registry = request.registry
         is_manual_empty = (
             trigger.trigger_type == "manual_plan_request"
             and len(trigger.changed_files) == 0

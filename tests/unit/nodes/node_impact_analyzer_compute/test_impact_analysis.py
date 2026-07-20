@@ -36,6 +36,12 @@ from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.constants import
 from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis import (
     HandlerImpactAnalysis,
 )
+from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_request import (
+    ModelImpactAnalysisRequest,
+)
+from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impact_analysis_result import (
+    ModelImpactAnalysisResult,
+)
 from omnibase_infra.registry.models.model_artifact_registry import ModelArtifactRegistry
 from omnibase_infra.registry.models.model_artifact_registry_entry import (
     ModelArtifactRegistryEntry,
@@ -45,6 +51,22 @@ from omnibase_infra.registry.models.model_source_trigger import ModelSourceTrigg
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _run(
+    handler: HandlerImpactAnalysis,
+    trigger: ModelUpdateTrigger,
+    registry: ModelArtifactRegistry,
+) -> ModelImpactAnalysisResult:
+    """Drive the canonical def-B ``handle`` entrypoint (replaces analyze()).
+
+    OMN-14817 flipped the two-arg ``analyze(trigger, registry)`` op-method to the
+    canonical ``handle(request)`` def-B entrypoint; the scoring logic is byte-
+    identical, so these behavioral assertions carry over unchanged.
+    """
+    return handler.handle(
+        ModelImpactAnalysisRequest(trigger=trigger, registry=registry)
+    )
 
 
 def _make_trigger(
@@ -145,7 +167,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         assert len(result.impacted_artifacts) == 1
         artifact = result.impacted_artifacts[0]
@@ -165,7 +187,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="pr_opened",
             changed_files=["tests/unit/test_smoke.py"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
         assert len(result.impacted_artifacts) == 0
         assert result.highest_merge_policy == "none"
 
@@ -183,7 +205,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         assert len(result.impacted_artifacts) == 1
         artifact = result.impacted_artifacts[0]
@@ -208,7 +230,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="pr_opened",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         assert len(result.impacted_artifacts) == 1
         artifact = result.impacted_artifacts[0]
@@ -227,7 +249,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         assert len(result.impacted_artifacts) == 1
         assert result.impacted_artifacts[0].required_action == "regenerate"
@@ -243,7 +265,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         for artifact in result.impacted_artifacts:
             for code in artifact.reason_codes:
@@ -264,7 +286,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         assert result.highest_merge_policy == "strict"
 
@@ -286,7 +308,7 @@ class TestHandlerImpactAnalysis:
             changed_files=[],
             source_repo="omnibase_infra",
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
 
         # Only entry_infra matches (same repo); entry_other is in a different repo
         assert len(result.impacted_artifacts) == 1
@@ -310,8 +332,8 @@ class TestHandlerImpactAnalysis:
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
 
-        result_pr = self.handler.analyze(trigger_pr, registry)
-        result_contract = self.handler.analyze(trigger_contract, registry)
+        result_pr = _run(self.handler, trigger_pr, registry)
+        result_contract = _run(self.handler, trigger_contract, registry)
 
         # PR: base=1.0, scope=0.7 → 0.7
         # contract_changed: base=1.0, scope=1.0 → 1.0
@@ -340,7 +362,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="pr_opened",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
         assert len(result.impacted_artifacts) == 0
 
     def test_handler_classification(self) -> None:
@@ -358,7 +380,7 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
         assert len(result.impacted_artifacts) == 0
         assert result.highest_merge_policy == "none"
 
@@ -373,6 +395,6 @@ class TestHandlerImpactAnalysis:
             trigger_type="contract_changed",
             changed_files=["src/omnibase_infra/nodes/node_foo/contract.yaml"],
         )
-        result = self.handler.analyze(trigger, registry)
+        result = _run(self.handler, trigger, registry)
         for artifact in result.impacted_artifacts:
             assert artifact.impact_strength <= 1.0
