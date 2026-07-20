@@ -590,6 +590,50 @@ def _find_multiline_state_after_line(
             return True, first_delim, content_before
 
 
+TYPE_CHECKING_BLOCK_RE = re.compile(r"if\s+TYPE_CHECKING\s*:")
+
+
+def _type_checking_block_line_indexes(lines: Sequence[str]) -> set[int]:
+    """Return line indexes inside TYPE_CHECKING conditional blocks."""
+    block_line_indexes: set[int] = set()
+    type_checking_indent: int | None = None
+    type_checking_line_idx: int | None = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+
+        if not stripped or stripped.startswith("#"):
+            if type_checking_indent is not None and type_checking_line_idx is not None:
+                block_line_indexes.add(idx)
+            continue
+
+        current_indent = len(line) - len(stripped)
+
+        if (
+            type_checking_indent is not None
+            and type_checking_line_idx is not None
+            and idx > type_checking_line_idx
+            and current_indent <= type_checking_indent
+        ):
+            type_checking_indent = None
+            type_checking_line_idx = None
+
+        if TYPE_CHECKING_BLOCK_RE.match(stripped):
+            type_checking_indent = current_indent
+            type_checking_line_idx = idx
+            continue
+
+        if (
+            type_checking_indent is not None
+            and type_checking_line_idx is not None
+            and idx > type_checking_line_idx
+            and current_indent > type_checking_indent
+        ):
+            block_line_indexes.add(idx)
+
+    return block_line_indexes
+
+
 def _is_in_type_checking_block(lines: Sequence[str], current_line_idx: int) -> bool:
     """Check if the current line is inside a TYPE_CHECKING conditional block.
 
@@ -634,7 +678,7 @@ def _is_in_type_checking_block(lines: Sequence[str], current_line_idx: int) -> b
             type_checking_line_idx = None
 
         # Check for TYPE_CHECKING if statement
-        if re.match(r"if\s+TYPE_CHECKING\s*:", stripped):
+        if TYPE_CHECKING_BLOCK_RE.match(stripped):
             type_checking_indent = current_indent
             type_checking_line_idx = idx
             continue
@@ -689,6 +733,7 @@ def _scan_file_for_imports(
         return violations
 
     lines = content.splitlines()
+    type_checking_block_lines = _type_checking_block_line_indexes(lines)
 
     for pattern in forbidden_patterns:
         # Regex patterns for detecting imports:
@@ -785,7 +830,7 @@ def _scan_file_for_imports(
                 continue
 
             # Skip imports inside TYPE_CHECKING blocks (type-only imports)
-            if _is_in_type_checking_block(lines, line_idx):
+            if line_idx in type_checking_block_lines:
                 continue
 
             if import_regex.match(processed_content):

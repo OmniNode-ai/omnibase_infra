@@ -1,0 +1,24 @@
+{
+  "branch_coverage_pct": 36.64,
+  "candidate_count": 4,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_build_loop_projection_compute.handlers.handler_build_loop_projection",
+  "handler_module_sha256": "sha256:bb9691ec92dda065b4fad25545ad57b99121adbab55cc31f1cd88c93f056761e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_build_loop_projection_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T02:50:29.014253+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 4,
+  "selected_input_hashes": [
+    "sha256:1f43a0fada4a2ab5e23f7c594663ece57217a0fc9c1fe0b68101c85f8cafa2d7",
+    "sha256:f8dccfc4a7000ed058cdeb43f5b92b44c303d196f561f14bce643809baf981aa",
+    "sha256:c3150ab885d99667ca978220c43563d54ccef76d26c916d0fcd7bea8ce66c9da",
+    "sha256:0afb18b72db2fda457905bdd526d9ee552d29c100d9ed67fcb873cb97d036bfc"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14821 hand-flips node_build_loop_projection_compute to canonical def-B via the OMN-14781 path: the entrypoint param is retyped object-> ModelEventMessage and the dead legacy execute()/_safe_correlation_id ProtocolHandler path is removed, while the projection business logic (project/_extract_payload/_first_str/_extract_timestamp/_extract_correlation_id/_coerce_event_message) is preserved byte-identical base_ref<->HEAD and re-derived from git by the ratchet. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests over the selected corpus, not by a broad branch-coverage claim; the JSON-decode/non-object error branches are covered by the existing patched unit suite (test_project_raises_*) and are not re-driven through the deterministic SUCCESS-only dispatch corpus.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}
