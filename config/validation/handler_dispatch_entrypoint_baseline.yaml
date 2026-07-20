@@ -100,9 +100,6 @@ known_entrypointless:
   - contract: node_routing_score_reducer
     handler: HandlerUpdateScores
     module: omnibase_infra.nodes.node_routing_score_reducer.handlers.handler_update_scores
-  - contract: node_runtime_source_attestor_effect
-    handler: HandlerSourceAttestation
-    module: omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers.handler_source_attestation
   - contract: node_setup_infisical_effect
     handler: HandlerInfisicalFullSetup
     module: omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup
