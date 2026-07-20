@@ -1,0 +1,33 @@
+{
+  "branch_coverage_pct": 50.91,
+  "candidate_count": 18,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_auth_gate_compute.handlers.handler_auth_gate",
+  "handler_module_sha256": "sha256:a18e55ed210014134cfa2f536fd7641a19d4c1565622797eb4abea2f2c2a0cab",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_auth_gate_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T02:50:47.586483+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 13,
+  "selected_input_hashes": [
+    "sha256:75dbab6c8bab5ed93d76d18ef1bb118b3125b278eb982a63a2128811e715b0a6",
+    "sha256:44932cbd604d85a302b97096e289e353e23ea6fa423059ffaf1ee99322ccb90a",
+    "sha256:f5642a9951c9b143635610826e60f3f867650d8dbcca71b1afc8e2f62c9fc21f",
+    "sha256:7ae6b33dd7ff5e3dcb1a18d5be5b1bcd4db3f2e2908733accac0047ce0b2ff8f",
+    "sha256:00fffc6b3b37de4891e1b475119eed380a8ebfa48214cda70a5430b4f948de9d",
+    "sha256:18d0aa10489a5f7befb4c23c3dadcf1e97bf11cd1e56efac8834da31773f725b",
+    "sha256:0270a7f70ffd8c6e0feee26950427430ff530c99b6732410479cb44760659c33",
+    "sha256:7ac31413b40f631d23faa0231b1c953ec6c172b07dcb5e0d515ffcd94bc21227",
+    "sha256:48f5ec93f2e7be66cd089fd80ba0706bb1b14769482c7c5491b1be37972b3794",
+    "sha256:655caa51701b2eb350938596da8b10b006e09905017e0a254ccb3fc095ea8e51",
+    "sha256:ae07129d49c0ad457d588330187a3ed6d959f09424d96adb583eb5b015ee3b8b",
+    "sha256:530c954b5ed0cbe717873c6dc35653570d2700e53eaa9a2fc3f4d0c80543d9cd",
+    "sha256:8e713ef61785d9d9dca2e2ccea62ddd0af83d542fa1fbb528f32bd4c81a25a82"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14818 hand-flips node_auth_gate_compute to canonical def-B via a PURE RENAME evaluate->handle (OMN-14781 path): the 10-step authorization cascade body is preserved byte-identically and the business-logic helpers (_is_whitelisted_path/_glob_to_regex/_path_matches_globs) are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests and the golden-equivalence replay over the selected input corpus, not by a broad branch-coverage claim over the legacy handler body; the ReDoS/depth guard branches (>2 '**' segments raising ValueError, PATH_MAX truncation) are adversarial guards covered by the existing unit suite and are not driven by the deterministic dispatch corpus.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

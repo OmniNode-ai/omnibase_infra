@@ -1,0 +1,23 @@
+{
+  "branch_coverage_pct": 79.52,
+  "candidate_count": 8,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_scope_extract_compute.handlers.handler_scope_extract",
+  "handler_module_sha256": "sha256:17171d9ff6d4fe44e35f37ec0665649e2dd8414cb9d511c371cf762535c1efc0",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_scope_extract_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T05:52:45.887782+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 3,
+  "selected_input_hashes": [
+    "sha256:0bbfadfaf5bb36fccb7abee57fb967a9c3b1bbe28f39e6d5dcb73844c9b671b6",
+    "sha256:4af8ef1643b9c2e6bdcbc159ee96da3b72307fd3ddaf5770cff049ae224bc279",
+    "sha256:3287dfd1c617d457604b4069e1bac6eb82723a63119116b379de8b3aa6c2fa4c"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14832 EQUIVALENCE-flips node_scope_extract_compute to canonical def-B (handle(request: ModelScopeExtractInput) -> ModelScopeExtracted). The regex-extraction body is preserved behaviorally identical (only the entry signature is unpacked from the request model); equivalence is proven by the golden-equivalence replay (goldens recorded against the git-BASE def-A handler and reproduced through def-B) over the coverage-guided selected corpus, not by a broad 80% branch claim. The uncovered branches are the mutually-exclusive backtick path-shape arms exercised by the existing patched unit suite.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

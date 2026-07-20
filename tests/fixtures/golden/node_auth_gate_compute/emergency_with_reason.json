@@ -1,0 +1,24 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "authorization": null,
+    "emergency_override_active": true,
+    "emergency_override_reason": "incident recovery",
+    "now": "2026-02-10T12:00:00Z",
+    "run_id": null,
+    "target_path": "",
+    "target_repo": "",
+    "tool_name": "Bash"
+  },
+  "input_type": "ModelAuthGateRequest",
+  "output": {
+    "banner": "EMERGENCY OVERRIDE ACTIVE \u2014 All tool invocations are permitted under emergency override. This override expires in 10 minutes and cannot be renewed without manual /authorize.",
+    "decision": "soft_deny",
+    "reason": "Emergency override active. Reason: incident recovery",
+    "reason_code": "emergency_override",
+    "step": 2
+  },
+  "output_type": "ModelAuthGateDecision",
+  "scenario": "emergency_with_reason",
+  "volatile_mask": []
+}
