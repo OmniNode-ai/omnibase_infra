@@ -1,0 +1,31 @@
+{
+  "golden_version": "compute_golden.v1",
+  "input": {
+    "base_dir": null,
+    "contract_content": null,
+    "contract_type": "effect",
+    "file_path": "__onex_golden_probe__/nonexistent_contract.yaml",
+    "model_code": null
+  },
+  "input_type": "ModelContractValidateInput",
+  "output": {
+    "contract_type": "effect",
+    "interface_version": {
+      "build": null,
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": null
+    },
+    "is_valid": false,
+    "score": 0.0,
+    "suggestions": [],
+    "violations": [
+      "Contract file not found: __onex_golden_probe__/nonexistent_contract.yaml"
+    ],
+    "warnings": []
+  },
+  "output_type": "ModelContractValidationResult",
+  "scenario": "file_not_found",
+  "volatile_mask": []
+}

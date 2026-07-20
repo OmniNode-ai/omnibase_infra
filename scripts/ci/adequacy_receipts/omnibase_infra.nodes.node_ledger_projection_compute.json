@@ -1,0 +1,28 @@
+{
+  "receipt_schema": "adequacy_receipt.v1",
+  "node_id": "omnibase_infra.nodes.node_ledger_projection_compute",
+  "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+  "handler_module_sha256": "sha256:d97387da8fdebbd9e471cbd86e68ce3b757157f124eac01fb25b2c0fbf42d6d2",
+  "recorded_at": "2026-07-20T04:31:10.852385+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "candidate_count": 5,
+  "selected_count": 5,
+  "selected_input_hashes": [
+    "sha256:0fb51e75c55ba1e136beda48c19caba87c9f5ce8e6d36f14043f756d00b4eaf4",
+    "sha256:19b117df4ad80be9d92db48acad358ed239bad72fb6be0128420c1e09544e940",
+    "sha256:688a6047c8ddf4392dee9631f3a15e525218919ac872adfe25db69004545eb0a",
+    "sha256:0efb529770391718986b1c093cca48cfcc724ef6afc86475150a45f2aaaa401d",
+    "sha256:41175742f2d6b9c63d3f5f89246cd21017df32d565605e72b93b5a939ab2b0e0"
+  ],
+  "branch_coverage_pct": 30.93,
+  "coverage_target": 80.0,
+  "meets_target": false,
+  "uncovered_waiver": {
+    "reason": "HAND-FLIP (OMN-14781): equivalence is proven by git-verbatim AST preservation of the business-logic symbols (project/_extract_ledger_metadata/_b64/_normalize_headers/_parse_offset), re-derived by verify_handflip_proof from git base 81b6f8ad<->HEAD, plus green parity over the selected corpus (test_node_ledger_projection_compute_defb_omn14823) -- NOT a coverage threshold. The uncovered lines are the legacy ProtocolHandler execute() entrypoint and defensive error/exception branches (message.value=None RuntimeHostError, header-serialization failure, unparseable offset, missing-headers) that the deterministic happy-path dispatch corpus intentionally does not exercise.",
+    "uncovered_branch_count": 6
+  },
+  "volatile_mask": [
+    "input_envelope_id",
+    "correlation_id"
+  ]
+}
