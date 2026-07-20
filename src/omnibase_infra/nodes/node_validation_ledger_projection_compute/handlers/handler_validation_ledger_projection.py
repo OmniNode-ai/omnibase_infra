@@ -216,19 +216,21 @@ class HandlerValidationLedgerProjection:
 
     async def handle(
         self,
-        message: object,
+        request: ModelEventMessage,
     ) -> ModelHandlerOutput[ModelIntent]:
-        """Contract-typed auto-wiring entry point (OMN-14524).
+        """Canonical definition-B dispatch entry point (OMN-14524, OMN-14831).
 
-        ``node_validation_ledger_projection_compute``'s contract declares
-        ``operation_match`` routing with no ``event_model``, so auto-wiring
-        (``handler_wiring._make_dispatch_callback``) invokes
-        ``handle(envelope)`` directly rather than ``execute()``. Without this
-        method the callback binds ``_missing_handle``, which raises on every
-        dispatched event -- and the auto-wired consume boundary
-        log-and-discards that exception, so events are acked and the
-        validation ledger stays empty with nothing surfaced. This mirrors the
-        exact OMN-14516 defect class for the sibling event_ledger.
+        The contract binds ``input_model`` = ``ModelEventMessage`` and the
+        auto-wiring dispatch callback (``handler_wiring._make_dispatch_callback``)
+        validates the wire payload into that type before invoking
+        ``handle(request)`` -- the canonical definition-B shape
+        (``handle(request) -> response``, no envelope type in the core, adapted
+        by the shared runtime rather than a per-node wrapper). Without an
+        adaptable ``handle`` the callback binds ``_missing_handle``, which raises
+        on every dispatched event -- and the auto-wired consume boundary
+        log-and-discards that exception, so events are acked and the validation
+        ledger stays empty with nothing surfaced. This mirrors the exact
+        OMN-14516 defect class for the sibling event_ledger.
 
         Unlike ``project()`` (which returns a plain dict of extracted
         metadata for existing callers), ``handle()`` wraps that dict into a
@@ -237,14 +239,11 @@ class HandlerValidationLedgerProjection:
         requires to route to ``node_validation_ledger_write_effect`` via
         ``intent_consumption.intent_routing_table``.
 
-        The value delivered here is whatever
-        ``MessageDispatchEngine._materialize_envelope_with_bindings`` produces
-        on the live dispatch path -- a **dict** (``{"payload": ..., ...}``),
-        not an attribute-bearing envelope. ``_coerce_event_message`` accepts
-        both shapes so this works for the real runtime path and for
-        object-shaped envelopes.
+        ``_coerce_event_message`` also accepts the raw materialized dict a
+        dispatch path may deliver and an attribute-bearing wrapper used by test
+        doubles, so both the runtime path and direct unit calls work.
         """
-        raw_message = self._coerce_event_message(message)
+        raw_message = self._coerce_event_message(request)
         headers = raw_message.headers
         correlation_id = headers.correlation_id if headers else None
         header_bytes: dict[str, bytes] | None = (
@@ -298,10 +297,10 @@ class HandlerValidationLedgerProjection:
 
     @staticmethod
     def _coerce_event_message(raw: object) -> ModelEventMessage:
-        """Accept a direct ModelEventMessage or an auto-wired envelope wrapper.
+        """Accept a direct ModelEventMessage or an auto-wired mapping/attr wrapper.
 
         The dispatch engine delivers a materialized dict on the live runtime
-        path and a ``ModelEventEnvelope``-like object from the auto_wiring
+        path and an attribute-bearing wrapper from the auto_wiring
         event-bus callback and test doubles; both must work here. Mirrors
         ``HandlerLedgerProjection._coerce_event_message``.
         """
