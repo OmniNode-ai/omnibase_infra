@@ -20,8 +20,9 @@
 # exempt from "narrow the trigger for efficiency" — a path filter here would
 # be the exact self-referential skip-vector this guard exists to catch.
 #
-# The reusable workflow is pinned to the omniclaude commit that introduced it
-# (4d60e9363728eed52a238cd5b47bb15808d51ca0 — origin/dev HEAD at fan-out time;
+# The reusable workflow is pinned to the omniclaude commit that includes the
+# temporary dev-side validator checkout fix
+# (5289b62c3eb7375de9b783e17f5f6d95805df9ca — origin/dev HEAD at fan-out time;
 # not yet promoted to omniclaude main, hence the SHA pin instead of @main,
 # consistent with this repo's existing pinned-ref convention for every other
 # omniclaude-hosted reusable workflow it calls, e.g. deploy-gate.yml/
@@ -52,5 +53,6 @@ jobs:
       core-ref: 8a47e092002dd1338599fa0733feda469436acbf
 
   required-check-skip-guard:
+    if: ${{ always() }}
     needs: occ-preflight
-    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@4d60e9363728eed52a238cd5b47bb15808d51ca0
+    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@5289b62c3eb7375de9b783e17f5f6d95805df9ca
