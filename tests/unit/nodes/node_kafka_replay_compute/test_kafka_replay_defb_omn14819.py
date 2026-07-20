@@ -22,16 +22,18 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.nodes.node_kafka_replay_compute.handlers import handler_replay
-from omnibase_infra.nodes.node_kafka_replay_compute.handlers.deserializer_default import (
+from omnibase_infra.nodes.node_kafka_replay_compute.deserializers.deserializer_default import (
     default_envelope_deserializer,
 )
+from omnibase_infra.nodes.node_kafka_replay_compute.handlers import handler_replay
 from omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay import (
     HandlerKafkaReplay,
 )
 from tests.unit.nodes.node_kafka_replay_compute._defb_corpus import (
+    FakeReplayConsumer,
     ReplayCase,
     replay_cases,
     run_case,
@@ -92,3 +94,48 @@ def test_default_deserializer_yields_correlation_id() -> None:
     envelope = default_envelope_deserializer(payload.encode("utf-8"))
 
     assert envelope.correlation_id == correlation_id
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_contract_declared_default_constructor_wiring_replays_isolated_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real contract handler wiring plus default constructor path stays executable."""
+    case = replay_cases()[0]
+    contract_path = Path(handler_replay.__file__).parents[1] / "contract.yaml"
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    handler_ref = contract["handler_routing"]["handlers"][0]["handler"]
+
+    assert handler_ref == {
+        "name": "HandlerKafkaReplay",
+        "module": (
+            "omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay"
+        ),
+    }
+
+    constructed: list[dict[str, object]] = []
+
+    class RecordingProductionConsumer(FakeReplayConsumer):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            constructed.append({"args": args, "kwargs": kwargs})
+            super().__init__(case.records)
+
+    monkeypatch.setattr(handler_replay, "AIOKafkaConsumer", RecordingProductionConsumer)
+    monkeypatch.setattr(handler_replay, "build_aiokafka_auth_kwargs_from_env", dict)
+
+    handler = HandlerKafkaReplay()
+    result = await handler.handle(case.command)
+
+    assert result.events_replayed == case.expected_events
+    assert constructed == [
+        {
+            "args": (),
+            "kwargs": {
+                "bootstrap_servers": case.command.target_cluster_bootstrap,
+                "group_id": case.command.target_consumer_group,
+                "enable_auto_commit": False,
+                "auto_offset_reset": "earliest",
+            },
+        }
+    ]

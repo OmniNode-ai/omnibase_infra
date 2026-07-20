@@ -18,7 +18,7 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.models.projection import ModelSequenceInfo
-from omnibase_infra.nodes.node_kafka_replay_compute.handlers.deserializer_default import (
+from omnibase_infra.nodes.node_kafka_replay_compute.deserializers.deserializer_default import (
     default_envelope_deserializer,
 )
 from omnibase_infra.nodes.node_kafka_replay_compute.models import (

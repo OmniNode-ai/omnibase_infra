@@ -3,10 +3,11 @@
 """Default replay-envelope deserializer for node_kafka_replay_compute.
 
 Isolates the concrete ``ModelEventEnvelope`` deserialization boundary in its own
-module so the canonical def-B handler core (``handler_replay.py``) references only
-the narrow ``ProtocolReplayEnvelope`` view -- satisfying the C-core requirement of
-the canonical handler-shape ratchet (OMN-14355). The handler injects this as the
-default ``envelope_deserializer`` and swaps it out under test.
+non-handler support module so the canonical def-B handler core
+(``handler_replay.py``) references only the narrow ``ProtocolReplayEnvelope`` view
+-- satisfying the C-core requirement of the canonical handler-shape ratchet
+(OMN-14355). The handler injects this as the default ``envelope_deserializer`` and
+swaps it out under test.
 """
 
 from __future__ import annotations

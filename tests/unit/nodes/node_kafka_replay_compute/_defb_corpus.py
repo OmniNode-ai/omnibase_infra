@@ -12,6 +12,7 @@ collected by pytest).
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from uuid import uuid4
 
@@ -27,8 +28,14 @@ from omnibase_infra.nodes.node_kafka_replay_compute.models import (
     ModelKafkaReplayOutput,
 )
 
-# Deterministic, explicitly-injected isolated target (never .201).
-_BOOTSTRAP = "isolated-redpanda:9092"
+# Deterministic, explicitly-injected isolated target/topic defaults (never .201).
+_BOOTSTRAP = os.environ.get("OMN14819_REPLAY_TEST_BOOTSTRAP", "isolated-redpanda:9092")
+_T1 = os.environ.get(
+    "OMN14819_REPLAY_TEST_TOPIC_PRIMARY", "dispatch_worker-completed.v1"
+)
+_T2 = os.environ.get(
+    "OMN14819_REPLAY_TEST_TOPIC_SECONDARY", "dispatch-outcome-evaluated.v1"
+)
 
 
 @dataclass(frozen=True)
@@ -131,10 +138,6 @@ class ReplayCase:
     expected_correlation_len: int | None = None
     expected_failed_offsets: list[int] = field(default_factory=list)
     raises: bool = False
-
-
-_T1 = "dispatch_worker-completed.v1"
-_T2 = "dispatch-outcome-evaluated.v1"
 
 
 def replay_cases() -> list[ReplayCase]:
