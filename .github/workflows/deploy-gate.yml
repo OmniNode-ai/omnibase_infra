@@ -33,7 +33,7 @@ jobs:
 
   deploy-gate:
     needs: occ-preflight
-    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@main
+    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@dev
     secrets: inherit
     with:
       contracts-dir: contracts

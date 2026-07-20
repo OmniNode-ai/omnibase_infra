@@ -30,4 +30,4 @@ jobs:
   imperative-contract-guard:
     needs: occ-preflight
     # self-gating-ok: central guard is intentionally shared across repos; caller PRs do not modify the referenced workflow.
-    uses: OmniNode-ai/onex_change_control/.github/workflows/imperative-contract-guard.yml@main
+    uses: OmniNode-ai/onex_change_control/.github/workflows/imperative-contract-guard.yml@dev
