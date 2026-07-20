@@ -1,12 +1,17 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# Related Tickets:
+#   - OMN-11548: node_invariant_evaluate_compute (original migration)
+#   - OMN-14822: canonical def-B flip — each operation now routes to its own
+#     def-B handler class exposing handle(request) -> response (Class-B Tier-1,
+#     parent epic OMN-14355; hand-flip proof path OMN-14781).
 name: "node_invariant_evaluate_compute"
 contract_name: "node_invariant_evaluate_compute"
 node_name: "node_invariant_evaluate_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
@@ -30,27 +35,21 @@ handler_routing:
     - operation: "invariant.evaluate"
       handler:
         name: "HandlerInvariantEvaluate"
-        function: "handle_invariant_evaluate"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
-        type: "async"
       input_model: "ModelInvariantEvaluateInput"
       output_model: "ModelInvariantResult"
       description: "Evaluate one invariant against an output payload."
     - operation: "invariant.evaluate_batch"
       handler:
-        name: "HandlerInvariantEvaluate"
-        function: "handle_invariant_evaluate_batch"
+        name: "HandlerInvariantEvaluateBatch"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
-        type: "async"
       input_model: "ModelInvariantEvaluateBatchInput"
       output_model: "list[ModelInvariantResult]"
       description: "Evaluate an invariant set and return ordered results."
     - operation: "invariant.evaluate_all"
       handler:
-        name: "HandlerInvariantEvaluate"
-        function: "handle_invariant_evaluate_all"
+        name: "HandlerInvariantEvaluateAll"
         module: "omnibase_infra.nodes.node_invariant_evaluate_compute.handlers.handler_invariant_evaluate"
-        type: "async"
       input_model: "ModelInvariantEvaluateAllInput"
       output_model: "ModelEvaluationSummary"
       description: "Evaluate an invariant set and return summary statistics."

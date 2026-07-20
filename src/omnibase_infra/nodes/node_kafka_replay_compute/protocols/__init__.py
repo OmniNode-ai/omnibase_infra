@@ -11,6 +11,9 @@ from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_kafka_rep
 from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_offset_and_timestamp import (
     ProtocolOffsetAndTimestamp,
 )
+from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_replay_envelope import (
+    ProtocolReplayEnvelope,
+)
 from omnibase_infra.nodes.node_kafka_replay_compute.protocols.protocol_topic_partition import (
     ProtocolTopicPartition,
 )
@@ -27,5 +30,6 @@ __all__ = [
     "ProtocolKafkaMessage",
     "ProtocolKafkaReplayConsumer",
     "ProtocolOffsetAndTimestamp",
+    "ProtocolReplayEnvelope",
     "ProtocolTopicPartition",
 ]
