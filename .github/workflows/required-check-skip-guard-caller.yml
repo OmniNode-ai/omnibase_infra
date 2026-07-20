@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Required-Check Skip-Vector Guard — local caller for omnibase_infra.
+# OMN-14865 (fan-out of the OMN-14854 omniclaude canary, PR #1917 merged to
+# omniclaude dev; validator + reusable workflow are canonical there).
+#
+# Produces required status check: "required-check-skip-guard / check-skip-vectors"
+#
+# NOT YET added to required_status_checks on this branch (mirrors the canary's
+# own ordering, design spec section 5): the branch-protection flip to REQUIRED
+# happens in a follow-up PR only after this workflow has posted green on `dev`
+# at least twice — never in the same PR that introduces the workflow, to avoid
+# a self-inflicted wedge (a PR blocked on a required check that has never
+# successfully run under real conditions). See .github/required-checks.yaml,
+# where this context's manifest row is `mode: ADVISORY`.
+#
+# IMPORTANT: this trigger MUST NOT carry a `paths:`/`paths-ignore:` filter
+# (design spec section 4c). This is the one required-check workflow that is
+# exempt from "narrow the trigger for efficiency" — a path filter here would
+# be the exact self-referential skip-vector this guard exists to catch.
+#
+# The reusable workflow is pinned to the omniclaude commit that includes the
+# temporary dev-side validator checkout fix
+# (5289b62c3eb7375de9b783e17f5f6d95805df9ca — origin/dev HEAD at fan-out time;
+# not yet promoted to omniclaude main, hence the SHA pin instead of @main,
+# consistent with this repo's existing pinned-ref convention for every other
+# omniclaude-hosted reusable workflow it calls, e.g. deploy-gate.yml/
+# call-reject-skip.yml).
+
+name: Required-Check Skip-Vector Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, dev]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  occ-preflight:
+    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      contracts-dir: contracts
+      receipts-dir: drift/dod_receipts
+      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
+
+  required-check-skip-guard:
+    if: ${{ always() }}
+    needs: occ-preflight
+    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@5289b62c3eb7375de9b783e17f5f6d95805df9ca
