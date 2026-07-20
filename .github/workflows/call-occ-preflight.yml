@@ -20,7 +20,7 @@ name: OCC Preflight
 on:
   pull_request:
     branches: [main, dev, "hotfix/**"]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 concurrency:
   # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group

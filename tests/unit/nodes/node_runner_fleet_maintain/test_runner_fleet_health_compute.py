@@ -23,6 +23,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_recommend
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_fleet_health_state import (
     EnumRunnerFleetHealthState,
 )
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_evaluate_command import (
+    ModelRunnerFleetHealthEvaluateCommand,
+)
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
     ModelRunnerFleetRunnerFact,
 )
@@ -68,7 +71,9 @@ class TestRunnerFleetHealthComputeHealthy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert all(
             a.state == EnumRunnerFleetHealthState.HEALTHY for a in verdict.assessments
@@ -95,7 +100,9 @@ class TestRunnerFleetHealthComputeSaturated:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert all(
             a.state == EnumRunnerFleetHealthState.SATURATED for a in verdict.assessments
@@ -123,7 +130,9 @@ class TestRunnerFleetHealthComputeDegraded:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         states = {a.name: a.state for a in verdict.assessments}
         assert states["omninode-runner-1"] == EnumRunnerFleetHealthState.CRASH_LOOPING
@@ -146,7 +155,9 @@ class TestRunnerFleetHealthComputeDegraded:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.assessments[0].state == EnumRunnerFleetHealthState.OFFLINE_IDLE
         assert verdict.offline_count == 1
@@ -171,7 +182,9 @@ class TestRunnerFleetHealthComputeZombiePresent:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         cancel_actions = [
             a
@@ -195,7 +208,9 @@ class TestRunnerFleetHealthComputeBuildxAndCodeload:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.buildx_unavailable is True
         assert (
@@ -215,7 +230,9 @@ class TestRunnerFleetHealthComputeBuildxAndCodeload:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.codeload_throttle_signal_count == 3
         assert (
@@ -234,7 +251,9 @@ class TestRunnerFleetHealthComputeBuildxAndCodeload:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert (
             verdict.assessments[0].state
@@ -258,7 +277,9 @@ class TestRunnerFleetHealthComputeWedged:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert all(
             a.state == EnumRunnerFleetHealthState.WEDGED for a in verdict.assessments
@@ -274,7 +295,9 @@ class TestRunnerFleetHealthComputeWedged:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.assessments[0].state == EnumRunnerFleetHealthState.HEALTHY
 
@@ -293,10 +316,14 @@ class TestRunnerFleetHealthComputeDeterminism:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict_a = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         verdict_b = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert [a.state for a in verdict_a.assessments] == [
             a.state for a in verdict_b.assessments
@@ -322,7 +349,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.github_source_ok is True
         assert verdict.docker_source_ok is True
@@ -348,7 +377,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.docker_source_ok is False
         assert all(a.is_determinate is False for a in verdict.assessments)
@@ -365,7 +396,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.github_source_ok is False
         assert all(a.is_determinate is False for a in verdict.assessments)
@@ -384,7 +417,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         by_name = {a.name: a for a in verdict.assessments}
         assert by_name["omninode-runner-1"].docker_restart_count == 9
@@ -402,7 +437,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.buildx_unavailable is False
         assert verdict.buildx_determinate is False
@@ -416,7 +453,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.buildx_unavailable is False
         assert verdict.buildx_determinate is True
@@ -431,7 +470,9 @@ class TestRunnerFleetHealthComputeDeterminacy:
         )
         handler = HandlerRunnerFleetHealthEvaluate()
         verdict = await handler.handle(
-            correlation_id=snapshot.correlation_id, snapshot=snapshot
+            ModelRunnerFleetHealthEvaluateCommand(
+                correlation_id=snapshot.correlation_id, snapshot=snapshot
+            )
         )
         assert verdict.buildx_unavailable is True
         assert verdict.buildx_determinate is True
