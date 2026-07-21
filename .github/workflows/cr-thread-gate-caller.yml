@@ -40,7 +40,7 @@ jobs:
     concurrency:
       group: cr-thread-gate-${{ github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.run_id }}
       cancel-in-progress: true
-    uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@ff230264ac3300d7ced43564dc921f44558110fe
+    uses: OmniNode-ai/omniclaude/.github/workflows/cr-thread-gate.yml@70718ddb45f6df5eb5e07159f2ae812efb1da7db
     with:
       pr-number: ${{ format('{0}', github.event.pull_request.number || github.event.issue.number || 0) }}
     secrets:
