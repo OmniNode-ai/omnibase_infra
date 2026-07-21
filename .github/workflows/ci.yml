@@ -420,6 +420,18 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py orchestration_monoliths --verbose
 
+      # ARCH-005 orchestrator/reducer handler state-invariant (OMN-14222).
+      # Full-repo scan, BLOCKING (no continue-on-error): unlike ARCH-004
+      # Signal A/B, this rule has ZERO ratchet baseline -- the repo carries
+      # no unexempted violations, so a finding here is always a fresh
+      # regression, not pre-existing debt working down to threshold.
+      - name: Run orchestrator/reducer state-invariant gate (ARCH-005)
+        run: |
+          echo "================================================================"
+          echo "Orchestrator/Reducer State Invariant (ARCH-005, OMN-14222)"
+          echo "================================================================"
+          uv run python scripts/validate.py orchestrator_reducer_state --verbose
+
       - name: Run markdown link validation
         run: |
           echo "================================================================"

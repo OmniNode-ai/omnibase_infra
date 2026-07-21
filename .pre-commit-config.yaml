@@ -446,6 +446,25 @@ repos:
         files: '(contract\.yaml|handlers/handler_.*\.py)$'
         pass_filenames: true
         stages: [pre-commit]
+      # ARCH-005 orchestrator/reducer handler state-persistence invariant
+      # (OMN-14222, surfaced by the OMN-14208 declarative-orchestrator census).
+      #
+      # Changed-node gate (BLOCKING, ZERO ratchet baseline): for any node
+      # directory touched by this commit whose contract.yaml declares
+      # node_type: ORCHESTRATOR* or *REDUCER* (reducers are NOT exempt here,
+      # unlike ARCH-004 Signal A/B), fail if a handlers/*.py file holds a
+      # ClassVar[<mutable container>] or a module-level mutable container
+      # (dict/list/set/OrderedDict/defaultdict/Counter) without an inline
+      # '# orchestrator-reducer-state-ok: <reason>' exemption. There is no
+      # accepted-debt baseline for this rule — the repo carries zero
+      # unexempted violations as of OMN-14222, so any new one fails outright.
+      - id: onex-orchestrator-reducer-state-invariant
+        name: ONEX Orchestrator/Reducer State Invariant (ARCH-005)
+        entry: uv run --frozen python scripts/validate.py orchestrator_reducer_state
+        language: system
+        files: '(contract\.yaml|handlers/.*\.py)$'
+        pass_filenames: true
+        stages: [pre-commit]
       # Architecture layer validation - core/infra separation
       # Verifies omnibase_core has no infrastructure dependencies (kafka, httpx, etc.)
       #
@@ -1064,4 +1083,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
-  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
+  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
