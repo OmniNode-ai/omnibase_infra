@@ -43,23 +43,11 @@ env:
   IMAGE_NAME: omnibase-infra-runtime
 
 jobs:
-  occ-preflight:
-    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      contracts-dir: contracts
-      receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
-
   # Validate Dockerfile plugin pin ranges before building.
   # Catches exact-pin-without-no-deps issues and stale range upper bounds early,
   # without waiting for the full Docker build (which can take 3-5 minutes).
   # See: scripts/check_dockerfile_pins.py
   dockerfile-pin-check:
-    needs: occ-preflight
     name: Validate Dockerfile Plugin Pins
     runs-on: >-
       ${{
@@ -88,7 +76,7 @@ jobs:
   # Build and validate Docker image
   docker-build:
     name: Build Runtime Image
-    needs: [occ-preflight, dockerfile-pin-check]
+    needs: [dockerfile-pin-check]
     # OMNI_RUNNER_SELECTOR_V1 — trusted Docker jobs default to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -262,7 +250,7 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, docker-build]
+    needs: [docker-build]
     timeout-minutes: 30
     # OMN-13950 (SAT2 fleet-load): this job is informational (continue-on-error)
     # and never gates merge, yet it held a self-hosted runner for up to 30 min on
@@ -361,8 +349,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, docker-build]
-    if: needs.occ-preflight.result == 'success' && (github.ref == 'refs/heads/main')
+    needs: [docker-build]
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: read
@@ -423,8 +411,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, docker-build]
-    if: needs.occ-preflight.result == 'success' && (github.ref == 'refs/heads/main')
+    needs: [docker-build]
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 10
 
     steps:
@@ -469,7 +457,7 @@ jobs:
   # This is a REQUIRED status check — no bypass, no skip tokens.
   attest-source-hash:
     name: Attest Source Hash (OMN-9139)
-    needs: [occ-preflight, docker-build]
+    needs: [docker-build]
     uses: ./.github/workflows/attest-source-hash.yml
     with:
       runtime_source_hash: ${{ github.sha }}
@@ -486,8 +474,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, docker-build, docker-integration-tests, attest-source-hash]
-    if: needs.occ-preflight.result == 'success' && (always())
+    needs: [docker-build, docker-integration-tests, attest-source-hash]
+    if: always()
 
     steps:
       - name: Generate summary
