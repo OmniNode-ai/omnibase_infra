@@ -43,6 +43,7 @@ dist/ did not contain exactly one wheel); ``2`` bad invocation.
 
 from __future__ import annotations
 
+import shutil
 import subprocess  # nosec B404 - invokes `uv venv`/`uv pip install` with a fixed, non-shell argv
 import sys
 import tempfile
@@ -52,6 +53,19 @@ from pathlib import Path
 #: because it has to hit the real PyPI index for every transitive dependency
 #: with no local cache warm-up.
 _INSTALL_TIMEOUT_SECONDS = 300
+
+
+def _resolve_uv() -> str:
+    """Resolve the absolute path to the ``uv`` binary.
+
+    Resolved up front (rather than passing the bare ``"uv"`` command name to
+    ``subprocess.run``) so callers get a clear error if ``uv`` is missing from
+    PATH, and so the invocation uses a fully-qualified executable path.
+    """
+    uv_path = shutil.which("uv")
+    if uv_path is None:
+        raise SystemExit("ERROR: `uv` not found on PATH")
+    return uv_path
 
 
 def find_single_wheel(dist_dir: Path) -> Path:
@@ -79,12 +93,13 @@ def verify_pin_resolvability(wheel_path: Path) -> tuple[bool, str]:
 
     Returns ``(ok, combined_stdout_stderr_log)``.
     """
+    uv_bin = _resolve_uv()
     with tempfile.TemporaryDirectory(prefix="pypi-pin-resolve-") as tmp:
         tmp_path = Path(tmp)
         venv_dir = tmp_path / "venv"
 
-        create = subprocess.run(  # nosec B603 B607 - fixed argv, no shell, trusted uv binary
-            ["uv", "venv", str(venv_dir)],
+        create = subprocess.run(  # nosec B603 - fixed argv, no shell, fully-qualified uv path
+            [uv_bin, "venv", str(venv_dir)],
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -98,9 +113,9 @@ def verify_pin_resolvability(wheel_path: Path) -> tuple[bool, str]:
         scratch_wheel.write_bytes(wheel_path.read_bytes())
 
         venv_python = venv_dir / "bin" / "python"
-        proc = subprocess.run(  # nosec B603 B607 - fixed argv, no shell, trusted uv binary
+        proc = subprocess.run(  # nosec B603 - fixed argv, no shell, fully-qualified uv path
             [
-                "uv",
+                uv_bin,
                 "pip",
                 "install",
                 "--python",

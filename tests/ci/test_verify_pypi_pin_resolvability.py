@@ -16,6 +16,7 @@ prove ``verify_pypi_pin_resolvability``:
 
 from __future__ import annotations
 
+import shutil
 import subprocess  # nosec B404 - invokes `uv build` with a fixed argv in tests
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from scripts.ci.verify_pypi_pin_resolvability import (
     find_single_wheel,
     verify_pin_resolvability,
 )
+
+_UV_BIN = shutil.which("uv")
 
 # ---------------------------------------------------------------------------
 # find_single_wheel -- unit, no network
@@ -82,8 +85,9 @@ packages = ["src/omn14070_pin_fixture"]
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "__init__.py").write_text("")
 
-    subprocess.run(  # nosec B603 B607 - fixed argv, trusted `uv` CLI, test-only
-        ["uv", "build", "--wheel"],
+    assert _UV_BIN is not None, "`uv` not found on PATH"
+    subprocess.run(  # nosec B603 - fixed argv, no shell, fully-qualified uv path, test-only
+        [_UV_BIN, "build", "--wheel"],
         cwd=fixture_dir,
         check=True,
         capture_output=True,
@@ -110,7 +114,8 @@ def test_broken_pin_fails_red_reproduces_omn_14064(tmp_path: Path) -> None:
 @pytest.mark.integration
 def test_resolvable_pin_passes_green(tmp_path: Path) -> None:
     """Once the pin names a version range that actually exists on PyPI, the
-    same gate passes cleanly."""
+    same gate passes cleanly.
+    """
     wheel = _build_fixture_wheel(tmp_path, "requests>=2,<3")
 
     ok, log = verify_pin_resolvability(wheel)
