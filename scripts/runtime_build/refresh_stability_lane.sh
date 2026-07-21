@@ -266,12 +266,23 @@ done
 #    (deploy-runtime.sh reads its own git_sha from THIS clone's HEAD; DEPLOY_REF
 #    below only pins the 4 SIBLING repos staged by stage_workspace.sh -- it
 #    does not touch omnibase_infra's own tree.)
+#
+#    OMN-14889 canary finding: this clone's local `dev` branch may already be
+#    checked out in a SIBLING worktree on the same host (e.g. deploy-agent's
+#    runtime-sync-worktrees/OMN-12618) -- git refuses to check that branch out
+#    a second time ("already checked out at <path>"), hard-failing this whole script on
+#    an environment collision that has nothing to do with lane health. Resolve
+#    --ref to a commit SHA first and check it out DETACHED: a detached HEAD
+#    carries no branch identity, so it can never collide with another
+#    worktree regardless of what branch that worktree holds. --force discards
+#    any local modifications the same way the previous checkout+reset --hard
+#    pair did.
 # =============================================================================
 log "=== Refresh omnibase_infra ambient clone to ${REF} ==="
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 git -C "${INFRA_CLONE}" fetch origin --prune
-git -C "${INFRA_CLONE}" checkout dev
-git -C "${INFRA_CLONE}" reset --hard "${REF}"
+RESOLVED_REF_SHA="$(git -C "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
+git -C "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
 NEW_INFRA_SHA="$(git -C "${INFRA_CLONE}" rev-parse HEAD)"
 NEW_INFRA_SHA_SHORT="$(git -C "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
 log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
