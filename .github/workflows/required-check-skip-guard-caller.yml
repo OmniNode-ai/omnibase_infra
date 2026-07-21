@@ -55,4 +55,4 @@ jobs:
   required-check-skip-guard:
     if: ${{ always() }}
     needs: occ-preflight
-    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@5289b62c3eb7375de9b783e17f5f6d95805df9ca
+    uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@70718ddb45f6df5eb5e07159f2ae812efb1da7db
