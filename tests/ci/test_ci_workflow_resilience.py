@@ -833,7 +833,7 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
         for job_name, job in workflow["jobs"].items():
             if "uses" in job:
                 assert job["uses"].endswith(
-                    "occ-preflight.yml@79c620f904526f773f6b92eb98743b011fe2eb12"
+                    "occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2"
                 )
                 continue
 
