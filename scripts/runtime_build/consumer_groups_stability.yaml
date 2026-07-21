@@ -6,33 +6,51 @@
 # (matching this repo's topic/service-catalog convention) instead of a
 # hardcoded Python list.
 #
-# Each entry is a full rpk consumer-group name as seen via:
+# Each entry MUST be the FULL rpk consumer-group name (including the
+# `.__i.<instance>.__t.<topic>` per-topic suffix), exactly as printed by:
 #   docker exec <stability-test-redpanda-container> rpk group list \
 #     -X brokers=redpanda:9092
 #
-# The health-gate asserts `state == "Stable"` for every group listed here
-# (via `rpk group describe <group> -X brokers=redpanda:9092 -f json`) after a
-# refresh. A group that drops to Empty/Dead/PreparingRebalance/etc. after a
-# refresh is a wiring regression the digest-changed + manifest-count checks
-# alone would not catch (OMN-14208-class silent wiring death).
+# The BARE group-name prefix (e.g. `stability-test.omnibase_infra.
+# node_registration_orchestrator.consume.1.1.1` with no `.__i....__t....v1`
+# suffix) is NOT itself a real group -- `rpk group describe` on that bare
+# prefix resolves to a distinct, nonexistent group (STATE=Dead, 0 members).
+# This is a real bug an earlier revision of this file shipped with (caught by
+# the OMN-14873 canary run) -- always copy the FULL name from `rpk group
+# list`, never hand-truncate it.
+#
+# The health-gate treats `state in {"Stable", "Empty"}` as healthy (via
+# `rpk group describe <group> -X brokers=redpanda:9092`, plain-text output --
+# `-f json` is NOT supported by this rpk version, verified live). "Empty"
+# (group registered with the broker, topic subscription known, zero
+# currently-connected members) is the NORMAL idle state for a demand-driven
+# consumer that only joins its group when there is work to process -- treating
+# it as a failure produced false-negative rollbacks in the OMN-14873 canary
+# even though the refresh itself was healthy (digest changed, revision
+# matched, manifest floor met, /health healthy). Only "Dead" or an absent/
+# errored describe is the real "silent wiring death" signal
+# (reference_silent_wiring_death_mechanisms: a consumer that never registered
+# a group at all).
 #
 # Chosen to span all 4 core services this refresh targets
 # (omninode-runtime / runtime-effects / runtime-worker / projection-api):
-# registration (kernel-owned), delegation pipeline (routing/inference/
-# projection), and ticket-classify (the def-B canary this OMN-14873 refresh
-# is also proving live). Extend this list as new load-bearing consumer
-# groups come online; never silently drop an entry without a reason recorded
-# in the PR that removes it.
+# registration (kernel-owned, continuously-active via the platform-wide
+# node-heartbeat.v1 topic -- these two stay Stable, never Empty, so they are
+# the strongest signal), delegation pipeline (routing/inference/projection,
+# demand-driven), and ticket-classify (the def-B canary this OMN-14873
+# refresh is also proving live, demand-driven). Extend this list as new
+# load-bearing consumer groups come online; never silently drop an entry
+# without a reason recorded in the PR that removes it.
 consumer_groups:
-  - name: stability-test.omnibase_infra.node_registration_orchestrator.consume.1.1.1
-    description: kernel-owned node-registration orchestrator (registration/introspection/heartbeat fan-in)
-  - name: stability-test.omnibase_infra.node_ledger_projection_compute.consume.1.0.2
-    description: node-registration ledger projection (registration-snapshots)
-  - name: stability-test.omnimarket.projection_delegation.consume.1.0.0
-    description: delegation projection consumer (carries the OMN-14855 judge-verdict DLQ fix this refresh lands)
-  - name: stability-test.omnimarket.node_llm_delegation_call_effect.consume.0.1.0
-    description: delegation LLM-call effect (inference dispatch)
-  - name: stability-test.omnimarket.node_delegation_routing_reducer.consume.0.3.0
-    description: delegation routing reducer (FSM routing decisions)
-  - name: stability-test.omnimarket.node_ticket_classify_compute.consume.1.0.0
-    description: ticket-classify def-B compute (OMN-14799 Tier-1 fan-out canary)
+  - name: stability-test.omnibase_infra.node_registration_orchestrator.consume.1.1.1.__i.stability-test-main.__t.onex.evt.platform.node-heartbeat.v1
+    description: kernel-owned node-registration orchestrator, node-heartbeat fan-in (continuously active, always Stable)
+  - name: stability-test.omnibase_infra.node_ledger_projection_compute.consume.1.0.2.__i.stability-test-main.__t.onex.evt.platform.node-heartbeat.v1
+    description: node-registration ledger projection, node-heartbeat fan-in (continuously active, always Stable)
+  - name: stability-test.omnimarket.projection_delegation.consume.1.0.0.__i.stability-test-main.__t.onex.evt.omnibase-infra.delegation-completed.v1
+    description: delegation projection consumer (carries the OMN-14855 judge-verdict DLQ fix this refresh lands; demand-driven, may show Empty when idle)
+  - name: stability-test.omnimarket.node_llm_delegation_call_effect.consume.0.1.0.__i.stability-test-effects.__t.onex.cmd.omnibase-infra.delegation-inference-request.v1
+    description: delegation LLM-call effect, inference dispatch (demand-driven, may show Empty when idle)
+  - name: stability-test.omnimarket.node_delegation_routing_reducer.consume.0.3.0.__i.stability-test-main.__t.onex.cmd.omnibase-infra.delegation-routing-request.v1
+    description: delegation routing reducer, FSM routing decisions (demand-driven, may show Empty when idle)
+  - name: stability-test.omnimarket.node_ticket_classify_compute.consume.1.0.0.__i.stability-test-main.__t.onex.cmd.omnimarket.ticket-classify.v1
+    description: ticket-classify def-B compute (OMN-14799 Tier-1 fan-out canary; demand-driven, may show Empty when idle)

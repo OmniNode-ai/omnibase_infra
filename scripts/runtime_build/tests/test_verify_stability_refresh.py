@@ -31,6 +31,7 @@ check_manifest_count = _mod.check_manifest_count
 check_health = _mod.check_health
 check_cluster_health = _mod.check_cluster_health
 check_consumer_group = _mod.check_consumer_group
+check_consumer_group_with_retry = _mod.check_consumer_group_with_retry
 check_service_digest = _mod.check_service_digest
 run_health_gate = _mod.run_health_gate
 build_receipt = _mod.build_receipt
@@ -192,17 +193,41 @@ def test_cluster_health_not_ok_nonzero_exit():
     assert ok is False
 
 
+def _group_describe_output(state: str) -> str:
+    """rpk group describe has NO -f json mode -- fixed-width plain text."""
+    return (
+        "GROUP        some.group\n"
+        "COORDINATOR  0\n"
+        f"STATE        {state}\n"
+        "BALANCER     \n"
+        "MEMBERS      1\n"
+        "TOTAL-LAG    0\n"
+    )
+
+
 def test_consumer_group_stable():
-    runner = MagicMock(return_value=_completed(stdout=json.dumps({"state": "Stable"})))
+    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Stable")))
     result = check_consumer_group("redpanda-container", "some.group", runner=runner)
     assert result.stable is True
     assert result.state == "Stable"
 
 
-def test_consumer_group_not_stable():
-    runner = MagicMock(return_value=_completed(stdout=json.dumps({"state": "Empty"})))
+def test_consumer_group_empty_is_healthy_demand_driven_idle():
+    """Empty = registered with the broker, zero current members -- the normal
+    idle state for a demand-driven consumer, not a wiring failure."""
+    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Empty")))
+    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
+    assert result.stable is True
+    assert result.state == "Empty"
+
+
+def test_consumer_group_dead_is_not_stable():
+    """Dead is the real 'silent wiring death' signal -- group coordinator does
+    not know this group at all."""
+    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Dead")))
     result = check_consumer_group("redpanda-container", "some.group", runner=runner)
     assert result.stable is False
+    assert result.state == "Dead"
 
 
 def test_consumer_group_describe_error_is_not_a_silent_stable():
@@ -210,6 +235,52 @@ def test_consumer_group_describe_error_is_not_a_silent_stable():
     result = check_consumer_group("redpanda-container", "some.group", runner=runner)
     assert result.stable is False
     assert result.error is not None
+
+
+def test_consumer_group_no_state_line_is_not_a_silent_stable():
+    runner = MagicMock(return_value=_completed(stdout="GROUP  some.group\n"))
+    result = check_consumer_group("redpanda-container", "some.group", runner=runner)
+    assert result.stable is False
+    assert result.error is not None
+
+
+def test_consumer_group_retry_recovers_after_transient_empty_then_dead():
+    """Right after a force-recreate the group can show a transient bad state
+    before the consumer rejoins; the bounded retry should recover on a later
+    attempt without sleeping in real time (sleep_fn stubbed)."""
+    runner = MagicMock(
+        side_effect=[
+            _completed(stdout=_group_describe_output("Dead")),
+            _completed(stdout=_group_describe_output("Dead")),
+            _completed(stdout=_group_describe_output("Stable")),
+        ]
+    )
+    sleeps: list[float] = []
+    result = check_consumer_group_with_retry(
+        "redpanda-container",
+        "some.group",
+        runner=runner,
+        attempts=5,
+        interval_seconds=0.01,
+        sleep_fn=sleeps.append,
+    )
+    assert result.stable is True
+    assert result.state == "Stable"
+    assert len(sleeps) == 2  # slept between attempts 1->2 and 2->3, not after success
+
+
+def test_consumer_group_retry_exhausts_and_reports_last_state():
+    runner = MagicMock(return_value=_completed(stdout=_group_describe_output("Dead")))
+    result = check_consumer_group_with_retry(
+        "redpanda-container",
+        "some.group",
+        runner=runner,
+        attempts=3,
+        interval_seconds=0.01,
+        sleep_fn=lambda _s: None,
+    )
+    assert result.stable is False
+    assert result.state == "Dead"
 
 
 # ─── full health-gate orchestration: PASS / FAIL end to end ────────────────
@@ -229,9 +300,9 @@ def _full_pass_runner():
                 return _completed(stdout="sha256:new-image")
             return _completed(stdout="newrevision1234")
         if cmd[:3] == ["docker", "exec", "redpanda-container"] and "cluster" in cmd:
-            return _completed(stdout="Healthy:             true\n")
+            return _completed(stdout="Healthy:                          true\n")
         if "group" in cmd and "describe" in cmd:
-            return _completed(stdout=json.dumps({"state": "Stable"}))
+            return _completed(stdout=_group_describe_output("Stable"))
         raise AssertionError(f"unexpected command: {cmd}")
 
     return _run
@@ -260,11 +331,12 @@ def test_health_gate_overall_pass():
         consumer_groups=["group.a", "group.b"],
         runner=_full_pass_runner(),
         opener=combo_opener,
+        sleep_fn=lambda _s: None,
     )
     assert report.overall == "PASS"
 
 
-def test_health_gate_overall_fail_when_a_group_not_stable():
+def test_health_gate_overall_fail_when_a_group_is_dead():
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
 
     def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
@@ -274,9 +346,11 @@ def test_health_gate_overall_fail_when_a_group_not_stable():
                 return _completed(stdout="sha256:new-image")
             return _completed(stdout="newrevision1234")
         if "cluster" in cmd:
-            return _completed(stdout="Healthy:             true\n")
+            return _completed(stdout="Healthy:                          true\n")
         if "group" in cmd and "describe" in cmd:
-            return _completed(stdout=json.dumps({"state": "Empty"}))
+            # Dead, not Empty -- Empty is now a healthy demand-driven-idle
+            # state; Dead is the genuine "group unknown to broker" failure.
+            return _completed(stdout=_group_describe_output("Dead"))
         raise AssertionError(f"unexpected command: {cmd}")
 
     def opener(url, timeout=10):
@@ -297,6 +371,7 @@ def test_health_gate_overall_fail_when_a_group_not_stable():
         consumer_groups=["group.a"],
         runner=runner,
         opener=opener,
+        sleep_fn=lambda _s: None,
     )
     assert report.overall == "FAIL"
     assert report.groups_stable is False

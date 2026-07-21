@@ -41,8 +41,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -336,8 +338,12 @@ def check_cluster_health(
             f"rpk cluster health failed (exit {result.returncode}): {(result.stderr or '').strip()}",
         )
     stdout = result.stdout or ""
-    healthy = (
-        "Healthy:             true" in stdout or "cluster is healthy" in stdout.lower()
+    # `rpk cluster health` prints a "Healthy:" line whose padding varies by rpk
+    # version (observed: "Healthy:                          true" on the live
+    # .201 broker) -- match on the label + boolean via regex, not a hardcoded
+    # column width, so a whitespace difference never produces a false FAIL.
+    healthy = bool(re.search(r"Healthy:\s*true\b", stdout, re.IGNORECASE)) or (
+        "cluster is healthy" in stdout.lower()
     )
     return healthy, stdout.strip().splitlines()[0] if stdout.strip() else "no output"
 
@@ -345,6 +351,22 @@ def check_cluster_health(
 def check_consumer_group(
     broker_container: str, group: str, *, runner: object | None = None
 ) -> ConsumerGroupCheck:
+    """Describe one consumer group and report its ``STATE``.
+
+    ``rpk group describe`` has NO ``-f json`` output mode (unlike most other
+    ``rpk`` subcommands) -- verified live against the .201 broker's rpk
+    version, which rejects ``-f`` as an unknown flag. Output is a fixed-width
+    plain-text key/value block:
+
+        GROUP        <name>
+        COORDINATOR  0
+        STATE        Stable
+        BALANCER
+        MEMBERS      1
+        TOTAL-LAG    0
+
+    Parsed by matching the ``STATE`` line, not by JSON decoding.
+    """
     try:
         result = _run(
             [
@@ -357,8 +379,6 @@ def check_consumer_group(
                 group,
                 "-X",
                 "brokers=redpanda:9092",
-                "-f",
-                "json",
             ],
             runner=runner,
         )
@@ -377,14 +397,60 @@ def check_consumer_group(
             stable=False,
             error=f"rpk group describe failed (exit {result.returncode}): {(result.stderr or '').strip()}",
         )
-    try:
-        payload = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError as exc:
+    state: str | None = None
+    for line in (result.stdout or "").splitlines():
+        match = re.match(r"^STATE\s+(\S+)", line)
+        if match:
+            state = match.group(1)
+            break
+    if state is None:
         return ConsumerGroupCheck(
-            group=group, state=None, stable=False, error=f"bad JSON: {exc}"
+            group=group,
+            state=None,
+            stable=False,
+            error="no STATE line found in rpk group describe output",
         )
-    state = payload.get("state") or payload.get("STATE")
-    return ConsumerGroupCheck(group=group, state=state, stable=(state == "Stable"))
+    # "Stable" (actively balanced, member(s) connected) and "Empty" (group is
+    # REGISTERED with the broker -- the topic subscription is known -- but has
+    # zero currently-connected members) are both healthy for a demand-driven
+    # consumer that only joins when there is work to process. "Dead" (or any
+    # other/absent state) means the group coordinator does not know this
+    # group at all -- the actual "silent wiring death" signal
+    # (reference_silent_wiring_death_mechanisms: a consumer that never
+    # registered a group) -- and stays a hard failure.
+    return ConsumerGroupCheck(
+        group=group, state=state, stable=(state in ("Stable", "Empty"))
+    )
+
+
+def check_consumer_group_with_retry(
+    broker_container: str,
+    group: str,
+    *,
+    runner: object | None = None,
+    attempts: int = 10,
+    interval_seconds: float = 3.0,
+    sleep_fn: object | None = None,
+) -> ConsumerGroupCheck:
+    """Retry ``check_consumer_group`` for a bounded window.
+
+    Right after a `--force-recreate`, a consumer's Kafka client needs a few
+    seconds to reconnect and rejoin its group -- querying immediately can
+    observe a transient ``Empty``/``Dead`` state on an otherwise-healthy
+    refresh. Mirrors the retry shape of `assert_broker_reachable()` in
+    deploy-runtime.sh (bounded attempts + fixed interval, not an unbounded
+    poll). Returns the LAST observed result; a group that never reaches
+    Stable within the window is a genuine, accurately-reported finding.
+    """
+    sleep = sleep_fn or time.sleep
+    result = ConsumerGroupCheck(group=group, state=None, stable=False)
+    for attempt in range(1, attempts + 1):
+        result = check_consumer_group(broker_container, group, runner=runner)
+        if result.stable:
+            return result
+        if attempt < attempts:
+            sleep(interval_seconds)  # type: ignore[operator]
+    return result
 
 
 def load_declared_consumer_groups(path: Path) -> list[str]:
@@ -417,6 +483,7 @@ def run_health_gate(
     runner: object | None = None,
     opener: object | None = None,
     require_digest_change: bool = True,
+    sleep_fn: object | None = None,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -454,7 +521,9 @@ def run_health_gate(
 
     for group in consumer_groups:
         report.consumer_groups.append(
-            check_consumer_group(broker_container, group, runner=runner)
+            check_consumer_group_with_retry(
+                broker_container, group, runner=runner, sleep_fn=sleep_fn
+            )
         )
 
     return report
