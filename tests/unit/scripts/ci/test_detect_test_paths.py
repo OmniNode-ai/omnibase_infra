@@ -170,16 +170,104 @@ def test_small_change_returns_smart_selection_no_reason() -> None:
     assert selection.matrix == list(range(1, selection.split_count + 1))
 
 
-def test_no_matching_files_falls_back_to_unit_root() -> None:
-    # Doc-only change has no unit-test mapping → conservative fallback.
+def test_no_matching_non_doc_files_falls_back_to_unit_root() -> None:
+    # An unclassified, non-doc change (no src/, tests/unit/, CI-process, or
+    # docs mapping) has no unit-test mapping → conservative fallback.
     selection = compute_selection(
-        changed_files=["docs/something.md"],
+        changed_files=["scripts/some_new_uncategorized_tool.sh"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )
     assert selection.is_full_suite is False
     assert selection.selected_paths == ["tests/unit/"]
     assert selection.split_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Docs-only exemption (OMN-14753 regression coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_docs_only_markdown_change_selects_nothing() -> None:
+    # Reproduces the reported bug: a single new .md file under docs/runbooks/
+    # must NOT map to selected_paths=['tests/unit/'] (the full unit tree).
+    selection = compute_selection(
+        changed_files=["docs/runbooks/some-new-runbook.md"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.full_suite_reason is None
+    assert selection.selected_paths == []
+    assert selection.split_count == 1
+    assert selection.matrix == [1]
+
+
+def test_docs_only_top_level_markdown_selects_nothing() -> None:
+    # A top-level markdown file (e.g. CLAUDE.md) not under docs/ is still
+    # provably documentation by its .md suffix.
+    selection = compute_selection(
+        changed_files=["CLAUDE.md"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == []
+
+
+def test_multiple_docs_only_files_select_nothing() -> None:
+    selection = compute_selection(
+        changed_files=[
+            "docs/runbooks/foo.md",
+            "docs/architecture/bar.md",
+            "README.md",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == []
+
+
+def test_docs_plus_shared_module_change_still_escalates() -> None:
+    # A mixed diff (docs + a shared-module source file) must NOT take the
+    # docs-only exemption -- shared-module escalation still applies.
+    selection = compute_selection(
+        changed_files=["docs/runbooks/foo.md", "src/omnibase_infra/models/x.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.SHARED_MODULE
+
+
+def test_docs_plus_unclassified_code_change_falls_back_not_exempt() -> None:
+    # Mixed diff: docs + an unrelated, unclassified non-doc path. Not ALL
+    # files are docs, so the exemption must not fire; the conservative
+    # tests/unit/ fallback still applies (ambiguous changes still escalate).
+    selection = compute_selection(
+        changed_files=[
+            "docs/runbooks/foo.md",
+            "scripts/some_new_uncategorized_tool.sh",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is False
+    assert selection.selected_paths == ["tests/unit/"]
+
+
+def test_docs_under_test_infrastructure_path_still_escalates() -> None:
+    # A markdown file under a test-infrastructure directory (tests/fixtures/)
+    # is ambiguous/shared by path, not provably inert -- test-infrastructure
+    # escalation (checked before the docs-only exemption) still wins.
+    selection = compute_selection(
+        changed_files=["tests/fixtures/README.md"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.TEST_INFRASTRUCTURE
 
 
 def test_feature_flag_off_returns_full_suite() -> None:

@@ -30,6 +30,21 @@ CI_PROCESS_TEST_PATHS = (
     "config/runner_routing_policy.yaml",
 )
 
+# Positive-evidence documentation classification (OMN-14753). A path matching
+# either of these can never contain executable code or fixture data, so it
+# cannot influence any test outcome. This is narrower and stronger than "no
+# unit-test mapping" (the conservative tests/unit/ fallback in
+# `compute_selection`) -- it only exempts a diff when every changed file is
+# affirmatively provable as prose/documentation, not merely unclassified.
+DOCS_ONLY_SUFFIXES = (".md",)
+DOCS_ONLY_PREFIXES = ("docs/",)
+
+
+def _is_docs_only_path(path: str) -> bool:
+    """True when `path` is documentation that cannot affect any test."""
+    return path.endswith(DOCS_ONLY_SUFFIXES) or path.startswith(DOCS_ONLY_PREFIXES)
+
+
 FULL_SUITE_BRANCHES = {"main"}
 
 # Full suite uses 15 splits (infra CI split count)
@@ -138,13 +153,33 @@ def compute_selection(
     if len(changed_modules) >= config.thresholds.modules_changed_for_full_suite:
         return _full_suite(EnumFullSuiteReason.THRESHOLD_MODULES)
 
-    # 5. Smart selection.
+    # 5. Docs-only exemption (OMN-14753): a diff where EVERY changed file is
+    # documentation cannot affect any test outcome. Select nothing rather than
+    # falling through to the conservative tests/unit/ fallback below -- that
+    # fallback exists for genuinely-unclassified changes (a new script
+    # directory, config we have no adjacency entry for), not for a diff we can
+    # positively prove is prose. A single non-doc file anywhere in the diff
+    # (including one this selector doesn't otherwise recognize) disqualifies
+    # the exemption and falls through to the normal smart-selection/fallback
+    # path below, so ambiguous or mixed changes still escalate.
+    if changed_files and all(_is_docs_only_path(p) for p in changed_files):
+        return ModelTestSelection(
+            selected_paths=[],
+            split_count=1,
+            is_full_suite=False,
+            full_suite_reason=None,
+            matrix=[1],
+        )
+
+    # 6. Smart selection.
     selected = _resolve(changed_files, config)
     if not selected:
         # Conservative one-shard fallback over the full tests/unit/ tree. This
         # is NOT a no-op — it runs ~3-5 min of unit tests. It fires for changes
-        # that have no unit-test mapping (doc-only, workflow-only, integration-
-        # only). Per Selector Truth Boundary: safer to run something than nothing.
+        # that have no unit-test mapping (workflow-only, integration-only, or
+        # an otherwise-unclassified path) and are NOT provably docs-only (step
+        # 5 above already exempted the pure-docs case). Per Selector Truth
+        # Boundary: safer to run something than nothing.
         selected = ["tests/unit/"]
     split_count = _split_count_for(selected)
 

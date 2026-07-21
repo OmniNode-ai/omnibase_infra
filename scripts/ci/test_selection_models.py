@@ -33,7 +33,10 @@ ModuleName = Annotated[
 class ModelTestSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    selected_paths: list[TestPath] = Field(..., min_length=1)
+    # min_length=0 (not 1): a docs-only diff (OMN-14753) legitimately selects
+    # no tests -- distinct from the conservative tests/unit/ fallback, which
+    # always selects at least one path.
+    selected_paths: list[TestPath] = Field(default_factory=list)
     split_count: int = Field(..., ge=1, le=15)
     is_full_suite: bool
     full_suite_reason: EnumFullSuiteReason | None = Field(default=None)

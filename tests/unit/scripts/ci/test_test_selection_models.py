@@ -74,3 +74,21 @@ def test_smart_selection_no_reason() -> None:
     assert selection.split_count == 1
     assert selection.matrix == [1]
     assert selection.full_suite_reason is None
+
+
+def test_empty_selected_paths_is_valid_for_docs_only_exemption() -> None:
+    """OMN-14753: selected_paths=[] is a legitimate "nothing to run" selection.
+
+    Previously `min_length=1` forced every non-full-suite selection to name at
+    least one test directory, which made the docs-only exemption impossible
+    to express -- the selector had no way to say "provably zero impact."
+    """
+    selection = ModelTestSelection(
+        selected_paths=[],
+        split_count=1,
+        is_full_suite=False,
+        full_suite_reason=None,
+        matrix=[1],
+    )
+    assert selection.selected_paths == []
+    assert selection.is_full_suite is False
