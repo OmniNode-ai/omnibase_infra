@@ -886,7 +886,102 @@ services:
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - runner-64-creds:/home/runner/.runner-creds
+  # omninode-deploy-runner -- OMN-14889: dedicated runner for the
+  # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
+  # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
+  # host-path git access to the $OMNI_HOME sibling clones (they `git fetch`/
+  # `reset --hard`/tag the ambient clones directly and run
+  # deploy-runtime.sh's BUILD_SOURCE=workspace path against them) -- the
+  # shared 48-64 omnibase-ci fleet above deliberately does NOT have this
+  # (docker.sock only, no OMNI_HOME bind mount) so that a compromised/buggy
+  # CI job from the general fleet cannot mutate host git state or lane
+  # containers. Fork 1 (OMN-14889 ticket): rejected SSH-hop from a shared
+  # runner (refresh_stability_lane.sh's own docstring disallows it) and
+  # rejected mounting OMNI_HOME into the WHOLE fleet (blast radius -- every
+  # CI job would get host git-mutation access). This is the smallest
+  # incremental surface: ONE runner, scoped to its own runner group, with
+  # exactly the access the release-train jobs need.
+  #
+  # OMNI_HOME is bind-mounted at the IDENTICAL path inside the container as
+  # on the host (not a container-local alias). This container uses the
+  # HOST's docker.sock (docker-outside-of-docker), so a `docker compose`
+  # invocation issued from inside this container resolves relative volume
+  # paths to an absolute path that the DAEMON (running on the host) then
+  # tries to bind -- that only works if the resulting path exists on the
+  # host at that exact location. Matching the mount path 1:1 is what makes
+  # that resolution correct; a container-local alias (e.g. /workspace) would
+  # resolve to a host path that does not exist and silently produce empty
+  # bind mounts.
+  #
+  # PROVISIONED AND ONLINE (verified live 2026-07-21): this service is up and
+  # its runner is registered. `gh api
+  # repos/OmniNode-ai/omnibase_infra/actions/runners` returns
+  # omninode-deploy-runner status=online with labels
+  # [self-hosted, Linux, X64, omnibase-deploy]. Note registration landed at
+  # the REPOSITORY level, not the org level assumed by the re-provisioning
+  # recipe below.
+  #
+  # Consequence: release-train-lab.yml is LIVE, not dormant. A `lab/dev/**` or
+  # `lab/stability/**` tag push dispatches its deploy job onto THIS container
+  # and refreshes the target lane in execute mode. Intended (dev + stability
+  # are pre-authorized), but not a no-op -- treat a lab tag push as a real
+  # deploy.
+  #
+  # Known blocker is host-side git access, NOT provisioning: five runs on
+  # 2026-07-21T03:59-04:19Z all failed in the `Refresh stability lane` step
+  # against the bind-mounted $OMNI_HOME clone -- `detected dubious ownership`
+  # (exit 128), `cannot open .git/FETCH_HEAD: Permission denied` (exit 255),
+  # and `'dev' is already checked out at .../runtime-sync-worktrees/...`
+  # (exit 128). All died before any container action (no `docker compose` /
+  # `up -d` / `--force-recreate` in any log); no lane was mutated. Fix is
+  # ownership/uid alignment + worktree contention on this container's view of
+  # the $OMNI_HOME mount below.
+  #
+  # To RE-provision (token rotation / rebuild): mint a registration token
+  # (`gh api -X POST orgs/OmniNode-ai/actions/runners/registration-token`,
+  # valid 1h) and export it as DEPLOY_RUNNER_TOKEN before `docker compose up
+  # -d omninode-deploy-runner`. An org-level runner group named
+  # `omnibase-deploy` is NOT auto-created by registering a runner into it.
+  # See docs/runbooks/release-train-lab.md.
+  omninode-deploy-runner:
+    image: omninode-runner:latest
+    container_name: omninode-deploy-runner
+    restart: unless-stopped
+    mem_limit: 4g
+    memswap_limit: 8g
+    cpus: "2.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
+      RUNNER_NAME: omninode-deploy-runner
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      OMNI_HOME: ${OMNI_HOME}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OMNI_HOME}:${OMNI_HOME}
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - deploy-runner-creds:/home/runner/.runner-creds
+    group_add:
+      - "984" # Match host Docker socket GID for DinD access
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
+  deploy-runner-creds:
+    name: omninode-deploy-runner-creds
   runner-1-creds:
     name: omninode-runner-1-creds
   runner-2-creds:
