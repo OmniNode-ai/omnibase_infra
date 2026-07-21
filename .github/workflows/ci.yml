@@ -1174,6 +1174,19 @@ jobs:
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         run: |
           paths=$(echo '${{ needs.detect-changes.outputs.selected_paths }}' | jq -r '.[]')
+          if [ -z "$paths" ]; then
+            # OMN-14753: an empty selection (e.g. the docs-only exemption) is a
+            # legitimate "provably zero impact" result, not an error. Without
+            # this guard, passing no positional paths to pytest falls back to
+            # `testpaths = ["tests"]` from pyproject.toml -- i.e. close to the
+            # full suite -- silently defeating the selector.
+            echo "No impacted tests for this change set; nothing to run."
+            cat > "junit-${{ matrix.split }}.xml" << 'JUNIT_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="0"></testsuite></testsuites>
+          JUNIT_EOF
+            exit 0
+          fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
             -m "not slow and not chaos and not kafka and not performance" \
