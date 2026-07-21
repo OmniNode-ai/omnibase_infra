@@ -31,13 +31,37 @@
 #   `lab/dev/**` / `lab/stability/**` tag names, which is a disjoint
 #   namespace from `v*`.
 #
-# PROVISIONING STATUS (OMN-14889): the omninode-deploy-runner service is
-# defined in docker-compose.runners.yml but registering it live (GitHub
-# runner group + registration token + `docker compose up`) is a separate,
-# not-yet-executed infra step -- see that file's comment block and
-# docs/runbooks/release-train-lab.md. Until that runner is registered and
-# online, the `deploy` job below will queue but never pick up (GitHub has no
-# online runner carrying the `omnibase-deploy` label).
+# PROVISIONING STATUS (OMN-14889, verified live 2026-07-21): the runner IS
+# registered and ONLINE. `gh api repos/OmniNode-ai/omnibase_infra/actions/
+# runners` returns omninode-deploy-runner status=online carrying labels
+# [self-hosted, Linux, X64, omnibase-deploy] -- the exact label set both jobs
+# below target. Note it is registered at the REPOSITORY level, not the org
+# level (the runbook's original org-scoped provisioning recipe predates this).
+#
+# THIS MECHANISM IS LIVE, NOT DORMANT. Pushing a `lab/dev/**` or
+# `lab/stability/**` tag DOES dispatch the `deploy` job onto that runner and
+# DOES run the lane refresh in execute mode against the real .201 lane. That
+# is the intended design (dev + stability lanes are pre-authorized), but do
+# NOT treat a lab tag push as a no-op or a rehearsal -- it is a real deploy.
+# Note also that the trigger only requires this workflow file to exist at the
+# TAGGED COMMIT; a tag cut from a feature branch fires it just as a tag on
+# dev would.
+#
+# The remaining known blocker is NOT provisioning -- it is host-side git
+# access to the ambient $OMNI_HOME clone from inside the runner container.
+# Five runs on 2026-07-21T03:59-04:19Z all failed in the `Refresh stability
+# lane` step, in three distinct forms as intermediate fixes were attempted:
+#   - `fatal: detected dubious ownership in repository at
+#     /data/omninode/omni_home/omnibase_infra` (exit 128)
+#   - `error: cannot open .git/FETCH_HEAD: Permission denied` (exit 255)
+#   - `fatal: 'dev' is already checked out at
+#     /data/omninode/runtime-sync-worktrees/OMN-12618/...` (exit 128)
+# All five died before any container action: zero `docker compose` /
+# `up -d` / `--force-recreate` lines appear in any of the five job logs, so
+# no lane was mutated. Fixing this is an ownership/permissions + worktree
+# contention problem on the runner's view of $OMNI_HOME, not a registration
+# problem. See docker/docker-compose.runners.yml and
+# docs/runbooks/release-train-lab.md.
 
 name: release-train-lab
 

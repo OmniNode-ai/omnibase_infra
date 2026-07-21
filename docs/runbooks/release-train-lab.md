@@ -69,7 +69,52 @@ the identical host path (required for docker-outside-of-docker relative-path
 resolution against the host daemon — see the compose file's comment block
 for why a container-local alias path would silently break).
 
-### Provisioning this runner (NOT done by the OMN-14889 PR — do this once, live)
+### Provisioning status: DONE — the runner is registered and online
+
+**Verified live 2026-07-21:**
+
+```bash
+gh api repos/OmniNode-ai/omnibase_infra/actions/runners \
+  --jq '.runners[] | select(.name=="omninode-deploy-runner")'
+# -> {"name":"omninode-deploy-runner","status":"online","busy":false,
+#     "labels":["self-hosted","Linux","X64","omnibase-deploy"]}
+```
+
+The runner is registered at the **repository** level, not the org level — the
+historical recipe below is org-scoped and is kept only for reference /
+re-provisioning. Verify against the `repos/...` endpoint above, not
+`orgs/OmniNode-ai/actions/runners`.
+
+> **This mechanism is LIVE, not dormant.** Pushing a `lab/dev/**` or
+> `lab/stability/**` tag DOES dispatch the `deploy` job onto this runner and
+> DOES refresh the target lane in execute mode. That is intended behavior —
+> dev and stability lanes are pre-authorized — but a lab tag push is a real
+> deploy, not a rehearsal or a no-op. Note the trigger only requires
+> `release-train-lab.yml` to exist at the **tagged commit**, so a tag cut
+> from a feature branch fires it exactly as a tag on `dev` would.
+
+### Known blocker: host-side git access, not provisioning
+
+Five runs on 2026-07-21T03:59–04:19Z all failed in the **`Refresh stability
+lane`** step, in three distinct forms as intermediate fixes were attempted:
+
+| Runs | Error | Exit |
+|---|---|---|
+| 03:59 | `fatal: detected dubious ownership in repository at /data/omninode/omni_home/omnibase_infra` | 128 |
+| 04:01, 04:08 | `error: cannot open .git/FETCH_HEAD: Permission denied` | 255 |
+| 04:14, 04:19 | `fatal: 'dev' is already checked out at /data/omninode/runtime-sync-worktrees/OMN-12618/...` | 128 |
+
+All five died **before any container action** — zero `docker compose`,
+`up -d`, or `--force-recreate` lines appear in any of the five job logs, so no
+lane was mutated. The remaining work is fixing the runner container's
+ownership/permissions and worktree contention against the ambient
+`$OMNI_HOME` clone; registration is no longer the gap.
+
+Seven `lab/stability/*` tags exist on origin; only five produced runs — the
+two earliest (`43935c84…`, `e5404e36…`) predate the workflow file at their
+tagged commits, so nothing fired for them.
+
+### Historical: provisioning this runner (kept for re-provisioning reference)
 
 ```bash
 # 1. Create the GitHub org runner group (one-time; a runner group is NOT
@@ -91,19 +136,19 @@ docker compose -f docker-compose.runners.yml up -d omninode-deploy-runner
 gh api orgs/OmniNode-ai/actions/runners --jq '.runners[] | select(.name=="omninode-deploy-runner")'
 ```
 
-Until this is done, `release-train-lab.yml`'s `deploy` job (and the
-`cut-tag` job, which also runs on this label so the tag-cutting host has the
-same `OMNI_HOME` access) will queue on GitHub but never pick up — there is
-no online runner carrying the `omnibase-deploy` label. This is the one hop
-OMN-14889 flagged as not exercised end-to-end through the real GitHub
-Actions trigger path; the underlying deploy scripts were proven directly
-on `.201` instead (see the ticket's canary evidence).
+Both the `deploy` job and the `cut-tag` job run on this label (the
+tag-cutting host needs the same `OMNI_HOME` access). As of 2026-07-21 that
+runner is online, so both jobs pick up: the GitHub Actions trigger path
+OMN-14889 originally flagged as unexercised has now fired end-to-end through
+to the refresh step, where it fails on the host-side git access issue
+documented above. The underlying deploy scripts were separately proven
+directly on `.201` (see the ticket's canary evidence).
 
-## Manual canary (proves the deploy step without the runner)
+## Manual canary (exercises the deploy step without going through a tag)
 
-Because the dedicated runner is not provisioned yet, the release-train
-scripts can still be exercised directly on `.201` (this is exactly what the
-`deploy` job would do once the runner exists — same script, same flags):
+The release-train scripts can be exercised directly on `.201`, which is
+useful for isolating a refresh-script problem from the runner/trigger path.
+This is exactly what the `deploy` job runs — same script, same flags:
 
 ```bash
 ssh omni-201-ts
@@ -133,3 +178,10 @@ tag→prod path. `omninode-deploy-runner` has no prod-lane access beyond what
 any host process already has via `OMNI_HOME`; the prod-promotion gate is
 enforced at the `node_redeploy_orchestrator` layer, which this workflow
 never calls.
+
+This remains true now that the runner is online. The workflow triggers only
+on `lab/dev/**` and `lab/stability/**`, a namespace disjoint from the `v*`
+tags that drive `release.yml` → PyPI publish (Train 2). Promoting any digest
+to the `.201` prod lane still requires a fresh, CODEOWNERS-approved
+`ModelProdPromotionGrant` through `node_redeploy_orchestrator`'s gate
+(CLAUDE.md Rules 2a/12) — nothing here can satisfy or bypass it.

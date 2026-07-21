@@ -913,15 +913,36 @@ services:
   # resolve to a host path that does not exist and silently produce empty
   # bind mounts.
   #
-  # PROVISIONING NOT DONE BY THIS PR (OMN-14889 flagged missing hop): this
-  # service definition is wired but not yet brought up. Standing it up live
-  # additionally requires (a) an org-level GitHub runner group named
-  # `omnibase-deploy` (create via Settings > Actions > Runner groups or the
-  # REST API -- a runner group is NOT auto-created by registering a runner
-  # into it), and (b) a runner registration token
+  # PROVISIONED AND ONLINE (verified live 2026-07-21): this service is up and
+  # its runner is registered. `gh api
+  # repos/OmniNode-ai/omnibase_infra/actions/runners` returns
+  # omninode-deploy-runner status=online with labels
+  # [self-hosted, Linux, X64, omnibase-deploy]. Note registration landed at
+  # the REPOSITORY level, not the org level assumed by the re-provisioning
+  # recipe below.
+  #
+  # Consequence: release-train-lab.yml is LIVE, not dormant. A `lab/dev/**` or
+  # `lab/stability/**` tag push dispatches its deploy job onto THIS container
+  # and refreshes the target lane in execute mode. Intended (dev + stability
+  # are pre-authorized), but not a no-op -- treat a lab tag push as a real
+  # deploy.
+  #
+  # Known blocker is host-side git access, NOT provisioning: five runs on
+  # 2026-07-21T03:59-04:19Z all failed in the `Refresh stability lane` step
+  # against the bind-mounted $OMNI_HOME clone -- `detected dubious ownership`
+  # (exit 128), `cannot open .git/FETCH_HEAD: Permission denied` (exit 255),
+  # and `'dev' is already checked out at .../runtime-sync-worktrees/...`
+  # (exit 128). All died before any container action (no `docker compose` /
+  # `up -d` / `--force-recreate` in any log); no lane was mutated. Fix is
+  # ownership/uid alignment + worktree contention on this container's view of
+  # the $OMNI_HOME mount below.
+  #
+  # To RE-provision (token rotation / rebuild): mint a registration token
   # (`gh api -X POST orgs/OmniNode-ai/actions/runners/registration-token`,
-  # valid 1h) exported as DEPLOY_RUNNER_TOKEN before `docker compose up -d
-  # omninode-deploy-runner`. See docs/runbooks/release-train-lab.md.
+  # valid 1h) and export it as DEPLOY_RUNNER_TOKEN before `docker compose up
+  # -d omninode-deploy-runner`. An org-level runner group named
+  # `omnibase-deploy` is NOT auto-created by registering a runner into it.
+  # See docs/runbooks/release-train-lab.md.
   omninode-deploy-runner:
     image: omninode-runner:latest
     container_name: omninode-deploy-runner
