@@ -77,6 +77,28 @@ readonly RUNTIME_SERVICES=(
     intelligence-api
     omninode-contract-resolver
 )
+
+# OMN-14873: optional scoped-build/restart override. When RUNTIME_BUILD_SERVICES_OVERRIDE
+# is set (a space-separated service-name list), build_images() and restart_services()
+# operate on ONLY that subset instead of the full RUNTIME_SERVICES fan-out. Unset (the
+# default) leaves every existing caller -- prod, dev, cut-lab-ref.sh, the cold bring-up --
+# byte-for-byte unchanged (RUNTIME_BUILD_SERVICES == RUNTIME_SERVICES).
+#
+# scripts/runtime_build/refresh_stability_lane.sh sets this to the 4 known-good core
+# services (omninode-runtime runtime-effects runtime-worker projection-api) so a
+# workspace-mode build never attempts the 4 release-only services with the still-open
+# BUILD_SOURCE selector-mismatch defect (OMN-14262 residual: agent-actions-consumer,
+# skill-lifecycle-consumer, intelligence-api, omninode-contract-resolver). This makes the
+# scoping a controlled decision, not a side effect of a partial `docker compose build`
+# failure leaving only the good images tagged by accident.
+if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+    # shellcheck disable=SC2206  # intentional word-splitting of an operator-provided
+    # space-separated service list (not a glob; no IFS surprises expected here)
+    RUNTIME_BUILD_SERVICES=(${RUNTIME_BUILD_SERVICES_OVERRIDE})
+else
+    RUNTIME_BUILD_SERVICES=("${RUNTIME_SERVICES[@]}")
+fi
+readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
 # Order matters: forward-migration applies the omnibase_infra schema, then
 # intelligence-migration applies the omniintelligence schema, then migration-gate
@@ -1967,9 +1989,13 @@ build_images() {
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
         --build-arg "ONEX_CHANGE_CONTROL_REF=${occ_ref}"
+        # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
+        # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
+        "${RUNTIME_BUILD_SERVICES[@]}"
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Build scope: ${RUNTIME_BUILD_SERVICES[*]}"
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
     log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref} ONEX_CHANGE_CONTROL_REF=${occ_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
@@ -2299,10 +2325,10 @@ restart_services() {
         "${compose_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
-        "${RUNTIME_SERVICES[@]}"
+        "${RUNTIME_BUILD_SERVICES[@]}"
     )
 
-    log_info "Restarting services: ${RUNTIME_SERVICES[*]}"
+    log_info "Restarting services: ${RUNTIME_BUILD_SERVICES[*]}"
     log_cmd "${cmd[*]}"
 
     "${cmd[@]}"
@@ -2567,7 +2593,7 @@ print_compose_commands() {
     log_info "    ${compose_f} \\"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
-    log_info "    ${RUNTIME_SERVICES[*]}"
+    log_info "    ${RUNTIME_BUILD_SERVICES[*]}"
     log_info ""
     log_info "Full stack up (infra + runtime):"
     log_info "  docker compose \\"
