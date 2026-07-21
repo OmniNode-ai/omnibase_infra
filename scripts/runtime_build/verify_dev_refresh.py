@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -54,6 +55,7 @@ from dataclasses import asdict, dataclass, field
 _REVISION_LABEL = "org.opencontainers.image.revision"
 
 DEFAULT_MIN_CONTRACTS = 288
+DEFAULT_BROKER_ADDRESS = os.environ.get("OMNIBASE_DEV_BROKER_ADDRESS", "redpanda:9092")
 
 CORE_SERVICE_NAMES = (
     "omninode-runtime",
@@ -283,7 +285,10 @@ def check_health(health_url: str, *, opener: object | None = None) -> tuple[bool
 
 
 def check_cluster_health(
-    broker_container: str, *, runner: object | None = None
+    broker_container: str,
+    broker_address: str = DEFAULT_BROKER_ADDRESS,
+    *,
+    runner: object | None = None,
 ) -> tuple[bool, str]:
     try:
         result = _run(
@@ -295,7 +300,7 @@ def check_cluster_health(
                 "cluster",
                 "health",
                 "-X",
-                "brokers=redpanda:9092",
+                f"brokers={broker_address}",
             ],
             runner=runner,
         )

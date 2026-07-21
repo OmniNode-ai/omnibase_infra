@@ -62,10 +62,12 @@ if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/docker/runtime-policy.env"
-    if [[ -f "${HOME}/.omnibase/.env" ]]; then
-        # shellcheck source=/dev/null
-        source "${HOME}/.omnibase/.env"
-    fi
+    set +a
+fi
+if [[ -f "${HOME}/.omnibase/.env" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${HOME}/.omnibase/.env"
     set +a
 fi
 if [[ -n "${_OPERATOR_OMNI_HOME}" ]]; then
@@ -163,6 +165,30 @@ run_verify() {
 }
 
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
+
+# --- ambient-clone git wrapper ----------------------------------------------
+# The ambient clones under OMNI_HOME are owned by the uid that provisioned them
+# (deploy-agent), but this script can run as a DIFFERENT uid -- e.g. inside the
+# self-hosted runner container. git then refuses every operation on them with
+# "fatal: detected dubious ownership in repository at '<clone>'" and exits 128.
+# Run 29799976126 died exactly there, on ${OMNI_HOME}/omnibase_infra, before a
+# single fetch happened.
+#
+# That was relieved out-of-band on the host with an ad hoc `git config --global
+# --add safe.directory ...`, but that relief is NOT DURABLE: the runner's
+# /home/runner is not a named volume, so the global gitconfig -- and with it the
+# exemption -- is lost on any `--force-recreate` of the runner container, and the
+# next tag push fails the same way. Carry the exemption in-repo instead, scoped
+# per invocation: `-c safe.directory=<clone>` is protected configuration git
+# honours from the command line, applies to exactly one git process and one
+# path, requires no host change, writes nothing to the user's global gitconfig,
+# and is never the blanket `safe.directory=*`.
+git_clone() {
+    local clone="$1"
+    shift
+    git -c "safe.directory=${clone}" -C "${clone}" "$@"
+}
+
 compose_ps_q() {
     # Resolve a service's running container ID (empty string if not running).
     # Never hardcode a container name for this lane -- see file header.
@@ -259,7 +285,7 @@ if [[ "${BRANCH}" == "warm" ]]; then
     for repo in "${ALL_TRACKED_REPOS[@]}"; do
         clone="${OMNI_HOME}/${repo}"
         [[ -d "${clone}/.git" ]] || { err "Expected clone not found: ${clone}"; exit 64; }
-        PRIOR_REFS["${repo}"]="$(git -C "${clone}" rev-parse HEAD)"
+        PRIOR_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
         log "  ${repo} prior HEAD: ${PRIOR_REFS[${repo}]:0:12}"
     done
 
@@ -275,17 +301,50 @@ else
     for repo in "${ALL_TRACKED_REPOS[@]}"; do
         clone="${OMNI_HOME}/${repo}"
         [[ -d "${clone}/.git" ]] || { err "Expected clone not found: ${clone}"; exit 64; }
-        PRIOR_REFS["${repo}"]="$(git -C "${clone}" rev-parse HEAD)"
+        PRIOR_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
     done
 fi
 
+# Refresh the omnibase_infra ambient clone itself to --ref.
+# (deploy-runtime.sh reads its own git_sha from THIS clone's HEAD; DEPLOY_REF
+# below only pins the SIBLING repos staged by stage_workspace.sh -- it does not
+# touch omnibase_infra's own tree.)
+#
+# This clone's local `dev` branch may already be checked out in a SIBLING
+# worktree on the same host (deploy-agent's
+# runtime-sync-worktrees/OMN-12618/omni_home/omnibase_infra) -- git refuses to
+# check that branch out a second time ("fatal: 'dev' is already checked out at
+# <path>"), hard-failing this whole script on an environment collision that has
+# nothing to do with lane health. Runs 29800684577 and 29800954943 died exactly
+# there. refresh_stability_lane.sh already retired the checkout+`reset --hard`
+# pair for this reason (OMN-12618); the dev lane mirrors it rather than
+# reintroducing the retired pattern. Resolve --ref to a commit SHA first and
+# check it out DETACHED: a detached HEAD carries no branch identity, so it can
+# never collide with another worktree regardless of what branch that worktree
+# holds. --force discards any local modifications the same way the previous
+# checkout+`reset --hard` pair did.
 log "=== Refresh omnibase_infra ambient clone to ${REF} ==="
-git -C "${INFRA_CLONE}" fetch origin --prune
-git -C "${INFRA_CLONE}" checkout dev
-git -C "${INFRA_CLONE}" reset --hard "${REF}"
-NEW_INFRA_SHA="$(git -C "${INFRA_CLONE}" rev-parse HEAD)"
-NEW_INFRA_SHA_SHORT="$(git -C "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
+git_clone "${INFRA_CLONE}" fetch origin --prune
+RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
+git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
+NEW_INFRA_SHA="$(git_clone "${INFRA_CLONE}" rev-parse HEAD)"
+NEW_INFRA_SHA_SHORT="$(git_clone "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
 log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
+
+log "=== Refresh tracked sibling ambient clones ==="
+for repo in "${ALL_TRACKED_REPOS[@]}"; do
+    [[ "${repo}" == "omnibase_infra" ]] && continue
+    clone="${OMNI_HOME}/${repo}"
+    [[ -d "${clone}/.git" ]] || { err "Expected clone not found: ${clone}"; exit 64; }
+    git_clone "${clone}" fetch origin --prune
+    sibling_ref="${REF}"
+    if ! sibling_sha="$(git_clone "${clone}" rev-parse "${sibling_ref}^{commit}" 2>/dev/null)"; then
+        sibling_ref="origin/dev"
+        sibling_sha="$(git_clone "${clone}" rev-parse "${sibling_ref}^{commit}")"
+    fi
+    git_clone "${clone}" checkout --force --detach "${sibling_sha}"
+    log "  ${repo} now at $(git_clone "${clone}" rev-parse --short=12 HEAD) via ${sibling_ref}"
+done
 
 log "=== Build + bring-up (branch: ${BRANCH}) ==="
 DEPLOY_EXIT=0
@@ -320,10 +379,10 @@ declare -A NEW_REFS
 if [[ "${BRANCH}" == "warm" ]]; then
     for repo in "${ALL_TRACKED_REPOS[@]}"; do
         clone="${OMNI_HOME}/${repo}"
-        NEW_REFS["${repo}"]="$(git -C "${clone}" rev-parse HEAD)"
-        cmd="git -C ${clone} merge-base --is-ancestor ${PRIOR_REFS[${repo}]} ${NEW_REFS[${repo}]}"
+        NEW_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
+        cmd="git -c safe.directory=${clone} -C ${clone} merge-base --is-ancestor ${PRIOR_REFS[${repo}]} ${NEW_REFS[${repo}]}"
         ANCESTRY_COMMANDS+=("${cmd}")
-        if git -C "${clone}" merge-base --is-ancestor "${PRIOR_REFS[${repo}]}" "${NEW_REFS[${repo}]}"; then
+        if git_clone "${clone}" merge-base --is-ancestor "${PRIOR_REFS[${repo}]}" "${NEW_REFS[${repo}]}"; then
             log "  ${repo}: ${PRIOR_REFS[${repo}]:0:12} -> ${NEW_REFS[${repo}]:0:12} (forward progress OK)"
         else
             err "  ${repo}: ${PRIOR_REFS[${repo}]:0:12} -> ${NEW_REFS[${repo}]:0:12} is NOT forward progress!"
@@ -335,7 +394,7 @@ if [[ "${BRANCH}" == "warm" ]]; then
     fi
 else
     for repo in "${ALL_TRACKED_REPOS[@]}"; do
-        NEW_REFS["${repo}"]="$(git -C "${OMNI_HOME}/${repo}" rev-parse HEAD)"
+        NEW_REFS["${repo}"]="$(git_clone "${OMNI_HOME}/${repo}" rev-parse HEAD)"
     done
     log "cold-aware branch: no prior running state to compare -- ancestry check N/A"
 fi

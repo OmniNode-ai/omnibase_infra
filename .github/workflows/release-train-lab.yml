@@ -181,8 +181,10 @@ jobs:
           set -euo pipefail
           if [[ "${LANE}" == "stability" ]]; then
             state_dir="${HOME}/.omnibase/state/stability_lane_refresh"
-          else
+          elif [[ "${LANE}" == "dev" ]]; then
             state_dir="${HOME}/.omnibase/state/dev_lane_refresh"
+          else
+            state_dir=""
           fi
           receipt="${state_dir}/latest.json"
           {
@@ -192,7 +194,9 @@ jobs:
             echo "- lane: \`${LANE}\`"
             echo "- refresh exit code: \`${REFRESH_EXIT:-unknown}\`"
             echo
-            if [[ -f "${receipt}" ]]; then
+            if [[ -z "${state_dir}" ]]; then
+              echo "No receipt is associated with an unrecognized release-train lane."
+            elif [[ -f "${receipt}" ]]; then
               echo '```json'
               # Augment (never mutate) the receipt with triggering_tag/lane for
               # the summary view -- refresh_stability_lane.sh is reused
