@@ -1805,6 +1805,10 @@ jobs:
     permissions:
       actions: read
       contents: read
+      # OMN-14909 (CI-01): read the head SHA's cross-workflow check-runs for the
+      # REPORT-ONLY cascade projection step below. Read scope only — no verdict
+      # authority; the poll step above owns pass/fail.
+      checks: read
     # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
     # Kept under any run-cancellation window so the required context ALWAYS posts
     # a terminal state first, and comfortably above the tests-gate 30m budget plus
@@ -1856,6 +1860,52 @@ jobs:
             esac
             sleep "${POLL_INTERVAL_SECONDS}"
           done
+
+      # OMN-14909 (CI-01, plan §3.C5) — REPORT-ONLY cascade reason-graph.
+      # Collapses the head SHA's full cross-workflow check-run list into ONE
+      # typed root + BLOCKED_UPSTREAM dependents so a single upstream defect
+      # (e.g. a missing Evidence-Source making occ-preflight red) is presented
+      # as ONE rerunnable root instead of the ~37 independently-rerunnable red
+      # checks that provoke the rerun reflex. This step:
+      #   * runs `if: always()` so it renders even when the poll above FAILED,
+      #   * is `continue-on-error: true` and ends every command with `|| true`,
+      #     so it can NEVER change the CI Summary verdict — the poll step above
+      #     is the sole pass/fail authority (gate not weakened), and
+      #   * writes only to $GITHUB_STEP_SUMMARY.
+      - name: CI cascade reason-graph (report-only, counts roots not checks)
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: >-
+            ${{ github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+              || github.sha }}
+        run: |
+          set +e
+          set -uo pipefail
+          if [ -z "${HEAD_SHA:-}" ]; then
+            echo "cascade reason-graph: no head SHA resolved; skipping report" >&2
+            exit 0
+          fi
+          # Cross-workflow check-runs for the exact head (NDJSON, one per line).
+          gh api --paginate \
+            "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+            --jq '.check_runs[] | {name, status, conclusion, html_url}' \
+            > cascade_check_runs.ndjson || true
+          if [ ! -s cascade_check_runs.ndjson ]; then
+            echo "cascade reason-graph: no check-runs fetched (report-only, non-fatal)" >&2
+            exit 0
+          fi
+          # Invoke via `-m` from the repo root (working-directory default) so the
+          # `scripts.ci.*` package imports resolve, matching product-readiness-
+          # shadow.yml's `python -m scripts.ci.product_reason_graph`.
+          python3 -m scripts.ci.ci_cascade_graph classify \
+            --check-runs-file cascade_check_runs.ndjson \
+            --head-sha "${HEAD_SHA}" \
+            --summary 1>/dev/null 2>>"${GITHUB_STEP_SUMMARY}" || true
+          exit 0
 
   # Cross-repo Kafka boundary compatibility test (OMN-3256)
   # Verifies that producer and consumer Pydantic models can round-trip across
