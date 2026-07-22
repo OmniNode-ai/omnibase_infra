@@ -256,6 +256,11 @@ if [[ "${MODE}" != "execute" ]]; then
     exit 0
 fi
 
+# OMN-14900: ensure the private runner clones exist before any git operation.
+# Idempotent: clones any of the 5 repos missing under OMNI_HOME (the deploy
+# runner's PRIVATE bind mount) and asserts each is operable by this euid.
+OMNI_HOME="${OMNI_HOME}" bash "${SCRIPT_DIR}/ensure_runner_clones.sh"
+
 declare -A PRE_IMAGE_IDS
 OLD_INFRA_REVISION=""
 declare -A PRIOR_REFS

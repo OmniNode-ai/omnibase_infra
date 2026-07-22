@@ -889,60 +889,60 @@ services:
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
-  # host-path git access to the $OMNI_HOME sibling clones (they `git fetch`/
-  # `reset --hard`/tag the ambient clones directly and run
-  # deploy-runtime.sh's BUILD_SOURCE=workspace path against them) -- the
-  # shared 48-64 omnibase-ci fleet above deliberately does NOT have this
-  # (docker.sock only, no OMNI_HOME bind mount) so that a compromised/buggy
-  # CI job from the general fleet cannot mutate host git state or lane
-  # containers. Fork 1 (OMN-14889 ticket): rejected SSH-hop from a shared
-  # runner (refresh_stability_lane.sh's own docstring disallows it) and
-  # rejected mounting OMNI_HOME into the WHOLE fleet (blast radius -- every
-  # CI job would get host git-mutation access). This is the smallest
-  # incremental surface: ONE runner, scoped to its own runner group, with
-  # exactly the access the release-train jobs need.
+  # host-path git access to OMNI_HOME sibling clones (they `git fetch`/
+  # `checkout --detach`/tag the clones directly and run deploy-runtime.sh's
+  # BUILD_SOURCE=workspace path against them) -- the shared 48-64 omnibase-ci
+  # fleet above deliberately does NOT have this (docker.sock only, no
+  # OMNI_HOME bind mount) so that a compromised/buggy CI job from the general
+  # fleet cannot mutate host git state or lane containers. Fork 1 (OMN-14889
+  # ticket): rejected SSH-hop from a shared runner (refresh_stability_lane.sh's
+  # own docstring disallows it) and rejected mounting OMNI_HOME into the
+  # WHOLE fleet (blast radius). This is the smallest incremental surface: ONE
+  # runner with exactly the access the release-train jobs need.
   #
-  # OMNI_HOME is bind-mounted at the IDENTICAL path inside the container as
-  # on the host (not a container-local alias). This container uses the
-  # HOST's docker.sock (docker-outside-of-docker), so a `docker compose`
-  # invocation issued from inside this container resolves relative volume
-  # paths to an absolute path that the DAEMON (running on the host) then
-  # tries to bind -- that only works if the resulting path exists on the
-  # host at that exact location. Matching the mount path 1:1 is what makes
-  # that resolution correct; a container-local alias (e.g. /workspace) would
-  # resolve to a host path that does not exist and silently produce empty
-  # bind mounts.
+  # PRIVATE OMNI_HOME (OMN-14900). This runner does NOT mount the shared
+  # /data/omninode/omni_home clones. Five release-train runs on 2026-07-21
+  # all died on uid-mismatch against those shared clones (`detected dubious
+  # ownership` 128, `cannot open .git/FETCH_HEAD: Permission denied` 255,
+  # `'dev' is already checked out at .../runtime-sync-worktrees/...` 128) --
+  # a write surface into clones the runner does not own, relieved only by
+  # UNCOMMITTED live hand-edits (exec'd `git config --global`, a compose
+  # hand-edit adding group_add 1000 + GIT_CONFIG_* env) that any
+  # `--force-recreate` silently drops. The committed fix: a DEDICATED,
+  # runner-uid-owned clone tree at DEPLOY_RUNNER_OMNI_HOME
+  # (e.g. /data/omninode/runner_omni_home -- operator-chosen, host-side env),
+  # bind-mounted at the IDENTICAL container path, with the shared mount
+  # REMOVED so writes into the shared clones are structurally impossible.
+  # The clones themselves are provisioned automatically by
+  # scripts/runtime_build/ensure_runner_clones.sh at the top of every entry
+  # script (all 5 repos are public; anonymous https clones, no creds).
   #
-  # PROVISIONED AND ONLINE (verified live 2026-07-21): this service is up and
-  # its runner is registered. `gh api
-  # repos/OmniNode-ai/omnibase_infra/actions/runners` returns
-  # omninode-deploy-runner status=online with labels
-  # [self-hosted, Linux, X64, omnibase-deploy]. Note registration landed at
-  # the REPOSITORY level, not the org level assumed by the re-provisioning
-  # recipe below.
+  # The IDENTICAL host:container bind path is load-bearing: this container
+  # uses the HOST's docker.sock (docker-outside-of-docker), so a
+  # `docker compose` invocation issued from inside this container resolves
+  # volume paths to absolute paths that the DAEMON (running on the host)
+  # then tries to bind -- that only works if the path exists on the host at
+  # that exact location. A container-local alias (e.g. /workspace) would
+  # resolve to a nonexistent host path and silently produce empty binds.
   #
-  # Consequence: release-train-lab.yml is LIVE, not dormant. A `lab/dev/**` or
-  # `lab/stability/**` tag push dispatches its deploy job onto THIS container
-  # and refreshes the target lane in execute mode. Intended (dev + stability
-  # are pre-authorized), but not a no-op -- treat a lab tag push as a real
-  # deploy.
+  # DEPLOY_RUNNER_OMNI_HOME is REQUIRED (fail-fast `:?` interpolation): any
+  # `docker compose -f docker-compose.runners.yml ...` against this file
+  # needs it in the compose environment (export it, or put it in the .env
+  # next to this file). No silent default -- an empty value would produce
+  # broken binds (CLAUDE.md rule 8).
   #
-  # Known blocker is host-side git access, NOT provisioning: five runs on
-  # 2026-07-21T03:59-04:19Z all failed in the `Refresh stability lane` step
-  # against the bind-mounted $OMNI_HOME clone -- `detected dubious ownership`
-  # (exit 128), `cannot open .git/FETCH_HEAD: Permission denied` (exit 255),
-  # and `'dev' is already checked out at .../runtime-sync-worktrees/...`
-  # (exit 128). All died before any container action (no `docker compose` /
-  # `up -d` / `--force-recreate` in any log); no lane was mutated. Fix is
-  # ownership/uid alignment + worktree contention on this container's view of
-  # the $OMNI_HOME mount below.
-  #
-  # To RE-provision (token rotation / rebuild): mint a registration token
-  # (`gh api -X POST orgs/OmniNode-ai/actions/runners/registration-token`,
-  # valid 1h) and export it as DEPLOY_RUNNER_TOKEN before `docker compose up
-  # -d omninode-deploy-runner`. An org-level runner group named
-  # `omnibase-deploy` is NOT auto-created by registering a runner into it.
-  # See docs/runbooks/release-train-lab.md.
+  # REGISTRATION IS REPOSITORY-SCOPED (live-verified 2026-07-22):
+  # GITHUB_ORG_URL points at the omnibase_infra REPO, matching the live
+  # registration and the credential cache seeded in the
+  # omninode-deploy-runner-creds volume (cache key = labels + URL; changing
+  # the URL orphans the cache and forces re-registration). RUNNER_GROUP is
+  # explicitly EMPTY: repo-scoped `config.sh --runnergroup` hard-fails, and
+  # the entrypoint (OMN-14900) only omits the flag for an explicitly empty
+  # value. A recreate re-registers only if the creds volume is lost; then
+  # mint a REPO registration token (`gh api -X POST
+  # repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
+  # valid 1h) and export DEPLOY_RUNNER_TOKEN before `up -d`.
+  # See docs/runbooks/release-train-lab.md for the full recreate procedure.
   omninode-deploy-runner:
     image: omninode-runner:latest
     container_name: omninode-deploy-runner
@@ -951,17 +951,58 @@ services:
     memswap_limit: 8g
     cpus: "2.0"
     pids_limit: 4096
+    # Root-phase init (OMN-14900): own the private OMNI_HOME bind for the
+    # runner uid, then exec the stock entrypoint (which gosu-drops to
+    # `runner`). Committed here so the ownership fix survives every
+    # recreate -- the live container's equivalent wrapper was an uncommitted
+    # host hand-edit. `$$` escapes keep these as RUNTIME shell vars (compose
+    # must not interpolate them).
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        : "$${OMNI_HOME:?OMNI_HOME must reach the container env (from DEPLOY_RUNNER_OMNI_HOME)}"
+        mkdir -p "$${OMNI_HOME}"
+        runner_uid="$$(id -u runner)"
+        runner_gid="$$(id -g runner)"
+        if [ "$$(stat -c '%u' "$${OMNI_HOME}")" != "$${runner_uid}" ]; then
+          chown "$${runner_uid}:$${runner_gid}" "$${OMNI_HOME}"
+        fi
+        exec /usr/local/bin/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
       RUNNER_NAME: omninode-deploy-runner
-      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      # Repo-scoped, matching the live registration + seeded creds volume.
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai/omnibase_infra
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
-      RUNNER_GROUP: omnibase-deploy
+      # Present-and-empty = do NOT pass --runnergroup (repo-scoped
+      # registration rejects it; see docker/runners/entrypoint.sh).
+      RUNNER_GROUP: ""
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
-      OMNI_HOME: ${OMNI_HOME}
+      OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
+      # Defense-in-depth safe.directory for the 5 PRIVATE clones. The
+      # load-bearing exemption is the scoped `git -c safe.directory=<clone>`
+      # committed in the runtime_build scripts themselves (OMN-14900); this
+      # env only covers stray git invocations outside those scripts.
+      GIT_CONFIG_COUNT: "5"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_infra
+      GIT_CONFIG_KEY_1: safe.directory
+      GIT_CONFIG_VALUE_1: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_core
+      GIT_CONFIG_KEY_2: safe.directory
+      GIT_CONFIG_VALUE_2: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_compat
+      GIT_CONFIG_KEY_3: safe.directory
+      GIT_CONFIG_VALUE_3: ${DEPLOY_RUNNER_OMNI_HOME:?}/onex_change_control
+      GIT_CONFIG_KEY_4: safe.directory
+      GIT_CONFIG_VALUE_4: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnimarket
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${OMNI_HOME}:${OMNI_HOME}
+      # PRIVATE clone tree at the identical host:container path. The shared
+      # ${OMNI_HOME} bind is deliberately ABSENT (OMN-14900) -- do not re-add
+      # it; that reopens the uid-mismatch write surface into clones this
+      # runner does not own.
+      - ${DEPLOY_RUNNER_OMNI_HOME:?}:${DEPLOY_RUNNER_OMNI_HOME:?}
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro

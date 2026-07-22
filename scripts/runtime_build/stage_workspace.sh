@@ -249,7 +249,9 @@ for repo in "${SIBLING_REPOS[@]}"; do
     # Record the source HEAD SHA so the lock-pin preflight and provenance can
     # identify exactly which commit was vendored. rsync drops .git, so without
     # this marker the staged tree has no recoverable SHA (OMN-12987).
-    if ! vcs_ref="$(git -C "${src}" rev-parse HEAD 2>/dev/null)"; then
+    # OMN-14900: scope every probe with safe.directory so a uid-mismatched
+    # invoker (the deploy runner) is never rejected with "dubious ownership".
+    if ! vcs_ref="$(git -c "safe.directory=${src}" -C "${src}" rev-parse HEAD 2>/dev/null)"; then
         echo "ERROR: cannot resolve HEAD SHA for ${src}; refusing to stage an unverifiable tree" >&2
         exit 3
     fi
@@ -258,11 +260,11 @@ for repo in "${SIBLING_REPOS[@]}"; do
     # OMN-13030: capture full per-repo VCS provenance at staging time. A repo
     # whose git history is unreadable for the branch/status probes is just as
     # unverifiable as one missing a HEAD SHA — abort rather than stamp "unknown".
-    if ! vcs_branch="$(git -C "${src}" rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
+    if ! vcs_branch="$(git -c "safe.directory=${src}" -C "${src}" rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
         echo "ERROR: cannot resolve branch for ${src}; refusing to stage an unverifiable tree (OMN-13030)" >&2
         exit 3
     fi
-    if ! status_out="$(git -C "${src}" status --porcelain 2>/dev/null)"; then
+    if ! status_out="$(git -c "safe.directory=${src}" -C "${src}" status --porcelain 2>/dev/null)"; then
         echo "ERROR: cannot resolve working-tree status for ${src}; refusing to stage an unverifiable tree (OMN-13030)" >&2
         exit 3
     fi

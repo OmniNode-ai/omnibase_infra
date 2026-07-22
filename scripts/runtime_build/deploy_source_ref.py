@@ -86,9 +86,15 @@ def _git(repo_path: Path, *args: str) -> str:
 
     Raises ``DeploySourceRefError`` (CHECKOUT_FAILED) on a non-zero exit so every
     git failure is loud, not swallowed.
+
+    OMN-14900: ``-c safe.directory=<repo_path>`` is injected on every call so a
+    uid-mismatched invoker (the deploy runner container driving RT-1 against
+    the OMNI_HOME clones) is never rejected with "detected dubious ownership".
+    Scoped per process + path; removes the fragile dependency on the container
+    env GIT_CONFIG_* pass-through, which subprocess env overrides can drop.
     """
     result = subprocess.run(
-        ["git", "-C", str(repo_path), *args],
+        ["git", "-c", f"safe.directory={repo_path}", "-C", str(repo_path), *args],
         capture_output=True,
         text=True,
         env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
@@ -117,6 +123,8 @@ def _resolve_commit(repo_path: Path, ref: str) -> str:
     result = subprocess.run(
         [
             "git",
+            "-c",
+            f"safe.directory={repo_path}",
             "-C",
             str(repo_path),
             "rev-parse",

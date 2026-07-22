@@ -195,6 +195,30 @@ run_verify() {
     fi
 }
 
+# --- ambient-clone git wrapper (OMN-14900) ----------------------------------
+# The clones under OMNI_HOME are owned by the uid that provisioned them, but
+# this script can run as a DIFFERENT uid -- e.g. inside the self-hosted deploy
+# runner container. git then refuses every operation on them with "fatal:
+# detected dubious ownership in repository at '<clone>'" and exits 128. Five
+# release-train-lab.yml runs on 2026-07-21 died exactly there, before a single
+# fetch happened.
+#
+# That was relieved out-of-band on the host with an ad hoc `git config
+# --global --add safe.directory ...`, but that relief is NOT DURABLE: the
+# runner's /home/runner is not a named volume, so the global gitconfig -- and
+# with it the exemption -- is lost on any `--force-recreate` of the runner
+# container, and the next tag push fails the same way. Carry the exemption
+# in-repo instead, scoped per invocation: `-c safe.directory=<clone>` is
+# protected configuration git honours from the command line, applies to
+# exactly one git process and one path, requires no host change, writes
+# nothing to the user's global gitconfig, and is never the blanket
+# `safe.directory=*`. (Ported verbatim from refresh_dev_lane.sh.)
+git_clone() {
+    local clone="$1"
+    shift
+    git -c "safe.directory=${clone}" -C "${clone}" "$@"
+}
+
 # --- state / receipt paths ---------------------------------------------------
 STATE_DIR="${HOME}/.omnibase/state/stability_lane_refresh"
 HISTORY_DIR="${STATE_DIR}/history"
@@ -218,6 +242,14 @@ if [[ "${MODE}" != "execute" ]]; then
     log "  ${DEPLOY_RUNTIME} --execute --force --restart"
     exit 0
 fi
+
+# =============================================================================
+# 0. Ensure the private runner clones exist (OMN-14900)
+#    Idempotent: clones any of the 5 repos missing under OMNI_HOME (the deploy
+#    runner's PRIVATE bind mount) and asserts each is operable by this euid.
+#    Committed provisioning, never a remembered manual host step.
+# =============================================================================
+OMNI_HOME="${OMNI_HOME}" bash "${SCRIPT_DIR}/ensure_runner_clones.sh"
 
 # =============================================================================
 # 1. Capture PRE-STATE (before touching anything)
@@ -247,7 +279,7 @@ for repo in "${ALL_TRACKED_REPOS[@]}"; do
         err "Expected clone not found: ${clone}"
         exit 64
     fi
-    PRIOR_REFS["${repo}"]="$(git -C "${clone}" rev-parse HEAD)"
+    PRIOR_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
     log "  ${repo} prior HEAD: ${PRIOR_REFS[${repo}]:0:12}"
 done
 
@@ -280,11 +312,11 @@ done
 # =============================================================================
 log "=== Refresh omnibase_infra ambient clone to ${REF} ==="
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
-git -C "${INFRA_CLONE}" fetch origin --prune
-RESOLVED_REF_SHA="$(git -C "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
-git -C "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
-NEW_INFRA_SHA="$(git -C "${INFRA_CLONE}" rev-parse HEAD)"
-NEW_INFRA_SHA_SHORT="$(git -C "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
+git_clone "${INFRA_CLONE}" fetch origin --prune
+RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
+git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
+NEW_INFRA_SHA="$(git_clone "${INFRA_CLONE}" rev-parse HEAD)"
+NEW_INFRA_SHA_SHORT="$(git_clone "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
 log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
 
 # =============================================================================
@@ -314,10 +346,10 @@ ANCESTRY_OK=true
 ANCESTRY_COMMANDS=()
 for repo in "${ALL_TRACKED_REPOS[@]}"; do
     clone="${OMNI_HOME}/${repo}"
-    NEW_REFS["${repo}"]="$(git -C "${clone}" rev-parse HEAD)"
-    cmd="git -C ${clone} merge-base --is-ancestor ${PRIOR_REFS[${repo}]} ${NEW_REFS[${repo}]}"
+    NEW_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
+    cmd="git -c safe.directory=${clone} -C ${clone} merge-base --is-ancestor ${PRIOR_REFS[${repo}]} ${NEW_REFS[${repo}]}"
     ANCESTRY_COMMANDS+=("${cmd}")
-    if git -C "${clone}" merge-base --is-ancestor "${PRIOR_REFS[${repo}]}" "${NEW_REFS[${repo}]}"; then
+    if git_clone "${clone}" merge-base --is-ancestor "${PRIOR_REFS[${repo}]}" "${NEW_REFS[${repo}]}"; then
         log "  ${repo}: ${PRIOR_REFS[${repo}]:0:12} -> ${NEW_REFS[${repo}]:0:12} (forward progress OK)"
     else
         err "  ${repo}: ${PRIOR_REFS[${repo}]:0:12} -> ${NEW_REFS[${repo}]:0:12} is NOT forward progress!"

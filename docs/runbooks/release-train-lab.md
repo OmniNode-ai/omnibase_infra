@@ -93,7 +93,7 @@ re-provisioning. Verify against the `repos/...` endpoint above, not
 > `release-train-lab.yml` to exist at the **tagged commit**, so a tag cut
 > from a feature branch fires it exactly as a tag on `dev` would.
 
-### Known blocker: host-side git access, not provisioning
+### Fixed blocker: host-side git access (OMN-14900 private OMNI_HOME)
 
 Five runs on 2026-07-21T03:59–04:19Z all failed in the **`Refresh stability
 lane`** step, in three distinct forms as intermediate fixes were attempted:
@@ -106,34 +106,79 @@ lane`** step, in three distinct forms as intermediate fixes were attempted:
 
 All five died **before any container action** — zero `docker compose`,
 `up -d`, or `--force-recreate` lines appear in any of the five job logs, so no
-lane was mutated. The remaining work is fixing the runner container's
-ownership/permissions and worktree contention against the ambient
-`$OMNI_HOME` clone; registration is no longer the gap.
+lane was mutated. Root cause: the runner container bind-mounted the **shared**
+host clones, owned by a different uid and contended by host worktrees — a
+write surface into clones the runner does not own. The interim live relief
+(exec'd `git config --global`, a hand-edited compose adding `group_add 1000` +
+`GIT_CONFIG_*` env) was **uncommitted container state** that any
+`--force-recreate` silently drops.
+
+The committed fix (OMN-14900) has three legs:
+
+1. **Private OMNI_HOME** — `docker/docker-compose.runners.yml` gives the
+   deploy runner its own runner-uid-owned clone tree at
+   `DEPLOY_RUNNER_OMNI_HOME` (identical host:container bind path, required
+   for docker-outside-of-docker path resolution) and **removes the shared
+   `${OMNI_HOME}` mount entirely** — shared-clone writes become structurally
+   impossible, and host worktree contention (`'dev' is already checked out`)
+   can no longer occur because no host process holds branches in the private
+   clones.
+2. **Scoped `git -c safe.directory=<clone>`** on every git invocation in
+   `scripts/runtime_build/` (refresh scripts, tag cut, stage_workspace
+   probes, `deploy_source_ref.py`, `check_sibling_lock_pins.py`) — committed
+   defense-in-depth that needs no container-global state.
+3. **Automatic provisioning** — `scripts/runtime_build/ensure_runner_clones.sh`
+   clones any missing repo (all 5 are public; anonymous https) and asserts
+   euid operability at the top of every entry script.
+
+Tag pushes changed with this: the cut-tag job now creates the GitHub tag ref
+via `gh api repos/OmniNode-ai/omnibase_infra/git/refs` using the workflow's
+own token (`permissions: contents: write` on the job) — the private clones
+have no push credentials, so `git push` from a clone is not a supported tag
+source. Externally-cut tags (operator workstation) still work for the anchor
+repo, but note the 4 sibling **private** clones can only resolve a lab tag
+that the runner's own cut-tag job cut locally; a deploy from an
+externally-cut tag will fail loudly at RT-1 sibling checkout rather than
+silently building mixed refs.
+
+**The compose-side fix only takes effect at a container RECREATE from the
+committed file — an operator-gated action** (the live container also carries
+the OMN-13915 zombie). Until that recreate, the live container still runs
+its pre-fix hand-edited config.
 
 Seven `lab/stability/*` tags exist on origin; only five produced runs — the
 two earliest (`43935c84…`, `e5404e36…`) predate the workflow file at their
 tagged commits, so nothing fired for them.
 
-### Historical: provisioning this runner (kept for re-provisioning reference)
+### Recreate / re-provision procedure (OMN-14900)
 
 ```bash
-# 1. Create the GitHub org runner group (one-time; a runner group is NOT
-#    auto-created by registering a runner into it).
-#    Settings > Actions > Runner groups > New runner group, name: omnibase-deploy
-#    (or via REST API: POST /orgs/OmniNode-ai/actions/runner-groups)
+# On the runner host (omninode-pc / .201):
 
-# 2. Mint a registration token (valid 1h):
-gh api -X POST orgs/OmniNode-ai/actions/runners/registration-token \
-  --jq '.token'
+# 1. Choose + export the PRIVATE clone-tree path (REQUIRED: the compose file
+#    fail-fast interpolates DEPLOY_RUNNER_OMNI_HOME; any `docker compose`
+#    against docker-compose.runners.yml needs it in the compose environment —
+#    export it or add it to the .env next to the compose file).
+export DEPLOY_RUNNER_OMNI_HOME=/data/omninode/runner_omni_home
 
-# 3. On .201, export it + bring the runner up:
-export DEPLOY_RUNNER_TOKEN=<token from step 2>
-export OMNI_HOME=/data/omninode/omni_home
-cd "${OMNI_HOME}/omnibase_infra/docker"
+# 2. (Only if the omninode-deploy-runner-creds volume was lost) mint a
+#    REPOSITORY-scoped registration token (valid 1h) — registration is
+#    repo-scoped, NOT org-scoped; RUNNER_GROUP is intentionally empty:
+export DEPLOY_RUNNER_TOKEN="$(gh api -X POST \
+  repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token --jq '.token')"
+
+# 3. Recreate the runner from the COMMITTED compose file:
+cd /data/omninode/omni_home/omnibase_infra/docker   # shared infra clone: compose file source only
 docker compose -f docker-compose.runners.yml up -d omninode-deploy-runner
 
-# 4. Verify registration:
-gh api orgs/OmniNode-ai/actions/runners --jq '.runners[] | select(.name=="omninode-deploy-runner")'
+# The compose entrypoint wrapper (root phase) mkdir/chowns
+# ${DEPLOY_RUNNER_OMNI_HOME} for the runner uid; the 5 private clones are
+# then provisioned automatically by ensure_runner_clones.sh on the first
+# release-train job (or pre-seed them manually as the runner uid).
+
+# 4. Verify registration (REPOSITORY endpoint, not org):
+gh api repos/OmniNode-ai/omnibase_infra/actions/runners \
+  --jq '.runners[] | select(.name=="omninode-deploy-runner")'
 ```
 
 Both the `deploy` job and the `cut-tag` job run on this label (the
