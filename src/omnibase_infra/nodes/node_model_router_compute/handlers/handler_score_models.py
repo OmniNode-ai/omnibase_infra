@@ -8,6 +8,16 @@ Scores candidate models by: quality * w + (1-cost) * w + speed * w + chain_bonus
 Models without sufficient live metrics (>=20 samples) receive lowest routing
 priority. Seed/bootstrap estimates have been removed (OMN-7841) — only measured
 eval data drives routing decisions.
+
+Optional routing-confidence audit (OMN-7404, Phase 2 Task 8): callers may
+inject a `RoutingGate` at construction time. When present, the gate AUDITS
+the rule-based decision (logs confidence + would_flag) but never selects a
+model or alters `ModelRoutingDecision` — shadow-mode only, per the plan's
+"Clarification from review" (docs/plans/2026-04-03-learning-infrastructure.md,
+Task 8). When no gate is injected (the default — no `RoutingGate` classifier
+has ever been trained; Task 7 is unbuilt), behavior is byte-identical to the
+pre-OMN-7404 handler (graceful degradation, proven by
+`test_score_models_defb_omn14825.py`'s golden-equivalence corpus).
 """
 
 from __future__ import annotations
@@ -15,6 +25,7 @@ from __future__ import annotations
 import logging
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.learning.routing.gate import RoutingGate
 from omnibase_infra.nodes.node_model_health_effect.models.model_endpoint_health import (
     ModelEndpointHealth,
 )
@@ -169,7 +180,20 @@ def _compute_score(
 
 
 class HandlerScoreModels:
-    """Pure scoring handler — no I/O, deterministic for same inputs."""
+    """Pure scoring handler — no I/O, deterministic for same inputs.
+
+    ``gate`` is an optional injected `RoutingGate` (OMN-7404). It defaults to
+    `None`, which is the only path ever exercised in production today (no
+    trained classifier artifact exists) and reproduces prior behavior
+    exactly. Injection point is the constructor, not a file-existence check
+    inside `handle()`, so the handler remains I/O-free regardless of whether
+    a gate is configured — loading any real classifier from disk is the
+    responsibility of whatever wires this handler (a DI/registry seam),
+    never of the handler itself.
+    """
+
+    def __init__(self, gate: RoutingGate | None = None) -> None:
+        self._gate = gate
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -266,6 +290,9 @@ class HandlerScoreModels:
             (scoring_input.context_length_estimate / estimated_speed) * 1000
         )
 
+        if self._gate is not None:
+            self._audit_decision(scoring_input, selected)
+
         return ModelRoutingDecision(
             correlation_id=scoring_input.correlation_id,
             selected_model_key=selected.model_key,
@@ -275,4 +302,31 @@ class HandlerScoreModels:
             scores=scores,
             estimated_cost=estimated_cost,
             estimated_latency_ms=estimated_latency_ms,
+        )
+
+    def _audit_decision(
+        self,
+        scoring_input: ModelScoringInput,
+        selected: ModelRegistryEntry,
+    ) -> None:
+        """Shadow-mode audit only (OMN-7404): logs, never alters routing.
+
+        Never raises — a classifier/gate failure must not affect the already
+        -computed routing decision. See `RoutingGate.audit()` for the
+        graceful-degradation contract this relies on.
+        """
+        assert self._gate is not None  # narrows type for mypy; caller already checked
+        features: dict[str, object] = {
+            "prompt_length": len(scoring_input.task_description),
+            "context_length_estimate": scoring_input.context_length_estimate,
+        }
+        audit = self._gate.audit(features)
+        logger.info(
+            "routing_audit: confidence=%s would_flag=%s selected_model=%s "
+            "correlation_id=%s (shadow-mode, audit_only=%s)",
+            audit.get("confidence"),
+            audit.get("would_flag"),
+            selected.model_key,
+            scoring_input.correlation_id,
+            audit.get("audit_only"),
         )

@@ -10,15 +10,19 @@
 # Related Tickets:
 #   - OMN-14825: HandlerScoreModels exposes the canonical def-B handle()
 #     dispatch entrypoint while preserving deterministic model scoring.
+#   - OMN-7404: Optional RoutingGate audit hook (shadow-mode only, never
+#     alters routing) injectable via HandlerScoreModels(gate=...). Defaults
+#     to None (no classifier ever trained -- Task 7 unbuilt), which
+#     reproduces prior behavior byte-for-byte.
 #
 name: "node_model_router_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 2
-node_version: "1.0.2"
-description: "Pure scoring of candidate models by quality, measured cost tier, live speed metrics, and availability. Contract patch 2 records the OMN-14825 canonical def-B handler entrypoint flip while preserving deterministic model scoring."
+  patch: 3
+node_version: "1.0.3"
+description: "Pure scoring of candidate models by quality, measured cost tier, live speed metrics, and availability. Contract patch 3 adds an optional shadow-mode RoutingGate audit hook (OMN-7404) that never alters routing, on top of the OMN-14825 canonical def-B handler entrypoint flip."
 input_model:
   name: "ModelScoringInput"
   module: "omnibase_infra.nodes.node_model_router_compute.models.model_scoring_input"

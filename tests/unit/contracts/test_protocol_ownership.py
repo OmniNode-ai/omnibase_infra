@@ -89,6 +89,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "RowLookup": "services/cost_api/handlers.py",  # [DI] OMN-10334 narrow row adapter for asyncpg.Record/test rows
     # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
     "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
+    # [DI] OMN-7404 narrow duck-typed classifier interface injected into RoutingGate
+    # (predict_proba(features) -> float); no ML-library dependency, no Task 7
+    # RoutingClassifier artifact required to exist.
+    "ProtocolRoutingClassifier": "learning/routing/gate.py",
     # === [MIXIN] Mixin host contracts ===
     "ProtocolCircuitBreakerAware": "mixins/protocol_circuit_breaker_aware.py",
     "ProtocolKafkaDlqHost": "event_bus/mixin_kafka_dlq.py",
