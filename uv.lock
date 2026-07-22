@@ -2241,7 +2241,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.48b0,<0.66" },
     { name = "opentelemetry-instrumentation-asyncpg", specifier = ">=0.48b0,<0.66" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.48b0,<0.64" },
-    { name = "opentelemetry-instrumentation-kafka-python", specifier = ">=0.48b0,<0.64" },
+    { name = "opentelemetry-instrumentation-kafka-python", specifier = ">=0.48b0,<0.66" },
     { name = "opentelemetry-instrumentation-redis", specifier = ">=0.48b0,<0.64" },
     { name = "opentelemetry-sdk", specifier = ">=1.27.0,<2.0.0" },
     { name = "packaging", specifier = ">=23.0,<27.0" },
