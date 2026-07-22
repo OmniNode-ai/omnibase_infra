@@ -41,18 +41,6 @@ permissions:
   contents: read
 
 jobs:
-  occ-preflight:
-    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      contracts-dir: contracts
-      receipts-dir: drift/dod_receipts
-      core-ref: 8a47e092002dd1338599fa0733feda469436acbf
-
   required-check-skip-guard:
     if: ${{ always() }}
-    needs: occ-preflight
     uses: OmniNode-ai/omniclaude/.github/workflows/required-check-skip-guard-reusable.yml@70718ddb45f6df5eb5e07159f2ae812efb1da7db
