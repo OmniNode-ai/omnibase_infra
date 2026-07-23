@@ -44,7 +44,14 @@ DEV_SCRIPT = RUNTIME_BUILD / "refresh_dev_lane.sh"
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 
-LANE_PORTS = {STABILITY_SCRIPT: "18085", DEV_SCRIPT: "8085"}
+# OMN-14984: the manifest/health default URLs no longer interpolate a
+# hardcoded port literal -- they read the contract-rendered per-lane main
+# port (docker/runtime-policy.env, generated from
+# contracts/services/runtime_policy.contract.yaml) via this env var.
+LANE_PORT_VARS = {
+    STABILITY_SCRIPT: "STABILITY_TEST_RUNTIME_MAIN_PORT",
+    DEV_SCRIPT: "DEV_RUNTIME_MAIN_PORT",
+}
 
 
 def _deploy_runner_service() -> dict[str, Any]:
@@ -61,7 +68,7 @@ def _deploy_runner_service() -> dict[str, Any]:
 @pytest.mark.parametrize("script", [STABILITY_SCRIPT, DEV_SCRIPT], ids=lambda p: p.name)
 def test_refresh_scripts_derive_gate_urls_from_lane_probe_host(script: Path) -> None:
     text = script.read_text(encoding="utf-8")
-    port = LANE_PORTS[script]
+    port_var = LANE_PORT_VARS[script]
     assert re.search(
         r'^LANE_PROBE_HOST="\$\{LANE_PROBE_HOST:-localhost\}" # fallback-ok:',
         text,
@@ -71,10 +78,10 @@ def test_refresh_scripts_derive_gate_urls_from_lane_probe_host(script: Path) -> 
         f"runs) with the OMN-10741 fallback-ok justification"
     )
     assert (
-        f'MANIFEST_URL="http://${{LANE_PROBE_HOST}}:{port}/v1/introspection/manifest"'
+        f'MANIFEST_URL="http://${{LANE_PROBE_HOST}}:${{{port_var}}}/v1/introspection/manifest"'
         in text
     ), f"{script.name} MANIFEST_URL default must derive from LANE_PROBE_HOST"
-    assert f'HEALTH_URL="http://${{LANE_PROBE_HOST}}:{port}/health"' in text, (
+    assert f'HEALTH_URL="http://${{LANE_PROBE_HOST}}:${{{port_var}}}/health"' in text, (
         f"{script.name} HEALTH_URL default must derive from LANE_PROBE_HOST"
     )
     # The regression: a hardcoded-localhost default URL.
