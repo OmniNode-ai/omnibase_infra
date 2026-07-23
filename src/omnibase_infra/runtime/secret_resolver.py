@@ -1908,6 +1908,88 @@ class SecretResolver:
             return f"file:{path.parent}/***"
         return "***"
 
+    def validate_required_secrets(self, correlation_id: UUID | None = None) -> None:
+        """Fail loudly, naming every missing/unreachable required secret at once.
+
+        OMN-14951: eagerly resolves every logical name in
+        ``config.required_secrets`` and raises a single
+        ``SecretResolutionError`` naming ALL offending keys together -- never
+        one at a time -- when any of them:
+
+        * fails to resolve (the source has no value for the key), or
+        * cannot be determined because the source itself is unreachable or
+          rejects authentication (e.g. Infisical down, bad credentials,
+          timeout, malformed response).
+
+        Fail-closed: an unreachable/erroring source is treated identically to
+        "missing" -- never silently skipped, never assumed present. This is
+        the batch, boot/deploy-time counterpart to
+        ``get_secret(required=True)``, which proves only ONE key at a time and
+        raises at the first failure; this method proves the WHOLE declared-
+        required set in a single pass so an operator sees every gap at once,
+        matching CLAUDE.md rule "Second failure of the same check is a bug" —
+        the very first failure here must already be actionable and complete.
+
+        Note on key names in the raised error: unlike ``get_secret``'s
+        per-call error (which intentionally omits the logical name to avoid
+        leaking secret identifiers into generic application logs -- see
+        ``get_secret``'s SECURITY comment), this batch gate is an
+        operational boot/deploy diagnostic and MUST name every offending key
+        so the failure is actionable. Names only, never values -- this
+        mirrors the resolver's existing masking discipline
+        (``_mask_source_path``), just applied to a different audience
+        (operator, not generic application logs).
+
+        Args:
+            correlation_id: Optional correlation ID for tracing.
+
+        Raises:
+            SecretResolutionError: If any required secret is missing, or if
+                resolving any required secret raised (source unreachable,
+                auth failure, or any other resolution error). The message
+                names every offending logical name.
+        """
+        effective_correlation_id = correlation_id or uuid4()
+        missing: list[str] = []
+        errored: dict[str, str] = {}
+
+        for name in self._config.required_secrets:
+            try:
+                value = self.get_secret(
+                    name, required=False, correlation_id=effective_correlation_id
+                )
+            except Exception as exc:  # noqa: BLE001 -- fail-closed: ANY resolution
+                # error (Infisical unreachable, auth failure, malformed
+                # response, or anything else) is a gate failure, never a
+                # silent pass. Continue so remaining keys are still checked --
+                # the whole point is naming every offender in one pass.
+                errored[name] = type(exc).__name__
+                continue
+            if value is None:
+                missing.append(name)
+
+        if not missing and not errored:
+            return
+
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=effective_correlation_id,
+            transport_type=EnumInfraTransportType.INFISICAL,
+            operation="validate_required_secrets",
+            target_name="secret_resolver",
+        )
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing={sorted(missing)}")
+        if errored:
+            parts.append(
+                f"unreachable_or_errored={ {k: errored[k] for k in sorted(errored)} }"
+            )
+        raise SecretResolutionError(
+            "Required secrets failed the fail-closed presence gate (OMN-14951): "
+            + "; ".join(parts),
+            context=context,
+        )
+
 
 __all__: list[str] = [
     "ProtocolSecretResolverMetrics",

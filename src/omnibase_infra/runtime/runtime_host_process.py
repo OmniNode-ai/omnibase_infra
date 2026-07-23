@@ -83,6 +83,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+    SecretResolutionError,
     UnknownHandlerTypeError,
 )
 
@@ -143,6 +144,9 @@ from omnibase_infra.runtime.models.model_materialized_resources import (
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
+)
 from omnibase_infra.runtime.protocol_lifecycle_executor import (
     DEFAULT_HANDLER_SHUTDOWN_TIMEOUT,
     ProtocolLifecycleExecutor,
@@ -157,6 +161,10 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     parse_active_runtime_packages,
     validate_runtime_local_ingress_payload,
 )
+from omnibase_infra.runtime.runtime_profile import (
+    resolve_secret_resolver_config_path,
+)
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
@@ -174,6 +182,7 @@ if TYPE_CHECKING:
         ModelMessageEnvelope,
     )
     from omnibase_infra.event_bus.models import ModelEventMessage
+    from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
@@ -186,6 +195,9 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols import (
         ProtocolContainerAware,
         ProtocolNodeIntrospection,
+    )
+    from omnibase_infra.runtime.config_discovery.models import (
+        ProtocolSecretResolver,
     )
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
@@ -4033,6 +4045,18 @@ class RuntimeHostProcess:
                             f"{', '.join(sorted(problem_keys))}",
                             context=context,
                         )
+
+                # Step 5.5: Validate declared-required secrets (OMN-14951).
+                # Distinct gate from Step 1-5 above: those validate the
+                # ContractConfigExtractor's contract-scanned config_requirements;
+                # this validates the SecretResolver's authoritative
+                # required_secrets set (ModelSecretResolverConfig), rendered to
+                # ONEX_SECRET_RESOLVER_CONFIG_PATH by
+                # render_secret_resolver_config.py at deploy time. No-op when a
+                # lane has not opted in (no rendered config, or an empty
+                # required_secrets list), so lanes that have not adopted the
+                # declared-required-key contract are unaffected.
+                self._validate_required_secrets_via_resolver(handler)
             finally:
                 # Always shut down the inline handler to release SDK resources.
                 # Handlers found in the handler registry manage their own lifecycle
@@ -4061,6 +4085,105 @@ class RuntimeHostProcess:
                     "error": sanitize_error_message(exc),
                     "correlation_id": str(context.correlation_id),
                 },
+            )
+
+    def _validate_required_secrets_via_resolver(
+        self, infisical_handler: ProtocolSecretResolver
+    ) -> None:
+        """Validate the SecretResolver's declared-required key set (OMN-14951).
+
+        Extends the existing ``SecretResolver`` / ``ModelSecretResolverConfig``
+        machinery rather than adding a parallel gate: loads the rendered
+        secret-resolver config from ``ONEX_SECRET_RESOLVER_CONFIG_PATH`` (the
+        artifact ``render_secret_resolver_config.py`` already produces at
+        deploy time from a lane's ``ONEX_SECRET_RESOLVER_CONFIG_JSON``
+        overlay) and, when it declares ``required_secrets``, calls
+        ``SecretResolver.validate_required_secrets()`` to fail loudly naming
+        every missing/unreachable key at once.
+
+        No-op (returns without raising) when:
+            * ``ONEX_SECRET_RESOLVER_CONFIG_PATH`` is unset or empty, or
+            * the file does not exist (lane has not rendered a config), or
+            * the config renders but declares no ``required_secrets`` (lane
+              has not opted into the gate).
+
+        A malformed rendered config is logged as a non-fatal warning rather
+        than raised: the config is validated on write by
+        ``render_secret_resolver_config.py`` (which already enforces
+        ``ModelSecretResolverConfig``'s ``required_secrets``-must-map-to-
+        Infisical invariant at render/deploy time), so an unreadable file here
+        indicates deploy-time tampering/corruption rather than a routing
+        defect this gate is responsible for catching.
+
+        Policy semantics mirror Step 5 above (``self._prefetch_policy``):
+        ``"required"`` promotes a gate failure to a fatal
+        ``ProtocolConfigurationError`` naming every offending key;
+        ``"best_effort"``/``"disabled"`` log a structured warning and let boot
+        continue.
+
+        Args:
+            infisical_handler: The already-constructed ``HandlerInfisical``
+                used for Step 1-5's ``ConfigPrefetcher`` prefetch above. Reused
+                here rather than opening a second Infisical connection.
+        """
+        config_path_raw = resolve_secret_resolver_config_path()
+        if not config_path_raw:
+            return
+        config_path = Path(config_path_raw)
+        if not config_path.exists():
+            return
+
+        try:
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    "rendered secret resolver config must have a mapping root"
+                )
+            secret_resolver_config = ModelSecretResolverConfig.model_validate(raw)
+        except Exception as exc:  # noqa: BLE001 — boundary: config load/parse
+            logger.warning(
+                "Failed to load rendered secret resolver config at %s for "
+                "required_secrets validation (non-fatal): %s",
+                config_path_raw,
+                sanitize_error_message(exc),
+            )
+            return
+
+        if not secret_resolver_config.required_secrets:
+            return
+
+        # SecretResolver's constructor is typed against the concrete
+        # HandlerInfisical (it also drives the async execute()-based path
+        # elsewhere in that class), while this call site only has the
+        # narrower ProtocolSecretResolver interface used elsewhere in this
+        # module (matches ConfigPrefetcher's own handler typing above). The
+        # object passed here is always a real HandlerInfisical at runtime --
+        # this method is only ever called with the handler built/found a few
+        # lines above in _prefetch_config_from_infisical. Only the sync
+        # get_secret_sync() path (validate_required_secrets ->
+        # get_secret -> _resolve_secret) is exercised here, which
+        # ProtocolSecretResolver already covers structurally.
+        resolver = SecretResolver(
+            config=secret_resolver_config,
+            infisical_handler=cast("HandlerInfisical", infisical_handler),
+        )
+        try:
+            resolver.validate_required_secrets()
+        except SecretResolutionError as exc:
+            if self._prefetch_policy == "required":
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="validate_required_secrets",
+                )
+                raise ProtocolConfigurationError(
+                    f"Required-secrets presence gate failed (OMN-14951): {exc}",
+                    context=context,
+                ) from exc
+            logger.warning(
+                "Required-secrets presence gate failed but prefetch_policy=%r "
+                "tolerates it (non-fatal, OMN-14951): %s",
+                self._prefetch_policy,
+                sanitize_error_message(exc),
             )
 
     async def _resolve_handler_dependencies(
