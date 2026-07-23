@@ -23,9 +23,11 @@ Three legs, each guarded here against silent reversion:
    the observed-unhealthy STOP; the "may be UNHEALTHY" claim is reserved for
    a gate that actually ran and failed.
 3. Operator-env provisioning: deploy-runtime.sh and both refresh scripts
-   honor OMNIBASE_OPERATOR_ENV_FILE, and the runner compose provisions the
-   file read-only at a neutral path (never under /home/runner/.omnibase,
-   whose state/ subtree must stay runner-writable for receipts).
+   honor OMNIBASE_OPERATOR_ENV_FILE, and the runner compose bind-mounts the
+   host operator env read-only at a neutral path. Root-phase init copies it
+   into runner-owned credentials storage before job steps run (never under
+   /home/runner/.omnibase, whose state/ subtree must stay runner-writable
+   for receipts).
 """
 
 from __future__ import annotations
@@ -182,9 +184,22 @@ def test_scripts_honor_parameterized_operator_env(script: Path) -> None:
 def test_compose_deploy_runner_provisions_operator_env_readonly() -> None:
     svc = _deploy_runner_service()
     env = svc["environment"]
-    assert env.get("OMNIBASE_OPERATOR_ENV_FILE") == "/run/omnibase-operator.env", (
-        "deploy runner must point OMNIBASE_OPERATOR_ENV_FILE at the neutral "
-        "read-only mount path"
+    assert (
+        env.get("OMNIBASE_OPERATOR_ENV_FILE")
+        == "/home/runner/.runner-creds/operator.env"
+    ), (
+        "deploy runner must point OMNIBASE_OPERATOR_ENV_FILE at the "
+        "runner-owned root-phase-init copy, not the raw host-owner mount"
+    )
+    entrypoint = "\n".join(str(part) for part in svc["entrypoint"])
+    assert re.search(
+        r'install -o "\$\$\{runner_uid\}" -g "\$\$\{runner_gid\}" -m 0400\s+\\\s+'
+        r"/run/omnibase-operator\.env "
+        r"/home/runner/\.runner-creds/operator\.env",
+        entrypoint,
+    ), (
+        "deploy runner root-phase init must copy the unreadable-by-runner "
+        "host mount into runner-owned credentials storage at mode 0400"
     )
     volumes = [str(v) for v in svc["volumes"]]
     op_binds = [v for v in volumes if v.endswith(":/run/omnibase-operator.env:ro")]
