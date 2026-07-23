@@ -585,7 +585,7 @@ class MixinKafkaDlq:
         dlq_topic: str | None = None,
         failure_class: str | None = None,
         validation_detail: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
         Cases where message conversion fails before we have
@@ -613,9 +613,20 @@ class MixinKafkaDlq:
                 detail (OMN-14492) for the ``publisher_malformed`` case,
                 carried as its own structured field.
 
+        Returns:
+            ``True`` if the DLQ message was actually published (producer
+            send acked within timeout), ``False`` otherwise (rejected
+            input, producer unavailable, or the send itself failed/timed
+            out). Callers that gate an offset commit on durable DLQ
+            persistence (OMN-14936) MUST check this return value instead
+            of assuming the write succeeded just because no exception
+            escaped this method.
+
         Note:
             This method logs errors if DLQ publishing fails but does not raise
-            exceptions to prevent cascading failures in the consumer loop.
+            exceptions to prevent cascading failures in the consumer loop. The
+            boolean return value is the only signal of actual persistence
+            success.
         """
         # Validate original_topic - reject whitespace-only values
         if not original_topic or not original_topic.strip():
@@ -627,7 +638,7 @@ class MixinKafkaDlq:
                     "failure_type": failure_type,
                 },
             )
-            return
+            return False
 
         # Track timing for metrics
         start_time = datetime.now(UTC)
@@ -865,6 +876,8 @@ class MixinKafkaDlq:
 
         # Invoke DLQ callbacks
         await self._invoke_dlq_callbacks(dlq_event)
+
+        return success
 
 
 __all__: list[str] = ["MixinKafkaDlq", "DlqCallbackType"]

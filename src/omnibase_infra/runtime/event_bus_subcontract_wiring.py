@@ -534,7 +534,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         dlq_topic: str | None = None,
         failure_class: str | None = None,
         validation_detail: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Publish failed message to Dead Letter Queue.
 
         Delegates to the event bus if it supports DLQ publishing.
@@ -558,6 +558,18 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 a glance instead of requiring a log dig.
             validation_detail: Optional real pydantic ``ValidationError``
                 detail (OMN-14492) for the ``publisher_malformed`` case.
+
+        Returns:
+            ``True`` when it is safe for the caller to commit the offset:
+            either the DLQ write was confirmed persisted, or DLQ is
+            deliberately disabled by config (``ModelDlqConfig.enabled ==
+            False`` is a documented drop-and-commit policy, not a failure).
+            ``False`` when DLQ is enabled but the message was NOT durably
+            persisted (duck-typed method missing, the publish call raised,
+            or the underlying publish reported non-persistence) -- callers
+            MUST NOT commit the offset in that case (OMN-14936): committing
+            past an un-persisted DLQ record is exactly the silent,
+            unrecoverable drop this return value exists to prevent.
         """
         if not self._dlq_config.enabled:
             self._logger.debug(
@@ -566,14 +578,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 str(correlation_id),
                 error_category,
             )
-            return
+            return True
 
         # Duck-type check for DLQ publish method
         publish_dlq_fn = getattr(self._event_bus, "_publish_raw_to_dlq", None)
         if publish_dlq_fn is not None and callable(publish_dlq_fn):
             try:
                 resolved_dlq_topic = dlq_topic or get_dlq_topic_for_original(topic)
-                await publish_dlq_fn(
+                dlq_result = await publish_dlq_fn(
                     original_topic=topic,
                     raw_msg=message,
                     error=error,
@@ -584,34 +596,63 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     failure_class=failure_class,
                     validation_detail=validation_detail,
                 )
-                self._logger.warning(
-                    "dlq_published topic=%s error_category=%s error_type=%s "
-                    "correlation_id=%s dlq_topic=%s failure_class=%s",
-                    topic,
-                    error_category,
-                    type(error).__name__,
-                    str(correlation_id),
-                    resolved_dlq_topic,
-                    failure_class or "unclassified",
-                )
+                # OMN-14936: only an explicit ``False`` return counts as a
+                # confirmed non-persist -- legacy/duck-typed implementations
+                # (and test doubles) that still return ``None`` are treated
+                # as success, preserving prior behavior for callers that
+                # haven't been updated to the bool contract yet. The real
+                # MixinKafkaDlq._publish_raw_to_dlq always returns a real
+                # bool now, so this is only a compatibility allowance for
+                # third-party/legacy duck-typed event buses.
+                dlq_persisted = dlq_result is not False
+                if dlq_persisted:
+                    self._logger.warning(
+                        "dlq_published topic=%s error_category=%s error_type=%s "
+                        "correlation_id=%s dlq_topic=%s failure_class=%s",
+                        topic,
+                        error_category,
+                        type(error).__name__,
+                        str(correlation_id),
+                        resolved_dlq_topic,
+                        failure_class or "unclassified",
+                    )
+                else:
+                    self._logger.error(
+                        "dlq_publish_not_persisted topic=%s error_category=%s "
+                        "error_type=%s correlation_id=%s dlq_topic=%s "
+                        "failure_class=%s -- offset will NOT be committed",
+                        topic,
+                        error_category,
+                        type(error).__name__,
+                        str(correlation_id),
+                        resolved_dlq_topic,
+                        failure_class or "unclassified",
+                    )
+                return dlq_persisted
             except Exception as dlq_error:
                 self._logger.exception(
-                    "dlq_publish_failed topic=%s error=%s correlation_id=%s",
+                    "dlq_publish_failed topic=%s error=%s correlation_id=%s "
+                    "-- offset will NOT be committed",
                     topic,
                     str(dlq_error),
                     str(correlation_id),
                 )
+                return False
         else:
-            # Fallback: log at ERROR level if DLQ not available
+            # Fallback: log at ERROR level if DLQ not available. DLQ is
+            # enabled by config but this event bus cannot durably persist
+            # the record -- fail closed (OMN-14936).
             self._logger.error(
                 "dlq_not_available topic=%s error_category=%s error_type=%s "
-                "error_message=%s correlation_id=%s",
+                "error_message=%s correlation_id=%s -- offset will NOT be "
+                "committed",
                 topic,
                 error_category,
                 type(error).__name__,
                 str(error),
                 str(correlation_id),
             )
+            return False
 
     def _get_retry_count(self, correlation_id: UUID) -> int:
         """Get current retry count for a correlation ID.
@@ -852,7 +893,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                             target_name=topic,
                         ),
                     )
-                    await self._publish_to_dlq(
+                    dlq_persisted = await self._publish_to_dlq(
                         topic,
                         message,
                         no_dispatcher_error,
@@ -869,6 +910,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                             else None
                         ),
                     )
+                    # OMN-14936: a no_dispatcher drop must leave a durable DLQ
+                    # record before the offset advances. If the DLQ write was
+                    # not confirmed, withhold the commit entirely -- Kafka
+                    # will redeliver this message and we retry the DLQ write
+                    # rather than silently losing it. _publish_to_dlq already
+                    # logged the non-persistence loudly at ERROR level.
+                    if not dlq_persisted:
+                        return
                     if self._should_commit_after_handler():
                         await self._commit_offset(message, correlation_id)
                     self._clear_retry_count(correlation_id)
@@ -900,9 +949,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 )
 
                 if self._dlq_config.on_content_error == "dlq_and_commit":
-                    await self._publish_to_dlq(
+                    dlq_persisted = await self._publish_to_dlq(
                         topic, message, e, correlation_id, "content", consumer_group
                     )
+                    # OMN-14936: withhold the commit if the DLQ write was not
+                    # confirmed durable -- Kafka will redeliver rather than
+                    # silently dropping the message past an un-persisted
+                    # DLQ record.
+                    if not dlq_persisted:
+                        return
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
 
@@ -926,9 +981,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 )
 
                 if self._dlq_config.on_content_error == "dlq_and_commit":
-                    await self._publish_to_dlq(
+                    dlq_persisted = await self._publish_to_dlq(
                         topic, message, e, correlation_id, "content", consumer_group
                     )
+                    # OMN-14936: withhold the commit if the DLQ write was not
+                    # confirmed durable -- Kafka will redeliver rather than
+                    # silently dropping the message past an un-persisted
+                    # DLQ record.
+                    if not dlq_persisted:
+                        return
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
 
@@ -957,9 +1018,17 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 if is_exhausted:
                     # Retry budget exhausted - check policy
                     if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
-                        await self._publish_to_dlq(
+                        dlq_persisted = await self._publish_to_dlq(
                             topic, message, e, correlation_id, "infra", consumer_group
                         )
+                        # OMN-14936: do NOT commit or clear the retry count if
+                        # the DLQ write was not confirmed durable. Leaving the
+                        # retry count in place means the next redelivery is
+                        # still "exhausted" and retries the DLQ write instead
+                        # of silently dropping the message past an
+                        # un-persisted DLQ record.
+                        if not dlq_persisted:
+                            return
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
                         return  # Handled - don't re-raise
@@ -987,9 +1056,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
                 if is_exhausted:
                     if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
-                        await self._publish_to_dlq(
+                        dlq_persisted = await self._publish_to_dlq(
                             topic, message, e, correlation_id, "infra", consumer_group
                         )
+                        # OMN-14936: do NOT commit or clear the retry count if
+                        # the DLQ write was not confirmed durable -- see the
+                        # RuntimeHostError branch above for rationale.
+                        if not dlq_persisted:
+                            return
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
                         return
