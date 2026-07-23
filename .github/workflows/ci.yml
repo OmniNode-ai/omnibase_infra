@@ -918,6 +918,44 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_plugin_env_service_completeness.py -v
 
+  occ-born-path-trigger-coverage:
+    needs: occ-preflight
+    name: "OCC Born-Path Trigger Coverage (OMN-14987)"
+    # OMNI_RUNNER_SELECTOR_V1 -- trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: OCC born-path trigger coverage check
+        run: |
+          echo "================================================================"
+          echo "Guardrail (OMN-14987): call-occ-autobind.yml and"
+          echo "call-occ-companion-effect.yml must listen for the full set of"
+          echo "PR events that can make a PR mint-eligible (opened, synchronize,"
+          echo "reopened, ready_for_review). A missing trigger type is silent --"
+          echo "no run fires, nothing goes red -- so this is a structural gate,"
+          echo "not a behavioral one."
+          echo "================================================================"
+          uv run pytest tests/ci/test_occ_born_path_trigger_coverage.py -v
+
   compose-required-env-coverage:
     needs: occ-preflight
     name: "Compose Required-Env Coverage (OMN-5439)"
