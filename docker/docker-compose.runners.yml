@@ -981,6 +981,19 @@ services:
       RUNNER_GROUP: ""
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
       OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
+      # OMN-14958: the runtime_build scripts + deploy-runtime.sh need the
+      # operator env (POSTGRES_PASSWORD etc.) for compose interpolation, but
+      # this container's $HOME carries no ~/.omnibase/.env -- deploy run
+      # 29977968728 crashed on exactly that. Point the scripts at the
+      # read-only bind mount below (never at /home/runner/.omnibase, whose
+      # state/ subtree must stay runner-writable for refresh receipts).
+      OMNIBASE_OPERATOR_ENV_FILE: /run/omnibase-operator.env
+      # OMN-14958: health-gate/rollback-gate probes. Inside this container
+      # localhost is the container itself, so the refresh scripts' default
+      # http://localhost:18085|8085 probes die ECONNREFUSED and report a
+      # false "lane unhealthy" STOP. host.docker.internal resolves to the
+      # host-gateway (extra_hosts below), where the lane ports are published.
+      LANE_PROBE_HOST: host.docker.internal
       # Defense-in-depth safe.directory for the 5 PRIVATE clones. The
       # load-bearing exemption is the scoped `git -c safe.directory=<clone>`
       # committed in the runtime_build scripts themselves (OMN-14900); this
@@ -1003,10 +1016,22 @@ services:
       # it; that reopens the uid-mismatch write surface into clones this
       # runner does not own.
       - ${DEPLOY_RUNNER_OMNI_HOME:?}:${DEPLOY_RUNNER_OMNI_HOME:?}
+      # OMN-14958: host operator env file, read-only, at a NEUTRAL path.
+      # REQUIRED (fail-fast `:?`, same policy as DEPLOY_RUNNER_OMNI_HOME):
+      # a silent default would let docker create a DIRECTORY at a bogus host
+      # path and the scripts would crash later with a misleading error. Do
+      # NOT mount this at /home/runner/.omnibase/.env -- docker would create
+      # root-owned intermediate dirs there and break the runner-writable
+      # ~/.omnibase/state receipt tree.
+      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - deploy-runner-creds:/home/runner/.runner-creds
+    # OMN-14958: host-gateway alias so LANE_PROBE_HOST=host.docker.internal
+    # reaches the lane ports published on the host (18085/8085 etc.).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     group_add:
       - "984" # Match host Docker socket GID for DinD access
     healthcheck:

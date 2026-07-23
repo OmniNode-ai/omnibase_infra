@@ -13,13 +13,21 @@
 # creating the tag ref on GitHub so a `push: tags:` workflow trigger can fire.
 #
 # Tag scheme: lab/<lane>/<utc>-<shortsha>, lane in {dev, stability}. The tag
-# is cut LOCALLY on all 5 sibling clones at each clone's own resolved SHA for
-# <ref> (so a single tag name resolves in all 5 repos even though the ref
-# string itself never existed in the other 4) but CREATED ON GITHUB ON THE
-# ANCHOR REPO ONLY (omnibase_infra) -- the deploy step's own checkout only
-# needs the other 4 repos' tags to exist locally (git checkout <tag> works
-# against a local-only tag), and pushing to all 5 GitHub repos would add
-# write surface with no behavior difference (OMN-14889 Fork 2).
+# is cut LOCALLY on all 5 sibling clones (so a single tag name resolves in
+# all 5 repos) but CREATED ON GITHUB ON THE ANCHOR REPO ONLY
+# (omnibase_infra) -- the deploy step's own checkout only needs the other 4
+# repos' tags to exist locally (git checkout <tag> works against a
+# local-only tag), and pushing to all 5 GitHub repos would add write surface
+# with no behavior difference (OMN-14889 Fork 2).
+#
+# REF RESOLUTION (OMN-14956): <ref> is resolved in the ANCHOR clone
+# (omnibase_infra); it is the only repo whose commit space <ref> is
+# guaranteed to live in. Each SIBLING clone tags at its own resolution of
+# <ref> when that resolves there (branch/tag names like origin/dev do), and
+# otherwise FALLS BACK, loudly, to the sibling's own origin/dev -- a raw
+# omnibase_infra commit SHA can never resolve in the other 4 repos, and the
+# pre-fix per-sibling `rev-parse <ref>` died exit 128 at omnibase_core
+# despite usage advertising `--ref <branch|tag|sha>` (run 29977699589).
 #
 # OMN-14900: the GitHub-side tag is created via `gh api .../git/refs` (the
 # workflow token, contents:write), NOT `git push` from a clone -- the deploy
@@ -29,9 +37,18 @@
 # with `-c safe.directory=<clone>` (see git_clone below).
 #
 # This script does NOT deploy anything -- it only tags + creates the GitHub
-# ref. The deploy step is a separate workflow job that reacts to the tag push
-# event (see .github/workflows/release-train-lab.yml) and calls
-# refresh_stability_lane.sh (stability) or refresh_dev_lane.sh (dev).
+# ref, and (when $GITHUB_OUTPUT is set) publishes the cut tag name as a step
+# output (`tag=<TAG>`) for the calling workflow.
+#
+# TRIGGER REALITY (OMN-14957): a ref created with the workflow's own
+# GITHUB_TOKEN does NOT fire `push: tags:` workflows -- GitHub suppresses
+# event delivery for default-token mutations (documented anti-recursion
+# behavior; OMN-9426 class). release-train-lab.yml therefore CHAINS its
+# deploy job onto the cut-tag job in the SAME run (needs: cut-tag, keyed off
+# the `tag` output above). The `push: tags:` trigger remains ONLY for tags
+# cut/pushed with non-GITHUB_TOKEN credentials (e.g. an operator
+# workstation). The deploy job calls refresh_stability_lane.sh (stability)
+# or refresh_dev_lane.sh (dev).
 #
 # Default is a DRY-RUN plan; pass --execute to actually cut + push.
 #
@@ -66,7 +83,7 @@ LANE=""
 MODE="plan"
 
 usage() {
-    sed -n '4,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,61p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -163,29 +180,59 @@ if [[ "${MODE}" != "execute" ]]; then
 fi
 
 # --- execute: cut locally on all 5, create the GitHub ref on the anchor -----
-ANCHOR_SHA=""
+# OMN-14956: resolve --ref in the ANCHOR clone FIRST, with a named error --
+# the anchor is the only repo whose commit space --ref is guaranteed to live
+# in (usage advertises <branch|tag|sha>, and a raw sha only exists here).
+ANCHOR_CLONE="${OMNI_HOME}/${ANCHOR_REPO}"
+if ! ANCHOR_SHA="$(git_clone "${ANCHOR_CLONE}" rev-parse "${REF}^{commit}" 2>/dev/null)"; then
+    err "--ref '${REF}' does not resolve to a commit in the anchor clone (${ANCHOR_CLONE})."
+    err "  Pass a ref that exists in ${ANCHOR_REPO}: a branch (origin/dev), a tag, or a"
+    err "  full/short ${ANCHOR_REPO} commit SHA reachable from a fetched ref."
+    exit 1
+fi
+
+# Sibling fallback ref used when --ref does not resolve in a sibling clone
+# (always the case for a raw anchor SHA). Freshly fetched by the execute-mode
+# preflight above.
+readonly SIBLING_FALLBACK_REF="origin/dev"
+
 for repo in "${TAG_REPOS[@]}"; do
     clone="${OMNI_HOME}/${repo}"
     if ! git_clone "${clone}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if [[ "${repo}" == "${ANCHOR_REPO}" ]]; then
+            err "anchor clone at ${clone} is not a git work tree; refusing to continue."
+            exit 1
+        fi
         log "skip tag ${repo}: not a git clone at ${clone}"
         continue
     fi
-    sha="$(git_clone "${clone}" rev-parse "${REF}^{commit}")"
+    if [[ "${repo}" == "${ANCHOR_REPO}" ]]; then
+        sha="${ANCHOR_SHA}"
+    elif sha="$(git_clone "${clone}" rev-parse "${REF}^{commit}" 2>/dev/null)"; then
+        : # --ref resolves in this sibling (branch/tag name) -- use it as-is.
+    elif sha="$(git_clone "${clone}" rev-parse "${SIBLING_FALLBACK_REF}^{commit}" 2>/dev/null)"; then
+        log "NOTE ${repo}: --ref '${REF}' does not resolve here (anchor-only ref, e.g. a raw"
+        log "  ${ANCHOR_REPO} SHA) -- falling back to this sibling's own ${SIBLING_FALLBACK_REF} (${sha:0:12})."
+    else
+        err "${repo}: neither --ref '${REF}' nor fallback '${SIBLING_FALLBACK_REF}' resolves in ${clone}."
+        err "  The clone is present but has no usable ref -- re-provision it (ensure_runner_clones.sh)"
+        err "  or fetch its origin before cutting a release-train tag."
+        exit 1
+    fi
     git_clone "${clone}" tag -f "${TAG}" "${sha}" >/dev/null
     log "tagged ${repo}: ${TAG} -> ${sha:0:12}"
-    if [[ "${repo}" == "${ANCHOR_REPO}" ]]; then
-        ANCHOR_SHA="${sha}"
-    fi
 done
-
-if [[ -z "${ANCHOR_SHA}" ]]; then
-    err "anchor repo ${ANCHOR_REPO} was not tagged (clone missing/broken at ${OMNI_HOME}/${ANCHOR_REPO})."
-    err "  Refusing to create a GitHub ref whose SHA was never resolved locally."
-    exit 1
-fi
 
 log "creating refs/tags/${TAG} on GitHub (${ANCHOR_GITHUB_REPO}) at ${ANCHOR_SHA:0:12} via gh api..."
 gh api "repos/${ANCHOR_GITHUB_REPO}/git/refs" \
     -f ref="refs/tags/${TAG}" \
     -f sha="${ANCHOR_SHA}" >/dev/null
-log "created. This ref creation fires .github/workflows/release-train-lab.yml's deploy job."
+# OMN-14957: this GITHUB_TOKEN-created ref does NOT fire `push: tags:`
+# workflows (GitHub suppresses default-token event delivery). The deploy job
+# is chained in-run by release-train-lab.yml via the step output below; the
+# push trigger only fires for refs created with non-GITHUB_TOKEN credentials.
+log "created. NOTE: a GITHUB_TOKEN-created ref fires NO push:tags workflow -- the"
+log "  release-train-lab.yml deploy job runs chained in this same workflow run."
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+fi

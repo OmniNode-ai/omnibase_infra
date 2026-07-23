@@ -58,16 +58,20 @@ VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dev_refresh.py"
 # this script also issues direct `docker compose` calls (container
 # resolution, rollback recreate) that need the same vars in scope.
 _OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
+# OMN-14958: operator env path is parameterized (same knob as deploy-runtime.sh)
+# so the containerized deploy runner can point at its provisioned read-only
+# mount instead of a ${HOME} that carries no operator env.
+OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
 if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/docker/runtime-policy.env"
     set +a
 fi
-if [[ -f "${HOME}/.omnibase/.env" ]]; then
+if [[ -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     set -a
     # shellcheck source=/dev/null
-    source "${HOME}/.omnibase/.env"
+    source "${OMNIBASE_OPERATOR_ENV_FILE}"
     set +a
 fi
 if [[ -n "${_OPERATOR_OMNI_HOME}" ]]; then
@@ -82,10 +86,15 @@ readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
 readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 
+# OMN-14958: probe host parameterized -- localhost is only correct ON the lane
+# host; inside the containerized deploy runner it is the runner container and
+# every probe dies ECONNREFUSED (false "lane unhealthy"). The runner compose
+# sets LANE_PROBE_HOST=host.docker.internal; flags still override.
+LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
-MANIFEST_URL="http://localhost:8085/v1/introspection/manifest"
-HEALTH_URL="http://localhost:8085/health"
+MANIFEST_URL="http://${LANE_PROBE_HOST}:8085/v1/introspection/manifest"
+HEALTH_URL="http://${LANE_PROBE_HOST}:8085/health"
 MODE="plan"
 TRIGGERING_TAG=""
 
@@ -512,11 +521,25 @@ elif [[ "${BRANCH}" == "warm" ]]; then
     if [[ "${GATE2_OVERALL}" == "PASS" ]]; then
         RESULT="FAILED_ROLLED_BACK"
         log "Rollback restored a healthy lane. Refresh FAILED but the lane is HEALTHY."
+    elif [[ "${GATE2_OVERALL}" == "INFRA_ERROR" ]]; then
+        # OMN-14958: INFRA_ERROR = probes could not RUN (lane unreachable from
+        # this probe context) -- never claim lane damage the gate never saw.
+        RESULT="FAILED"
+        err "=============================================================="
+        err "STOP AND REPORT: post-rollback health-gate is INFRA_ERROR -- the"
+        err "lane is UNREACHABLE FROM THIS PROBE CONTEXT, not proven unhealthy."
+        err "Probes attempted: ${HEALTH_URL} / ${MANIFEST_URL}. If this ran"
+        err "inside the containerized deploy runner, set LANE_PROBE_HOST (or"
+        err "--health-url/--manifest-url) to a host reachable from here, and"
+        err "verify the lane's true state from a host that can reach it before"
+        err "treating this as lane damage. Do not retry automatically."
+        err "=============================================================="
     else
         RESULT="FAILED"
         err "=============================================================="
         err "STOP AND REPORT: rollback did NOT restore a healthy lane."
-        err "The dev lane may be UNHEALTHY right now. Do not retry automatically."
+        err "The dev lane may be UNHEALTHY right now (observed-unhealthy gate"
+        err "readback, not a probe-context error). Do not retry automatically."
         err "=============================================================="
     fi
 else
