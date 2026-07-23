@@ -60,6 +60,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.testing.model_publisher_metrics import (
     ModelPublisherMetrics,
 )
@@ -210,6 +211,11 @@ class AdapterProtocolEventPublisherKafka:
             - correlation_id: Stored in envelope.correlation_id
             - causation_id: Stored in envelope.metadata.tags["causation_id"]
             - Both IDs are preserved through serialization for full traceability
+            - The SAME correlation_id is stamped onto the Kafka message HEADER
+              (via an explicit ModelEventHeaders passed to bus.publish()) so
+              header-based tracing/consumers never diverge from the envelope's
+              correlation_id (OMN-14962). Without this, EventBusKafka.publish()
+              mints its own, unrelated correlation_id when no headers are given.
 
         Error Handling:
             All exceptions are caught and logged. On any failure, returns False
@@ -260,9 +266,29 @@ class AdapterProtocolEventPublisherKafka:
             if partition_key is not None:
                 key_bytes = partition_key.encode("utf-8")
 
+            # Resolve the correlation_id shared by the envelope AND the Kafka
+            # header so header-based tracing never diverges from the
+            # payload-embedded correlation (OMN-14962). If the envelope ended
+            # up with no correlation_id (caller passed None), mint a single
+            # UUID here and stamp it onto the envelope too, so both surfaces
+            # still agree instead of each independently minting their own.
+            resolved_correlation_id = envelope.correlation_id
+            if resolved_correlation_id is None:
+                resolved_correlation_id = uuid4()
+                envelope = envelope.with_correlation_id(resolved_correlation_id)
+
             # Serialize envelope to JSON bytes
             envelope_dict = envelope.model_dump(mode="json")
             value_bytes = json.dumps(envelope_dict).encode("utf-8")
+
+            # Build headers explicitly so EventBusKafka.publish() does not
+            # fall back to minting its own, independent correlation_id.
+            headers = ModelEventHeaders(
+                source=self._service_name,
+                event_type=event_type,
+                correlation_id=resolved_correlation_id,
+                timestamp=start_time,
+            )
 
             # Publish to underlying bus
             bus = self._get_bus()
@@ -270,6 +296,7 @@ class AdapterProtocolEventPublisherKafka:
                 topic=target_topic,
                 key=key_bytes,
                 value=value_bytes,
+                headers=headers,
             )
 
             # Update success metrics (coroutine-safe)

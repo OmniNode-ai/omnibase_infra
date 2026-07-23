@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -1080,3 +1081,142 @@ class TestMetadataPreservation:
         )
 
         assert success is True
+
+
+# =============================================================================
+# Kafka Header / Envelope Correlation ID Parity Tests (OMN-14962)
+# =============================================================================
+
+
+async def _consume_one_raw_message(
+    bootstrap_servers: str,
+    topic: str,
+    timeout_seconds: float = 15.0,
+) -> tuple[dict[str, bytes], bytes]:
+    """Consume a single raw message from `topic` and return (headers, value).
+
+    Drives the ACTUAL Kafka wire protocol via a real AIOKafkaConsumer
+    (auto_offset_reset="earliest", fresh unique group so no offset is
+    inherited from another test run) rather than stubbing/mocking the
+    producer or serializer. `headers` is a dict of the raw Kafka message
+    headers (key -> raw bytes value); `value` is the raw message value bytes.
+    """
+    from aiokafka import AIOKafkaConsumer
+
+    consumer = AIOKafkaConsumer(
+        topic,
+        bootstrap_servers=bootstrap_servers,
+        group_id=f"test-header-parity-{uuid4().hex[:12]}",
+        auto_offset_reset="earliest",
+        enable_auto_commit=False,
+    )
+    await consumer.start()
+    try:
+        record = await asyncio.wait_for(consumer.getone(), timeout=timeout_seconds)
+    finally:
+        await consumer.stop()
+
+    raw_headers: dict[str, bytes] = dict(record.headers or [])
+    return raw_headers, record.value
+
+
+class TestKafkaHeaderCorrelationIdParity:
+    """Regression coverage for OMN-14962.
+
+    AdapterProtocolEventPublisherKafka.publish() must propagate the
+    envelope/payload correlation_id into the Kafka message HEADER instead of
+    letting EventBusKafka.publish() mint an independent, unrelated UUID when
+    no explicit `headers` argument is supplied. These tests drive the real
+    publish seam end-to-end (adapter -> EventBusKafka -> real Kafka broker)
+    and read the raw Kafka headers back via a real consumer -- not a mocked
+    bus/serializer -- so a regression that reintroduces the mismatch fails
+    for real.
+    """
+
+    @pytest.mark.asyncio
+    async def test_header_correlation_id_matches_envelope_with_known_correlation(
+        self,
+        adapter: object,
+        kafka_bootstrap_servers: str,
+        ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
+    ) -> None:
+        """Header correlation_id must equal the envelope correlation_id.
+
+        Publishes with an explicit, known correlation_id and asserts the raw
+        Kafka header `correlation_id` equals both the value passed in AND the
+        `correlation_id` field of the envelope decoded from the raw message
+        value -- proving header and payload never diverge.
+        """
+        topic = await ensure_test_topic(f"test.header.corr.known.{uuid4().hex[:8]}", 1)
+        known_correlation_id = uuid4()
+
+        success = await adapter.publish(
+            event_type="test.header.correlation",
+            payload={"data": "header-parity-test"},
+            topic=topic,
+            correlation_id=str(known_correlation_id),
+        )
+        assert success is True
+
+        raw_headers, raw_value = await _consume_one_raw_message(
+            kafka_bootstrap_servers, topic
+        )
+
+        assert "correlation_id" in raw_headers, (
+            f"Kafka message missing correlation_id header. Got headers: {raw_headers}"
+        )
+        header_correlation_id = UUID(raw_headers["correlation_id"].decode("utf-8"))
+
+        envelope_dict = json.loads(raw_value.decode("utf-8"))
+        envelope_correlation_id = UUID(envelope_dict["correlation_id"])
+
+        assert header_correlation_id == known_correlation_id, (
+            f"Header correlation_id {header_correlation_id} does not match the "
+            f"correlation_id passed to publish() {known_correlation_id}. "
+            "EventBusKafka.publish() likely minted its own UUID instead of "
+            "using the headers propagated by the adapter."
+        )
+        assert header_correlation_id == envelope_correlation_id, (
+            f"Header correlation_id {header_correlation_id} does not match the "
+            f"envelope/payload correlation_id {envelope_correlation_id}. "
+            "Header-based tracing would attribute this event to a correlation "
+            "that exists nowhere else."
+        )
+
+    @pytest.mark.asyncio
+    async def test_header_correlation_id_matches_envelope_when_correlation_none(
+        self,
+        adapter: object,
+        kafka_bootstrap_servers: str,
+        ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
+    ) -> None:
+        """When no correlation_id is supplied, header and envelope still agree.
+
+        A freshly-minted UUID is acceptable here (no known correlation to
+        assert against), but the SAME UUID must land in both the header and
+        the envelope -- not two independent uuid4() mints.
+        """
+        topic = await ensure_test_topic(f"test.header.corr.none.{uuid4().hex[:8]}", 1)
+
+        success = await adapter.publish(
+            event_type="test.header.correlation.none",
+            payload={"data": "header-parity-no-correlation"},
+            topic=topic,
+        )
+        assert success is True
+
+        raw_headers, raw_value = await _consume_one_raw_message(
+            kafka_bootstrap_servers, topic
+        )
+
+        assert "correlation_id" in raw_headers
+        header_correlation_id = UUID(raw_headers["correlation_id"].decode("utf-8"))
+
+        envelope_dict = json.loads(raw_value.decode("utf-8"))
+        envelope_correlation_id = UUID(envelope_dict["correlation_id"])
+
+        assert header_correlation_id == envelope_correlation_id, (
+            f"Header correlation_id {header_correlation_id} does not match "
+            f"envelope correlation_id {envelope_correlation_id} when no "
+            "correlation_id was supplied to publish()."
+        )
