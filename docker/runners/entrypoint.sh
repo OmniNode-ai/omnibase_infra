@@ -75,7 +75,7 @@ RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
 MAX_RETRIES=3
 BACKOFF_SECONDS=(20 40 80)
 CRED_CACHE_DIR="/home/runner/.runner-creds"
-LOG_FILE="/tmp/runner-listener.log"
+LOG_FILE="${LOG_FILE:-/tmp/runner-listener.log}"
 
 # ---------------------------------------------------------------------------
 # Listener watchdog (OMN-13915)
@@ -95,6 +95,25 @@ LISTENER_SUPERVISE_MISSES="${LISTENER_SUPERVISE_MISSES:-5}"
 LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
 # LISTENER_PGREP_PATTERN is derived from RUNNER_HOME below (after RUNNER_HOME
 # is resolved) so it matches THIS runner home's listener binary only.
+
+# ---------------------------------------------------------------------------
+# Hung-listener heartbeat watchdog (OMN-14564)
+# ---------------------------------------------------------------------------
+# Incident (2026-07-16..23): 11/64 runners went GitHub-offline for ~6 days
+# with the Runner.Listener process STILL ALIVE — deadlocked inside the
+# AAD/OAuth token-refresh HTTP call while acknowledging a broker job
+# assignment (terminal _diag line: "AAD Correlation ID for this token
+# request: Unknown"). A hung listener passes the OMN-13915 process-existence
+# watchdog forever, never exits (so run.sh never respawns it), and only the
+# Docker healthcheck's _diag heartbeat layer flagged it — with nothing acting
+# on the signal. This watchdog turns that same detection into remediation:
+# when the listener process exists but the newest _diag *.log is older than
+# RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS (same tunable + condition as
+# healthcheck.sh layer 2) for LISTENER_HEARTBEAT_MISSES consecutive supervise
+# ticks, kill the listener explicitly and recycle the wrapper tree. The
+# recycle NEVER fires while a Runner.Worker is executing a job.
+RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS="${RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS:-900}"
+LISTENER_HEARTBEAT_MISSES="${LISTENER_HEARTBEAT_MISSES:-3}"
 
 # ---------------------------------------------------------------------------
 # Credential cache helpers
@@ -249,6 +268,38 @@ trap _request_shutdown TERM INT
 # Watchdog pattern (OMN-13915): match THIS runner home's listener binary path.
 # Dots escaped for pgrep's ERE matching.
 LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Listener}"
+# Worker pattern (OMN-14564): a Runner.Worker process means a job is executing
+# — the heartbeat watchdog must NEVER recycle mid-job.
+WORKER_PGREP_PATTERN="${WORKER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Worker}"
+
+# OMN-14564: mirror of healthcheck.sh layer 2 — returns 0 (stale) when no
+# _diag *.log was modified within RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS. A
+# missing _diag directory under a "live" listener is the same divergence and
+# also reads as stale; the LISTENER_HEARTBEAT_MISSES grace window covers
+# first-registration startup before the listener writes its first log.
+_listener_heartbeat_stale() {
+    local diag_dir="${RUNNER_HOME}/_diag"
+    local max_age_minutes=$(( (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS + 59) / 60 ))
+    local fresh_file
+    fresh_file=$(find "${diag_dir}" -type f -name '*.log' -mmin "-${max_age_minutes}" -print 2>/dev/null | head -n 1)
+    [[ -z "${fresh_file}" ]]
+}
+
+# Kill the wrapper tree AND the listener binary itself (TERM, grace, KILL).
+# The explicit listener pkill is load-bearing for OMN-14564: a listener
+# deadlocked in its token-refresh HTTP call ignores the wrapper-tree TERM,
+# and a surviving hung listener would collide with the respawned listener's
+# broker session.
+_recycle_runner_tree() {
+    local pid="${1}"
+    kill -TERM "${pid}" 2>/dev/null || true
+    pkill -TERM -f "run-helper" 2>/dev/null || true
+    pkill -TERM -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+    sleep 10
+    kill -KILL "${pid}" 2>/dev/null || true
+    pkill -KILL -f "run-helper" 2>/dev/null || true
+    pkill -KILL -f "${LISTENER_PGREP_PATTERN}" 2>/dev/null || true
+}
 
 # Check for credentials in priority order:
 # 1. In-place (container restart — files already in RUNNER_HOME)
@@ -281,13 +332,36 @@ while true; do
 
     # Watchdog: run.sh alive but no Runner.Listener process = the OMN-13915
     # zombie mode. Recycle the wrapper tree so this loop restarts the runner.
+    # Listener process alive but _diag heartbeat stale (and no job running)
+    # = the OMN-14564 hung-listener mode; same recycle, plus an explicit
+    # listener kill because a hung listener never exits on its own.
     supervised_kill=0
     misses=0
+    hb_misses=0
     while kill -0 "${runner_pid}" 2>/dev/null; do
         sleep "${LISTENER_SUPERVISE_INTERVAL}"
         kill -0 "${runner_pid}" 2>/dev/null || break
         if pgrep -f "${LISTENER_PGREP_PATTERN}" >/dev/null 2>&1; then
             misses=0
+            # OMN-14564: process existence is NOT liveness. A worker process
+            # means a job is executing — never recycle mid-job, whatever the
+            # heartbeat says (the Docker healthcheck still surfaces it).
+            if pgrep -f "${WORKER_PGREP_PATTERN}" >/dev/null 2>&1; then
+                hb_misses=0
+                continue
+            fi
+            if _listener_heartbeat_stale; then
+                hb_misses=$((hb_misses + 1))
+                echo "[entrypoint] WATCHDOG: listener process alive but no _diag heartbeat within ${RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS}s (miss ${hb_misses}/${LISTENER_HEARTBEAT_MISSES}) — OMN-14564 hung-listener mode"
+                if [[ ${hb_misses} -ge ${LISTENER_HEARTBEAT_MISSES} ]]; then
+                    echo "[entrypoint] WATCHDOG: listener hung (alive but silent) — killing listener and recycling runner wrapper tree (OMN-14564)"
+                    supervised_kill=1
+                    _recycle_runner_tree "${runner_pid}"
+                    break
+                fi
+            else
+                hb_misses=0
+            fi
             continue
         fi
         misses=$((misses + 1))
@@ -295,11 +369,7 @@ while true; do
         if [[ ${misses} -ge ${LISTENER_SUPERVISE_MISSES} ]]; then
             echo "[entrypoint] WATCHDOG: listener dead-in-container — recycling runner wrapper tree (OMN-13915)"
             supervised_kill=1
-            kill -TERM "${runner_pid}" 2>/dev/null || true
-            pkill -TERM -f "run-helper" 2>/dev/null || true
-            sleep 10
-            kill -KILL "${runner_pid}" 2>/dev/null || true
-            pkill -KILL -f "run-helper" 2>/dev/null || true
+            _recycle_runner_tree "${runner_pid}"
             break
         fi
     done
