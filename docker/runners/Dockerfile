@@ -106,7 +106,15 @@ RUN tmp_dir="$(mktemp -d)" \
     && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/uv
 
-# Install Docker CLI (no daemon — socket mounted at runtime)
+# Install Docker CLI + Compose v2 plugin (no daemon — socket mounted at runtime)
+# OMN-14966: docker-compose-plugin provides `docker compose` v2 (installed at
+# /usr/libexec/docker/cli-plugins/docker-compose). Without it, `docker compose`
+# resolves to nothing inside this runner and every compose-based recreate path
+# dies with `docker: unknown command: docker compose` (exit 125) -- the exact
+# failure that broke both the deploy targeted-recreate AND the rollback
+# targeted-recreate in refresh_stability_lane.sh / refresh_dev_lane.sh from
+# inside the omninode-deploy-runner (deploy run 29977968728). It ships from the
+# same Docker apt repo configured just above, so this is a package add only.
 RUN install -m 0755 -d /etc/apt/keyrings \
     && omni-curl https://download.docker.com/linux/ubuntu/gpg \
         | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -115,7 +123,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
         https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gh CLI
