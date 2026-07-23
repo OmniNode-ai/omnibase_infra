@@ -1,5 +1,6 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Regression guard: OCC born-path trigger workflows must listen for the full
 set of ``pull_request`` events that can make a PR mint-eligible (OMN-14987).
 
