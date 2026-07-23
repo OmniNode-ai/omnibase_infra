@@ -62,24 +62,47 @@ def test_no_setup_env_function() -> None:
 
 
 @pytest.mark.unit
-def test_sources_omnibase_env_at_top() -> None:
-    """deploy-runtime.sh must source ~/.omnibase/.env early in the script."""
+def test_sources_operator_env_at_top() -> None:
+    """deploy-runtime.sh must source the operator env early in the script.
+
+    OMN-14958: the path is parameterized via OMNIBASE_OPERATOR_ENV_FILE
+    (default ${HOME}/.omnibase/.env) so the containerized deploy runner can
+    point at its provisioned read-only mount, and a MISSING file must be a
+    NAMED precondition failure -- not bash's bare `source` crash (which
+    killed deploy run 29977968728 with no actionable error).
+    """
     text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-    # Find the source line (not in a comment)
+    # Parameterized default preserved (~/.omnibase/.env stays the default).
+    default_match = re.search(
+        r'^OMNIBASE_OPERATOR_ENV_FILE="\$\{OMNIBASE_OPERATOR_ENV_FILE:-\$\{HOME\}/\.omnibase/\.env\}"$',
+        text,
+        re.MULTILINE,
+    )
+    assert default_match is not None, (
+        "deploy-runtime.sh must default OMNIBASE_OPERATOR_ENV_FILE to "
+        "${HOME}/.omnibase/.env (OMN-14958 parameterization)"
+    )
+    # The parameterized file is what gets sourced (never a hardcoded $HOME path).
     match = re.search(
-        r'^source\s+["\']?\$\{?HOME\}?/\.omnibase/\.env["\']?',
+        r'^source\s+"\$\{OMNIBASE_OPERATOR_ENV_FILE\}"$',
         text,
         re.MULTILINE,
     )
     assert match is not None, (
-        "deploy-runtime.sh must source ~/.omnibase/.env "
-        "(expected 'source ${HOME}/.omnibase/.env' or similar near top of script)"
+        "deploy-runtime.sh must source ${OMNIBASE_OPERATOR_ENV_FILE} "
+        "(OMN-14958: parameterized operator env sourcing)"
     )
-    # Ensure it appears in the first 50 lines
+    # Ensure the sourcing still happens early (before any deploy logic).
     line_number = text[: match.start()].count("\n") + 1
-    assert line_number <= 50, (
-        f"source ~/.omnibase/.env found at line {line_number}, "
-        "expected within first 50 lines of script"
+    assert line_number <= 80, (
+        f"source ${{OMNIBASE_OPERATOR_ENV_FILE}} found at line {line_number}, "
+        "expected within first 80 lines of script"
+    )
+    # Named, fail-closed guard for the missing-file case.
+    assert "OPERATOR_ENV_MISSING" in text, (
+        "deploy-runtime.sh must emit the named OPERATOR_ENV_MISSING error "
+        "(exit 64) when the operator env file is absent -- a bare `source` "
+        "crash is the OMN-14958 regression"
     )
 
 

@@ -28,14 +28,39 @@ set -euo pipefail
 # Source contract-rendered runtime policy first, then operator env overrides, so
 # all ${VAR} references in docker-compose.infra.yml resolve from exported shell
 # environment without making Compose the owner of activation policy.
-# shellcheck source=/dev/null
+#
+# OMN-14958: the operator env file path is parameterized via
+# OMNIBASE_OPERATOR_ENV_FILE (default: ${HOME}/.omnibase/.env) so execution
+# contexts whose $HOME does not carry the operator env -- the containerized
+# omninode-deploy-runner is the live case -- can point at a provisioned
+# mount instead (docker-compose.runners.yml binds the host operator env at
+# /run/omnibase-operator.env). A MISSING file is a NAMED, actionable
+# precondition failure (exit 64), never bash's bare
+# "source: .../.omnibase/.env: No such file or directory" crash that killed
+# deploy run 29977968728 before any build/compose action.
 SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
+OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
+if [[ ! -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    {
+        echo "[deploy-runtime] ERROR: OPERATOR_ENV_MISSING -- operator env file not found:"
+        echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+        echo "  deploy-runtime.sh requires the operator env (POSTGRES_PASSWORD etc.) for"
+        echo "  docker compose \${VAR} interpolation. Either provision it at"
+        echo "  \${HOME}/.omnibase/.env, or set OMNIBASE_OPERATOR_ENV_FILE to a readable"
+        echo "  env file. In the containerized deploy runner this is the read-only bind"
+        echo "  mount at /run/omnibase-operator.env wired by DEPLOY_RUNNER_OPERATOR_ENV_FILE"
+        echo "  in docker/docker-compose.runners.yml (OMN-14958)."
+    } >&2
+    exit 64
+fi
 set -a
+# shellcheck source=/dev/null
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
-source "${HOME}/.omnibase/.env"
+# shellcheck source=/dev/null
+source "${OMNIBASE_OPERATOR_ENV_FILE}"
 set +a
 if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${OPERATOR_OMNI_HOME}"

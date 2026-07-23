@@ -68,13 +68,17 @@ CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 # recreate. Preserve any operator-set OMNI_HOME/HEALTH_CHECK_URL exactly the
 # way deploy-runtime.sh's own header does.
 _OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
+# OMN-14958: operator env path is parameterized (same knob as deploy-runtime.sh)
+# so the containerized deploy runner can point at its provisioned read-only
+# mount instead of a ${HOME} that carries no operator env.
+OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
 if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/docker/runtime-policy.env"
-    if [[ -f "${HOME}/.omnibase/.env" ]]; then
+    if [[ -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
         # shellcheck source=/dev/null
-        source "${HOME}/.omnibase/.env"
+        source "${OMNIBASE_OPERATOR_ENV_FILE}"
     fi
     set +a
 fi
@@ -103,10 +107,18 @@ declare -A CORE_CONTAINERS=(
 readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
 
 # --- defaults ---------------------------------------------------------------
+# OMN-14958: the health-gate probe host is parameterized. `localhost` is only
+# correct when this script runs ON the lane host itself; inside the
+# containerized deploy runner (bridge network) localhost is the runner
+# container, both probes die ECONNREFUSED, and a healthy lane gets reported
+# as a false "lane unhealthy" STOP (deploy run 29977968728). The runner
+# compose sets LANE_PROBE_HOST=host.docker.internal (host-gateway alias);
+# --manifest-url/--health-url flags still override entirely.
+LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
-MANIFEST_URL="http://localhost:18085/v1/introspection/manifest"
-HEALTH_URL="http://localhost:18085/health"
+MANIFEST_URL="http://${LANE_PROBE_HOST}:18085/v1/introspection/manifest"
+HEALTH_URL="http://${LANE_PROBE_HOST}:18085/health"
 MODE="plan"
 
 usage() {
@@ -467,12 +479,32 @@ else
     if [[ "${GATE2_OVERALL}" == "PASS" ]]; then
         RESULT="FAILED_ROLLED_BACK"
         log "Rollback restored a healthy lane. Refresh FAILED but the lane is HEALTHY."
+    elif [[ "${GATE2_OVERALL}" == "INFRA_ERROR" ]]; then
+        # OMN-14958: an INFRA_ERROR gate means the probes could not RUN (e.g.
+        # ${HEALTH_URL} unreachable from THIS execution context, docker/rpk
+        # missing) -- the lane was never actually observed unhealthy. Do NOT
+        # claim lane damage the gate never saw; that false alarm is exactly
+        # what deploy run 29977968728 emitted from inside the runner container.
+        RESULT="FAILED"
+        err "=============================================================="
+        err "STOP AND REPORT: post-rollback health-gate is INFRA_ERROR -- the"
+        err "lane is UNREACHABLE FROM THIS PROBE CONTEXT, not proven unhealthy."
+        err "Probes attempted: ${HEALTH_URL} / ${MANIFEST_URL}."
+        err "If this ran inside the containerized deploy runner, localhost is"
+        err "the runner container, not the lane host -- set LANE_PROBE_HOST"
+        err "(or --health-url/--manifest-url) to a host reachable from here,"
+        err "then verify the lane's true state from a host that can reach it"
+        err "(e.g. curl the lane's /health on the lane host) before treating"
+        err "this as lane damage. Do not retry automatically."
+        err "=============================================================="
     else
         RESULT="FAILED"
         err "=============================================================="
         err "STOP AND REPORT: rollback did NOT restore a healthy lane."
-        err "The stability-test lane may be UNHEALTHY right now. Do not retry"
-        err "automatically -- this is a STOP condition per operating rules."
+        err "The stability-test lane may be UNHEALTHY right now (health-gate"
+        err "readback FAILED -- this is an observed-unhealthy verdict, not a"
+        err "probe-context error). Do not retry automatically -- this is a"
+        err "STOP condition per operating rules."
         err "Suggested Linear ticket:"
         err "  title: stability-test lane unhealthy after refresh+rollback (OMN-14263 recurrence)"
         err "  body: refresh to ${REF} failed health-gate; rollback to preflight-${UTC_NOW}"

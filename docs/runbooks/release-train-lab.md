@@ -33,10 +33,16 @@ is documented inline in `scripts/runtime_build/refresh_dev_lane.sh`.
    works fine during the deploy step's own checkout, and pushing to 4 more
    GitHub repos would add write surface for no behavior difference.
 
-2. **Tag push fires the `deploy` job** in
-   `.github/workflows/release-train-lab.yml`
-   (`on: push: tags: ['lab/dev/**', 'lab/stability/**']`). The job parses
-   the lane from `github.ref_name` and calls:
+2. **The `deploy` job fires on one of two paths** in
+   `.github/workflows/release-train-lab.yml` (OMN-14957): **chained in the
+   same run** after an execute-mode `cut-tag` (`needs: cut-tag`, keyed off
+   the job's `tag` output) — this is the only path a runner-cut tag can
+   take, because refs created with the workflow's own `GITHUB_TOKEN` never
+   deliver `push` events (GitHub's documented anti-recursion suppression;
+   proven live by run 29977781670, whose ref creation fired nothing) — or
+   via `on: push: tags: ['lab/dev/**', 'lab/stability/**']` for tags pushed
+   with non-`GITHUB_TOKEN` credentials (operator workstation). The job
+   parses the lane from the triggering tag and calls:
    - `refresh_stability_lane.sh --ref <tag> --execute` for a `lab/stability/*`
      tag — REUSED VERBATIM (OMN-14873, zero changes).
    - `refresh_dev_lane.sh --ref <tag> --triggering-tag <tag> --execute` for
@@ -160,6 +166,13 @@ tagged commits, so nothing fired for them.
 #    against docker-compose.runners.yml needs it in the compose environment —
 #    export it or add it to the .env next to the compose file).
 export DEPLOY_RUNNER_OMNI_HOME=/data/omninode/runner_omni_home
+
+# 1b. Export the host path of the operator env file (REQUIRED, OMN-14958:
+#     fail-fast interpolated the same way). It is bind-mounted READ-ONLY at
+#     /run/omnibase-operator.env inside the runner, and the runtime_build
+#     scripts + deploy-runtime.sh read it via OMNIBASE_OPERATOR_ENV_FILE —
+#     without it the deploy job dies before any build (run 29977968728).
+export DEPLOY_RUNNER_OPERATOR_ENV_FILE="${HOME}/.omnibase/.env"
 
 # 2. (Only if the omninode-deploy-runner-creds volume was lost) mint a
 #    REPOSITORY-scoped registration token (valid 1h) — registration is
