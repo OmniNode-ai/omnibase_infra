@@ -41,6 +41,16 @@
 #   declares a projection surface, its schema migration must be eligible for the
 #   same deploy-time materialization path as every other marketplace node.
 #
+# RECURRING DRIFT (OMN-14975, 6th occurrence — see OMN-14556, OMN-14555,
+# OMN-13805, OMN-13746, OMN-13020, OMN-13401): this script and its --check
+# mode only run on the omnibase_infra side, so drift is always DISCOVERED
+# here (by whichever unrelated omnibase_infra commit happens next) but was
+# never PREVENTED at its source. The structural fix is
+# omnimarket's `.github/workflows/node-migration-vendor-parity-gate.yml`,
+# which fails an omnimarket PR touching migrations/*.sql unless the vendored
+# copy already exists here at dev tip — so a new drift-causing merge can no
+# longer land in omnimarket in the first place.
+#
 # USAGE
 #   scripts/sync-node-migrations.sh            # vendor (writes files)
 #   scripts/sync-node-migrations.sh --check    # CI mode: fail if drift exists

@@ -336,6 +336,22 @@ repos:
       # (golden-chain run12 Finding). always_run closes that gap. The script
       # itself returns exit 2 (gate fires) when the omnimarket source is
       # unresolvable unless SYNC_NODE_MIGRATIONS_SKIP_UNRESOLVABLE=1.
+      #
+      # OMN-14975 (6th recurrence of this drift class — OMN-14556, OMN-14555,
+      # OMN-13805, OMN-13746, OMN-13020, OMN-13401 were all the same
+      # mechanical re-vendor-and-close fix): the drift always reappears
+      # because omnimarket has never had any check of its own — every node
+      # migration merge there drifts this always_run hook for whichever
+      # unrelated omnibase_infra commit happens next. The structural fix is
+      # on the omnimarket side: `.github/workflows/node-migration-vendor-parity-gate.yml`
+      # in omnimarket now fails an omnimarket PR that adds/edits a
+      # migrations/*.sql file unless the vendored copy already exists here at
+      # dev tip — so drift can no longer be introduced at all, and this local
+      # hook should stay green going forward without another re-vendor cycle.
+      # `node-migration-sync` remaining absent from required_status_checks
+      # here is tracked separately in scripts/enforcement_parity_manifest.yaml
+      # (MISSING, report-only ratchet, OMN-14556 item 2/3) pending an explicit
+      # branch-protection decision — not re-litigated in this change.
       - id: onex-check-node-migration-sync
         name: ONEX Node Migration Vendor Sync Check
         entry: bash scripts/sync-node-migrations.sh --check
