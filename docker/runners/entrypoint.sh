@@ -65,7 +65,11 @@ fi
 : "${RUNNER_LABELS:?RUNNER_LABELS must be set}"
 : "${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set}"
 
-RUNNER_GROUP="${RUNNER_GROUP:-omnibase-ci}"
+# OMN-14900: no-colon default -- an EXPLICITLY EMPTY RUNNER_GROUP is the
+# opt-out signal for repository-scoped registration (config.sh hard-fails on
+# --runnergroup at repo scope, which would brick re-registration after a
+# container recreate). Unset still defaults to the org fleet group.
+RUNNER_GROUP="${RUNNER_GROUP-omnibase-ci}"
 RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
 
 MAX_RETRIES=3
@@ -197,18 +201,26 @@ _as_runner() {
 
 _register() {
     echo "[entrypoint] Registering runner: ${RUNNER_NAME} @ ${GITHUB_ORG_URL}"
-    echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP}"
+    echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP:-<none: repo-scoped>}"
 
-    _as_runner "${RUNNER_HOME}/config.sh" \
-        --url "${GITHUB_ORG_URL}" \
-        --token "${RUNNER_TOKEN}" \
-        --name "${RUNNER_NAME}" \
-        --labels "${RUNNER_LABELS}" \
-        --runnergroup "${RUNNER_GROUP}" \
-        --work "${RUNNER_WORK_DIR}" \
-        --unattended \
-        --disableupdate \
+    local config_args=(
+        --url "${GITHUB_ORG_URL}"
+        --token "${RUNNER_TOKEN}"
+        --name "${RUNNER_NAME}"
+        --labels "${RUNNER_LABELS}"
+        --work "${RUNNER_WORK_DIR}"
+        --unattended
+        --disableupdate
         --replace
+    )
+    # OMN-14900: --runnergroup only when a group is actually set. Repo-scoped
+    # registration (GITHUB_ORG_URL pointing at a repository, as the deploy
+    # runner does) rejects --runnergroup outright.
+    if [[ -n "${RUNNER_GROUP}" ]]; then
+        config_args+=(--runnergroup "${RUNNER_GROUP}")
+    fi
+
+    _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
 }
 
 _deregister() {

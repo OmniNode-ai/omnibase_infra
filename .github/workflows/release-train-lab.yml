@@ -47,21 +47,27 @@
 # TAGGED COMMIT; a tag cut from a feature branch fires it just as a tag on
 # dev would.
 #
-# The remaining known blocker is NOT provisioning -- it is host-side git
-# access to the ambient $OMNI_HOME clone from inside the runner container.
-# Five runs on 2026-07-21T03:59-04:19Z all failed in the `Refresh stability
-# lane` step, in three distinct forms as intermediate fixes were attempted:
-#   - `fatal: detected dubious ownership in repository at
-#     /data/omninode/omni_home/omnibase_infra` (exit 128)
-#   - `error: cannot open .git/FETCH_HEAD: Permission denied` (exit 255)
-#   - `fatal: 'dev' is already checked out at
-#     /data/omninode/runtime-sync-worktrees/OMN-12618/...` (exit 128)
-# All five died before any container action: zero `docker compose` /
-# `up -d` / `--force-recreate` lines appear in any of the five job logs, so
-# no lane was mutated. Fixing this is an ownership/permissions + worktree
-# contention problem on the runner's view of $OMNI_HOME, not a registration
-# problem. See docker/docker-compose.runners.yml and
+# HOST-SIDE GIT ACCESS (OMN-14900). Five runs on 2026-07-21T03:59-04:19Z all
+# failed in the `Refresh stability lane` step against the then-mounted SHARED
+# /data/omninode/omni_home clones (dubious ownership 128, FETCH_HEAD EACCES
+# 255, `'dev' is already checked out at .../runtime-sync-worktrees/...` 128)
+# -- all before any container action, so no lane was mutated. The committed
+# fix gives the deploy runner a PRIVATE OMNI_HOME (DEPLOY_RUNNER_OMNI_HOME
+# in docker/docker-compose.runners.yml -- dedicated runner-uid-owned clones,
+# identical container path, shared mount REMOVED) plus scoped
+# `git -c safe.directory=<clone>` on every git invocation in the
+# runtime_build scripts, plus automatic clone provisioning
+# (ensure_runner_clones.sh). NOTE: the compose-side half only takes effect
+# when the runner container is RECREATED from the committed compose file --
+# an operator-gated action (the live container also carries the OMN-13915
+# zombie). Until that recreate, the live container still runs its old
+# hand-edited config. See docker/docker-compose.runners.yml and
 # docs/runbooks/release-train-lab.md.
+#
+# The cut-tag job creates the GitHub tag ref via `gh api` with the job's own
+# GITHUB_TOKEN (job-level `permissions: contents: write`) -- the runner's
+# private clones are anonymous public checkouts with no push credentials, so
+# `git push` from a clone is not a supported tag source (OMN-14900).
 
 name: release-train-lab
 
@@ -105,6 +111,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, omnibase-deploy]
     timeout-minutes: 5
+    # OMN-14900: the GitHub tag ref is created via `gh api` with this job's
+    # token (the private runner clones carry no push credentials). Job-level
+    # override of the workflow's top-level `contents: read`.
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -114,6 +125,7 @@ jobs:
           LANE: ${{ inputs.lane }}
           REF: ${{ inputs.ref }}
           EXECUTE: ${{ inputs.execute }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           : "${OMNI_HOME:?OMNI_HOME must be set in the omnibase-deploy runner environment}"

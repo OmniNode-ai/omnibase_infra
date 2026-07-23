@@ -10,21 +10,28 @@
 # half of that mechanism -- it is the tag-cutting block of cut-lab-ref.sh's
 # compute_lab_tag_name()/cut_lab_tags() (OMN-14438/RT-2), extracted verbatim,
 # extended with exactly ONE new capability cut-lab-ref.sh does not have:
-# pushing the tag to GitHub so a `push: tags:` workflow trigger can fire.
+# creating the tag ref on GitHub so a `push: tags:` workflow trigger can fire.
 #
 # Tag scheme: lab/<lane>/<utc>-<shortsha>, lane in {dev, stability}. The tag
 # is cut LOCALLY on all 5 sibling clones at each clone's own resolved SHA for
 # <ref> (so a single tag name resolves in all 5 repos even though the ref
-# string itself never existed in the other 4) but PUSHED TO GITHUB ON THE
+# string itself never existed in the other 4) but CREATED ON GITHUB ON THE
 # ANCHOR REPO ONLY (omnibase_infra) -- the deploy step's own checkout only
 # needs the other 4 repos' tags to exist locally (git checkout <tag> works
 # against a local-only tag), and pushing to all 5 GitHub repos would add
 # write surface with no behavior difference (OMN-14889 Fork 2).
 #
-# This script does NOT deploy anything -- it only tags + pushes. The deploy
-# step is a separate workflow job that reacts to the tag push (see
-# .github/workflows/release-train-lab.yml) and calls refresh_stability_lane.sh
-# (stability; unmodified) or refresh_dev_lane.sh (dev; OMN-14889).
+# OMN-14900: the GitHub-side tag is created via `gh api .../git/refs` (the
+# workflow token, contents:write), NOT `git push` from a clone -- the deploy
+# runner's private OMNI_HOME clones are cloned anonymously from public repos
+# and carry NO push credentials, and the old ambient-clone push only ever
+# worked from an operator workstation. All local git operations are scoped
+# with `-c safe.directory=<clone>` (see git_clone below).
+#
+# This script does NOT deploy anything -- it only tags + creates the GitHub
+# ref. The deploy step is a separate workflow job that reacts to the tag push
+# event (see .github/workflows/release-train-lab.yml) and calls
+# refresh_stability_lane.sh (stability) or refresh_dev_lane.sh (dev).
 #
 # Default is a DRY-RUN plan; pass --execute to actually cut + push.
 #
@@ -38,6 +45,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Siblings whose clones get the LOCAL tag. Mirrors LAB_REF_REPOS in
 # cut-lab-ref.sh and SIBLING_REPOS in stage_workspace.sh.
 TAG_REPOS=(
@@ -48,15 +57,16 @@ TAG_REPOS=(
     "omnimarket"
 )
 
-# Only this repo's tag is pushed to GitHub (Fork 2 decision above).
+# Only this repo's tag is created on GitHub (Fork 2 decision above).
 readonly ANCHOR_REPO="omnibase_infra"
+readonly ANCHOR_GITHUB_REPO="OmniNode-ai/omnibase_infra"
 
 REF="origin/dev"
 LANE=""
 MODE="plan"
 
 usage() {
-    sed -n '4,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -97,6 +107,35 @@ if [[ -z "${OMNI_HOME}" ]]; then
     exit 1
 fi
 
+# --- scoped git wrapper (OMN-14900) -----------------------------------------
+# The clones under OMNI_HOME may be owned by a different uid than the one
+# running this script (the deploy runner container case). An unscoped git
+# invocation dies with "detected dubious ownership"; `-c
+# safe.directory=<clone>` scopes the exemption to one process + one path with
+# no global gitconfig write -- durable across container recreation because it
+# is committed here, not exec-applied container state. (Same wrapper as
+# refresh_dev_lane.sh.)
+git_clone() {
+    local clone="$1"
+    shift
+    git -c "safe.directory=${clone}" -C "${clone}" "$@"
+}
+
+# --- execute-mode preflight: provision + refresh the private clones ---------
+# Runs BEFORE computing the tag name so the tag's <shortsha> is minted from a
+# freshly-fetched origin/<ref>, never a stale private clone. Dry-run stays
+# read-only (no clone/fetch) -- the printed tag name is an estimate.
+if [[ "${MODE}" == "execute" ]]; then
+    command -v gh >/dev/null 2>&1 || {
+        err "'gh' is required to create the GitHub tag ref (repos/${ANCHOR_GITHUB_REPO}/git/refs)."
+        exit 1
+    }
+    OMNI_HOME="${OMNI_HOME}" bash "${SCRIPT_DIR}/ensure_runner_clones.sh"
+    for repo in "${TAG_REPOS[@]}"; do
+        git_clone "${OMNI_HOME}/${repo}" fetch origin --prune --tags
+    done
+fi
+
 # --- compute the tag name: lab/<lane>/<utc>-<shortsha> ----------------------
 # Resolved against the ANCHOR repo's <ref> SHA (matches cut-lab-ref.sh's
 # compute_lab_tag_name(), which always short-shas off the omnibase_infra
@@ -105,7 +144,7 @@ compute_tag_name() {
     local infra_clone="${OMNI_HOME}/${ANCHOR_REPO}"
     local utc short
     utc="$(date -u +%Y%m%dT%H%M%SZ)"
-    short="$(git -C "${infra_clone}" rev-parse --short=12 "${REF}^{commit}" 2>/dev/null || echo "unknown")"
+    short="$(git_clone "${infra_clone}" rev-parse --short=12 "${REF}^{commit}" 2>/dev/null || echo "unknown")"
     echo "lab/${LANE}/${utc}-${short}"
 }
 
@@ -119,23 +158,34 @@ log "mode   : ${MODE}"
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no tags cut, nothing pushed. Re-run with --execute."
     log "would cut this tag locally on: ${TAG_REPOS[*]}"
-    log "would push to GitHub on: ${ANCHOR_REPO} only"
+    log "would create the GitHub ref on: ${ANCHOR_GITHUB_REPO} only (via gh api)"
     exit 0
 fi
 
-# --- execute: cut locally on all 5, push on the anchor only -----------------
+# --- execute: cut locally on all 5, create the GitHub ref on the anchor -----
+ANCHOR_SHA=""
 for repo in "${TAG_REPOS[@]}"; do
     clone="${OMNI_HOME}/${repo}"
-    if ! git -C "${clone}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if ! git_clone "${clone}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         log "skip tag ${repo}: not a git clone at ${clone}"
         continue
     fi
-    sha="$(git -C "${clone}" rev-parse "${REF}^{commit}")"
-    git -C "${clone}" tag -f "${TAG}" "${sha}" >/dev/null
+    sha="$(git_clone "${clone}" rev-parse "${REF}^{commit}")"
+    git_clone "${clone}" tag -f "${TAG}" "${sha}" >/dev/null
     log "tagged ${repo}: ${TAG} -> ${sha:0:12}"
+    if [[ "${repo}" == "${ANCHOR_REPO}" ]]; then
+        ANCHOR_SHA="${sha}"
+    fi
 done
 
-anchor_clone="${OMNI_HOME}/${ANCHOR_REPO}"
-log "pushing ${TAG} to origin (${ANCHOR_REPO} only)..."
-git -C "${anchor_clone}" push origin "refs/tags/${TAG}"
-log "pushed. This push is what fires .github/workflows/release-train-lab.yml's deploy job."
+if [[ -z "${ANCHOR_SHA}" ]]; then
+    err "anchor repo ${ANCHOR_REPO} was not tagged (clone missing/broken at ${OMNI_HOME}/${ANCHOR_REPO})."
+    err "  Refusing to create a GitHub ref whose SHA was never resolved locally."
+    exit 1
+fi
+
+log "creating refs/tags/${TAG} on GitHub (${ANCHOR_GITHUB_REPO}) at ${ANCHOR_SHA:0:12} via gh api..."
+gh api "repos/${ANCHOR_GITHUB_REPO}/git/refs" \
+    -f ref="refs/tags/${TAG}" \
+    -f sha="${ANCHOR_SHA}" >/dev/null
+log "created. This ref creation fires .github/workflows/release-train-lab.yml's deploy job."

@@ -218,8 +218,19 @@ def _is_clone_strictly_ahead(
 
     # The locked SHA must be a real object in this clone; an unknown rev means we
     # cannot prove ancestry and must stay fatal.
+    # OMN-14900: safe.directory scoping so a uid-mismatched invoker (deploy
+    # runner) is never rejected with "detected dubious ownership".
     cat = subprocess.run(
-        ["git", "-C", str(repo_root), "cat-file", "-e", f"{locked}^{{commit}}"],
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root}",
+            "-C",
+            str(repo_root),
+            "cat-file",
+            "-e",
+            f"{locked}^{{commit}}",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -230,7 +241,17 @@ def _is_clone_strictly_ahead(
     # exit 0 => locked is an ancestor of head (clone ahead); exit 1 => it is not
     # (clone behind / unrelated). Any other exit code is an error -> not ahead.
     ancestry = subprocess.run(
-        ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", locked, head],
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root}",
+            "-C",
+            str(repo_root),
+            "merge-base",
+            "--is-ancestor",
+            locked,
+            head,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -302,7 +323,15 @@ def resolve_actual_pin(package: str, repo_root: Path) -> ModelActualPin:
         raise ValueError(f"no project.version in {pyproject_path}")
 
     head_sha = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root}",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "HEAD",
+        ],
         check=True,
         capture_output=True,
         text=True,
