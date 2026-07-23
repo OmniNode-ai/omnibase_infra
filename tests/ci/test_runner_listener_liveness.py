@@ -25,7 +25,9 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import shutil
+import signal
 import stat
 import subprocess
 import threading
@@ -202,6 +204,181 @@ class TestEntrypointWatchdog:
             text=True,
         )
         assert result.returncode == 0, f"bash -n failed: {result.stderr}"
+
+
+def _make_executable(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+
+
+@pytest.fixture
+def synthetic_entrypoint_home(tmp_path: Path) -> Path:
+    """A fake RUNNER_HOME the real entrypoint.sh can supervise end-to-end.
+
+    - ``run.sh`` launches ``bin/Runner.Listener`` by absolute path (so the
+      watchdog's RUNNER_HOME-anchored pgrep pattern matches) and waits on it.
+    - ``bin/Runner.Listener`` is a sleeper: ALIVE but writing nothing — the
+      exact OMN-14564 hung-listener shape.
+    - In-place ``.runner`` + ``.credentials`` skip registration entirely.
+    - The only ``_diag`` log is pre-aged one hour → heartbeat STALE.
+    """
+    home = tmp_path / "actions-runner"
+    (home / "bin").mkdir(parents=True)
+    (home / "_diag").mkdir()
+    listener = home / "bin" / "Runner.Listener"
+    _make_executable(listener, "#!/bin/bash\nsleep 300\n")
+    worker = home / "bin" / "Runner.Worker"
+    _make_executable(worker, "#!/bin/bash\nsleep 300\n")
+    _make_executable(home / "run.sh", f'#!/bin/bash\n"{listener}" &\nwait $!\n')
+    (home / ".runner").write_text("{}\n", encoding="utf-8")
+    (home / ".credentials").write_text("{}\n", encoding="utf-8")
+    diag_log = home / "_diag" / "Runner_20260716-000000-utc.log"
+    diag_log.write_text("heartbeat\n", encoding="utf-8")
+    stale = time.time() - 3600
+    os.utime(diag_log, (stale, stale))
+    return home
+
+
+def _entrypoint_env(home: Path, log_file: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    env.update(
+        {
+            "RUNNER_NAME": "synthetic-runner",
+            "RUNNER_LABELS": "synthetic",
+            "GITHUB_ORG_URL": "https://github.com/OmniNode-ai",
+            "RUNNER_HOME": str(home),
+            "LOG_FILE": str(log_file),
+            "LISTENER_SUPERVISE_INTERVAL": "1",
+            "LISTENER_HEARTBEAT_MISSES": "2",
+            "LISTENER_RESTART_MAX": "0",
+            "LISTENER_HEARTBEAT_MAX_AGE_SECONDS": "60",
+        }
+    )
+    return env
+
+
+class TestEntrypointHungListenerWatchdog:
+    """OMN-14564: a listener can hang ALIVE (AAD/OAuth token-refresh deadlock).
+
+    Incident 2026-07-16..23: 11/64 runners GitHub-offline for ~6 days with
+    Runner.Listener still in the process table — pgrep-existence supervision
+    (OMN-13915) passes forever, the hung listener never exits so run.sh never
+    respawns it, and only the healthcheck's _diag staleness layer flagged it.
+    The entrypoint watchdog must turn that same detection into remediation.
+    """
+
+    def test_entrypoint_has_heartbeat_watchdog(self) -> None:
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        assert "OMN-14564" in content
+        assert "LISTENER_HEARTBEAT_MAX_AGE_SECONDS" in content
+        assert "LISTENER_HEARTBEAT_MISSES" in content
+        assert "_listener_heartbeat_stale" in content
+
+    def test_kill_threshold_decoupled_and_above_alert_threshold(self) -> None:
+        """The watchdog KILL threshold must exceed the healthcheck ALERT
+        threshold (900s). Live 2026-07-23T05:25-06:02Z readback: a fleet-wide
+        broker-quiet window silenced _diag on 53/64 listeners for 35-50 min
+        while GitHub kept them online and docker-"unhealthy" runners were
+        actively executing jobs — killing at the 900s alert threshold would
+        have mass-recycled ~50 healthy-but-quiet listeners mid-window."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        match = re.search(r"LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-(\d+)", content)
+        assert match, "LISTENER_HEARTBEAT_MAX_AGE_SECONDS default missing"
+        assert int(match.group(1)) >= 3600, (
+            "kill threshold must clear the observed ~50 min benign "
+            "broker-quiet ceiling (>= 3600s)"
+        )
+
+    def test_entrypoint_has_worker_job_guard(self) -> None:
+        """The heartbeat recycle must never kill an executing job."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        assert "WORKER_PGREP_PATTERN" in content
+        assert "bin/Runner\\.Worker" in content
+
+    def test_recycle_kills_listener_binary_explicitly(self) -> None:
+        """A hung listener ignores the wrapper-tree TERM and never exits on
+        its own; leaving it alive collides with the respawned listener's
+        broker session. The recycle path must pkill the listener pattern."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        assert "_recycle_runner_tree" in content
+        assert 'pkill -KILL -f "${LISTENER_PGREP_PATTERN}"' in content
+
+    @pytest.mark.skipif(
+        os.getuid() == 0, reason="entrypoint takes root-only paths (gosu/groupmod)"
+    )
+    def test_entrypoint_recycles_hung_listener(
+        self, synthetic_entrypoint_home: Path, tmp_path: Path
+    ) -> None:
+        """Functional: alive-but-silent listener → watchdog kills + recycles.
+
+        LISTENER_RESTART_MAX=0 makes the first supervised recycle a terminal
+        container exit (rc=1), giving the test a deterministic endpoint.
+        """
+        home = synthetic_entrypoint_home
+        stdout_path = tmp_path / "entrypoint-stdout.log"
+        with stdout_path.open("wb") as stdout_file:
+            proc = subprocess.Popen(
+                ["bash", str(ENTRYPOINT)],
+                stdout=stdout_file,
+                stderr=subprocess.STDOUT,
+                env=_entrypoint_env(home, tmp_path / "listener.log"),
+                start_new_session=True,
+            )
+            try:
+                rc = proc.wait(timeout=90)
+            finally:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                # Belt-and-braces: never leak synthetic sleepers.
+                subprocess.run(["pkill", "-KILL", "-f", str(home)], check=False)
+        output = stdout_path.read_text(encoding="utf-8")
+        assert rc == 1, f"expected terminal exit 1 (RESTART_MAX=0); got {rc}: {output}"
+        assert "OMN-14564 hung-listener mode" in output
+        assert "killing listener" in output
+        # The hung listener process itself must be gone, not just the wrapper.
+        pgrep = subprocess.run(
+            ["pgrep", "-f", f"{home}/bin/Runner.Listener"],
+            check=False,
+            capture_output=True,
+        )
+        assert pgrep.returncode != 0, "hung listener survived the recycle"
+
+    @pytest.mark.skipif(
+        os.getuid() == 0, reason="entrypoint takes root-only paths (gosu/groupmod)"
+    )
+    def test_entrypoint_never_recycles_while_worker_running(
+        self, synthetic_entrypoint_home: Path, tmp_path: Path
+    ) -> None:
+        """Functional: stale heartbeat + active Runner.Worker → NO recycle."""
+        home = synthetic_entrypoint_home
+        worker = subprocess.Popen([str(home / "bin" / "Runner.Worker")])
+        stdout_path = tmp_path / "entrypoint-stdout.log"
+        proc = None
+        try:
+            with stdout_path.open("wb") as stdout_file:
+                proc = subprocess.Popen(
+                    ["bash", str(ENTRYPOINT)],
+                    stdout=stdout_file,
+                    stderr=subprocess.STDOUT,
+                    env=_entrypoint_env(home, tmp_path / "listener.log"),
+                    start_new_session=True,
+                )
+                # Long enough for >2 supervise ticks (interval=1, misses=2):
+                # without the worker guard the hung-listener miss line appears
+                # within ~2s.
+                time.sleep(6)
+                assert proc.poll() is None, "entrypoint exited despite active job"
+            output = stdout_path.read_text(encoding="utf-8")
+            assert "OMN-14564 hung-listener mode" not in output, (
+                f"watchdog counted heartbeat misses while a Runner.Worker "
+                f"job was executing: {output}"
+            )
+        finally:
+            worker.kill()
+            worker.wait(timeout=10)
+            if proc is not None and proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+            subprocess.run(["pkill", "-KILL", "-f", str(home)], check=False)
 
 
 class TestComposeHealthcheckWiring:
