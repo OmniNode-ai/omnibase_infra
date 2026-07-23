@@ -25,6 +25,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -250,7 +251,7 @@ def _entrypoint_env(home: Path, log_file: Path) -> dict[str, str]:
             "LISTENER_SUPERVISE_INTERVAL": "1",
             "LISTENER_HEARTBEAT_MISSES": "2",
             "LISTENER_RESTART_MAX": "0",
-            "RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS": "60",
+            "LISTENER_HEARTBEAT_MAX_AGE_SECONDS": "60",
         }
     )
     return env
@@ -269,11 +270,24 @@ class TestEntrypointHungListenerWatchdog:
     def test_entrypoint_has_heartbeat_watchdog(self) -> None:
         content = ENTRYPOINT.read_text(encoding="utf-8")
         assert "OMN-14564" in content
-        # Shared tunable + condition with healthcheck.sh layer 2 — the two
-        # surfaces must not drift apart on what "stale" means.
-        assert "RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS" in content
+        assert "LISTENER_HEARTBEAT_MAX_AGE_SECONDS" in content
         assert "LISTENER_HEARTBEAT_MISSES" in content
         assert "_listener_heartbeat_stale" in content
+
+    def test_kill_threshold_decoupled_and_above_alert_threshold(self) -> None:
+        """The watchdog KILL threshold must exceed the healthcheck ALERT
+        threshold (900s). Live 2026-07-23T05:25-06:02Z readback: a fleet-wide
+        broker-quiet window silenced _diag on 53/64 listeners for 35-50 min
+        while GitHub kept them online and docker-"unhealthy" runners were
+        actively executing jobs — killing at the 900s alert threshold would
+        have mass-recycled ~50 healthy-but-quiet listeners mid-window."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        match = re.search(r"LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-(\d+)", content)
+        assert match, "LISTENER_HEARTBEAT_MAX_AGE_SECONDS default missing"
+        assert int(match.group(1)) >= 3600, (
+            "kill threshold must clear the observed ~50 min benign "
+            "broker-quiet ceiling (>= 3600s)"
+        )
 
     def test_entrypoint_has_worker_job_guard(self) -> None:
         """The heartbeat recycle must never kill an executing job."""

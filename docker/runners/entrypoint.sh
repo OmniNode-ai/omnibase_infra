@@ -108,11 +108,23 @@ LISTENER_RESTART_MAX="${LISTENER_RESTART_MAX:-50}"
 # Docker healthcheck's _diag heartbeat layer flagged it — with nothing acting
 # on the signal. This watchdog turns that same detection into remediation:
 # when the listener process exists but the newest _diag *.log is older than
-# RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS (same tunable + condition as
+# LISTENER_HEARTBEAT_MAX_AGE_SECONDS (same find-mmin condition as
 # healthcheck.sh layer 2) for LISTENER_HEARTBEAT_MISSES consecutive supervise
 # ticks, kill the listener explicitly and recycle the wrapper tree. The
 # recycle NEVER fires while a Runner.Worker is executing a job.
-RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS="${RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS:-900}"
+#
+# The KILL threshold is deliberately DECOUPLED from the healthcheck's ALERT
+# threshold (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS, 900s). Live readback
+# 2026-07-23T05:25-06:02Z: a fleet-wide broker-quiet window silenced _diag on
+# 53/64 listeners for 35-50 min while GitHub kept every one of them online
+# and docker-"unhealthy" runners were actively EXECUTING jobs (runners 4 and
+# 40 busy while heartbeat-stale); runner-2 and runner-45 both resumed on
+# their own after ~37 min blocked in the same token-refresh path that hangs
+# the true zombies forever. Killing at 900s would have mass-recycled ~50
+# healthy-but-quiet listeners mid-window. 3600s clears the observed benign
+# ceiling (~50 min) with margin while still recovering a true AAD-deadlock
+# zombie in ~1h instead of the 6 days the 2026-07-16..23 incident took.
+LISTENER_HEARTBEAT_MAX_AGE_SECONDS="${LISTENER_HEARTBEAT_MAX_AGE_SECONDS:-3600}"
 LISTENER_HEARTBEAT_MISSES="${LISTENER_HEARTBEAT_MISSES:-3}"
 
 # ---------------------------------------------------------------------------
@@ -272,14 +284,17 @@ LISTENER_PGREP_PATTERN="${LISTENER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runn
 # — the heartbeat watchdog must NEVER recycle mid-job.
 WORKER_PGREP_PATTERN="${WORKER_PGREP_PATTERN:-${RUNNER_HOME//./\\.}/bin/Runner\.Worker}"
 
-# OMN-14564: mirror of healthcheck.sh layer 2 — returns 0 (stale) when no
-# _diag *.log was modified within RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS. A
-# missing _diag directory under a "live" listener is the same divergence and
-# also reads as stale; the LISTENER_HEARTBEAT_MISSES grace window covers
-# first-registration startup before the listener writes its first log.
+# OMN-14564: same find-mmin condition as healthcheck.sh layer 2 — returns 0
+# (stale) when no _diag *.log was modified within
+# LISTENER_HEARTBEAT_MAX_AGE_SECONDS (the kill threshold; the healthcheck
+# alerts earlier at RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS — see the decoupling
+# rationale above). A missing _diag directory under a "live" listener is the
+# same divergence and also reads as stale; the LISTENER_HEARTBEAT_MISSES
+# grace window covers first-registration startup before the listener writes
+# its first log.
 _listener_heartbeat_stale() {
     local diag_dir="${RUNNER_HOME}/_diag"
-    local max_age_minutes=$(( (RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS + 59) / 60 ))
+    local max_age_minutes=$(( (LISTENER_HEARTBEAT_MAX_AGE_SECONDS + 59) / 60 ))
     local fresh_file
     fresh_file=$(find "${diag_dir}" -type f -name '*.log' -mmin "-${max_age_minutes}" -print 2>/dev/null | head -n 1)
     [[ -z "${fresh_file}" ]]
@@ -352,7 +367,7 @@ while true; do
             fi
             if _listener_heartbeat_stale; then
                 hb_misses=$((hb_misses + 1))
-                echo "[entrypoint] WATCHDOG: listener process alive but no _diag heartbeat within ${RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS}s (miss ${hb_misses}/${LISTENER_HEARTBEAT_MISSES}) — OMN-14564 hung-listener mode"
+                echo "[entrypoint] WATCHDOG: listener process alive but no _diag heartbeat within ${LISTENER_HEARTBEAT_MAX_AGE_SECONDS}s (miss ${hb_misses}/${LISTENER_HEARTBEAT_MISSES}) — OMN-14564 hung-listener mode"
                 if [[ ${hb_misses} -ge ${LISTENER_HEARTBEAT_MISSES} ]]; then
                     echo "[entrypoint] WATCHDOG: listener hung (alive but silent) — killing listener and recycling runner wrapper tree (OMN-14564)"
                     supervised_kill=1

@@ -28,7 +28,7 @@ A point-in-time process/container check cannot prove a runner is serving jobs:
 | Layer | Surface | What it proves | Latency |
 |-------|---------|----------------|---------|
 | 1 | `docker/runners/healthcheck.sh` (in-container) | `bin/Runner.Listener` process alive AND `_diag` heartbeat fresh (`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default 900s) AND github.com egress | ≤ ~17 min (staleness + 3×30s retries) |
-| 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is stale for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing | ≤ ~6 min (dead) / ≤ ~18 min (hung: 900s staleness + 3×60s) |
+| 2 | `docker/runners/entrypoint.sh` watchdog | listener process exists while `run.sh` runs; recycles the wrapper tree after 5×60s consecutive misses (bounded by `LISTENER_RESTART_MAX=50`, then container exit → restart policy). **OMN-14564:** also recycles (with an explicit listener kill) when the listener process is alive but its `_diag` heartbeat is older than `LISTENER_HEARTBEAT_MAX_AGE_SECONDS` (3600s) for `LISTENER_HEARTBEAT_MISSES` (3) consecutive 60s ticks — never while a `Runner.Worker` job is executing | ≤ ~6 min (dead) / ≤ ~63 min (hung: 3600s staleness + 3×60s) |
 | 3 | `runner-monitor.sh` cron on `.201` (OMN-13109) | Docker vs GitHub divergence, silent wedge, crash loop → Slack | 3 min cadence, shares fate with host |
 | 4 | **`runner-fleet-canary` GHA workflow (authoritative)** | GitHub org registry online count vs `config/runner_fleet.yaml` `expected_count`; fails the run when offline+missing > `RUNNER_CANARY_MAX_OFFLINE` (5) | 15 min cadence, GitHub-hosted — survives total `.201` loss |
 
@@ -45,12 +45,24 @@ respawn. Docker health (layer 1) correctly flagged all 11 — but detection
 without remediation left them zombied until a manual idle-only restart.
 
 The layer-2 watchdog now treats *listener-alive-but-heartbeat-stale* as a
-listener death: same `_diag` staleness condition as the healthcheck (shared
-tunable `RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, default 900s), guarded by a
-`Runner.Worker` check so an executing job is never killed, with an explicit
-`pkill` of the listener binary on recycle (a hung listener ignores the
-wrapper-tree TERM and would collide with the respawned listener's session).
-Restarts remain bounded by `LISTENER_RESTART_MAX`.
+listener death: same `_diag` `find -mmin` staleness condition as the
+healthcheck, guarded by a `Runner.Worker` check so an executing job is never
+killed, with an explicit `pkill` of the listener binary on recycle (a hung
+listener ignores the wrapper-tree TERM and would collide with the respawned
+listener's session). Restarts remain bounded by `LISTENER_RESTART_MAX`.
+
+**The kill threshold (`LISTENER_HEARTBEAT_MAX_AGE_SECONDS`, 3600s) is
+deliberately HIGHER than the healthcheck alert threshold
+(`RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS`, 900s).** Live readback
+2026-07-23T05:25–06:02Z: a fleet-wide broker-quiet window silenced `_diag` on
+53/64 listeners for 35–50 min while GitHub kept all of them online — two
+docker-"unhealthy" runners were actively executing jobs, and runners 2 and 45
+resumed on their own after ~37 min blocked in the same token-refresh path
+that hangs the true zombies forever. Docker health going red during such a
+window is expected and benign (alerting stays sensitive); the watchdog only
+kills once staleness clears the observed benign ceiling with margin, which
+still recovers a true AAD-deadlock zombie in ~1 h instead of the 6 days the
+2026-07-16..23 incident took.
 
 ## Operator response to a canary failure
 
