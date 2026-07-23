@@ -76,7 +76,25 @@ if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/docker/runtime-policy.env"
-    if [[ -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    # OMN-14983: a bare `-f` (exists) check silently treats an EXISTING but
+    # UNREADABLE file the same as an absent one -- the operator env file is
+    # then just skipped with no error, and the real failure surfaces later
+    # and misleadingly (e.g. a missing POSTGRES_PASSWORD during compose
+    # interpolation) instead of here, at the actual root cause. Distinguish
+    # "missing" (still optional -- unchanged behavior) from "present but
+    # unreadable" (always a fail-fast error, never silent).
+    if [[ -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+        if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+            {
+                echo "[refresh-stability-lane] ERROR: OPERATOR_ENV_UNREADABLE -- operator env file exists but this process cannot read it:"
+                echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+                echo "  effective uid=$(id -u) ($(id -un 2>/dev/null || echo unknown))"
+                echo "  Check the file's ownership/permissions. A silent skip here would let the"
+                echo "  refresh proceed without the operator env (POSTGRES_PASSWORD etc.) and fail"
+                echo "  later at a less obvious point (OMN-14983)."
+            } >&2
+            exit 64
+        fi
         # shellcheck source=/dev/null
         source "${OMNIBASE_OPERATOR_ENV_FILE}"
     fi
