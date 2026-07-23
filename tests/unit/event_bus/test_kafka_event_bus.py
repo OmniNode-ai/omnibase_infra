@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from aiokafka.errors import KafkaError
+from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
 from pydantic import BaseModel
 
 from omnibase_infra.errors import (
@@ -2742,6 +2742,105 @@ class TestKafkaEventBusDLQRouting:
                 "DLQ successful_publishes should be incremented on success"
             )
             assert final_metrics.get_error_type_count("ValueError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_returns_true_on_confirmed_persist(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14936: ``_publish_raw_to_dlq`` returns True when the DLQ send acks.
+
+        Callers upstream (``EventBusSubcontractWiring._publish_to_dlq``) gate
+        an offset commit on this return value -- it must be a real bool, not
+        an implicit ``None`` that could be misread as failure or success.
+        """
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"test-value"
+            mock_raw_msg.offset = 200
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("no dispatcher for this message type")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="no_dispatcher",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+
+            assert result is True
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_returns_false_when_dlq_topic_does_not_exist(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """OMN-14936: reproduce the live-proven defect at the mixin boundary.
+
+        ``service_kernel``'s no_dispatcher path logged a DLQ topic name that
+        was never created on the broker (``UnknownTopicOrPartitionError`` on
+        ``send_and_wait``), yet the caller committed the offset anyway --  a
+        silent, unrecoverable drop. ``_publish_raw_to_dlq`` must return
+        ``False`` in this scenario so the caller can withhold the commit.
+        """
+
+        async def raise_unknown_topic(*args: object, **kwargs: object) -> MagicMock:
+            raise UnknownTopicOrPartitionError(
+                "DLQ topic 'onex.dlq.omnibase-infra."
+                "delegation-inference-request.v1' does not exist"
+            )
+
+        mock_producer.send_and_wait = AsyncMock(side_effect=raise_unknown_topic)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = EventBusKafka(config=dlq_config)
+            await event_bus.start()
+
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"test-value"
+            mock_raw_msg.offset = 201
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("no dispatcher for this message type")
+
+            result = await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="no_dispatcher",
+                consumer_group="test.test-service.dlq-test.consume.v1",
+            )
+
+            assert result is False
+
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.failed_publishes == 1, (
+                "DLQ failed_publishes should be incremented when the send fails"
+            )
+            assert final_metrics.successful_publishes == 0
 
             await event_bus.close()
 
