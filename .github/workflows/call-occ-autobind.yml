@@ -51,7 +51,17 @@ jobs:
       github.actor != 'renovate[bot]' &&
       (contains(github.event.pull_request.title, 'OMN-') ||
        contains(github.event.pull_request.head.ref, 'OMN-'))
-    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-autobind-reusable.yml@main
+    # OMN-14941 (F1 repin): `@main` was a live 404 — call-occ-autobind-reusable.yml
+    # exists ONLY on omniclaude dev (verified 2026-07-22 via
+    # `gh api repos/OmniNode-ai/omniclaude/contents/.github/workflows/call-occ-autobind-reusable.yml?ref=main`
+    # -> HTTP 404). With the broken pin, every invocation failed at workflow
+    # parse time ("workflow was not found") and the autobind publisher NEVER
+    # ran — the E1 failure class. Pinned `@dev` (the ref that resolves) until
+    # the reusable promotes to omniclaude main; then re-pin to `@main` or a
+    # main SHA (OMN-14812). The tests/ci/test_workflow_uses_refs_resolve.py
+    # gate now fails closed on any cross-repo `uses:` pin that does not
+    # resolve live.
+    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-autobind-reusable.yml@dev
     secrets: inherit
     with:
       lane: dev
