@@ -35,19 +35,25 @@ class ModelSecretResolverConfig(BaseModel):
         bootstrap_secrets: Secrets resolved directly from env (never through chain).
         secrets_dir: Directory for file-based secrets (K8s secrets volume).
         required_secrets: The authoritative declared-required key set (OMN-14951).
-            Logical names only -- never values. Every name here MUST resolve
-            through ``SecretResolver.validate_required_secrets()`` (Infisical or
-            an explicit non-Infisical mapping when
-            ``require_infisical_for_required_secrets=False``) or boot/deploy
+            Logical names only -- never values. Every name here MUST have an
+            explicit ``mappings`` entry (convention/env fallback is
+            structurally forbidden for declared-required keys, unconditionally
+            -- this holds regardless of ``require_infisical_for_required_secrets``
+            or ``enable_convention_fallback``) and MUST resolve through
+            ``SecretResolver.validate_required_secrets()`` or boot/deploy
             fails, naming every missing key at once.
         require_infisical_for_required_secrets: When True (default), every
-            logical name in ``required_secrets`` MUST have an explicit
-            ``mappings`` entry with ``source_type="infisical"``. Convention
-            fallback (``enable_convention_fallback``) is structurally forbidden
-            for declared-required keys: a required key silently resolving from
-            ambient env is exactly the failure class this gate closes
-            (OMN-14951). Config construction itself fails, naming every
-            offending key, when this invariant is violated.
+            explicit mapping for a name in ``required_secrets`` must have
+            ``source_type="infisical"``. When False, a required key may
+            instead have an explicit **non**-Infisical mapping (e.g.
+            ``source_type="file"`` for a K8s secrets-volume lane) -- but an
+            explicit mapping of SOME source type is still mandatory either
+            way. This flag only ever narrows *which* source type an explicit
+            mapping may use; it can never be used to skip declaring a mapping
+            at all, so it can never reopen the convention-fallback path for a
+            declared-required key (OMN-14951 gap 1). Config construction
+            itself fails, naming every offending key, when this invariant is
+            violated.
 
     Example:
         >>> config = ModelSecretResolverConfig(
@@ -86,7 +92,10 @@ class ModelSecretResolverConfig(BaseModel):
     enable_convention_fallback: bool = Field(
         default=True,
         description="Enable automatic source discovery using naming conventions. "
-        "When True, 'database.postgres.password' becomes 'DATABASE_POSTGRES_PASSWORD'.",
+        "When True, 'database.postgres.password' becomes 'DATABASE_POSTGRES_PASSWORD'. "
+        "Never applies to a name in required_secrets (OMN-14951) -- that "
+        "structural exclusion is enforced by SecretResolver._get_source_spec "
+        "at the resolution choke point, independent of this flag's value.",
     )
     convention_env_prefix: str = Field(
         default="",
@@ -118,9 +127,11 @@ class ModelSecretResolverConfig(BaseModel):
     )
     require_infisical_for_required_secrets: bool = Field(
         default=True,
-        description="When True, every name in required_secrets must have an explicit "
-        "mappings entry with source_type='infisical' -- convention/env fallback is "
-        "structurally forbidden for declared-required keys (OMN-14951). Config "
+        description="When True, every explicit mapping for a name in required_secrets "
+        "must have source_type='infisical'. When False, a required key's explicit "
+        "mapping may use a different source_type instead -- an explicit mapping is "
+        "mandatory either way, so convention/env fallback stays structurally forbidden "
+        "for declared-required keys regardless of this flag (OMN-14951 gap 1). Config "
         "construction fails, naming every offending key, when violated.",
     )
 
@@ -138,10 +149,30 @@ class ModelSecretResolverConfig(BaseModel):
         unmapped logical name, so whether a key is Infisical-backed is decided
         per-key by static config -- never by runtime fallback-on-failure. This
         validator makes that routing decision structurally impossible to get
-        wrong for declared-required keys: either every required key has an
-        explicit ``source_type="infisical"`` mapping, or config construction
-        itself raises, naming every missing-mapping and wrong-source-type key
-        together (never one at a time).
+        wrong for declared-required keys: every required key MUST have an
+        explicit mapping, unconditionally -- config construction itself raises,
+        naming every missing-mapping key, otherwise.
+
+        ``require_infisical_for_required_secrets`` narrows this further when
+        True (the default): it additionally requires the explicit mapping's
+        ``source_type`` to be ``"infisical"``. When False, an explicit mapping
+        of any other source type (e.g. ``"file"`` for a K8s secrets-volume
+        lane) is accepted -- but the mapping itself is never optional. This is
+        gap 1 from the 2026-07-23 hardening pass: the flag previously
+        short-circuited the *entire* check (including the missing-mapping
+        check) when False, so a required key with zero mappings passed
+        construction and silently resolved via
+        ``enable_convention_fallback`` at runtime -- exactly the silent-miss
+        this gate exists to kill. That early return is gone; only the
+        source-type restriction is now conditional on the flag.
+
+        This is the construction-time half of the fix. The resolution-time
+        half lives in ``SecretResolver._get_source_spec``, which refuses
+        convention fallback for any name in ``required_secrets`` unconditionally
+        -- a second, independent enforcement point so the invariant holds even
+        if this config were mutated after construction (the model is
+        ``frozen=False``) or constructed via ``model_construct()``, bypassing
+        this validator.
         """
         if not self.required_secrets:
             return self
@@ -157,9 +188,6 @@ class ModelSecretResolverConfig(BaseModel):
                 f"{bootstrap_overlap}"
             )
 
-        if not self.require_infisical_for_required_secrets:
-            return self
-
         mapped_source_types = {
             mapping.logical_name: mapping.source.source_type
             for mapping in self.mappings
@@ -169,8 +197,16 @@ class ModelSecretResolverConfig(BaseModel):
         for name in self.required_secrets:
             source_type = mapped_source_types.get(name)
             if source_type is None:
+                # OMN-14951 gap 1: unconditional. An explicit mapping is
+                # mandatory for every declared-required key regardless of
+                # require_infisical_for_required_secrets -- that flag only
+                # ever narrows *which* source_type the explicit mapping may
+                # use (see below), never whether a mapping must exist at all.
                 missing_mapping.append(name)
-            elif source_type != "infisical":
+            elif (
+                self.require_infisical_for_required_secrets
+                and source_type != "infisical"
+            ):
                 wrong_source_type.append(name)
 
         if missing_mapping or wrong_source_type:
@@ -179,13 +215,16 @@ class ModelSecretResolverConfig(BaseModel):
                 details.append(f"no explicit mapping: {sorted(missing_mapping)}")
             if wrong_source_type:
                 details.append(
-                    f"mapped to non-infisical source_type: {sorted(wrong_source_type)}"
+                    f"mapped to non-infisical source_type "
+                    f"(require_infisical_for_required_secrets=True): "
+                    f"{sorted(wrong_source_type)}"
                 )
             raise ValueError(
-                "required_secrets must each have an explicit mappings entry with "
-                "source_type='infisical' (require_infisical_for_required_secrets=True); "
-                "convention/env fallback is forbidden for declared-required keys "
-                "(OMN-14951). Offending keys -- " + "; ".join(details)
+                "required_secrets must each have an explicit mappings entry "
+                "(convention/env fallback is forbidden for declared-required keys, "
+                "OMN-14951); require_infisical_for_required_secrets=True additionally "
+                "requires source_type='infisical'. Offending keys -- "
+                + "; ".join(details)
             )
 
         return self

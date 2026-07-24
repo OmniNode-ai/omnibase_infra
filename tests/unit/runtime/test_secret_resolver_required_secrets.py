@@ -13,6 +13,7 @@ feedback_optional_input_means_the_check_does_not_exist).
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -165,3 +166,48 @@ class TestValidateRequiredSecretsGreenControl:
         config = ModelSecretResolverConfig(required_secrets=[])
         resolver = SecretResolver(config=config, infisical_handler=None)
         resolver.validate_required_secrets()
+
+
+class TestValidateRequiredSecretsGap1ResolverChokePoint:
+    """RED proof (OMN-14951 gap 1, 2026-07-23 hardening): the resolution-time
+    choke point (SecretResolver._get_source_spec) independently refuses
+    convention fallback for a required key -- regardless of
+    require_infisical_for_required_secrets / enable_convention_fallback --
+    even when ModelSecretResolverConfig's construction-time validator is
+    bypassed via model_construct() (which skips all validators). This proves
+    the invariant is not ONLY paper-enforced by a validator a mutated or
+    reconstructed config (frozen=False) could route around; it is a second,
+    independent enforcement point at the actual resolution choke point every
+    resolution path funnels through.
+    """
+
+    def test_convention_fallback_never_fires_for_a_required_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The exact leaky flag combo the operator/verifier drove live,
+        # constructed via model_construct() to bypass the construction-time
+        # validator entirely -- proving the runtime choke point holds
+        # independently of it.
+        config = ModelSecretResolverConfig.model_construct(
+            mappings=[],
+            default_ttl_env_seconds=86400,
+            default_ttl_file_seconds=86400,
+            enable_convention_fallback=True,
+            convention_env_prefix="",
+            bootstrap_secrets=[],
+            secrets_dir=Path("/run/secrets"),
+            required_secrets=["payments.stripe.secret_key"],
+            require_infisical_for_required_secrets=False,
+        )
+        # The ambient env var convention fallback WOULD resolve to, if the
+        # gate did not structurally forbid it for required keys.
+        monkeypatch.setenv("PAYMENTS_STRIPE_SECRET_KEY", "leaked-via-convention")
+
+        resolver = SecretResolver(config=config, infisical_handler=None)
+
+        # get_secret must NOT silently succeed off the ambient env var.
+        assert resolver.get_secret("payments.stripe.secret_key", required=False) is None
+
+        with pytest.raises(SecretResolutionError) as exc_info:
+            resolver.validate_required_secrets()
+        assert "payments.stripe.secret_key" in str(exc_info.value)
