@@ -128,6 +128,10 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
+      # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
+      # for this lane's live-proof, sourced from the ledgered contract value
+      # (docker/runtime-policy.env), fail-fast if the policy env is missing.
+      ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
     volumes: !override
@@ -169,6 +173,8 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
+      # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
     volumes: !override
@@ -223,6 +229,8 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
+      # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
       - worker_logs:/app/logs
       - stability_test_worker_data:/app/data
