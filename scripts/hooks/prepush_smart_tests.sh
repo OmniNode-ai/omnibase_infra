@@ -132,7 +132,7 @@ fi
 
 # Parse the selection with stdlib json -- fail loud on any parse error.
 read_sel() {
-  python3 - "$SELECTION_FILE" "$1" << 'PY'
+  uv run python - "$SELECTION_FILE" "$1" << 'PY'
 import json
 import sys
 
