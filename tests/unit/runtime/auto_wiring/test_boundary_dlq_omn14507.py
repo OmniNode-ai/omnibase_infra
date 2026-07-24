@@ -399,3 +399,102 @@ class TestBoundaryDlqMetricNaming:
         assert "metric_name=boundary_swallow_prevented" not in caplog.text
         assert "metric_name=boundary_swallow_observed" in caplog.text
         assert "message_lost=true" in caplog.text
+
+
+class TestBoundaryDlqAlertableMessageLostCounter:
+    """OMN-14551 — forbid-verify residual ask: ``message_lost=true`` must
+    increment a REAL alertable signal, not just a greppable log line
+    ("that MUST page -- a greppable log won't"). RED-then-GREEN proof that
+    the increment actually fires on the genuine double-failure path (retry
+    budget exhausted AND the best-effort DLQ publish itself also fails) --
+    not merely that the counter object exists somewhere unreachable."""
+
+    @pytest.mark.asyncio
+    async def test_message_lost_increments_alertable_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _BOUNDARY_MESSAGE_LOST_COUNTER,
+        )
+
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        # Unique topic label per test so the counter's per-label-set value
+        # starts at a known baseline (0 on first touch) regardless of
+        # cross-test process-global Counter state.
+        topic = "onex.cmd.omn14551-message-lost-counter-test.v1"
+        error_type = "RuntimeError"
+
+        assert _BOUNDARY_MESSAGE_LOST_COUNTER is not None, (
+            "prometheus_client Counter failed to initialize -- the "
+            "alertable signal is unavailable in this process"
+        )
+        before = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+        event_bus._publish_raw_to_dlq = AsyncMock(
+            side_effect=RuntimeError("dlq topic unreachable")
+        )
+        callback = _make_event_bus_callback(
+            topic,
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())  # must not raise -- boundary never crashes
+
+        after = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+        assert after == before + 1, (
+            "onex_boundary_message_lost_total did not increment on the "
+            "double-failure (retry-exhausted AND DLQ-publish-failed) path -- "
+            "this is exactly the EXISTS-but-WRONG class (counter defined "
+            "but its call site never reached)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_dlq_success_path_does_not_increment_message_lost_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Contrast case: DLQ-routed is the SUCCESS path (nothing lost) --
+        the loss counter must stay untouched, matching the same
+        prevented-vs-observed honesty distinction as the metric_name logs
+        (G3, OMN-14507 review)."""
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _BOUNDARY_MESSAGE_LOST_COUNTER,
+        )
+
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        topic = "onex.cmd.omn14551-dlq-success-counter-test.v1"
+        error_type = "RuntimeError"
+
+        assert _BOUNDARY_MESSAGE_LOST_COUNTER is not None
+        before = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+
+        callback = _make_event_bus_callback(
+            topic,
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())
+
+        event_bus._publish_raw_to_dlq.assert_awaited_once()
+        after = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+        assert after == before, (
+            "the DLQ-routed SUCCESS path must never increment "
+            "onex_boundary_message_lost_total -- only the genuine "
+            "double-failure loss window does"
+        )

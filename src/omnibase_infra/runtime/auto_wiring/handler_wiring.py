@@ -209,6 +209,37 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
 _BOUNDARY_DLQ_MAX_ATTEMPTS = 3
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
+
+# OMN-14551: alertable counter for the boundary's one true loss window --
+# retry budget exhausted AND the best-effort DLQ publish itself also failed
+# (the ``message_lost=true`` branch of ``_route_swallowed_exception`` below).
+# Prior to this, that path was a structured-but-unalertable ``logger.error``
+# line only (forbid-verify residual ask: "a greppable log won't [page]").
+# Emitted through the same process-global default Prometheus registry the
+# runtime's existing metrics surface (``SinkMetricsPrometheus`` /
+# ``HandlerMetricsPrometheus``'s ``/metrics`` scrape endpoint, OMN-9121
+# observability profile) already exports -- mirrors the established
+# module-level ``prometheus_client.Counter`` idiom in ``handler_db.py``
+# (OMN-1366) rather than inventing a new observability surface. Scoped to
+# this one loss-path emission only -- not a refactor of the boundary's
+# other logging.
+try:
+    from prometheus_client import Counter as _PrometheusCounter
+
+    _BOUNDARY_MESSAGE_LOST_COUNTER: _PrometheusCounter | None = _PrometheusCounter(
+        "onex_boundary_message_lost_total",
+        "Count of auto-wiring boundary messages genuinely lost: handler "
+        "exception survived the bounded retry AND the best-effort DLQ "
+        "publish itself also failed. MUST page -- unlike "
+        "boundary_swallow_prevented (DLQ-routed, the success path), this "
+        "counter incrementing means the message is gone.",
+        ["topic", "error_type"],
+    )
+except (ImportError, ValueError):
+    # ImportError: prometheus_client not installed (graceful degradation,
+    # matches handler_db.py). ValueError: duplicate registration under
+    # pytest-xdist/module-reimport -- idempotent fallback, not fatal.
+    _BOUNDARY_MESSAGE_LOST_COUNTER = None
 # OMN-14600: the state_io outbox recovery sweep (re-publish + finalize any row
 # whose batch is committed but never finalized) originally ran exactly once
 # per adapter lifetime (first live dispatch only) -- a row stranded later in a
@@ -3335,6 +3366,21 @@ def _make_event_bus_callback(
                 sanitize_error_message(dlq_exc),
                 correlation_id,
             )
+            # OMN-14551: this IS the alertable signal -- the log line above
+            # is greppable but not pageable. Never let metric emission
+            # itself become a new swallow site.
+            if _BOUNDARY_MESSAGE_LOST_COUNTER is not None:
+                try:
+                    _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+                        topic=topic, error_type=type(exc).__name__
+                    ).inc()
+                except Exception:  # noqa: BLE001 — metric emission must never crash the consumer
+                    logger.warning(
+                        "Failed to increment onex_boundary_message_lost_total "
+                        "metric for topic=%s (message loss above is still "
+                        "authoritative)",
+                        topic,
+                    )
 
     async def callback(message: object) -> None:
         from uuid import uuid4
