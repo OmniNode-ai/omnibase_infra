@@ -169,10 +169,12 @@ class DriftThresholds:
         7.0  # release-run age (main-ahead-of-tag) before STALLED fires
     )
     deploy_stale_hours: float = (
-        4.0  # age of the newest deploy-affecting commit before DEPLOY_STALE_VS_DEV
-        # fires -- a buffer so the check does not nag seconds after a merge;
-        # the incident this guards against (OMN-14994) sat undeployed ~28h, so
-        # 4h surfaces it same-day with ample margin below the incident window.
+        4.0  # hours since the last successful deploy run before
+        # DEPLOY_STALE_VS_DEV fires (OMN-14998: keyed on last_success.created_at,
+        # not branch-HEAD-commit recency) -- a buffer so the check does not nag
+        # seconds after a fresh success; the incident this guards against
+        # (OMN-14994) sat undeployed ~28h, so 4h surfaces it same-day with ample
+        # margin below the incident window.
     )
 
 
@@ -390,12 +392,25 @@ def evaluate_deploy_target(
        target with zero known-good deploys is worse than a stale one.
     2. ``DEPLOY_STALE_VS_DEV`` -- deploy-affecting paths changed on the
        target branch since the last successful run's ``head_sha``, and the
-       newest such change is older than ``thresholds.deploy_stale_hours``.
+       last successful run itself is older than ``thresholds.deploy_stale_hours``.
        Requires ``branch_head_sha != last_success.head_sha`` (something is
        actually ahead) AND a non-empty ``deploy_affecting_paths_changed``
        (the ahead commits actually touch deploy-relevant paths, not just
-       docs/tests) AND the age buffer, so a merge from five minutes ago does
-       not nag before the workflow has had a chance to run.
+       docs/tests) AND the age buffer, so a merge from five minutes after a
+       fresh success does not nag before the workflow has had a chance to run.
+
+       OMN-14998: the age clock is keyed on ``last_success.created_at``, NOT
+       ``branch_head_at`` (the target branch's current HEAD commit date).
+       Keying on branch-HEAD recency was the original (wrong) implementation --
+       it is reset to ~0h by *any* commit landing on the branch, deploy-affecting
+       or not, as long as at least one ahead commit touches a deploy-affecting
+       path. That under-reports exactly the failure this check exists to catch:
+       a deploy workflow that has not succeeded in months while ordinary commits
+       keep landing on ``dev`` looks perpetually fresh under a branch-HEAD clock.
+       Keying on ``last_success.created_at`` instead makes staleness a direct,
+       monotonically-growing function of "how long has it been since we know
+       this target was actually deployed" -- which is the fact this check is
+       named for.
     """
     now = now or datetime.now(tz=UTC)
     findings: list[DriftFinding] = []
@@ -423,7 +438,9 @@ def evaluate_deploy_target(
         and facts.branch_head_sha != facts.last_success.head_sha
         and facts.deploy_affecting_paths_changed
     ):
-        age = _age_hours(facts.branch_head_at, now)
+        # OMN-14998: clock on time-since-last-success, not branch-HEAD-commit
+        # recency -- see the OMN-14998 docstring note above.
+        age = _age_hours(facts.last_success.created_at, now)
         if age is not None and age >= thresholds.deploy_stale_hours:
             paths_preview = ", ".join(facts.deploy_affecting_paths_changed[:5])
             more = len(facts.deploy_affecting_paths_changed) - 5
@@ -436,20 +453,21 @@ def evaluate_deploy_target(
                     repo=facts.repo,
                     signature=f"{facts.repo}:{facts.target}:deploy-stale-vs-{facts.branch}",
                     summary=(
-                        f"{facts.target}: deploy-affecting changes on {facts.branch} "
-                        f"are {age:.1f}h old with no successful {facts.workflow} run "
-                        f"since (>= {thresholds.deploy_stale_hours:.0f}h threshold)"
+                        f"{facts.target}: last successful {facts.workflow} run is "
+                        f"{age:.1f}h old with deploy-affecting changes on "
+                        f"{facts.branch} since then "
+                        f"(>= {thresholds.deploy_stale_hours:.0f}h threshold)"
                     ),
                     detail=(
                         f"{facts.branch} HEAD ({facts.branch_head_sha}) is ahead of "
                         f"the last successful {facts.workflow} run "
                         f"({facts.last_success.head_sha}, {facts.last_success.created_at}) "
                         f"and the change set touches deploy-affecting paths: "
-                        f"{paths_preview}. The newest such commit is {age:.1f}h old. "
-                        "Merged code is not running -- this is the "
-                        '"merged but never deployed" class (OMN-14994): dispatch '
-                        f"{facts.workflow} and confirm via a live HTTP readback, "
-                        "not a green apply step alone."
+                        f"{paths_preview}. The last successful run is {age:.1f}h old "
+                        "with no successful run since. Merged code is not running "
+                        '-- this is the "merged but never deployed" class '
+                        f"(OMN-14994): dispatch {facts.workflow} and confirm via a "
+                        "live HTTP readback, not a green apply step alone."
                     ),
                 )
             )
