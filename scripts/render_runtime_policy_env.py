@@ -96,6 +96,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         env[f"{profile_prefix}_TOPIC_PROVISIONER_MAX_PARTITIONS"] = str(
             profile.topic_provisioner_max_partitions
         )
+        env[f"{profile_prefix}_BOUNDARY_DLQ_ENABLED"] = _bool_text(
+            profile.boundary_dlq_enabled
+        )
         secret_resolver_config_json = ""
         if profile.secret_resolver_mappings:
             secret_resolver_config_json = json.dumps(
