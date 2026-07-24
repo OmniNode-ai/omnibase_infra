@@ -55,16 +55,43 @@
 # dev-lane listener is plaintext. This repo needs no Kafka secrets for this
 # workflow.
 #
-# Ticket: OMN-14941
+# MANUAL REPLAY ENTRYPOINT (OMN-14993): `workflow_dispatch` lets an operator
+# manually re-request a mint for a PR whose original `pull_request` event was
+# swallowed (e.g. the pre-fix 422 bug, OMN-14981/OMN-14939). This ONLY works
+# for a PR that is currently OPEN and non-draft -- the downstream F-17 guard
+# in omnimarket's handler_occ_companion_compute.py deliberately refuses to
+# author a companion for a closed/merged/draft PR (added after incident
+# occ#4333), so `scripts/ci/occ_manual_replay_precheck.py` refuses BEFORE
+# publish for those states rather than let the request silently vanish
+# downstream. Merged/closed-PR replay is explicitly OUT OF SCOPE -- see
+# OMN-14993 and OMN-14991 Recommendation 4 for why building that is a
+# separate, deliberate design decision, not a trigger-wiring change. The
+# `occ-companion-effect-manual-replay` job below deliberately duplicates the
+# reusable's checkout/pip/run GHA glue (not the publish LOGIC itself, which
+# stays sourced from omnimarket) rather than threading override inputs
+# through the shared cross-repo reusable used by every born-path caller.
+#
+# Ticket: OMN-14941, OMN-14993
 
 name: OCC Companion Effect Publisher
 
 on:
   pull_request:
     types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: >
+          PR number to manually re-request an occ-companion-effect mint for
+          (OMN-14993). Only works for a PR that is currently OPEN and
+          non-draft -- a closed/merged/draft PR is refused before publish
+          (see scripts/ci/occ_manual_replay_precheck.py); it is not silently
+          accepted and dropped downstream.
+        required: true
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -76,6 +103,7 @@ jobs:
     # reusable enforces defensively). Gating here means the reusable is not
     # even invoked for non-OMN / bot PRs.
     if: >-
+      github.event_name == 'pull_request' &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'renovate[bot]' &&
       (contains(github.event.pull_request.title, 'OMN-') ||
@@ -83,3 +111,75 @@ jobs:
     uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-companion-effect-reusable.yml@dev
     with:
       lane: dev
+
+  occ-companion-effect-manual-replay:
+    # OMN-14993: manual re-publish entrypoint, gated to the workflow_dispatch
+    # trigger only. See the header comment above -- open/non-draft PRs only.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch live PR state
+        id: pr
+        run: |
+          gh pr view "${PR_NUMBER}" --repo "${{ github.repository }}" \
+            --json number,state,isDraft,headRefOid,headRefName,title,body \
+            > pr_state.json
+          jq 'del(.body)' pr_state.json
+
+      - name: Precheck -- refuse closed/merged/draft (F-17 boundary, OMN-14993)
+        run: python3 scripts/ci/occ_manual_replay_precheck.py pr_state.json
+
+      - name: Ticket gate (mirrors the reusable's defensive gate, OMN-13990 H4)
+        run: |
+          title="$(jq -r .title pr_state.json)"
+          head_ref="$(jq -r .headRefName pr_state.json)"
+          if [[ "${title}" != *"OMN-"* && "${head_ref}" != *"OMN-"* ]]; then
+            echo "REFUSED: PR #${PR_NUMBER} title/branch carries no OMN- ticket token; the reusable's defensive gate would also skip this PR." >&2
+            exit 1
+          fi
+
+      - name: Fetch canonical occ-companion-effect publisher (omnimarket)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .occ-companion-effect-src
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/publish_occ_companion_effect_command.py
+            scripts/publish_occ_autobind_command.py
+            config/ci_bus_lanes.yaml
+            src/omnimarket/events/topics.py
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --quiet confluent-kafka click pyyaml
+
+      - name: Publish onex.cmd.omnimarket.occ-companion-effect-requested.v1 (manual replay)
+        env:
+          RUNNER_IS_TRUSTED: "true"
+          PR_REPO: ${{ github.repository }}
+          LANE: dev
+        working-directory: .occ-companion-effect-src
+        run: |
+          PR_HEAD_SHA="$(jq -r .headRefOid ../pr_state.json)"
+          PR_BODY="$(jq -r .body ../pr_state.json)"
+          export PR_HEAD_SHA PR_BODY
+          python scripts/publish_occ_companion_effect_command.py --lane "${LANE}"
