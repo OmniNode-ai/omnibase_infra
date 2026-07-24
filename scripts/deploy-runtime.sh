@@ -56,13 +56,9 @@ if [[ ! -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     } >&2
     exit 64
 fi
-# OMN-14983: a bare `-f`/`-e` (exists) check does not prove the file is
-# READABLE by this process -- a root-owned or wrong-owner 0600 file passes
-# the existence check and then fails opaquely at `source` with a raw
-# "Permission denied" instead of a named, actionable error. Distinguish
-# "missing" (above) from "present but unreadable" explicitly, naming the
-# file and the effective uid so this never masquerades as a different
-# failure (CLAUDE.md rule 8 -- fail fast, never silent fallback).
+# OMN-14983: existence does not prove readability. Distinguish "missing"
+# from "present but unreadable" explicitly so a permissions problem never
+# reaches a raw `source` crash or masquerades as a different failure.
 if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     {
         echo "[deploy-runtime] ERROR: OPERATOR_ENV_UNREADABLE -- operator env file exists but this process cannot read it:"

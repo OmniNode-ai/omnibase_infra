@@ -50,7 +50,7 @@ async def test_non_dispatch_session_populates_projection_costs() -> None:
             },
         )
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "session-non-dispatch-root",
                 "tokens_injected": 300,

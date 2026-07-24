@@ -60,11 +60,15 @@ output_model:
 # contract routes its "validation_ledger.append" intent here. This command topic
 # mirrors node_build_loop_write_effect's shape (also intent-routed) so the node is
 # introspectable/independently invocable like every other effect node.
+# OMN-14986: publish_topics removed -- HandlerValidationLedgerAppend.handle()
+# returns ModelHandlerOutput.for_compute() (never for_orchestrator), and
+# EFFECT handlers have no direct event-bus access (only orchestrators publish
+# per repo doctrine). No runtime path ever published
+# onex.evt.omnibase-infra.validation-ledger-appended.v1 -- it was dead
+# declaration.
 event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.validation-ledger-append.v1"
-  publish_topics:
-    - "onex.evt.omnibase-infra.validation-ledger-appended.v1"
 # Capability declaration (capability-oriented naming)
 capabilities:
   - name: "validation_ledger.write"
