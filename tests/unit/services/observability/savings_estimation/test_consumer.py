@@ -99,7 +99,7 @@ async def test_grace_window_finalization(service: ServiceSavingsEstimator) -> No
     """Session finalizes after grace window elapses post session-outcome."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-2",
                 "tokens_injected": 300,
@@ -132,7 +132,7 @@ async def test_grace_window_includes_late_events(
     """Events arriving after outcome but within grace window are included."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-grace",
                 "tokens_injected": 500,
@@ -147,7 +147,7 @@ async def test_grace_window_includes_late_events(
     # Late event within grace window (2s after outcome, grace is 5s)
     with patch("time.monotonic", return_value=_T0 + 2.0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-grace",
                 "tokens_injected": 300,
@@ -168,7 +168,7 @@ async def test_grace_window_includes_late_events(
 async def test_session_timeout(service: ServiceSavingsEstimator) -> None:
     """Sessions without outcome finalize after timeout."""
     service.ingest_event(
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         {
             "session_id": "sess-3",
             "tokens_injected": 200,
@@ -198,7 +198,7 @@ async def test_idempotency_finalized_sessions(
     """Finalized sessions are not re-processed on subsequent events."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-4",
                 "tokens_injected": 500,
@@ -216,7 +216,7 @@ async def test_idempotency_finalized_sessions(
 
     # Ingest another event for same session -- should be ignored
     service.ingest_event(
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         {
             "session_id": "sess-4",
             "tokens_injected": 200,
@@ -253,7 +253,7 @@ async def test_partial_signals_produce_estimate(
     """Sessions with only injection signals (no LLM calls) still produce estimates."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-partial",
                 "tokens_injected": 500,
@@ -279,7 +279,7 @@ async def test_deterministic_source_event_id(
     """source_event_id is deterministic from session_id and schema_version."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-6",
                 "tokens_injected": 200,
@@ -318,7 +318,7 @@ async def test_lru_eviction() -> None:
     service = ServiceSavingsEstimator(config)
 
     service.ingest_event(
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         {
             "session_id": "old",
             "tokens_injected": 100,
@@ -326,7 +326,7 @@ async def test_lru_eviction() -> None:
         },
     )
     service.ingest_event(
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         {
             "session_id": "mid",
             "tokens_injected": 100,
@@ -335,7 +335,7 @@ async def test_lru_eviction() -> None:
     )
     # This should evict "old"
     service.ingest_event(
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         {
             "session_id": "new",
             "tokens_injected": 100,
@@ -355,7 +355,7 @@ async def test_multiple_sessions_independent(
     """Multiple sessions are tracked independently."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-a",
                 "tokens_injected": 100,
@@ -363,7 +363,7 @@ async def test_multiple_sessions_independent(
             },
         )
         service.ingest_event(
-            "onex.evt.omniclaude.hook-context-injected.v1",
+            "onex.evt.omniclaude.context-injected.v1",
             {
                 "session_id": "sess-b",
                 "tokens_injected": 200,

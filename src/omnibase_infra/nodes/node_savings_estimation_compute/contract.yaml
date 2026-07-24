@@ -67,7 +67,7 @@ event_bus:
     - "onex.evt.omniintelligence.llm-call-completed.v1"
     - "onex.evt.omniintelligence.dispatch-outcome-evaluated.v1"
     - "onex.evt.omniclaude.session-outcome.v1"
-    - "onex.evt.omniclaude.hook-context-injected.v1"
+    - "onex.evt.omniclaude.context-injected.v1"
     - "onex.evt.omniclaude.validator-catch.v1"
     - "onex.evt.omniclaude.pattern-enforcement.v1"
   publish_topics:
@@ -86,7 +86,7 @@ topics:
       description: "Dispatch outcome evaluation events correlated by session_id"
     - topic: "onex.evt.omniclaude.session-outcome.v1"
       description: "Session outcome events that trigger finalization of a savings estimate"
-    - topic: "onex.evt.omniclaude.hook-context-injected.v1"
+    - topic: "onex.evt.omniclaude.context-injected.v1"
       description: "Hook context injection signals accumulated into injection effectiveness"
     - topic: "onex.evt.omniclaude.validator-catch.v1"
       description: "Validator catch events contributing heuristic avoided-rework savings"

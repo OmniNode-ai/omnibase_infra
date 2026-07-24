@@ -58,6 +58,23 @@ DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_stability_refresh.py"
 CONSUMER_GROUPS_FILE="${SCRIPT_DIR}/consumer_groups_stability.yaml"
 
+log() { printf '[refresh-stability-lane] %s\n' "$*" >&2; }
+err() { printf '[refresh-stability-lane] ERROR: %s\n' "$*" >&2; }
+# OMN-14984: fail-fast-by-name helper for values this script expects the
+# already-sourced docker/runtime-policy.env (contracts/services/
+# runtime_policy.contract.yaml) to have provided, instead of re-declaring a
+# hardcoded default that silently drifts from the contract.
+require_contract_var() {
+    local var_name="$1"
+    if [[ -z "${!var_name:-}" ]]; then
+        err "${var_name} is not set -- expected from docker/runtime-policy.env"
+        err "  (generated from contracts/services/runtime_policy.contract.yaml)."
+        err "  Verify docker/runtime-policy.env exists and was sourced above, and"
+        err "  that the contract still renders ${var_name} for the stability_test lane."
+        exit 64
+    fi
+}
+
 # Source the same contract-rendered runtime policy + operator env that
 # deploy-runtime.sh sources at its own top (docker/runtime-policy.env, then
 # ~/.omnibase/.env). deploy-runtime.sh's OWN docker compose calls already do
@@ -76,7 +93,25 @@ if [[ -f "${REPO_ROOT}/docker/runtime-policy.env" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/docker/runtime-policy.env"
-    if [[ -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    # OMN-14983: a bare `-f` (exists) check silently treats an EXISTING but
+    # UNREADABLE file the same as an absent one -- the operator env file is
+    # then just skipped with no error, and the real failure surfaces later
+    # and misleadingly (e.g. a missing POSTGRES_PASSWORD during compose
+    # interpolation) instead of here, at the actual root cause. Distinguish
+    # "missing" (still optional -- unchanged behavior) from "present but
+    # unreadable" (always a fail-fast error, never silent).
+    if [[ -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+        if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+            {
+                echo "[refresh-stability-lane] ERROR: OPERATOR_ENV_UNREADABLE -- operator env file exists but this process cannot read it:"
+                echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+                echo "  effective uid=$(id -u) ($(id -un 2>/dev/null || echo unknown))"
+                echo "  Check the file's ownership/permissions. A silent skip here would let the"
+                echo "  refresh proceed without the operator env (POSTGRES_PASSWORD etc.) and fail"
+                echo "  later at a less obvious point (OMN-14983)."
+            } >&2
+            exit 64
+        fi
         # shellcheck source=/dev/null
         source "${OMNIBASE_OPERATOR_ENV_FILE}"
     fi
@@ -87,8 +122,24 @@ if [[ -n "${_OPERATOR_OMNI_HOME}" ]]; then
 fi
 
 # --- hardcoded lane identity (no --lane flag; stability-test ONLY) ---------
+# OMN-14984: COMPOSE_PROJECT duplicated the contract-rendered
+# STABILITY_TEST_COMPOSE_PROJECT (docker/runtime-policy.env, generated from
+# contracts/services/runtime_policy.contract.yaml) as a second, independently
+# hand-maintained bash literal -- re-render the contract and this script goes
+# stale silently. Read it from the file this script already sources above
+# instead; fail fast BY NAME (rule 8) if the sourced file didn't provide it,
+# rather than falling back to a hardcoded default.
+require_contract_var STABILITY_TEST_COMPOSE_PROJECT
 readonly LANE="stability-test"
-readonly COMPOSE_PROJECT="omnibase-infra-stability-test"
+readonly COMPOSE_PROJECT="${STABILITY_TEST_COMPOSE_PROJECT}"
+# REDPANDA_CONTAINER / CORE_SERVICES / CORE_CONTAINERS / MIN_CONTRACTS below
+# are NOT currently rendered into docker/runtime-policy.env -- verified
+# against contracts/services/runtime_policy.contract.yaml (OMN-14984 recon):
+# only compose_project/main_port/effects_port are declared per lane there.
+# These stay hardcoded here (no contract-rendered source to read from without
+# fabricating one); a future lane-descriptor YAML analogous to
+# consumer_groups_stability.yaml, or a contract schema extension, is the
+# correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-stability-test-redpanda"
 readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
@@ -114,20 +165,22 @@ readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_ch
 # as a false "lane unhealthy" STOP (deploy run 29977968728). The runner
 # compose sets LANE_PROBE_HOST=host.docker.internal (host-gateway alias);
 # --manifest-url/--health-url flags still override entirely.
+# OMN-14984: the manifest/health default port duplicated the contract-rendered
+# STABILITY_TEST_RUNTIME_MAIN_PORT as a hardcoded 18085 literal in these two
+# URLs. Read it from the sourced runtime-policy.env instead; fail fast BY NAME
+# if absent. --manifest-url/--health-url still fully override these defaults.
+require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
-MANIFEST_URL="http://${LANE_PROBE_HOST}:18085/v1/introspection/manifest"
-HEALTH_URL="http://${LANE_PROBE_HOST}:18085/health"
+MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
+HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
 
 usage() {
     sed -n '4,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
-
-log() { printf '[refresh-stability-lane] %s\n' "$*" >&2; }
-err() { printf '[refresh-stability-lane] ERROR: %s\n' "$*" >&2; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

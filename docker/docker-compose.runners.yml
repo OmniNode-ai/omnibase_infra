@@ -969,6 +969,29 @@ services:
         if [ "$$(stat -c '%u' "$${OMNI_HOME}")" != "$${runner_uid}" ]; then
           chown "$${runner_uid}:$${runner_gid}" "$${OMNI_HOME}"
         fi
+        # OMN-14983: the host operator env file is bind-mounted read-only at
+        # /run/omnibase-operator.env, 0600 and owned by the HOST operator uid
+        # (never the container `runner` uid -- it carries real secrets:
+        # POSTGRES_PASSWORD, GH_PAT, LINEAR_API_KEY, KEYCLOAK_*, Infisical
+        # creds). The `runner` job user (uid 1001, per docker/runners/
+        # Dockerfile) that executes job steps cannot read it directly
+        # (EACCES) once the entrypoint gosu-drops below. This root-phase
+        # init still runs as root (CAP_DAC_OVERRIDE), so it CAN read the
+        # 0600 mount; it copies the content into the already-runner-owned
+        # deploy-runner-creds volume at 0400 runner:runner, and the scripts
+        # are pointed at that copy (OMNIBASE_OPERATOR_ENV_FILE below) instead
+        # of the raw mount. This is the least-privilege fix: it does not
+        # relax the host file's 0600 perms (no world-readable regression),
+        # does not chgrp it to the container runner gid (on the .201 host,
+        # gid 1001 belongs to a DIFFERENT real user -- daniyal -- so that
+        # would have handed him direct read access to operator secrets), and
+        # does not touch the runner uid/Dockerfile shared with the other
+        # 64-runner fleet. Re-copied on every container start/recreate, so a
+        # host-side env rotation is picked up on next restart.
+        mkdir -p /home/runner/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
+          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
         exec /usr/local/bin/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-deploy,linux,x64
@@ -984,10 +1007,16 @@ services:
       # OMN-14958: the runtime_build scripts + deploy-runtime.sh need the
       # operator env (POSTGRES_PASSWORD etc.) for compose interpolation, but
       # this container's $HOME carries no ~/.omnibase/.env -- deploy run
-      # 29977968728 crashed on exactly that. Point the scripts at the
-      # read-only bind mount below (never at /home/runner/.omnibase, whose
-      # state/ subtree must stay runner-writable for refresh receipts).
-      OMNIBASE_OPERATOR_ENV_FILE: /run/omnibase-operator.env
+      # 29977968728 crashed on exactly that.
+      # OMN-14983: point the scripts at the root-phase-init COPY in the
+      # runner-owned deploy-runner-creds volume, NOT at the raw
+      # /run/omnibase-operator.env read-only mount below -- that mount stays
+      # 0600 owned by the host operator uid and is unreadable by the `runner`
+      # job user (uid 1001) once the entrypoint drops privilege. See the
+      # entrypoint block above for the copy step (never point this at
+      # /home/runner/.omnibase either -- its state/ subtree must stay
+      # runner-writable for refresh receipts).
+      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
       # OMN-14958: health-gate/rollback-gate probes. Inside this container
       # localhost is the container itself, so the refresh scripts' default
       # http://localhost:18085|8085 probes die ECONNREFUSED and report a
@@ -1023,6 +1052,13 @@ services:
       # NOT mount this at /home/runner/.omnibase/.env -- docker would create
       # root-owned intermediate dirs there and break the runner-writable
       # ~/.omnibase/state receipt tree.
+      # OMN-14983: this mount stays as the host owner's original 0600 perms
+      # (deliberately -- never chmod/chgrp the host file). Only the
+      # root-phase entrypoint init (which still runs as root/CAP_DAC_OVERRIDE)
+      # reads it directly, to copy it into the runner-owned
+      # /home/runner/.runner-creds/operator.env consumed by
+      # OMNIBASE_OPERATOR_ENV_FILE above. The `runner` job user never reads
+      # this path.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro

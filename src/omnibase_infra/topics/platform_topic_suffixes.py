@@ -1599,9 +1599,7 @@ SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT: str = (
 )
 """Pattern enforcement event topic emitted by omniclaude hooks."""
 
-SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED: str = (
-    "onex.evt.omniclaude.hook-context-injected.v1"
-)
+SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED: str = "onex.evt.omniclaude.context-injected.v1"
 """Hook context injection event topic emitted by omniclaude hooks."""
 
 SUFFIX_OMNICLAUDE_PHASE_METRICS: str = "onex.evt.omniclaude.phase-metrics.v1"
