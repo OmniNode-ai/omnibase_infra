@@ -91,6 +91,17 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # runner-fleet-canary 15-min GitHub-hosted schedule (OMN-13942 Increment 1),
     # not a contract-declared Kafka publisher.
     "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1": "Triggered by the reused OMN-13915 runner-fleet-canary GHA schedule, not Kafka | owner: jonah | expiry: 2026-12-01",
+    # OMN-15006: node_ledger_projection_compute widened subscribe_topics to
+    # OCC governance + omnimarket-redeploy topics whose canonical publisher
+    # contracts live in onex_change_control / omnimarket (cross-repo, not
+    # visible to this scan). Topic strings are onex_change_control's own
+    # GovernanceTopic registry (OMN-8635).
+    "onex.evt.occ.nightly-promotion.v1": "Published by onex_change_control nightly dev-to-main promotion pipeline (GovernanceTopic.NIGHTLY_PROMOTION), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.governance-check-completed.v1": "Published by onex_change_control governance check pipeline (GovernanceTopic.GOVERNANCE_CHECK_COMPLETED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.contract-drift-detected.v1": "Published by onex_change_control drift detection (GovernanceTopic.CONTRACT_DRIFT_DETECTED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.onex-change-control.cosmetic-compliance-scored.v1": "Published by onex_change_control cosmetic lint tooling (GovernanceTopic.COSMETIC_COMPLIANCE_SCORED), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnimarket.redeploy-start.v1": "Published by onex_change_control promotion tooling, consumed by omnimarket node_redeploy (GovernanceTopic.RUNTIME_DEPLOYMENT_REQUEST, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omnimarket.runtime-deployment-proof.v1": "Published by omnimarket node_redeploy per-lane probe (GovernanceTopic.RUNTIME_DEPLOYMENT_PROOF, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
