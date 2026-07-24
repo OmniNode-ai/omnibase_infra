@@ -1539,6 +1539,22 @@ class SecretResolver:
         if logical_name in self._mappings:
             return self._mappings[logical_name]
 
+        # OMN-14951 gap 1 (2026-07-23 hardening): a declared-required key
+        # must NEVER resolve via convention fallback, unconditionally --
+        # regardless of enable_convention_fallback or
+        # require_infisical_for_required_secrets. This is the single choke
+        # point every resolution path (_resolve_secret sync + async,
+        # get_secret_async) already funnels through, so enforcing it here
+        # closes the leak even if ModelSecretResolverConfig's
+        # construction-time validator were bypassed (the config is
+        # frozen=False, so required_secrets/mappings can be mutated after
+        # construction without re-running that validator). An unmapped
+        # required key resolves to None here -- never a source spec -- so
+        # validate_required_secrets() reports it as missing rather than
+        # silently succeeding off an ambient/convention env var.
+        if logical_name in self._config.required_secrets:
+            return None
+
         # Try convention fallback
         if self._config.enable_convention_fallback:
             env_var = self._logical_name_to_env_var(logical_name)

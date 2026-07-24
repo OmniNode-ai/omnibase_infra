@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# CI gate: block new os.environ/os.getenv reads outside approved modules.
+# CI gate: block new os.environ/os.getenv reads outside approved modules,
+# AND block reads of undeclared secret-ish names (OMN-14951 gap 2).
 # Modes:
 #   --staged  (pre-commit): check staged diff only
 #   --base <ref>  (CI): check diff against base branch
@@ -62,6 +63,21 @@ is_approved() {
     return 1
 }
 
+# OMN-14951 gap 2: files subject to the secret-name declaration check are
+# exactly the boundary infix set above -- these ARE a deployable's actual
+# env-consuming boundary code (OMN-14951 scope: "every deployable's consumed
+# env is enumerated and declared"). tests/ and scripts/ stay exempt from THIS
+# check: test doubles and tooling routinely mock/set secret-ish env names and
+# are not a deployable's consumed env surface. (They remain fully exempt from
+# the path-boundary check above, unchanged.)
+is_secret_name_check_target() {
+    local file="$1"
+    for infix in "${APPROVED_INFIX_PATTERNS[@]}"; do
+        [[ "$file" == *"$infix"* ]] && return 0
+    done
+    return 1
+}
+
 get_changed_files() {
     case "$MODE" in
         --staged) git diff --cached --diff-filter=ACMR --name-only -- '*.py' ;;
@@ -78,6 +94,131 @@ get_diff() {
     esac
 }
 
+# OMN-14951 gap 2: statically scan os.environ[...]/os.environ.get(...)/
+# os.getenv(...)/get_secret(...) reads of secret-ish names in boundary files
+# and fail when the name is neither the finite, named bootstrap allowlist nor
+# self-declared as a required_secrets/bootstrap_secrets list element in the
+# same file. Embedded as a single python3 invocation (stdlib only, no new
+# dependency) rather than a second parallel scanner script — this stays one
+# committed gate file, converging with the path-boundary check above.
+check_secret_name_declarations() {
+    local target_files=()
+    while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        is_secret_name_check_target "$file" || continue
+        [ -f "$file" ] || continue  # deleted files: nothing to scan
+        target_files+=("$file")
+    done < <(get_changed_files)
+
+    [ ${#target_files[@]} -eq 0 ] && return 0
+
+    local tmp_data tmp_py rc
+    tmp_data="$(mktemp)"
+    tmp_py="$(mktemp)"
+
+    {
+        for f in "${target_files[@]}"; do
+            printf '##FILE##%s\n' "$f"
+            get_diff "$f"
+            printf '\n'
+        done
+    } > "$tmp_data"
+
+    cat > "$tmp_py" <<'PYEOF'
+import re
+import sys
+
+# Finite, named bootstrap allowlist (OMN-14951): the irreducible set of
+# secret-ish-looking env vars needed to reach Infisical / identify the
+# runtime lane / locate the workspace in the first place — "a keyring
+# cannot unlock itself". Keep this list explicit and small; do NOT widen it
+# to cover a real declared-required secret (those must route through
+# ModelSecretResolverConfig.required_secrets instead, per the class-level
+# gate this script's sibling check enforces at construction/resolution
+# time).
+BOOTSTRAP_ALLOWLIST = {
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_ENVIRONMENT",
+    "RUNTIME_PROFILE",
+    "OMNI_HOME",
+    "ONEX_SECRET_POLICY",
+    "ONEX_SECRET_RESOLVER_CONFIG_PATH",
+}
+
+SECRET_ISH = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|CERT|PRIVATE|DSN)",
+    re.IGNORECASE,
+)
+READ_PATTERN = re.compile(
+    r"""os\.environ\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]
+        |os\.environ\.get\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']
+        |os\.getenv\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']
+        |get_secret(?:_async)?\(\s*["']([A-Za-z_][A-Za-z0-9_.]*)["']
+    """,
+    re.VERBOSE,
+)
+DECLARATION_MARKER = re.compile(r"required_secrets|bootstrap_secrets")
+
+
+def main() -> int:
+    data_path = sys.argv[1]
+    with open(data_path, encoding="utf-8") as fh:
+        raw = fh.read()
+
+    failed = False
+    for section in raw.split("##FILE##"):
+        if not section.strip():
+            continue
+        file_line, _, diff_body = section.partition("\n")
+        file = file_line.strip()
+        if not file:
+            continue
+
+        try:
+            with open(file, encoding="utf-8") as fh:
+                full_content = fh.read()
+        except OSError:
+            full_content = ""
+        declares_lists = bool(DECLARATION_MARKER.search(full_content))
+
+        for line in diff_body.splitlines():
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            for match in READ_PATTERN.finditer(line):
+                name = next(g for g in match.groups() if g)
+                if not SECRET_ISH.search(name):
+                    continue
+                if name in BOOTSTRAP_ALLOWLIST:
+                    continue
+                if declares_lists and re.search(
+                    r"""["']""" + re.escape(name) + r"""["']""", full_content
+                ):
+                    continue
+                print(
+                    f"BLOCKED: {file} reads undeclared secret-ish name '{name}'"
+                )
+                print(
+                    "  Declare it in required_secrets/bootstrap_secrets "
+                    "(OMN-14951) or the bootstrap allowlist."
+                )
+                failed = True
+
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYEOF
+
+    python3 "$tmp_py" "$tmp_data"
+    rc=$?
+    rm -f "$tmp_data" "$tmp_py"
+    return $rc
+}
+
 FAILED=0
 while IFS= read -r file; do
     [ -z "$file" ] && continue
@@ -91,5 +232,9 @@ while IFS= read -r file; do
         FAILED=1
     fi
 done < <(get_changed_files)
+
+if ! check_secret_name_declarations; then
+    FAILED=1
+fi
 
 exit $FAILED

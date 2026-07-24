@@ -101,7 +101,13 @@ class TestRequiredSecretsRedProofWrongSourceType:
 
 class TestRequiredSecretsOptOutEscapeHatch:
     """require_infisical_for_required_secrets=False is an explicit, named
-    escape hatch -- not a silent default -- for the rare non-Infisical lane."""
+    escape hatch for a required key's explicit mapping to use a non-Infisical
+    source_type -- NOT an escape hatch from declaring a mapping at all. Gap 1
+    (2026-07-23 hardening): prior to this fix, the flag short-circuited the
+    ENTIRE validator (including the missing-mapping check) when False, so a
+    required key with zero mappings passed construction and silently resolved
+    via enable_convention_fallback at runtime -- exactly the operator-flagged
+    live reproduction. The missing-mapping check is now unconditional."""
 
     def test_opt_out_allows_env_mapping(self) -> None:
         config = ModelSecretResolverConfig(
@@ -111,21 +117,67 @@ class TestRequiredSecretsOptOutEscapeHatch:
         )
         assert config.required_secrets == ["db.postgres.password"]
 
-    def test_opt_out_still_requires_some_mapping_when_convention_disabled(
+    def test_opt_out_does_not_waive_the_explicit_mapping_requirement(
         self,
     ) -> None:
         # require_infisical_for_required_secrets=False only removes the
-        # infisical-only constraint; it does not create a new fallback path.
-        # With convention fallback also disabled and no explicit mapping, the
-        # key still fails at resolution time (proven in test_secret_resolver
-        # tests) -- this test only proves construction succeeds (the model
-        # layer does not know about resolution-time behavior).
-        config = ModelSecretResolverConfig(
-            required_secrets=["db.postgres.password"],
-            require_infisical_for_required_secrets=False,
-            enable_convention_fallback=False,
-        )
-        assert config.required_secrets == ["db.postgres.password"]
+        # infisical-only source_type constraint; it does NOT create a new
+        # fallback path or waive the explicit-mapping requirement. With no
+        # mapping at all, construction must still raise -- naming the key --
+        # regardless of the flag value.
+        with pytest.raises(ValidationError) as exc_info:
+            ModelSecretResolverConfig(
+                required_secrets=["db.postgres.password"],
+                require_infisical_for_required_secrets=False,
+                enable_convention_fallback=False,
+            )
+        assert "db.postgres.password" in str(exc_info.value)
+
+
+class TestRequiredSecretsGap1LeakyFlagComboRedProof:
+    """RED proof (OMN-14951 gap 1, 2026-07-23 hardening): the exact leaky
+    flag combination the operator/verifier drove live --
+    require_infisical_for_required_secrets=False + enable_convention_fallback
+    at its True default + a required key with no Infisical mapping -- must
+    now raise, naming the key, rather than silently reintroducing the
+    convention-fallback silent-miss this gate exists to kill.
+
+    This is a stricter outcome than the live reproduction described: the
+    fixed validator now refuses to even CONSTRUCT such a config (closing the
+    leak one layer earlier, at declaration time, rather than only at
+    resolution time) -- see test_secret_resolver_required_secrets.py's
+    TestValidateRequiredSecretsGap1ResolverChokePoint for the independent
+    resolution-time choke-point proof (SecretResolver._get_source_spec),
+    which holds even if this construction-time validator is bypassed via
+    model_construct().
+    """
+
+    def test_leaky_flag_combo_raises_naming_the_key(self) -> None:
+        # Pre-fix (verify by checking out the unpatched
+        # model_secret_resolver_config.py and re-running): this constructs
+        # successfully with zero mappings, and the resulting config silently
+        # resolves "payments.stripe.secret_key" via convention/env fallback
+        # at runtime -- the exact silent-miss the operator flagged.
+        with pytest.raises(ValidationError) as exc_info:
+            ModelSecretResolverConfig(
+                required_secrets=["payments.stripe.secret_key"],
+                require_infisical_for_required_secrets=False,
+                enable_convention_fallback=True,
+            )
+        assert "payments.stripe.secret_key" in str(exc_info.value)
+
+    def test_leaky_flag_combo_with_bootstrap_default_also_raises(self) -> None:
+        # bootstrap_secrets/require_infisical_for_required_secrets both left
+        # at their non-default-opt-out-adjacent values to prove no OTHER flag
+        # combination reopens the leak either.
+        with pytest.raises(ValidationError):
+            ModelSecretResolverConfig(
+                required_secrets=["payments.stripe.secret_key"],
+                require_infisical_for_required_secrets=False,
+                enable_convention_fallback=True,
+                bootstrap_secrets=[],
+                convention_env_prefix="ONEX_",
+            )
 
 
 class TestBootstrapSecretsCannotOverlapRequiredSecrets:
