@@ -209,6 +209,37 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
 _BOUNDARY_DLQ_MAX_ATTEMPTS = 3
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
+
+# OMN-14551: alertable counter for the boundary's one true loss window --
+# retry budget exhausted AND the best-effort DLQ publish itself also failed
+# (the ``message_lost=true`` branch of ``_route_swallowed_exception`` below).
+# Prior to this, that path was a structured-but-unalertable ``logger.error``
+# line only (forbid-verify residual ask: "a greppable log won't [page]").
+# Emitted through the same process-global default Prometheus registry the
+# runtime's existing metrics surface (``SinkMetricsPrometheus`` /
+# ``HandlerMetricsPrometheus``'s ``/metrics`` scrape endpoint, OMN-9121
+# observability profile) already exports -- mirrors the established
+# module-level ``prometheus_client.Counter`` idiom in ``handler_db.py``
+# (OMN-1366) rather than inventing a new observability surface. Scoped to
+# this one loss-path emission only -- not a refactor of the boundary's
+# other logging.
+try:
+    from prometheus_client import Counter as _PrometheusCounter
+
+    _BOUNDARY_MESSAGE_LOST_COUNTER: _PrometheusCounter | None = _PrometheusCounter(
+        "onex_boundary_message_lost_total",
+        "Count of auto-wiring boundary messages genuinely lost: handler "
+        "exception survived the bounded retry AND the best-effort DLQ "
+        "publish itself also failed. MUST page -- unlike "
+        "boundary_swallow_prevented (DLQ-routed, the success path), this "
+        "counter incrementing means the message is gone.",
+        ["topic", "error_type"],
+    )
+except (ImportError, ValueError):
+    # ImportError: prometheus_client not installed (graceful degradation,
+    # matches handler_db.py). ValueError: duplicate registration under
+    # pytest-xdist/module-reimport -- idempotent fallback, not fatal.
+    _BOUNDARY_MESSAGE_LOST_COUNTER = None
 # OMN-14600: the state_io outbox recovery sweep (re-publish + finalize any row
 # whose batch is committed but never finalized) originally ran exactly once
 # per adapter lifetime (first live dispatch only) -- a row stranded later in a
@@ -3268,6 +3299,8 @@ def _make_event_bus_callback(
         there, only observed; conflating the two would mislead an operator
         alerting on the "prevented" counter into believing the message survived.
         """
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import ModelInfraErrorContext
         from omnibase_infra.utils.util_error_sanitization import (
             sanitize_error_message,
         )
@@ -3300,12 +3333,39 @@ def _make_event_bus_callback(
                 correlation_id,
             )
             return
+
+        def _increment_message_lost_counter() -> None:
+            # OMN-14551: this IS the alertable signal -- the log line at each
+            # call site is greppable but not pageable. Never let metric
+            # emission itself become a new swallow site.
+            if _BOUNDARY_MESSAGE_LOST_COUNTER is None:
+                return
+            try:
+                _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+                    topic=topic, error_type=type(exc).__name__
+                ).inc()
+            except Exception as metric_exc:  # noqa: BLE001 — metric emission must never crash the consumer
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="increment_message_lost_counter",
+                    target_name=topic,
+                    original_error_type=type(metric_exc).__name__,
+                )
+                logger.warning(
+                    "Failed to increment onex_boundary_message_lost_total "
+                    "metric for topic=%s (message loss above is still "
+                    "authoritative): context=%s",
+                    topic,
+                    context.model_dump(mode="json", exclude_none=True),
+                )
+
         try:
             from omnibase_infra.event_bus.topic_constants import (
                 get_dlq_topic_for_original,
             )
 
-            await publish_dlq_fn(
+            dlq_persisted = await publish_dlq_fn(
                 original_topic=topic,
                 raw_msg=message,
                 error=exc,
@@ -3314,14 +3374,34 @@ def _make_event_bus_callback(
                 consumer_group="auto-wiring",
                 dlq_topic=get_dlq_topic_for_original(topic),
             )
-            logger.error(
-                "metric_name=boundary_swallow_prevented dlq_routed=true "
-                "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
-                dlq_enabled,
-                topic,
-                type(exc).__name__,
-                correlation_id,
-            )
+            if dlq_persisted:
+                logger.error(
+                    "metric_name=boundary_swallow_prevented dlq_routed=true "
+                    "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
+                    dlq_enabled,
+                    topic,
+                    type(exc).__name__,
+                    correlation_id,
+                )
+            else:
+                # OMN-14936: a False return means the publish did NOT
+                # durably persist (rejected input, producer unavailable, or
+                # the send itself failed/timed out) WITHOUT raising -- the
+                # message is lost exactly like the except-branch below, just
+                # signaled through the return value instead of an exception.
+                # Reusing "dlq_publish_failed=true" here (rather than a new
+                # token) keeps this the same alertable shape as the
+                # exception path for any existing log-based consumer.
+                logger.error(
+                    "metric_name=boundary_swallow_observed dlq_routed=false "
+                    "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
+                    "topic=%s error_type=%s correlation_id=%s",
+                    dlq_enabled,
+                    topic,
+                    type(exc).__name__,
+                    correlation_id,
+                )
+                _increment_message_lost_counter()
         except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the consumer
             # Best-effort DLQ failed too -- the message IS lost here (gap G1).
             # Loud, not silent, but not prevented -- see gap G3 above.
@@ -3335,6 +3415,7 @@ def _make_event_bus_callback(
                 sanitize_error_message(dlq_exc),
                 correlation_id,
             )
+            _increment_message_lost_counter()
 
     async def callback(message: object) -> None:
         from uuid import uuid4
