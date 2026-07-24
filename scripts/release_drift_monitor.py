@@ -21,6 +21,18 @@ store (design §4 RT-7). The friction-emit shape mirrors
 ``node_env_sync_alert_effect``, the platform's existing scheduled drift ->
 friction -> Linear precedent.
 
+DEPLOY-GAP CHECK (OMN-14994): in addition to the per-repo PyPI/tag/main/dev
+checks, this shell also gathers ``DeployFacts`` for a small set of cloud deploy
+targets (repo + branch + workflow, e.g. ``omninode_infra`` dev ->
+``deploy-onex-dev.yml``) and evaluates them via
+``release_drift_monitor_lib.evaluate_deploy_target``. This closes the "merged
+but never deployed" gap that let three production-blocking fixes
+(omninode_infra PRs #619/#620/#622) sit merged to dev for ~28 hours with
+nothing red: that repo's push-trigger only fires on ``main``/``m7/**``, but
+``dev`` is the actual default/everyday branch (OMN-14198). Scope is deliberately
+narrow (onex-dev only) -- this monitor never touches or asserts anything about
+prod.
+
 SCOPE NOTE (per-lane running-signature): the design also calls for a per-lane
 "running-signature vs intended-ref" check. That requires reading a live ``.201``
 container signature (SSH / introspection endpoint) and is delivered by the RT-6
@@ -60,6 +72,7 @@ from typing import Any
 
 import yaml
 from release_drift_monitor_lib import (
+    DeployFacts,
     DriftReport,
     DriftThresholds,
     RepoFacts,
@@ -92,6 +105,43 @@ DEFAULT_REPOS: tuple[RepoConfig, ...] = (
     RepoConfig("omnibase_compat", "omnibase-compat"),
     RepoConfig("omnimarket", "omnimarket"),
     RepoConfig("onex_change_control", None),
+)
+
+
+@dataclass(frozen=True)
+class DeployTargetConfig:
+    """A (repo, branch, workflow) triple whose successful runs are the only
+    mechanism that moves code from "merged" to "running" for that target.
+    """
+
+    repo: str
+    target: str  # human label, e.g. "onex-dev"
+    branch: str  # branch the target deploys from
+    workflow: str  # workflow filename
+    deploy_paths: tuple[str, ...]  # path prefixes that make a commit deploy-affecting
+
+
+# Deploy targets monitored for the "merged but never deployed" gap (OMN-14994).
+# Scope is deliberately onex-dev only -- this monitor never touches or reasons
+# about prod. Extend this tuple (never hand-roll a parallel check) when another
+# repo/branch/workflow triple needs the same gap coverage.
+DEPLOY_TARGETS: tuple[DeployTargetConfig, ...] = (
+    DeployTargetConfig(
+        repo="omninode_infra",
+        target="onex-dev",
+        branch="dev",
+        workflow="deploy-onex-dev.yml",
+        deploy_paths=(
+            "k8s/onex-dev",
+            "k8s/onex-dev-overlay-dev",
+            "k8s/onex-dev-rbac",
+            ".github/workflows/deploy-onex-dev.yml",
+            "scripts/post-deploy-verify.sh",
+            "scripts/validate-deployment-env-vars.sh",
+            "docker/onex-api",
+            "docker/omnidash",
+        ),
+    ),
 )
 
 
@@ -235,6 +285,127 @@ def _workflow_last_run(
     )
 
 
+def _workflow_last_success(
+    repo: str, workflow: str
+) -> tuple[WorkflowRun | None, str | None]:
+    """Last SUCCESSFUL run of a workflow (any branch/trigger), with its head_sha.
+
+    Distinct from ``_workflow_last_run``: the deploy-gap check needs the last
+    known-good run specifically (its head_sha is the baseline to compare the
+    target branch against), not merely the most recent run regardless of
+    outcome.
+    """
+    data, err = _gh_api(
+        f"repos/{_ORG}/{repo}/actions/workflows/{workflow}/runs"
+        "?status=success&per_page=1",
+        jq=".workflow_runs[0] | {conclusion, created_at, head_sha}",
+    )
+    if err is not None:
+        if "Not Found" in err or "404" in err:
+            return WorkflowRun(name=workflow, exists=False), None
+        return None, f"{workflow} successful runs: {err}"
+    if not data:
+        # Workflow exists but has never had a successful run.
+        return WorkflowRun(name=workflow, exists=True, conclusion=None), None
+    try:
+        parsed = json.loads(str(data))
+    except json.JSONDecodeError as exc:
+        return None, f"{workflow} successful runs: invalid JSON: {exc}"
+    if not parsed or parsed.get("head_sha") is None:
+        return WorkflowRun(name=workflow, exists=True, conclusion=None), None
+    return (
+        WorkflowRun(
+            name=workflow,
+            exists=True,
+            conclusion=parsed.get("conclusion"),
+            created_at=parsed.get("created_at"),
+            head_sha=parsed.get("head_sha"),
+        ),
+        None,
+    )
+
+
+def _branch_head(repo: str, branch: str) -> tuple[str | None, str | None, str | None]:
+    """(head_sha, committer_date, error) for a branch's current HEAD commit."""
+    data, err = _gh_api(
+        f"repos/{_ORG}/{repo}/commits/{branch}",
+        jq="{sha, date: .commit.committer.date}",
+    )
+    if err is not None:
+        return None, None, f"branch head {branch}: {err}"
+    if not data:
+        return None, None, f"branch head {branch}: empty response"
+    try:
+        parsed = json.loads(str(data))
+    except json.JSONDecodeError as exc:
+        return None, None, f"branch head {branch}: invalid JSON: {exc}"
+    return parsed.get("sha"), parsed.get("date"), None
+
+
+def _deploy_affecting_changes(
+    repo: str, base_sha: str, head_sha: str, deploy_paths: tuple[str, ...]
+) -> tuple[tuple[str, ...], str | None]:
+    """Changed-file paths between base_sha and head_sha that match deploy_paths.
+
+    Uses the GitHub compare API's aggregated ``files[]`` list (every file
+    touched anywhere in the commit range) -- sufficient to answer "did any
+    deploy-affecting path change", which is all this check needs.
+    """
+    if base_sha == head_sha:
+        return (), None
+    data, err = _gh_api(
+        f"repos/{_ORG}/{repo}/compare/{base_sha}...{head_sha}",
+        jq=".files[].filename",
+    )
+    if err is not None:
+        return (), f"compare {base_sha[:8]}...{head_sha[:8]}: {err}"
+    if not data:
+        return (), None
+    changed = [line.strip() for line in str(data).splitlines() if line.strip()]
+    matched = tuple(
+        f for f in changed if any(f.startswith(prefix) for prefix in deploy_paths)
+    )
+    return matched, None
+
+
+def gather_deploy_facts(cfg: DeployTargetConfig) -> DeployFacts:
+    """Gather all monitored facts for one deploy target (OMN-14994)."""
+    errors: list[str] = []
+
+    last_success, err = _workflow_last_success(cfg.repo, cfg.workflow)
+    if err is not None:
+        errors.append(err)
+
+    branch_head_sha, branch_head_at, err = _branch_head(cfg.repo, cfg.branch)
+    if err is not None:
+        errors.append(err)
+
+    deploy_affecting: tuple[str, ...] = ()
+    if (
+        last_success is not None
+        and last_success.exists
+        and last_success.head_sha is not None
+        and branch_head_sha is not None
+    ):
+        deploy_affecting, err = _deploy_affecting_changes(
+            cfg.repo, last_success.head_sha, branch_head_sha, cfg.deploy_paths
+        )
+        if err is not None:
+            errors.append(err)
+
+    return DeployFacts(
+        repo=cfg.repo,
+        target=cfg.target,
+        branch=cfg.branch,
+        workflow=cfg.workflow,
+        last_success=last_success,
+        branch_head_sha=branch_head_sha,
+        branch_head_at=branch_head_at,
+        deploy_affecting_paths_changed=deploy_affecting,
+        probe_errors=tuple(errors),
+    )
+
+
 def gather_repo_facts(cfg: RepoConfig) -> RepoFacts:
     """Gather all monitored facts for one repo, accumulating any probe errors."""
     errors: list[str] = []
@@ -345,7 +516,8 @@ def _render_human(report: DriftReport, friction_paths: list[str]) -> str:
             lines.append(f"      {finding.detail}")
     else:
         lines.append(
-            "No drift detected -- PyPI/tag/main/dev aligned, workflows healthy."
+            "No drift detected -- PyPI/tag/main/dev aligned, workflows healthy, "
+            "deploy targets current."
         )
     if report.probe_errors:
         lines.append("")
@@ -416,15 +588,23 @@ def main(argv: list[str] | None = None) -> int:
         default=DriftThresholds.release_stale_days,
         help="release-run age (main ahead of tag) that fires RELEASE_TRAIN_STALLED",
     )
+    parser.add_argument(
+        "--deploy-stale-hours",
+        type=float,
+        default=DriftThresholds.deploy_stale_hours,
+        help="age of newest deploy-affecting commit that fires DEPLOY_STALE_VS_DEV",
+    )
     args = parser.parse_args(argv)
 
     thresholds = DriftThresholds(
         dev_ahead_warn=args.dev_ahead_warn,
         release_stale_days=args.release_stale_days,
+        deploy_stale_hours=args.deploy_stale_hours,
     )
 
     facts = [gather_repo_facts(cfg) for cfg in DEFAULT_REPOS]
-    report = evaluate_all(facts, thresholds)
+    deploy_facts = [gather_deploy_facts(cfg) for cfg in DEPLOY_TARGETS]
+    report = evaluate_all(facts, thresholds, deploy_facts=deploy_facts)
 
     friction_paths: list[str] = []
     if not args.no_emit:
