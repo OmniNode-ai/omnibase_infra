@@ -18,7 +18,7 @@ Consumed topics:
     - onex.evt.omniintelligence.llm-call-completed.v1
     - onex.evt.omniintelligence.dispatch-outcome-evaluated.v1
     - onex.evt.omniclaude.session-outcome.v1
-    - onex.evt.omniclaude.hook-context-injected.v1
+    - onex.evt.omniclaude.context-injected.v1
     - onex.evt.omniclaude.validator-catch.v1
     - onex.evt.omniclaude.pattern-enforcement.v1
 
@@ -129,7 +129,7 @@ def _resolve_counterfactual(actual_model_id: str) -> str:
 
 @dataclass  # internal-dataclass-ok: service-internal event signal
 class InjectionSignal:
-    """Raw injection signal accumulated from hook-context-injected events."""
+    """Raw injection signal accumulated from context-injected events."""
 
     tokens_injected: int = 0
     patterns_count: int = 0
@@ -538,7 +538,7 @@ class ServiceSavingsEstimator:
             _ingest_dispatch_eval(buf, payload)
         elif "session-outcome" in topic:
             self._ingest_session_outcome(buf, payload)
-        elif "hook-context-injected" in topic:
+        elif "context-injected" in topic:
             self._ingest_injection(buf, payload)
         elif "validator-catch" in topic or "pattern-enforcement" in topic:
             self._ingest_validator_catch(buf, payload)
