@@ -54,6 +54,9 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models import (
 from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -538,7 +541,11 @@ class ServiceSavingsEstimator:
             _ingest_dispatch_eval(buf, payload)
         elif "session-outcome" in topic:
             self._ingest_session_outcome(buf, payload)
-        elif "context-injected" in topic:
+        elif topic == SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED:
+            # Exact match, not substring: the removed "hook-context-injected" topic
+            # name contains "context-injected" as a substring -- a stale or
+            # replayed legacy-topic event must NOT be silently ingested here (no
+            # backwards-compat shim; OMN-14986 CodeRabbit finding).
             self._ingest_injection(buf, payload)
         elif "validator-catch" in topic or "pattern-enforcement" in topic:
             self._ingest_validator_catch(buf, payload)
