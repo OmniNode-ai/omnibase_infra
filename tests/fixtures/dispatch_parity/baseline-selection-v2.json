@@ -1392,14 +1392,14 @@
       "handler_module": "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation",
       "handler_name": "HandlerSavingsEstimation",
       "message_types": [
-        "omniclaude.hook-context-injected",
+        "omniclaude.context-injected",
         "omniclaude.pattern-enforcement",
         "omniclaude.session-ended",
         "omniclaude.session-outcome",
         "omniclaude.validator-catch",
         "omniintelligence.dispatch-outcome-evaluated",
         "omniintelligence.llm-call-completed",
-        "onex.evt.omniclaude.hook-context-injected.v1",
+        "onex.evt.omniclaude.context-injected.v1",
         "onex.evt.omniclaude.pattern-enforcement.v1",
         "onex.evt.omniclaude.session-ended.v1",
         "onex.evt.omniclaude.session-outcome.v1",
@@ -1702,7 +1702,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-18T11:09:20.890335+00:00",
+    "generated_at_utc": "2026-07-24T01:32:40.225341+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.4",
@@ -2658,10 +2658,10 @@
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
     },
-    "P1a::onex.evt.omniclaude.hook-context-injected.v1": {
+    "P1a::onex.evt.omniclaude.context-injected.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
-        "event_type": "omniclaude.hook-context-injected",
+        "event_type": "omniclaude.context-injected",
         "payload": "_DictPayload"
       },
       "selection": {
@@ -2670,10 +2670,10 @@
         ],
         "dlq_topic": null,
         "message_category": "event",
-        "message_type": "omniclaude.hook-context-injected",
+        "message_type": "omniclaude.context-injected",
         "status": "success"
       },
-      "topic": "onex.evt.omniclaude.hook-context-injected.v1"
+      "topic": "onex.evt.omniclaude.context-injected.v1"
     },
     "P1a::onex.evt.omniclaude.pattern-enforcement.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4042,7 +4042,7 @@
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
     },
-    "P1b::onex.evt.omniclaude.hook-context-injected.v1": {
+    "P1b::onex.evt.omniclaude.context-injected.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
         "event_type": null,
@@ -4055,7 +4055,7 @@
         "message_type": "_DictPayload",
         "status": "no_dispatcher"
       },
-      "topic": "onex.evt.omniclaude.hook-context-injected.v1"
+      "topic": "onex.evt.omniclaude.context-injected.v1"
     },
     "P1b::onex.evt.omniclaude.pattern-enforcement.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -9205,9 +9205,9 @@
       "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
       "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
       "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_hook_context_injected_v1",
-      "topic": "onex.evt.omniclaude.hook-context-injected.v1",
-      "topic_pattern": "*.evt.omniclaude.hook-context-injected.*",
+      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_context_injected_v1",
+      "topic": "onex.evt.omniclaude.context-injected.v1",
+      "topic_pattern": "*.evt.omniclaude.context-injected.*",
       "type_scoped": false
     },
     {

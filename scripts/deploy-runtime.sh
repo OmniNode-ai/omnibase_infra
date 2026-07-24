@@ -43,7 +43,7 @@ REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
-if [[ ! -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+if [[ ! -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     {
         echo "[deploy-runtime] ERROR: OPERATOR_ENV_MISSING -- operator env file not found:"
         echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
@@ -53,6 +53,21 @@ if [[ ! -f "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
         echo "  env file. In the containerized deploy runner this is the read-only bind"
         echo "  mount at /run/omnibase-operator.env wired by DEPLOY_RUNNER_OPERATOR_ENV_FILE"
         echo "  in docker/docker-compose.runners.yml (OMN-14958)."
+    } >&2
+    exit 64
+fi
+# OMN-14983: existence does not prove readability. Distinguish "missing"
+# from "present but unreadable" explicitly so a permissions problem never
+# reaches a raw `source` crash or masquerades as a different failure.
+if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    {
+        echo "[deploy-runtime] ERROR: OPERATOR_ENV_UNREADABLE -- operator env file exists but this process cannot read it:"
+        echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
+        echo "  effective uid=$(id -u) ($(id -un 2>/dev/null || echo unknown))"
+        echo "  Check the file's ownership/permissions. In the containerized deploy"
+        echo "  runner, OMNIBASE_OPERATOR_ENV_FILE should point at the root-phase-init"
+        echo "  copy in the runner-owned deploy-runner-creds volume, not directly at the"
+        echo "  raw /run/omnibase-operator.env read-only mount (OMN-14983)."
     } >&2
     exit 64
 fi

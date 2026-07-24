@@ -10,6 +10,18 @@ git overrides on each branch, dev-ahead-of-main commit count, and the last
 ``release.yml`` / ``runtime-rebuild-trigger.yml`` workflow run -- this module
 decides which drift findings fire.
 
+DEPLOY-GAP CHECK (OMN-14994): a second, independent fact family -- ``DeployFacts``
+-- covers the "merged but never deployed" class that ``RepoFacts`` does not: a
+cloud deploy workflow (e.g. ``omninode_infra``'s ``deploy-onex-dev.yml``) whose
+last SUCCESSFUL run is stale relative to deploy-affecting commits already sitting
+on the target branch. This is the exact incident class that left three
+production-blocking fixes (PRs #619/#620/#622) merged to ``omninode_infra`` dev
+for ~28 hours with nothing red anywhere -- the repo's push-trigger only fires on
+``main``/``m7/**``, but ``dev`` is the actual default/everyday branch (OMN-14198).
+``evaluate_deploy_target`` / ``evaluate_deploy_targets`` are additive: they reuse
+the same ``DriftFinding``/``DriftReport`` shapes and the same friction-emit path
+as the PyPI/tag checks above, so no new store or schema is introduced.
+
 WHY A SEPARATE PURE MODULE
 --------------------------
 The fire/no-fire decision has **no I/O**: every input is a plain frozen
@@ -71,6 +83,12 @@ def _age_days(iso_ts: str | None, now: datetime) -> float | None:
     return (now - when).total_seconds() / 86400.0
 
 
+def _age_hours(iso_ts: str | None, now: datetime) -> float | None:
+    """Age in hours of an ISO-8601 timestamp relative to ``now``; None if unparseable."""
+    days = _age_days(iso_ts, now)
+    return None if days is None else days * 24.0
+
+
 # --------------------------------------------------------------------------- #
 # Fact model -- populated by the I/O shell, consumed here with zero I/O.       #
 # --------------------------------------------------------------------------- #
@@ -82,6 +100,7 @@ class WorkflowRun:
     exists: bool = True
     conclusion: str | None = None  # "success" | "failure" | "cancelled" | None
     created_at: str | None = None  # ISO-8601
+    head_sha: str | None = None  # commit the run executed against
 
 
 @dataclass(frozen=True)
@@ -108,6 +127,28 @@ class RepoFacts:
 
 
 @dataclass(frozen=True)
+class DeployFacts:
+    """Everything the monitor knows about one deploy target this cycle.
+
+    A "deploy target" is a (repo, branch, workflow) triple whose successful
+    runs are the only mechanism that moves code from "merged" to "running" --
+    e.g. ``omninode_infra`` dev -> ``deploy-onex-dev.yml`` -> the onex-dev k3s
+    namespace. Distinct from ``RepoFacts``, which is about PyPI/tag/main-vs-dev
+    lineage, not a live runtime target.
+    """
+
+    repo: str
+    target: str  # human label, e.g. "onex-dev"
+    branch: str  # branch the target deploys from, e.g. "dev"
+    workflow: str  # workflow filename, e.g. "deploy-onex-dev.yml"
+    last_success: WorkflowRun | None = None
+    branch_head_sha: str | None = None
+    branch_head_at: str | None = None  # ISO-8601 commit date of branch HEAD
+    deploy_affecting_paths_changed: tuple[str, ...] = ()
+    probe_errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DriftFinding:
     """One divergence the monitor is firing on."""
 
@@ -126,6 +167,14 @@ class DriftThresholds:
     dev_ahead_warn: int = 25  # dev commits ahead of main before DEV_AHEAD_OF_MAIN fires
     release_stale_days: float = (
         7.0  # release-run age (main-ahead-of-tag) before STALLED fires
+    )
+    deploy_stale_hours: float = (
+        4.0  # hours since the last successful deploy run before
+        # DEPLOY_STALE_VS_DEV fires (OMN-14998: keyed on last_success.created_at,
+        # not branch-HEAD-commit recency) -- a buffer so the check does not nag
+        # seconds after a fresh success; the incident this guards against
+        # (OMN-14994) sat undeployed ~28h, so 4h surfaces it same-day with ample
+        # margin below the incident window.
     )
 
 
@@ -329,14 +378,126 @@ def evaluate_repo(
     return findings
 
 
+def evaluate_deploy_target(
+    facts: DeployFacts,
+    thresholds: DriftThresholds,
+    now: datetime | None = None,
+) -> list[DriftFinding]:
+    """Return every deploy-gap finding that fires for one deploy target.
+
+    Two independent checks:
+
+    1. ``MISSING_SUCCESSFUL_DEPLOY`` -- the workflow has never had a
+       successful run at all (or does not exist). Fires unconditionally; a
+       target with zero known-good deploys is worse than a stale one.
+    2. ``DEPLOY_STALE_VS_DEV`` -- deploy-affecting paths changed on the
+       target branch since the last successful run's ``head_sha``, and the
+       last successful run itself is older than ``thresholds.deploy_stale_hours``.
+       Requires ``branch_head_sha != last_success.head_sha`` (something is
+       actually ahead) AND a non-empty ``deploy_affecting_paths_changed``
+       (the ahead commits actually touch deploy-relevant paths, not just
+       docs/tests) AND the age buffer, so a merge from five minutes after a
+       fresh success does not nag before the workflow has had a chance to run.
+
+       OMN-14998: the age clock is keyed on ``last_success.created_at``, NOT
+       ``branch_head_at`` (the target branch's current HEAD commit date).
+       Keying on branch-HEAD recency was the original (wrong) implementation --
+       it is reset to ~0h by *any* commit landing on the branch, deploy-affecting
+       or not, as long as at least one ahead commit touches a deploy-affecting
+       path. That under-reports exactly the failure this check exists to catch:
+       a deploy workflow that has not succeeded in months while ordinary commits
+       keep landing on ``dev`` looks perpetually fresh under a branch-HEAD clock.
+       Keying on ``last_success.created_at`` instead makes staleness a direct,
+       monotonically-growing function of "how long has it been since we know
+       this target was actually deployed" -- which is the fact this check is
+       named for.
+    """
+    now = now or datetime.now(tz=UTC)
+    findings: list[DriftFinding] = []
+
+    if facts.last_success is None or not facts.last_success.exists:
+        findings.append(
+            DriftFinding(
+                code="MISSING_SUCCESSFUL_DEPLOY",
+                severity="P1",
+                repo=facts.repo,
+                signature=f"{facts.repo}:{facts.target}:missing-successful-deploy",
+                summary=(f"{facts.workflow} has no successful run for {facts.target}"),
+                detail=(
+                    f"No successful run of {facts.workflow} was found for the "
+                    f"{facts.target} deploy target. Either the workflow has never "
+                    "run clean, or the monitor cannot see any run -- either way "
+                    "there is no known-good deploy to compare the branch against."
+                ),
+            )
+        )
+        return findings
+
+    if (
+        facts.branch_head_sha is not None
+        and facts.branch_head_sha != facts.last_success.head_sha
+        and facts.deploy_affecting_paths_changed
+    ):
+        # OMN-14998: clock on time-since-last-success, not branch-HEAD-commit
+        # recency -- see the OMN-14998 docstring note above.
+        age = _age_hours(facts.last_success.created_at, now)
+        if age is not None and age >= thresholds.deploy_stale_hours:
+            paths_preview = ", ".join(facts.deploy_affecting_paths_changed[:5])
+            more = len(facts.deploy_affecting_paths_changed) - 5
+            if more > 0:
+                paths_preview += f" (+{more} more)"
+            findings.append(
+                DriftFinding(
+                    code="DEPLOY_STALE_VS_DEV",
+                    severity="P1",
+                    repo=facts.repo,
+                    signature=f"{facts.repo}:{facts.target}:deploy-stale-vs-{facts.branch}",
+                    summary=(
+                        f"{facts.target}: last successful {facts.workflow} run is "
+                        f"{age:.1f}h old with deploy-affecting changes on "
+                        f"{facts.branch} since then "
+                        f"(>= {thresholds.deploy_stale_hours:.0f}h threshold)"
+                    ),
+                    detail=(
+                        f"{facts.branch} HEAD ({facts.branch_head_sha}) is ahead of "
+                        f"the last successful {facts.workflow} run "
+                        f"({facts.last_success.head_sha}, {facts.last_success.created_at}) "
+                        f"and the change set touches deploy-affecting paths: "
+                        f"{paths_preview}. The last successful run is {age:.1f}h old "
+                        "with no successful run since. Merged code is not running "
+                        '-- this is the "merged but never deployed" class '
+                        f"(OMN-14994): dispatch {facts.workflow} and confirm via a "
+                        "live HTTP readback, not a green apply step alone."
+                    ),
+                )
+            )
+
+    return findings
+
+
+def evaluate_deploy_targets(
+    facts: list[DeployFacts],
+    thresholds: DriftThresholds,
+    now: datetime | None = None,
+) -> list[DriftFinding]:
+    """Evaluate every deploy target; findings are NOT pre-sorted (caller sorts)."""
+    now = now or datetime.now(tz=UTC)
+    findings: list[DriftFinding] = []
+    for target_facts in facts:
+        findings.extend(evaluate_deploy_target(target_facts, thresholds, now))
+    return findings
+
+
 def evaluate_all(
     facts: list[RepoFacts],
     thresholds: DriftThresholds | None = None,
     now: datetime | None = None,
+    deploy_facts: list[DeployFacts] | None = None,
 ) -> DriftReport:
-    """Evaluate every repo and aggregate into a single report."""
+    """Evaluate every repo (+ every deploy target) and aggregate into one report."""
     thresholds = thresholds or DriftThresholds()
     now = now or datetime.now(tz=UTC)
+    deploy_facts = deploy_facts or []
     all_findings: list[DriftFinding] = []
     all_probe_errors: list[str] = []
     for repo_facts in facts:
@@ -344,12 +505,18 @@ def evaluate_all(
         all_probe_errors.extend(
             f"{repo_facts.repo}: {err}" for err in repo_facts.probe_errors
         )
+    all_findings.extend(evaluate_deploy_targets(deploy_facts, thresholds, now))
+    for target_facts in deploy_facts:
+        all_probe_errors.extend(
+            f"{target_facts.repo}:{target_facts.target}: {err}"
+            for err in target_facts.probe_errors
+        )
     all_findings.sort(
         key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.repo, f.code)
     )
     return DriftReport(
         findings=tuple(all_findings),
-        repos_checked=len(facts),
+        repos_checked=len(facts) + len(deploy_facts),
         probe_errors=tuple(all_probe_errors),
         generated_at=now.isoformat(),
         thresholds=thresholds,
@@ -372,12 +539,15 @@ def exit_code_for(report: DriftReport) -> int:
 
 
 __all__ = [
+    "DeployFacts",
     "DriftFinding",
     "DriftReport",
     "DriftThresholds",
     "RepoFacts",
     "WorkflowRun",
     "evaluate_all",
+    "evaluate_deploy_target",
+    "evaluate_deploy_targets",
     "evaluate_repo",
     "exit_code_for",
     "parse_version",

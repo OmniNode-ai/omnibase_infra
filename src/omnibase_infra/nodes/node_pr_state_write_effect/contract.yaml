@@ -34,11 +34,14 @@ output_model:
   module: "omnibase_infra.nodes.node_pr_state_write_effect.models"
   description: "Outcome of one pr_state upsert."
 # Event bus configuration
+# OMN-14986: publish_topics removed -- HandlerPrStateUpsert.handle() returns
+# ModelHandlerOutput.for_compute() (never for_orchestrator), and EFFECT
+# handlers have no direct event-bus access (only orchestrators publish per
+# repo doctrine). No runtime path ever published
+# onex.evt.omnibase-infra.pr-state-upserted.v1 -- it was dead declaration.
 event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.pr-state-upsert.v1"
-  publish_topics:
-    - "onex.evt.omnibase-infra.pr-state-upserted.v1"
 # Handler routing
 handler_routing:
   routing_strategy: "operation_match"

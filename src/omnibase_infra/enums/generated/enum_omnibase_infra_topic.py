@@ -77,7 +77,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
-    EVT_PR_STATE_UPSERTED_V1 = "onex.evt.omnibase-infra.pr-state-upserted.v1"  # onex.evt.omnibase-infra.pr-state-upserted.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
     EVT_RUNNER_FLEET_HEALTH_VERDICT_V1 = "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"  # onex.evt.omnibase-infra.runner-fleet-health-verdict.v1
     EVT_RUNNER_FLEET_MAINTAIN_COMPLETED_V1 = "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"  # onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1
@@ -90,5 +89,4 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
     EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1
-    EVT_VALIDATION_LEDGER_APPENDED_V1 = "onex.evt.omnibase-infra.validation-ledger-appended.v1"  # onex.evt.omnibase-infra.validation-ledger-appended.v1
     EVT_VECTOR_STORE_COMPLETED_V1 = "onex.evt.omnibase-infra.vector-store-completed.v1"  # onex.evt.omnibase-infra.vector-store-completed.v1
