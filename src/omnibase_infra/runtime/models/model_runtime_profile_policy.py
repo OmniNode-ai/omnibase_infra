@@ -22,6 +22,11 @@ class ModelRuntimeProfilePolicy(BaseModel):
     main_port: int = Field(ge=1, le=65535)
     effects_port: int = Field(ge=1, le=65535)
     topic_provisioner_max_partitions: int = Field(ge=0)
+    # OMN-14551: lane-scoped stance for the auto-wired consume boundary's DLQ
+    # routing (ONEX_BOUNDARY_DLQ_ENABLED, see handler_wiring.py). Required
+    # (no default) so every lane declares an explicit position rather than
+    # silently inheriting an implicit off -- no-invisible-env-config doctrine.
+    boundary_dlq_enabled: bool
     secret_resolver_config_path: str = ""
     secret_resolver_mappings: tuple[ModelSecretMapping, ...] = ()
     processes: dict[RuntimeProcessName, ModelRuntimeProcessPolicy] = Field(
