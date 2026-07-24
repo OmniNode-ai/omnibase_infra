@@ -49,6 +49,11 @@ event_bus:
     - "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
     - "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"
     - "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
+runtime_dispatch:
+  external_trigger: true
+  command_topic: "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"
+  terminal_events:
+    - "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
 input_model:
   name: "ModelRunnerFleetMaintainStartCommand"
   module: "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command"
