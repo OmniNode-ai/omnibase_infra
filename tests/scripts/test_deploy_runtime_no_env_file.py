@@ -93,10 +93,16 @@ def test_sources_operator_env_at_top() -> None:
         "(OMN-14958: parameterized operator env sourcing)"
     )
     # Ensure the sourcing still happens early (before any deploy logic).
+    # OMN-14999: threshold bumped 80 -> 100. OMN-14984's named-error guard
+    # blocks (OPERATOR_ENV_MISSING / OPERATOR_ENV_UNREADABLE) pushed the real
+    # source line to 82 -- still immediately after set -euo pipefail and the
+    # two precondition checks, before any deploy logic, matching this test's
+    # actual intent. 100 gives headroom for the next named-guard addition
+    # without another line-count chase.
     line_number = text[: match.start()].count("\n") + 1
-    assert line_number <= 80, (
+    assert line_number <= 100, (
         f"source ${{OMNIBASE_OPERATOR_ENV_FILE}} found at line {line_number}, "
-        "expected within first 80 lines of script"
+        "expected within first 100 lines of script"
     )
     # Named, fail-closed guard for the missing-file case.
     assert "OPERATOR_ENV_MISSING" in text, (
