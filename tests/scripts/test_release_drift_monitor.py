@@ -345,7 +345,12 @@ def test_live_omninode_infra_deploy_gap_fires() -> None:
             head_sha="aaaaaaa1111111111111111111111111111111",
         ),
         branch_head_sha="ddddddd4444444444444444444444444444444",  # #622 merge
-        branch_head_at="2026-07-22T18:00:00Z",  # ~28h before _DEPLOY_NOW
+        branch_head_at="2026-07-22T18:00:00Z",  # commit landed ~28h before _DEPLOY_NOW
+        # last_success stays the fixture default (2026-07-20T09:00:00Z, ~85h
+        # before _DEPLOY_NOW) -- OMN-14998: the fire decision is keyed on
+        # that, not branch_head_at, so branch_head_at recency is deliberately
+        # NOT what makes this fire (see test_deploy_gap_fires_on_stale_clock_
+        # even_with_recent_commits below for the discriminating case).
         deploy_affecting_paths_changed=(
             ".github/workflows/deploy-onex-dev.yml",
             "tests/k8s/test_deploy_onex_dev_workflow.py",
@@ -397,22 +402,75 @@ def test_deploy_gap_requires_deploy_affecting_paths() -> None:
 
 
 @pytest.mark.unit
-def test_deploy_gap_threshold_is_age_of_newest_commit() -> None:
+def test_deploy_gap_threshold_is_age_of_last_success() -> None:
     """Below the stale-hours threshold -> no fire (buffer against nagging
-    seconds after a merge); at/above it -> fires.
+    seconds after a fresh success); at/above it -> fires.
+
+    OMN-14998: the clock is time-since-last-success, NOT the age of the
+    newest commit -- this test varies ``last_success.created_at`` (the
+    load-bearing input) while holding ``branch_head_at`` fixed, proving
+    branch-HEAD recency is no longer what the threshold responds to.
     """
-    below = _deploy_target(
-        branch_head_sha="ccccccc3333333333333333333333333333333",
-        branch_head_at="2026-07-23T19:00:00Z",  # 3h before _DEPLOY_NOW
-        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
-    )
-    at = _deploy_target(
-        branch_head_sha="ccccccc3333333333333333333333333333333",
-        branch_head_at="2026-07-23T18:00:00Z",  # 4h before _DEPLOY_NOW
-        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
-    )
+
+    def _target(last_success_created_at: str) -> Any:
+        return _deploy_target(
+            branch_head_sha="ccccccc3333333333333333333333333333333",
+            branch_head_at="2026-07-20T09:00:00Z",  # fixed; irrelevant to the fire decision
+            last_success=WorkflowRun(
+                name="deploy-onex-dev.yml",
+                exists=True,
+                conclusion="success",
+                created_at=last_success_created_at,
+                head_sha="aaaaaaa1111111111111111111111111111111",
+            ),
+            deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
+        )
+
+    below = _target("2026-07-23T19:00:00Z")  # last success 3h before _DEPLOY_NOW
+    at = _target("2026-07-23T18:00:00Z")  # last success 4h before _DEPLOY_NOW
     assert "DEPLOY_STALE_VS_DEV" not in _deploy_codes(below)
     assert "DEPLOY_STALE_VS_DEV" in _deploy_codes(at)
+
+
+@pytest.mark.unit
+def test_deploy_gap_fires_on_stale_clock_even_with_recent_commits() -> None:
+    """Regression for the OMN-14998 blind spot, reconstructed from the live
+    facts this monitor's own diagnosis found (2026-07-23/24): the last
+    successful ``deploy-onex-dev.yml`` run was 2026-03-12, but commits --
+    including deploy-affecting ones (the OMN-14938/OMN-14198 chain) -- kept
+    landing on ``omninode_infra`` dev right up through 2026-07-23, hours
+    before this fixture's "now".
+
+    A staleness clock keyed on "age of the branch's current HEAD commit"
+    (``branch_head_at``) is reset by every such commit and would report ~1h
+    old here, permanently masking a 4+ month deploy gap. Keying on time
+    since the last SUCCESSFUL run instead must fire regardless of how
+    recently the newest commit landed. This is the exact case the pre-fix
+    implementation gets wrong -- it stays green here.
+    """
+    facts = _deploy_target(
+        last_success=WorkflowRun(
+            name="deploy-onex-dev.yml",
+            exists=True,
+            conclusion="success",
+            created_at="2026-03-12T12:00:00Z",
+            head_sha="0000000000000000000000000000000000000f",
+        ),
+        branch_head_sha="373e650c6c93239b205025c5eecfe094f3da931",  # live dev HEAD, 2026-07-23
+        branch_head_at="2026-07-23T21:00:00Z",  # commit landed 1h before _DEPLOY_NOW
+        deploy_affecting_paths_changed=(
+            "k8s/onex-dev/networkpolicies.yaml",
+            ".github/workflows/deploy-onex-dev.yml",
+        ),
+    )
+    codes = _deploy_codes(facts)
+    assert "DEPLOY_STALE_VS_DEV" in codes, (
+        "last successful deploy-onex-dev run was 2026-03-12 (>4 months before "
+        "_DEPLOY_NOW) with deploy-affecting commits still landing on dev -- "
+        "this must fire regardless of how recently the newest commit landed. "
+        "A branch-HEAD-keyed clock (age of branch_head_at, 1h old here) "
+        "misses this entirely -- that is the OMN-14998 bug this test guards."
+    )
 
 
 @pytest.mark.unit
