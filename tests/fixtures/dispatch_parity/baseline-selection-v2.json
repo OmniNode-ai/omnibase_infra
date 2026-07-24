@@ -1702,7 +1702,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-18T11:09:20.890335+00:00",
+    "generated_at_utc": "2026-07-24T01:32:40.225341+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.4",
@@ -9205,7 +9205,7 @@
       "dispatcher_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
       "handler_id": "dispatcher.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375",
       "message_category": "event",
-      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_hook_context_injected_v1",
+      "route_id": "route.auto.node_savings_estimation_compute.HandlerSavingsEstimation.savings_estimate_548c2375.onex_evt_omniclaude_context_injected_v1",
       "topic": "onex.evt.omniclaude.context-injected.v1",
       "topic_pattern": "*.evt.omniclaude.context-injected.*",
       "type_scoped": false
