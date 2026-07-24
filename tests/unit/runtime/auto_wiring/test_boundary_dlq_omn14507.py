@@ -401,6 +401,17 @@ class TestBoundaryDlqMetricNaming:
         assert "message_lost=true" in caplog.text
 
 
+# OMN-14551 test-only topic identifiers, shared by the counter tests below
+# (single configuration-backed source reused at every site, per CodeRabbit
+# review on PR #2424 -- these are the two "unique per test" topics that
+# previously duplicated the same literal at each individual test).
+_LOSS_COUNTER_TEST_TOPIC = "onex.cmd.omn14551-message-lost-counter-test.v1"
+_LOSS_COUNTER_FALSE_RETURN_TEST_TOPIC = (
+    "onex.cmd.omn14551-message-lost-false-return-test.v1"
+)
+_DLQ_SUCCESS_COUNTER_TEST_TOPIC = "onex.cmd.omn14551-dlq-success-counter-test.v1"
+
+
 class TestBoundaryDlqAlertableMessageLostCounter:
     """OMN-14551 — forbid-verify residual ask: ``message_lost=true`` must
     increment a REAL alertable signal, not just a greppable log line
@@ -422,7 +433,7 @@ class TestBoundaryDlqAlertableMessageLostCounter:
         # Unique topic label per test so the counter's per-label-set value
         # starts at a known baseline (0 on first touch) regardless of
         # cross-test process-global Counter state.
-        topic = "onex.cmd.omn14551-message-lost-counter-test.v1"
+        topic = _LOSS_COUNTER_TEST_TOPIC
         error_type = "RuntimeError"
 
         assert _BOUNDARY_MESSAGE_LOST_COUNTER is not None, (
@@ -470,7 +481,7 @@ class TestBoundaryDlqAlertableMessageLostCounter:
 
         monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
 
-        topic = "onex.cmd.omn14551-dlq-success-counter-test.v1"
+        topic = _DLQ_SUCCESS_COUNTER_TEST_TOPIC
         error_type = "RuntimeError"
 
         assert _BOUNDARY_MESSAGE_LOST_COUNTER is not None
@@ -480,6 +491,9 @@ class TestBoundaryDlqAlertableMessageLostCounter:
 
         dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
         event_bus = _dlq_capable_event_bus()
+        # Explicit True: a genuinely-persisted DLQ publish, per
+        # _publish_raw_to_dlq's documented bool-return contract (OMN-14936).
+        event_bus._publish_raw_to_dlq = AsyncMock(return_value=True)
 
         callback = _make_event_bus_callback(
             topic,
@@ -498,3 +512,84 @@ class TestBoundaryDlqAlertableMessageLostCounter:
             "onex_boundary_message_lost_total -- only the genuine "
             "double-failure loss window does"
         )
+
+    @pytest.mark.asyncio
+    async def test_dlq_publish_false_return_increments_message_lost_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-14936 / CodeRabbit review (PR #2424): ``_publish_raw_to_dlq``
+        signals failed persistence via a ``False`` return, not only via a
+        raised exception (rejected input, producer unavailable, or the send
+        itself failing/timing out WITHOUT raising). Before this test's fix,
+        that return value was ignored -- the boundary logged
+        ``boundary_swallow_prevented dlq_routed=true`` and left the loss
+        counter untouched even though the message was never durably
+        persisted. A ``False`` return must be treated exactly like the
+        except-branch double-failure: loud log + counter increment."""
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _BOUNDARY_MESSAGE_LOST_COUNTER,
+        )
+
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        topic = _LOSS_COUNTER_FALSE_RETURN_TEST_TOPIC
+        error_type = "RuntimeError"
+
+        assert _BOUNDARY_MESSAGE_LOST_COUNTER is not None
+        before = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+        # Publish "succeeds" (no exception) but reports non-persistence via
+        # its documented bool contract -- the exact case the except-only
+        # handling in the original fix missed.
+        event_bus._publish_raw_to_dlq = AsyncMock(return_value=False)
+
+        callback = _make_event_bus_callback(
+            topic,
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        await callback(_envelope())  # must not raise
+
+        event_bus._publish_raw_to_dlq.assert_awaited_once()
+        after = _BOUNDARY_MESSAGE_LOST_COUNTER.labels(
+            topic=topic, error_type=error_type
+        )._value.get()
+        assert after == before + 1, (
+            "a False return from _publish_raw_to_dlq (failed persistence "
+            "without a raised exception) did not increment "
+            "onex_boundary_message_lost_total -- the message is lost here "
+            "exactly as if the publish had raised, but the counter treated "
+            "it as the success path"
+        )
+
+    @pytest.mark.asyncio
+    async def test_dlq_publish_false_return_logs_observed_not_prevented(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Companion assertion to the counter test above: the log line for
+        a False-return publish must use the same honest
+        boundary_swallow_observed/message_lost=true vocabulary as the
+        exception path, never boundary_swallow_prevented (G3)."""
+        monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+        dispatch_engine = _raising_dispatch_engine(RuntimeError("boom"))
+        event_bus = _dlq_capable_event_bus()
+        event_bus._publish_raw_to_dlq = AsyncMock(return_value=False)
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.omn14551-false-return-log-test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            event_bus=event_bus,
+        )
+
+        with caplog.at_level("ERROR"):
+            await callback(_envelope())
+
+        assert "metric_name=boundary_swallow_prevented" not in caplog.text
+        assert "metric_name=boundary_swallow_observed" in caplog.text
+        assert "message_lost=true" in caplog.text
