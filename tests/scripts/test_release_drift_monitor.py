@@ -14,6 +14,13 @@ Two obligations, per feedback_prove_red_against_exists_but_wrong:
    an aligned repo produces zero findings, and its sibling flips one field to
    confirm the same check goes RED -- a green here means "checked and matched",
    not "couldn't see anything".
+
+Deploy-gap tests (OMN-14994) apply the same two obligations to the deploy-gap
+check: ``test_live_omninode_infra_*`` reconstructs the 2026-07-22/23 incident
+(three fixes -- omninode_infra PRs #619/#620/#622 -- merged to dev and left
+undeployed for ~28h because deploy-onex-dev.yml's push trigger only fires on
+main/m7/**, never dev) and asserts it fires; the aligned/threshold tests prove
+the green is discriminating.
 """
 
 from __future__ import annotations
@@ -49,8 +56,11 @@ _lib = _load_lib()
 RepoFacts = _lib.RepoFacts
 WorkflowRun = _lib.WorkflowRun
 DriftThresholds = _lib.DriftThresholds
+DeployFacts = _lib.DeployFacts
 evaluate_repo = _lib.evaluate_repo
 evaluate_all = _lib.evaluate_all
+evaluate_deploy_target = _lib.evaluate_deploy_target
+evaluate_deploy_targets = _lib.evaluate_deploy_targets
 exit_code_for = _lib.exit_code_for
 
 
@@ -281,3 +291,162 @@ def test_probe_error_is_not_silently_green() -> None:
     assert report.diverged is False
     assert report.blind is True
     assert exit_code_for(report) == 2  # blind, not clean
+
+
+# --------------------------------------------------------------------------- #
+# Deploy-gap check (OMN-14994): "merged but never deployed".                   #
+# --------------------------------------------------------------------------- #
+# A fixed "now" matching the OMN-14938/OMN-14198 incident window (2026-07-23,
+# ~28h after the #619/#620/#622 fixes started landing on 2026-07-22).
+_DEPLOY_NOW = datetime(2026, 7, 23, 22, 0, tzinfo=UTC)
+
+
+def _deploy_codes(facts: Any, thresholds: DriftThresholds | None = None) -> set[str]:
+    findings = evaluate_deploy_target(
+        facts, thresholds or DriftThresholds(), now=_DEPLOY_NOW
+    )
+    return {f.code for f in findings}
+
+
+def _deploy_target(**overrides: Any) -> Any:
+    base: dict[str, Any] = {
+        "repo": "omninode_infra",
+        "target": "onex-dev",
+        "branch": "dev",
+        "workflow": "deploy-onex-dev.yml",
+        "last_success": WorkflowRun(
+            name="deploy-onex-dev.yml",
+            exists=True,
+            conclusion="success",
+            created_at="2026-07-20T09:00:00Z",
+            head_sha="aaaaaaa1111111111111111111111111111111",
+        ),
+        "branch_head_sha": "aaaaaaa1111111111111111111111111111111",
+        "branch_head_at": "2026-07-20T09:00:00Z",
+        "deploy_affecting_paths_changed": (),
+        "probe_errors": (),
+    }
+    base.update(overrides)
+    return DeployFacts(**base)
+
+
+@pytest.mark.unit
+def test_live_omninode_infra_deploy_gap_fires() -> None:
+    """Reconstructs the OMN-14938/OMN-14198 incident: #619/#620/#622 merged to
+    dev, touching deploy-onex-dev.yml itself, and sat ~28h with no successful
+    deploy run past their head -- the last successful run predates all three.
+    """
+    facts = _deploy_target(
+        last_success=WorkflowRun(
+            name="deploy-onex-dev.yml",
+            exists=True,
+            conclusion="success",
+            created_at="2026-07-20T09:00:00Z",
+            head_sha="aaaaaaa1111111111111111111111111111111",
+        ),
+        branch_head_sha="ddddddd4444444444444444444444444444444",  # #622 merge
+        branch_head_at="2026-07-22T18:00:00Z",  # ~28h before _DEPLOY_NOW
+        deploy_affecting_paths_changed=(
+            ".github/workflows/deploy-onex-dev.yml",
+            "tests/k8s/test_deploy_onex_dev_workflow.py",
+        ),
+    )
+    codes = _deploy_codes(facts)
+    assert "DEPLOY_STALE_VS_DEV" in codes
+    finding = next(
+        f
+        for f in evaluate_deploy_target(facts, DriftThresholds(), now=_DEPLOY_NOW)
+        if f.code == "DEPLOY_STALE_VS_DEV"
+    )
+    assert finding.severity == "P1"
+    assert finding.signature == "omninode_infra:onex-dev:deploy-stale-vs-dev"
+    assert "deploy-onex-dev.yml" in finding.detail
+
+
+@pytest.mark.unit
+def test_live_omninode_infra_missing_successful_deploy_fires() -> None:
+    """A stretch of the same incident: multiple dispatches (OMN-14929 kustomize
+    wall, OMN-14938 valueFrom wall) failed outright -- zero successful runs to
+    compare against. MISSING_SUCCESSFUL_DEPLOY must fire unconditionally.
+    """
+    facts = _deploy_target(
+        last_success=WorkflowRun(name="deploy-onex-dev.yml", exists=False)
+    )
+    codes = _deploy_codes(facts)
+    assert codes == {"MISSING_SUCCESSFUL_DEPLOY"}
+
+
+@pytest.mark.unit
+def test_aligned_deploy_target_is_green() -> None:
+    """Negative control: branch HEAD == last successful run's head_sha -> clean."""
+    assert _deploy_codes(_deploy_target()) == set()
+
+
+@pytest.mark.unit
+def test_deploy_gap_requires_deploy_affecting_paths() -> None:
+    """Branch is ahead of the last successful run, but only docs/tests changed
+    (no deploy-affecting path) -> must NOT fire. Proves the green above is
+    discriminating, not vacuous absence of any ahead-commits.
+    """
+    facts = _deploy_target(
+        branch_head_sha="bbbbbbb2222222222222222222222222222222",
+        branch_head_at="2026-07-22T18:00:00Z",
+        deploy_affecting_paths_changed=(),  # e.g. only README.md changed
+    )
+    assert _deploy_codes(facts) == set()
+
+
+@pytest.mark.unit
+def test_deploy_gap_threshold_is_age_of_newest_commit() -> None:
+    """Below the stale-hours threshold -> no fire (buffer against nagging
+    seconds after a merge); at/above it -> fires.
+    """
+    below = _deploy_target(
+        branch_head_sha="ccccccc3333333333333333333333333333333",
+        branch_head_at="2026-07-23T19:00:00Z",  # 3h before _DEPLOY_NOW
+        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
+    )
+    at = _deploy_target(
+        branch_head_sha="ccccccc3333333333333333333333333333333",
+        branch_head_at="2026-07-23T18:00:00Z",  # 4h before _DEPLOY_NOW
+        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
+    )
+    assert "DEPLOY_STALE_VS_DEV" not in _deploy_codes(below)
+    assert "DEPLOY_STALE_VS_DEV" in _deploy_codes(at)
+
+
+@pytest.mark.unit
+def test_evaluate_deploy_targets_aggregates_multiple() -> None:
+    gapped = _deploy_target(
+        branch_head_sha="ddddddd4444444444444444444444444444444",
+        branch_head_at="2026-07-22T18:00:00Z",
+        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
+    )
+    clean = _deploy_target(repo="other_infra", target="other-dev")
+    findings = evaluate_deploy_targets(
+        [gapped, clean], DriftThresholds(), now=_DEPLOY_NOW
+    )
+    assert {f.code for f in findings} == {"DEPLOY_STALE_VS_DEV"}
+    assert findings[0].repo == "omninode_infra"
+
+
+@pytest.mark.unit
+def test_evaluate_all_includes_deploy_targets_in_exit_code() -> None:
+    """evaluate_all aggregates repo findings + deploy-target findings into one
+    report, and a deploy-only gap is enough to flip the exit code RED.
+    """
+    gapped = _deploy_target(
+        branch_head_sha="ddddddd4444444444444444444444444444444",
+        branch_head_at="2026-07-22T18:00:00Z",
+        deploy_affecting_paths_changed=(".github/workflows/deploy-onex-dev.yml",),
+    )
+    report = evaluate_all(
+        [_aligned_facts()],
+        DriftThresholds(),
+        now=_DEPLOY_NOW,
+        deploy_facts=[gapped],
+    )
+    assert report.diverged is True
+    assert report.repos_checked == 2  # 1 RepoFacts + 1 DeployFacts
+    assert exit_code_for(report) == 1
+    assert any(f.code == "DEPLOY_STALE_VS_DEV" for f in report.findings)

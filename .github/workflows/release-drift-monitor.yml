@@ -16,6 +16,15 @@
 # This is what would have caught "PyPI omnibase-infra stuck at 0.36.1 for six
 # weeks" (main is at 0.38.4) on day one instead of after six weeks of silence.
 #
+# DEPLOY-GAP CHECK (OMN-14994): also checks a small set of cloud deploy targets
+# (currently omninode_infra dev -> deploy-onex-dev.yml -> onex-dev) for the
+# "merged but never deployed" gap -- deploy-affecting commits sitting on the
+# target branch with no successful deploy run since. This is what would have
+# caught three production-blocking fixes (omninode_infra PRs #619/#620/#622)
+# sitting merged to dev undeployed for ~28h with nothing red anywhere, because
+# deploy-onex-dev.yml's push trigger only fires on main/m7/**, never dev (the
+# repo's actual default branch). Scope is onex-dev only -- never prod.
+#
 # Token: uses CROSS_REPO_PAT when configured (needed to read the sibling repos
 # via the GitHub API). With only GITHUB_TOKEN, sibling probes fail and the
 # monitor exits 2 (BLIND) rather than a false green -- a visibility gap is never
