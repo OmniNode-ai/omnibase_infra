@@ -60,7 +60,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.session-outcome.v1": "Published by omniclaude SessionEnd hook outcome processing, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
-    "onex.evt.omniclaude.hook-context-injected.v1": "Published by omniclaude hook context injection, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.context-injected.v1": "Published by omniclaude hook context injection (renamed from the never-published hook-context-injected.v1, OMN-14986), not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.validator-catch.v1": "Published by omniclaude validator hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.pattern-enforcement.v1": "Published by omniclaude pattern enforcement hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.phase-metrics.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
