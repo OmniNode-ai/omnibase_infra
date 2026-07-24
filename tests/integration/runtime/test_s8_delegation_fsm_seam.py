@@ -366,6 +366,17 @@ def test_seam_fanout_owner_route_built_and_single_owner_gate_passes() -> None:
     fan-out topic (orchestrator + two legacy projection consumers), the routing map binds
     ONLY the designated owner's route, and ``assert_single_owner_split`` PASSES because the
     non-owner consumers keep distinct legacy consumer groups.
+
+    OMN-14795: the fixture ``_contract`` helper builds ``ModelEventBusWiring`` with
+    ``plugin_managed`` defaulted to ``False`` -- until OMN-14795 dropped
+    ``plugin_managed: true`` from the REAL ``node_delegation_orchestrator`` contract,
+    that default was counterfactual: the live orchestrator would have hit the
+    plugin-managed fail-closed branch in ``assert_single_owner_split`` before ever
+    reaching this fan-out-with-owner path (see
+    ``test_plugin_managed_owner_of_fanout_topic_fails_closed_omn14795`` and its resolution
+    pair ``test_plugin_managed_dropped_unblocks_fanout_owner_omn14795`` in
+    ``tests/unit/runtime/core_runtime/test_single_owner.py``). Post-OMN-14795 this test's
+    fixture shape now matches the real contract, not just a hypothetical one.
     """
     owner = _contract(
         ORCHESTRATOR,

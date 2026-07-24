@@ -136,6 +136,36 @@ def test_plugin_managed_owner_of_fanout_topic_fails_closed_omn14795() -> None:
         )
 
 
+def test_plugin_managed_dropped_unblocks_fanout_owner_omn14795() -> None:
+    """OMN-14795 resolution: the SAME delegation-orchestrator shape as the fail-closed
+    test above, with the only change being ``plugin_managed=False`` (Option A — dropped
+    on the real contract, see omnimarket ``node_delegation_orchestrator/contract.yaml``),
+    now passes.
+
+    This is the positive proof that dropping ``plugin_managed`` — not weakening the
+    guard — is what unblocks the S8 wave-3 ``ONEX_CORE_RUNTIME_TOPICS`` move: the
+    plugin-managed branch is never entered, so the request falls through to the
+    ordinary §4b fan-out-with-owner path (identical to
+    ``test_passes_fanout_with_owner_and_distinct_legacy_group``, restated here with the
+    exact delegation-orchestrator node names for direct traceability to the OMN-14795
+    trap this closes).
+    """
+    assert_single_owner_split(
+        core_runtime_topics=frozenset({FANOUT_TOPIC}),
+        routing_map={FANOUT_TOPIC: _route()},
+        legacy_subscribed_topics=frozenset({FANOUT_TOPIC}),
+        contracts=[
+            _contract(
+                "node_delegation_orchestrator",
+                (FANOUT_TOPIC,),
+                plugin_managed=False,
+            ),
+            _contract("node_projection_delegation_inference_response", (FANOUT_TOPIC,)),
+        ],
+        owners={FANOUT_TOPIC: "node_delegation_orchestrator"},
+    )
+
+
 # --- S8 §D1=4b: fan-out enablement (was: outright refusal) ----------------------------
 
 
