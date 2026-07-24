@@ -749,11 +749,13 @@ class TestContractValidation:
             return yaml.safe_load(f)
 
     def test_contract_has_all_seven_topics(self, contract_data: dict) -> None:
-        """Verify contract subscribes to all 7 platform topic suffixes."""
+        """Verify contract subscribes to the 7 platform topic suffixes plus
+        the 18 business command/completion/DLQ topics added by OMN-15006
+        (build_loop + OCC governance + DLQ) — 25 total."""
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 7, f"Expected 7 topics, got {len(topics)}: {topics}"
+        assert len(topics) == 25, f"Expected 25 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [

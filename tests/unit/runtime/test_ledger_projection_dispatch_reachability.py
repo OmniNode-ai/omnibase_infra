@@ -122,10 +122,12 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
     exists" stays GREEN on the dead node: the entry parses, all 7 topics get
     assigned, and the contract is still never wired.
 
-    OMN-14594: the contract now declares 7 topic_match entries (one per
-    topic, each type-scoped + correctly categorized — see the contract's own
-    comment) instead of 1 operation_match entry spanning all 7, so
-    wiring_count is 7, one per topic-scoped dispatcher.
+    OMN-14594: the contract declares 7 topic_match entries (one per topic,
+    each type-scoped + correctly categorized — see the contract's own
+    comment) instead of 1 operation_match entry spanning all 7. OMN-15006
+    widened subscribe_topics by 18 business command/completion/DLQ topics
+    (same one-entry-per-topic pattern), so wiring_count is 25, one per
+    topic-scoped dispatcher.
     """
     outcome, wiring_count, reason = await _wire(with_applier=True)
 
@@ -134,8 +136,8 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
         f"reason={reason!r}). A raw audit/projection contract that does not reach "
         "WIRED never creates a consumer, so event_ledger stays empty."
     )
-    assert wiring_count == 7, (
-        f"expected 7 wired handlers (1 per topic), got {wiring_count}"
+    assert wiring_count == 25, (
+        f"expected 25 wired handlers (1 per topic), got {wiring_count}"
     )
 
 

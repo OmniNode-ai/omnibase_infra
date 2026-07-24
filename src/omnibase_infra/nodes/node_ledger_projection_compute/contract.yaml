@@ -6,7 +6,8 @@
 # ONEX Node Contract
 # Node: NodeLedgerProjectionCompute
 #
-# COMPUTE node that subscribes to 7 platform event topics for event ledger
+# COMPUTE node that subscribes to 25 topics (7 platform-lifecycle topics plus
+# 18 business command/completion/DLQ topics — OMN-15006) for event ledger
 # persistence. This node projects events from the platform event bus into
 # the audit ledger for complete traceability and debugging support.
 #
@@ -19,20 +20,26 @@
 #   - OMN-1648: Ledger Projection Compute Node
 #   - OMN-14823: HandlerLedgerProjection exposes the canonical def-B handle()
 #     dispatch entrypoint while preserving ledger.append intent routing.
+#   - OMN-15006: widen subscribe_topics from 7 platform-lifecycle topics to
+#     25 by adding build_loop (3) + OCC governance (6) + DLQ (9) business
+#     topics whose silent loss OMN-15002 documented. The handler
+#     (HandlerLedgerProjection) and write-effect (node_ledger_write_effect)
+#     are TYPE-AGNOSTIC and required no change — the blindness was a
+#     subscription-scoping gap, not a handler bug.
 # Contract identifiers
 name: "node_ledger_projection_compute"
 contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 0
-  patch: 2
-node_version: "0.1.2"
+  minor: 1
+  patch: 0
+node_version: "0.2.0"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 7 platform event topics for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract patch 2 records the OMN-14823 canonical def-B handler entrypoint flip while preserving ledger.append intent routing.
+  COMPUTE node that subscribes to 25 topics (7 platform-lifecycle + 18 business command/completion/DLQ topics, OMN-15006) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.1.0 (OMN-15006) widens the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
 
 # Event bus configuration
 event_bus:
@@ -40,7 +47,8 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  # Subscribe to all 7 platform event topics for complete audit coverage
+  # Subscribe to 25 topics for complete audit coverage: 7 platform-lifecycle
+  # topics plus 18 business command/completion/DLQ topics (OMN-15006).
   subscribe_topics:
     # Node lifecycle events
     - "onex.evt.platform.node-registration.v1"
@@ -54,6 +62,34 @@ event_bus:
     - "onex.intent.platform.runtime-tick.v1"
     # State snapshots
     - "onex.evt.platform.registration-snapshots.v1"
+    # --- OMN-15006: business command/completion/DLQ topics ---
+    # build_loop (3) — EnumOmnibaseInfraTopic.CMD_BUILD_LOOP_APPEND_V1,
+    # .EVT_BUILD_LOOP_APPENDED_V1; the completion event is owned by
+    # omnimarket's node_build_loop_orchestrator (terminal_event) — literal
+    # here because infra ↛ market forbids importing EnumOmnimarketTopic.
+    - "onex.cmd.omnibase-infra.build-loop-append.v1"
+    - "onex.evt.omnibase-infra.build-loop-appended.v1"
+    - "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+    # OCC governance (6) — onex_change_control.kafka.topics.GovernanceTopic;
+    # literals here because infra cannot import onex_change_control's enum.
+    - "onex.evt.occ.nightly-promotion.v1"
+    - "onex.evt.onex-change-control.governance-check-completed.v1"
+    - "onex.evt.onex-change-control.contract-drift-detected.v1"
+    - "onex.evt.onex-change-control.cosmetic-compliance-scored.v1"
+    - "onex.cmd.omnimarket.redeploy-start.v1"
+    - "onex.evt.omnimarket.runtime-deployment-proof.v1"
+    # DLQ (9) — EnumOmnibaseInfraTopic.DLQ_*_V1. No evt/cmd/intent segment;
+    # message_category is "event" per the source-derived fallback documented
+    # on each handler_routing entry below.
+    - "onex.dlq.omnibase-infra.commands.v1"
+    - "onex.dlq.omnibase-infra.events.v1"
+    - "onex.dlq.omnibase-infra.intents.v1"
+    - "onex.dlq.omnibase-infra.omnibase-infra.v1"
+    - "onex.dlq.omnibase-infra.platform.v1"
+    - "onex.dlq.omnibase-infra.quarantine.v1"
+    - "onex.dlq.omnibase-infra.router.v1"
+    - "onex.dlq.omnibase-infra.rsd.v1"
+    - "onex.dlq.omnibase-infra.skill.v1"
   # Audit consumer - read-only, non-processing consumption for ledger persistence
   consumer_purpose: "audit"
   # Start from earliest offset to capture all historical events
@@ -65,7 +101,7 @@ input_model:
   name: "ModelEventMessage"
   module: "omnibase_infra.event_bus.models.model_event_message"
   description: >
-    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 7 subscribed topics.
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 25 subscribed topics.
 
 output_model:
   name: "ModelIntent"
@@ -188,6 +224,228 @@ handler_routing:
         module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
       supported_operations:
         - "ledger.project"
+    # --- OMN-15006: business command/completion/DLQ topics (18 entries) ---
+    # Same OMN-14594 pattern as above: one topic_match entry PER topic,
+    # event_model MANDATORY on every entry (a missing event_model is the
+    # exact OMN-15002 starvation asymmetry — it silently mis-categorizes a
+    # topic via the contract-wide subscribe_topics[0] fallback instead of
+    # per-entry derivation).
+    - topic: "onex.cmd.omnibase-infra.build-loop-append.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.omnibase-infra.build-loop-appended.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.occ.nightly-promotion.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.onex-change-control.governance-check-completed.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.onex-change-control.contract-drift-detected.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.onex-change-control.cosmetic-compliance-scored.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.cmd.omnimarket.redeploy-start.v1"
+      operation: ledger.project
+      message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.evt.omnimarket.runtime-deployment-proof.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.commands.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.events.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.intents.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.omnibase-infra.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.platform.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.quarantine.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.router.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.rsd.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    - topic: "onex.dlq.omnibase-infra.skill.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
 # Intent consumption (OMN-14516): the projection emits a `ledger.append` intent
 # per consumed platform event. This table is the SOURCE OF TRUTH the kernel uses
 # to DERIVE a result applier for this contract — it names the effect node whose
@@ -221,7 +479,7 @@ dependencies:
     optional: false
 # Metadata
 metadata:
-  description: "Subscribes to 7 platform event topics for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
+  description: "Subscribes to 25 topics (7 platform-lifecycle + 18 business command/completion/DLQ, OMN-15006) for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"
