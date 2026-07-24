@@ -24,7 +24,7 @@ contract_version:
 node_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_type: "EFFECT_GENERIC"
 description: >
   Effect node that drains a DLQ topic (onex.dlq.omnibase-infra.<category>.v1) from the persistent onex-dlq-replay consumer group, replays eligible messages back to their original topic exactly once, and quarantines non-replayable messages to onex.dlq.omnibase-infra.quarantine.v1 (never dropping them). Reuses should_replay() for eligibility and records every terminal outcome in dlq_replay_history.
@@ -157,12 +157,12 @@ quarantine:
 # Metadata
 metadata:
   description: >
-    Contract-native DLQ replay + quarantine node. Persistent consumer group onex-dlq-replay; quarantine to onex.dlq.omnibase-infra.quarantine.v1 ends silent loss.
+    Contract-native DLQ replay + quarantine node. Persistent consumer group onex-dlq-replay; quarantine to onex.dlq.omnibase-infra.quarantine.v1 ends silent loss. OMN-15021 (node_version 1.0.1): HandlerDlqReplay.handle() dispatch-boundary id extraction hardened against the runtime auto-wiring materialized dispatch-dict shape (no behavior change to the DLQ drain itself).
 
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-06-03"
+  updated: "2026-07-24"
   tags:
     - effect
     - dlq
