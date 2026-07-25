@@ -89,16 +89,10 @@ skills:
       - {name: skills-filter, payload_field: skills_filter, arg_type: string_list}
       - {name: skills-roots, payload_field: skills_roots, arg_type: string_list}
       - {name: nodes-root, payload_field: nodes_root, arg_type: string}
-  - skill_name: auto_merge
-    node_name: node_auto_merge_effect
-    result_model: omnimarket.nodes.node_auto_merge_effect.models.model_auto_merge_result.ModelAutoMergeResult
-    args:
-      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
-      - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: strategy, payload_field: strategy, arg_type: string}
-      - {name: delete-branch, payload_field: delete_branch, arg_type: boolean, default: false}
-      - {name: ticket-id, payload_field: ticket_id, arg_type: string}
-      - {name: gate-timeout-hours, payload_field: gate_timeout_hours, arg_type: integer}
+  # OMN-14151 deregistered the legacy node_auto_merge_effect catalog entry.
+  # The active merge path is the merge-queue governor
+  # (node_pr_arm_gate_compute + node_pr_lifecycle_merge_effect), which needs a
+  # separate CLI contract instead of a stale direct-arm skill mapping.
   - skill_name: build_loop
     node_name: node_build_loop
     result_model: omnimarket.nodes.node_build_loop.models.model_loop_state.ModelLoopState

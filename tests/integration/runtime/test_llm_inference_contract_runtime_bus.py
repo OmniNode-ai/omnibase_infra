@@ -147,6 +147,7 @@ def _install_fake_http(
         payload: dict[str, object],
         correlation_id: UUID,
         timeout_seconds: float,
+        max_retries: int,
     ) -> dict[str, object]:
         await captured.put(_CapturedRequest(url=url))
         return {
