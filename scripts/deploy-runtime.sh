@@ -1594,6 +1594,90 @@ show_preview() {
 # Sync -- rsync repository to deployment target
 # =============================================================================
 
+resolve_core_contracts_dir() {
+    # Resolve the omnibase_core runtime contracts directory (OMN-6698 / OMN-15122).
+    #
+    # Populates two caller-provided variables, both passed by name (never via
+    # command substitution -- a `$(...)` wrapper forks a subshell, and a `local -n`
+    # array populated inside that subshell would NOT propagate back to the
+    # caller): the first receives every path probed, in probe order; the second
+    # receives the resolved directory on success (left empty on failure).
+    #
+    # Usage:
+    #   local -a probed=()
+    #   local resolved=""
+    #   if resolve_core_contracts_dir probed resolved; then ...
+    #
+    # Primary: filesystem resolution from the OMNI_HOME sibling clone/checkout
+    # -- src/omnibase_core/contracts/runtime_data relative to the omnibase_core
+    # repo root. This is the deploy source of truth (the same pinned sibling
+    # clone the rest of the workspace build vendors from) and it works even
+    # when omnibase_core is not pip-installed on the deploy runner at all --
+    # the OMN-15122 failure: `importlib.util.find_spec('omnibase_core')`
+    # returned None on the runner's python3, and the previous editable-install
+    # fallback assumed a site-packages-shaped layout
+    # (`<pkg_dir>/../.. /contracts/runtime_data`) that does not match the real
+    # source-tree layout (`<repo>/src/omnibase_core/contracts/runtime_data`).
+    #
+    # Secondary: python import resolution, kept for hosts where omnibase_core
+    # IS installed (e.g. a developer workstation running this script directly
+    # against a pip/editable install with no OMNI_HOME sibling clone).
+    #
+    # Fails closed: leaves the resolved-dir output empty and returns 1 if
+    # neither probe resolves.
+    # NOTE: internal locals below are deliberately prefixed `_resolve_ccd_*`
+    # (never `resolved`/`probed`) -- a `local -n` nameref breaks silently if a
+    # plain local variable inside this function shares the caller-chosen target
+    # name (e.g. caller passes a variable literally named "resolved"), aliasing
+    # the nameref to itself instead of the caller's variable. Verified via a
+    # standalone bash harness during development: an earlier draft using
+    # `local resolved=""` here produced an empty resolved-dir output AND
+    # incorrectly returned success on the fail-closed case once the caller's
+    # own variable was also named "resolved".
+    local -n _out_probed="$1"
+    local -n _out_resolved="$2"
+    _out_resolved=""
+    local _resolve_ccd_dir=""
+
+    if [[ -n "${OMNI_HOME:-}" ]]; then
+        local fs_candidate="${OMNI_HOME}/omnibase_core/src/omnibase_core/contracts/runtime_data"
+        _out_probed+=("${fs_candidate}")
+        if [[ -d "${fs_candidate}" ]]; then
+            _resolve_ccd_dir="${fs_candidate}"
+        fi
+    else
+        _out_probed+=("<OMNI_HOME unset -- cannot probe the sibling clone filesystem path>")
+    fi
+
+    if [[ -z "${_resolve_ccd_dir}" ]]; then
+        local py_candidate
+        py_candidate="$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('omnibase_core')
+if spec and spec.origin:
+    pkg_dir = pathlib.Path(spec.origin).parent
+    runtime_data = pkg_dir / 'contracts' / 'runtime_data'
+    if not runtime_data.is_dir():
+        # Fallback: check sibling contracts/runtime_data directory (editable installs)
+        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime_data'
+    if runtime_data.is_dir():
+        print(runtime_data)
+" 2>/dev/null || true)"
+        if [[ -n "${py_candidate}" ]]; then
+            _out_probed+=("${py_candidate} (python find_spec('omnibase_core') resolution)")
+            _resolve_ccd_dir="${py_candidate}"
+        else
+            _out_probed+=("<python find_spec('omnibase_core') returned no importable spec/origin>")
+        fi
+    fi
+
+    if [[ -n "${_resolve_ccd_dir}" ]]; then
+        _out_resolved="${_resolve_ccd_dir}"
+        return 0
+    fi
+    return 1
+}
+
 sync_files() {
     # Rsync repository files to the versioned deployment target directory.
     local repo_root="$1"
@@ -1640,20 +1724,16 @@ sync_files() {
     # from the installed omnibase_core package (contracts/runtime_data/), but
     # the bind-mount hides them. We must copy them into the deployed contracts/
     # directory so they survive the bind-mount override.
+    #
+    # OMN-15122: resolution is delegated to resolve_core_contracts_dir(), which
+    # probes the OMNI_HOME sibling clone's real source-tree path FIRST (the
+    # deploy runner has no omnibase_core installed at all, so the prior
+    # python-only resolution always failed there) and falls back to python
+    # import resolution second.
     check_command python3 "locating omnibase_core runtime contracts"
-    local core_contracts_dir
-    core_contracts_dir="$(python3 -c "
-import importlib.util, pathlib
-spec = importlib.util.find_spec('omnibase_core')
-if spec and spec.origin:
-    pkg_dir = pathlib.Path(spec.origin).parent
-    runtime_data = pkg_dir / 'contracts' / 'runtime_data'
-    if not runtime_data.is_dir():
-        # Fallback: check sibling contracts/runtime_data directory (editable installs)
-        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime_data'
-    if runtime_data.is_dir():
-        print(runtime_data)
-" 2>/dev/null || true)"
+    local -a core_contracts_probed=()
+    local core_contracts_dir=""
+    resolve_core_contracts_dir core_contracts_probed core_contracts_dir || true
 
     if [[ -n "${core_contracts_dir}" && -d "${core_contracts_dir}" ]]; then
         log_info "Copying omnibase_core runtime contracts from ${core_contracts_dir}..."
@@ -1674,8 +1754,14 @@ if spec and spec.origin:
         log_info "Copied ${yaml_count} runtime contract YAMLs from omnibase_core."
     else
         log_error "Could not locate omnibase_core runtime contracts."
+        log_error "Probed the following paths:"
+        for probed_path in "${core_contracts_probed[@]}"; do
+            log_error "  - ${probed_path}"
+        done
         log_error "Aborting deployment to avoid runtime startup failure."
-        log_error "Ensure omnibase_core is installed: uv pip install omnibase-core"
+        log_error "Ensure OMNI_HOME points at a clone containing omnibase_core (with"
+        log_error "src/omnibase_core/contracts/runtime_data), or that omnibase_core is"
+        log_error "installed: uv pip install omnibase-core"
         exit 1
     fi
 
