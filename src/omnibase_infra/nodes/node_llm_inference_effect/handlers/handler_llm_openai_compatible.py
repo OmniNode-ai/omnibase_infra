@@ -293,6 +293,7 @@ class HandlerLlmOpenaiCompatible:
             extra_headers=request.extra_headers,
             correlation_id=correlation_id,
             timeout_seconds=request.timeout_seconds,
+            max_retries=request.max_retries,
         )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
@@ -571,6 +572,7 @@ class HandlerLlmOpenaiCompatible:
         correlation_id: UUID,
         extra_headers: dict[str, str] | None = None,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = 3,
     ) -> dict[str, JsonType]:
         """Execute HTTP call via transport, injecting auth and extra headers if needed.
 
@@ -596,6 +598,9 @@ class HandlerLlmOpenaiCompatible:
             timeout_seconds: HTTP request timeout in seconds for the
                 auth-injected client. Sourced from the request model so
                 callers can override the default (30.0) per-request.
+            max_retries: Maximum retry attempts, sourced from the request
+                model. Default 3 preserves the transport's historical
+                hardcoded behavior.
 
         Returns:
             Parsed JSON response dictionary.
@@ -630,6 +635,7 @@ class HandlerLlmOpenaiCompatible:
                 payload=payload,
                 correlation_id=correlation_id,
                 timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
             )
 
         # Lock lives on the transport so that ALL handler instances sharing
@@ -669,6 +675,7 @@ class HandlerLlmOpenaiCompatible:
                     payload=payload,
                     correlation_id=correlation_id,
                     timeout_seconds=timeout_seconds,
+                    max_retries=max_retries,
                 )
             finally:
                 self._transport._http_client = original_client

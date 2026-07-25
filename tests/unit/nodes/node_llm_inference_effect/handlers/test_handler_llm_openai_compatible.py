@@ -1378,3 +1378,57 @@ class TestTimeoutPropagation:
             f"Expected timeout_seconds={default_timeout} forwarded to transport, "
             f"got {actual_timeout!r}."
         )
+
+
+@pytest.mark.unit
+class TestMaxRetriesPropagation:
+    """OMN-15115: max_retries from the request must reach _execute_llm_http_call.
+
+    Mirrors TestTimeoutPropagation above -- max_retries is a per-model
+    registry override (e.g. a systematically-slow local endpoint sized down
+    from the default 3) and must reach the transport the same way
+    timeout_seconds does, through both the no-auth and auth-injected paths.
+    """
+
+    @pytest.mark.asyncio
+    async def test_custom_max_retries_forwarded_to_transport_no_auth(self) -> None:
+        """max_retries=1 must reach _execute_llm_http_call when api_key=None."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_openai_chat_response(
+            content="ok", finish_reason="stop", prompt_tokens=5, completion_tokens=2
+        )
+        handler = _make_handler(transport)
+
+        request = _make_chat_request(max_retries=1)
+        await handler.handle(request, correlation_id=_CORRELATION_ID)
+
+        call_kwargs = transport._execute_llm_http_call.call_args
+        assert call_kwargs is not None, "_execute_llm_http_call was not called"
+        actual_max_retries = call_kwargs.kwargs.get("max_retries")
+        assert actual_max_retries == 1, (
+            f"Expected max_retries=1 forwarded to _execute_llm_http_call, "
+            f"got {actual_max_retries!r}. A per-model retry override is not "
+            f"reaching the transport."
+        )
+
+    @pytest.mark.asyncio
+    async def test_default_max_retries_forwarded_to_transport(self) -> None:
+        """Default max_retries must still reach _execute_llm_http_call."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_openai_chat_response(
+            content="ok", finish_reason="stop", prompt_tokens=5, completion_tokens=2
+        )
+        handler = _make_handler(transport)
+
+        request = _make_chat_request()  # uses ModelLlmInferenceRequest default
+        default_max_retries = request.max_retries
+
+        await handler.handle(request, correlation_id=_CORRELATION_ID)
+
+        call_kwargs = transport._execute_llm_http_call.call_args
+        assert call_kwargs is not None
+        actual_max_retries = call_kwargs.kwargs.get("max_retries")
+        assert actual_max_retries == default_max_retries, (
+            f"Expected max_retries={default_max_retries} forwarded to transport, "
+            f"got {actual_max_retries!r}."
+        )
