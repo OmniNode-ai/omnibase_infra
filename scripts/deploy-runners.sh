@@ -97,6 +97,7 @@ SYNC_PATHS=(
     "scripts/ci/ci_env_digest.py"
     "scripts/ci/ensure_ci_env.sh"
     "scripts/ci/runner_image_identity.py"
+    "scripts/ci/check_runner_fleet_image_drift.py"
 )
 
 # ---------------------------------------------------------------------------
