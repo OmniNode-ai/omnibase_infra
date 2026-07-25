@@ -98,6 +98,7 @@ SYNC_PATHS=(
     "scripts/ci/ensure_ci_env.sh"
     "scripts/ci/runner_image_identity.py"
     "scripts/ci/check_runner_fleet_image_drift.py"
+    "scripts/ci/check_runner_host_artifact_freshness.py"
 )
 
 # ---------------------------------------------------------------------------
@@ -459,6 +460,7 @@ deploy_with_retry() {
         install_monitor_cron
         install_health_cron
         install_network_janitor_cron
+        install_host_artifact_freshness_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -602,6 +604,48 @@ install_network_janitor_cron() {
     echo "${existing}" | grep -v 'network-janitor-check' | { cat; echo "${cron_line}"; } | crontab -
 
     log "Network janitor cron installed locally (every 15 minutes, dry-run)."
+}
+
+# ---------------------------------------------------------------------------
+# Step 12: Install local runner host artifact-freshness cron (OMN-15114)
+# ---------------------------------------------------------------------------
+# Installs a LOCAL cron (on this dev machine, same model as step 10/11) that
+# runs scripts/ci/check_runner_host_artifact_freshness.py every 30 minutes.
+# That script diffs every SYNC_PATHS entry (sha256) between this repo
+# checkout and RUNNER_HOST's rsynced copy under RUNNER_HOST_DIR, and reports
+# any path that has drifted.
+#
+# Root cause this closes: the SYNC_PATHS rsync above only runs as part of
+# this script's full (disruptive, force-recreate-all) pipeline, which
+# operators routinely avoid for a small fix by rebuilding the image and
+# recreating containers directly on the host instead. That leaves the
+# host-staged checkout free to drift indefinitely with zero signal -- the
+# checked-in runner-image.lock.json sat at image_version 5 on the host for
+# 19 days after origin/dev moved to image_version 6 (OMN-15114) before
+# anything noticed, exactly the "merged fix silently never lands on the
+# artifact that matters" defect class OMN-15104 exists to close, one layer
+# further out (host checkout, not container).
+#
+# Marker-based idempotence via '# runner-host-artifact-freshness-check'.
+
+install_host_artifact_freshness_cron() {
+    log "Installing LOCAL runner host artifact-freshness cron..."
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min)."
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    local cron_line="*/30 * * * * cd ${repo_root} && uv run python scripts/ci/check_runner_host_artifact_freshness.py --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> /tmp/runner-host-artifact-freshness.log 2>&1 # runner-host-artifact-freshness-check"
+
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    echo "${existing}" | grep -v 'runner-host-artifact-freshness-check' | { cat; echo "${cron_line}"; } | crontab -
+
+    log "Runner host artifact-freshness cron installed locally (every 30 minutes)."
 }
 
 # ---------------------------------------------------------------------------
