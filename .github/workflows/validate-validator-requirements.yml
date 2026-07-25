@@ -2,14 +2,19 @@
 # SPDX-License-Identifier: MIT
 # OMN-13291: Enforce validator-requirements.yaml fleet gate for omnibase_infra.
 # Reports ALL missing gates in a single pass (never fail-on-first).
+#
+# MIGRATED INTO ci.yml (OMN-15108, OMN-14877/OMN-14430 fast-follow pattern):
+# this workflow used to trigger on push/pull_request, giving it its OWN
+# github.run_id — structurally invisible to ci.yml's ci-summary default-deny
+# poller (confirmed live: omnibase_infra/dev's only required_status_checks
+# context is "CI Summary") and gating nothing. Its validate step now runs
+# UNCONDITIONALLY inside ci.yml (job: validate-validator-requirements) under
+# the required "CI Summary" rollup. This file is retained workflow_dispatch-only
+# for manual/ad-hoc invocation.
 name: Validate Validator Requirements
 
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 env:
   # OMN-14017: this workflow runs a raw `uv sync` (not the hardened

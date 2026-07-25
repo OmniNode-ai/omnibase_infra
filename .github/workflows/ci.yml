@@ -1798,6 +1798,126 @@ jobs:
     with:
       mode: compose
 
+  # ===========================================================================
+  # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
+  # ---------------------------------------------------------------------------
+  # Both standalone workflows below triggered on push/pull_request with their
+  # OWN github.run_id, making them structurally invisible to this ci-summary
+  # job's poll of `actions/runs/${RUN_ID}/jobs` (the exact OMN-14430 mechanism,
+  # confirmed live here: omnibase_infra/dev's ONLY required_status_checks
+  # context is "CI Summary" — neither standalone workflow was ever a required
+  # context, so a red run never blocked a merge). Ported here as unconditional
+  # jobs (no `if:`/`needs:`) under the required "CI Summary" default-deny
+  # rollup (ci_summary_gate.py's sweep fails on ANY non-allowlisted job
+  # failure, so no allowlist edit is needed). Both standalone files are
+  # retired to workflow_dispatch-only in this same PR.
+  # ===========================================================================
+  # Migrated from validate-validator-requirements.yml (OMN-15108, OMN-14877
+  # pattern). Enforces architecture-handshakes/validator-requirements.yaml
+  # (OMN-13291 fleet gate) against this repo's own baseline.
+  validate-validator-requirements:
+    name: Enforce validator-requirements.yaml (OMN-13291)
+    # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
+    runs-on: >-
+      ${{
+        ((github.event_name == 'pull_request' && github.base_ref == 'dev') ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # OMN-14017: sibling checkout plus uv sync can consume the default budget
+    # while retrying transient GitHub/PyPI fetch failures.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Checkout omnibase_core
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # Pinned to the commit that exports the validate-validator-requirements hook (OMN-13291).
+          # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/dev --jq '.sha'
+          ref: d163312724489f10f58ffdf8115ba1fa9d5783e8
+          path: omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Enforce validator-requirements.yaml
+        run: |
+          cd omnibase_core
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
+          uv run python -m omnibase_core.validation.validator_requirements_consumer \
+            --repo omnibase_infra \
+            --repo-root .. \
+            --spec ../architecture-handshakes/validator-requirements.yaml \
+            --baseline ../architecture-handshakes/validator-requirements-baseline.yaml
+
+  # Migrated from validator-runtime-profiles.yml (OMN-15108, OMN-14877
+  # pattern). Enforces runtime_profiles on command-consuming contracts
+  # (OMN-9886 / OMN-12957) against the frozen allowlist.
+  runtime-profiles-validator:
+    name: Runtime Profiles / validate
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        github.event_name != 'pull_request'
+        && fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.3"
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            uv sync --all-extras && break
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
+
+      - name: Validate runtime_profiles on omnibase_infra contracts
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from omnibase_core.validation.validator_runtime_profiles import (
+              ValidatorRuntimeProfiles,
+          )
+
+          result = ValidatorRuntimeProfiles(
+              allowlist_path=Path("config/validation/runtime_profiles_allowlist.yaml")
+          ).validate(Path("src"))
+          for issue in result.issues:
+              print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
+          raise SystemExit(0 if result.is_valid else 1)
+          PY
+
   no-noncanonical-lifecycle-classes:
     name: no-noncanonical-lifecycle-classes
     # OMN-14350: non-canonical lifecycle-class ratchet — a STRICT CI Summary gate
