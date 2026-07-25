@@ -16,6 +16,12 @@
 #   -> ModelHandlerOutput — replacing the deleted ModelOnexEnvelope reference
 #   (B5 residual of OMN-13196; deploy-gate runtime-path docstring edit, behavior
 #   unchanged). (2026-06-17)
+# OMN-14804: HandlerLlmCliSubprocess now exposes the canonical async handle()
+#   dispatch entrypoint for gemini/claude/opencode CLI operations; the retained
+#   execute_cli_inference accessor delegates to the same owned core. (2026-07-19)
+# OMN-15115: HandlerLlmOpenaiCompatible accepts per-request max_retries and the
+#   OpenAI-compatible request model permits timeout_seconds up to 1800s for slow
+#   local endpoints measured below the old 600s ceiling. (2026-07-25)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -31,7 +37,7 @@ node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
   minor: 4
-  patch: 2
+  patch: 4
 node_version:
   major: 0
   minor: 1
@@ -80,7 +86,7 @@ handler_routing:
         name: "HandlerLlmOpenaiCompatible"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible"
         handler_type: "HTTP"
-      description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, GLM/Z.AI, etc.)"
+      description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, GLM/Z.AI, etc.) with per-request timeout_seconds up to 1800s and max_retries passthrough."
     # Gemini CLI Subprocess Handler
     - operation: "inference.gemini_cli"
       handler:
@@ -103,7 +109,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
       description: "Execute LLM inference via opencode CLI subprocess (opencode run --format json --pure)"
   execution_mode: "single"
-  max_timeout_seconds: 600
+  max_timeout_seconds: 1800
 # =============================================================================
 # ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
 # =============================================================================
@@ -141,7 +147,7 @@ error_handling:
 # =============================================================================
 io_operations:
   - operation: "inference.openai_compatible"
-    description: "Execute LLM inference via OpenAI-compatible API"
+    description: "Execute LLM inference via OpenAI-compatible API with per-request timeout and retry controls"
 # =============================================================================
 # EVENT BUS TOPICS
 # =============================================================================

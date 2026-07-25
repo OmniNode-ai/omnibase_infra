@@ -65,7 +65,21 @@ class ModelLlmInferenceRequest(BaseModel):
             Used for custom authentication schemes (e.g. HMAC ``X-ONEX-Signature``).
         timeout_seconds: HTTP request timeout in seconds (default 30.0). Applied
             to both authenticated and unauthenticated calls. Must be between 1.0
-            and 600.0 inclusive.
+            and 1800.0 inclusive. (OMN-15115: raised from 600.0 -- some local
+            model endpoints have real sustained throughput well below the rate
+            assumed when a caller's per-model timeout was sized, and 600.0 was
+            an unreachable ceiling for those endpoints regardless of what a
+            caller configured.)
+        max_retries: Maximum retry attempts for a failed/timed-out call (default
+            3, matching ``MixinLlmHttpTransport._execute_llm_http_call``'s
+            historical hardcoded default). Total attempts = 1 + max_retries.
+            OMN-15115: exposed as a request field so slow-but-reliable local
+            endpoints can opt into fewer retries -- retrying a call that is
+            failing because the endpoint is systematically slow (not because
+            of a transient blip) just re-consumes the same wall-clock budget
+            without changing the outcome, and on a single-concurrency-slot
+            endpoint it also extends how long that slot is held by doomed
+            requests.
 
     Example:
         >>> req = ModelLlmInferenceRequest(
@@ -177,8 +191,18 @@ class ModelLlmInferenceRequest(BaseModel):
     timeout_seconds: float = Field(
         default=30.0,
         ge=1.0,
-        le=600.0,
+        le=1800.0,
         description="HTTP request timeout in seconds.",
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Maximum retry attempts for a failed/timed-out call. Total "
+            "attempts = 1 + max_retries. Default of 3 preserves the prior "
+            "hardcoded transport behavior for all existing callers."
+        ),
     )
     gpu_type: str | None = Field(
         default=None,
