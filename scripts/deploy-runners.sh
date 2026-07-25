@@ -80,7 +80,19 @@ COMPOSE_FILE="docker/docker-compose.runners.yml"
 POLL_MAX_SECONDS=300
 POLL_INTERVAL_SECONDS=15
 
-# Artifacts to sync to the host (relative to repo root)
+# Artifacts to sync to the host (relative to repo root).
+#
+# NOTE (OMN-15114 follow-up): scripts/ci/check_runner_host_artifact_freshness.py
+# is deliberately NOT in this list. That checker's whole job is to diff a
+# local (assumed-current) repo checkout against its rsynced copy on the
+# runner host over ssh -- it is installed as a LOCAL cron on the
+# operator/dev machine (see install_host_artifact_freshness_cron below,
+# "same model as step 10/11") and never executes on the runner host itself.
+# Adding it here made the checker report its own absence as drift on every
+# host that had not yet received it -- a self-referential false positive
+# fixed by removal, not by syncing it. scripts/ci/check_runner_fleet_image_drift.py
+# is different and correctly stays synced: it docker-execs into containers
+# running ON the host, so it must exist there.
 SYNC_PATHS=(
     "${RUNNER_FLEET_CONFIG}"
     ".github/actions/setup-python-uv/action.yml"
@@ -98,7 +110,6 @@ SYNC_PATHS=(
     "scripts/ci/ensure_ci_env.sh"
     "scripts/ci/runner_image_identity.py"
     "scripts/ci/check_runner_fleet_image_drift.py"
-    "scripts/ci/check_runner_host_artifact_freshness.py"
 )
 
 # ---------------------------------------------------------------------------
