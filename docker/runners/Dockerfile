@@ -59,6 +59,13 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # node-based actions, e.g. pyright) dlopens libatomic.so.1 at load time.
 # Ubuntu 22.04 does not pull it in transitively; without it every node-based
 # action fails with "node: libatomic.so.1: cannot open shared object file".
+# rsync (OMN-15103): the omnibase-deploy runner (omninode-deploy-runner,
+# see docker-compose.runners.yml) invokes scripts/deploy-runtime.sh's
+# BUILD_SOURCE=workspace path, whose sync_files() stages the deploy target
+# via ~10 `rsync -a --delete` calls. The shared omnibase-ci fleet's jobs
+# (build/test) never exercise that path, so the gap went unnoticed until
+# the first live release-train-lab deploy run reached it and died at
+# "Validate Prerequisites" with 'rsync is required but not found in PATH'.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -66,6 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     tar \
     unzip \
+    rsync \
     libatomic1 \
     libicu-dev \
     libkrb5-3 \
