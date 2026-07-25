@@ -97,5 +97,22 @@
       ]
     }
   ],
-  "clientScopes": []
+  "clientScopes": [],
+  "realmSettings": {
+    "verifyEmail": true,
+    "registrationAllowed": true,
+    "attributes": {
+      "actionTokenGeneratedByUserLifespan.verify-email": "900"
+    },
+    "smtpServer": {
+      "fromDisplayNameEnv": "SMTP_FROM_DISPLAY_NAME",
+      "fromEnv": "SMTP_FROM",
+      "hostEnv": "SMTP_HOST",
+      "portEnv": "SMTP_PORT",
+      "starttlsEnv": "SMTP_STARTTLS",
+      "authEnv": "SMTP_AUTH",
+      "userEnv": "SMTP_USER",
+      "passwordEnv": "SMTP_PASSWORD"
+    }
+  }
 }

@@ -18,6 +18,18 @@
 #   KEYCLOAK_ADMIN_USERNAME
 #   KEYCLOAK_ADMIN_PASSWORD
 #
+# Required when desired-clients.json declares a "realmSettings" block (OMN-14115
+# realm verify-email + SMTP config) — each is an *Env indirection resolved at
+# reconcile time, fail-closed (no default) if unset:
+#   SMTP_HOST
+#   SMTP_PORT
+#   SMTP_FROM
+#   SMTP_FROM_DISPLAY_NAME
+#   SMTP_STARTTLS
+#   SMTP_AUTH
+#   SMTP_USER
+#   SMTP_PASSWORD
+#
 # This script is the canonical entry point for seeding a local Keycloak from
 # the omnibase platform installer. The top-level omnibase Makefile delegates
 # `make seed-keycloak` here so all Docker/Keycloak knowledge stays in
