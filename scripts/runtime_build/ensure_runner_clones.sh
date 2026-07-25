@@ -11,18 +11,26 @@
 # dubious-ownership, FETCH_HEAD EACCES, busy-branch worktree contention).
 # Instead it gets a PRIVATE OMNI_HOME bind mount (DEPLOY_RUNNER_OMNI_HOME in
 # docker/docker-compose.runners.yml) owned by the runner uid. This script
-# guarantees the 5 sibling clones exist under that private OMNI_HOME and are
-# operable by the CURRENT euid, so provisioning is a committed, automatic step
-# inside every entry script -- never a remembered manual step on the host.
+# guarantees the sibling clones (see sibling_clone_manifest.sh for the current
+# set) exist under that private OMNI_HOME and are operable by the CURRENT
+# euid, so provisioning is a committed, automatic step inside every entry
+# script -- never a remembered manual step on the host.
 #
 # Called at the top of the execute path of cut_release_train_tag.sh,
 # refresh_stability_lane.sh, and refresh_dev_lane.sh. Safe to re-run: existing
 # clones are left untouched (the refresh scripts already fetch; this script
 # only guarantees existence + operability).
 #
-# All 5 repos are public, so cloning needs NO credentials. The base URL is
+# All repos are public, so cloning needs NO credentials. The base URL is
 # overridable (RUNNER_CLONE_BASE_URL) so tests can point it at local file://
 # bare fixtures.
+#
+# OMN-15137: the clone set is NOT hardcoded here. It is sourced from
+# sibling_clone_manifest.sh -- the single source of truth shared with
+# stage_workspace.sh's sibling-pin preflight -- so this script can never again
+# provision fewer repos than the pin preflight requires (the omnibase_spi gap
+# this ticket fixes: the preflight referenced OMNI_HOME/omnibase_spi 3 deploy
+# hops downstream of this script, which never created it).
 #
 # Exit codes:
 #   0   all clones present and operable by the current euid
@@ -31,13 +39,11 @@
 
 set -euo pipefail
 
-RUNNER_CLONE_REPOS=(
-    "omnibase_infra"
-    "omnibase_core"
-    "omnibase_compat"
-    "onex_change_control"
-    "omnimarket"
-)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+
+RUNNER_CLONE_REPOS=("${SIBLING_CLONE_MANIFEST[@]}")
 
 RUNNER_CLONE_BASE_URL="${RUNNER_CLONE_BASE_URL:-https://github.com/OmniNode-ai}"
 

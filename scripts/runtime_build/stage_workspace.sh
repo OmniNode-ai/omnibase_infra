@@ -125,15 +125,21 @@ fi
 CONSUMER_LOCK="${CONSUMER_LOCK:-${OMNI_HOME}/omnimarket/uv.lock}"
 PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 
-# Foundation + sibling packages the build vendors, mapped to OMNI_HOME clone dirs.
-PREFLIGHT_REPO_ARGS=(
-    --repo "omnibase-infra=${OMNI_HOME}/omnibase_infra"
-    --repo "omnibase-core=${OMNI_HOME}/omnibase_core"
-    --repo "omnibase-spi=${OMNI_HOME}/omnibase_spi"
-    --repo "omnibase-compat=${OMNI_HOME}/omnibase_compat"
-    --repo "onex-change-control=${OMNI_HOME}/onex_change_control"
-    --repo "omnimarket=${OMNI_HOME}/omnimarket"
-)
+# Foundation + sibling packages the build vendors, mapped to OMNI_HOME clone
+# dirs. OMN-15137: built from sibling_clone_manifest.sh -- the single source
+# of truth shared with ensure_runner_clones.sh's RUNNER_CLONE_REPOS -- instead
+# of a second independently hardcoded list, so the two can never drift apart
+# again (the omnibase_spi gap this ticket fixes was exactly that drift: this
+# list already named omnibase-spi, but ensure_runner_clones.sh never
+# provisioned OMNI_HOME/omnibase_spi for it to find).
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+PREFLIGHT_REPO_ARGS=()
+for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do
+    PREFLIGHT_REPO_ARGS+=(
+        --repo "${SIBLING_CLONE_MANIFEST_DIST_NAMES[$i]}=${OMNI_HOME}/${SIBLING_CLONE_MANIFEST[$i]}"
+    )
+done
 
 preflight_extra=()
 if [[ "${ALLOW_SIBLING_PIN_DRIFT:-0}" == "1" ]]; then
