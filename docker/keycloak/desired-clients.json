@@ -14,8 +14,15 @@
       },
       "redirectUris": [
         "https://app.omninode.ai/*",
+        "https://dev.app.omninode.ai/*",
         "http://localhost:3000/*",
         "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "https://app.omninode.ai",
+        "https://dev.app.omninode.ai",
+        "http://localhost:3000",
+        "http://localhost:8080"
       ],
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
       "protocolMappers": [

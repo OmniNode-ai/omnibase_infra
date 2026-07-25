@@ -226,6 +226,59 @@ class TestClientAttributes:
         assert record["op"] == "updated"
         assert record["fields_changed"] == ["attributes"]
 
+    def test_create_payload_includes_web_origins(self) -> None:
+        spec = {
+            "clientId": "omniweb",
+            "publicClient": False,
+            "webOrigins": ["https://dev.app.omninode.ai"],
+        }
+
+        payload = _ensure_mod()._build_create_payload(spec, secret=None)
+
+        assert payload["webOrigins"] == ["https://dev.app.omninode.ai"]
+
+    def test_web_origin_drift_updates_client(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        existing = _make_existing_client(
+            "omniweb",
+            publicClient=False,
+            webOrigins=["https://app.omninode.ai"],
+        )
+        spec = {
+            "clientId": "omniweb",
+            "publicClient": False,
+            "webOrigins": [
+                "https://app.omninode.ai",
+                "https://dev.app.omninode.ai",
+            ],
+        }
+        put_payloads: list[dict[str, Any]] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            if method == "GET" and "clients?clientId" in url:
+                return _client_list_response([existing])
+            if method == "PUT" and "/clients/" in url:
+                put_payloads.append(kwargs.get("payload", {}))
+                return _no_content()
+            return (200, None)
+
+        with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
+            _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
+
+        assert put_payloads == [
+            {
+                **existing,
+                "webOrigins": [
+                    "https://app.omninode.ai",
+                    "https://dev.app.omninode.ai",
+                ],
+            }
+        ]
+        record = json.loads(capsys.readouterr().out.strip())
+        assert record["op"] == "updated"
+        assert record["fields_changed"] == ["webOrigins"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: missing secret env error

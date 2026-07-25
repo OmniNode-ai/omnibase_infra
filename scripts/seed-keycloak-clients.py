@@ -124,6 +124,7 @@ BASE_FIELDS = {
     "standardFlowEnabled",
     "directAccessGrantsEnabled",
     "redirectUris",
+    "webOrigins",
     "defaultClientScopes",
 }
 
@@ -198,6 +199,7 @@ def _build_create_payload(spec: dict[str, Any], secret: str | None) -> dict[str,
         "standardFlowEnabled",
         "directAccessGrantsEnabled",
         "redirectUris",
+        "webOrigins",
         "attributes",
     ):
         if field in spec:
