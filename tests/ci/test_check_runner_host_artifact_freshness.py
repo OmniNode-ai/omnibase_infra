@@ -157,3 +157,23 @@ def test_live_deploy_script_sync_paths_parses_without_error() -> None:
     paths = module.parse_sync_paths(deploy_script.read_text(encoding="utf-8"))
     assert "docker/runners/runner-image.lock.json" in paths
     assert "docker/runners/Dockerfile" in paths
+
+
+def test_live_deploy_script_sync_paths_excludes_the_checker_itself() -> None:
+    """Regression guard (OMN-15114 follow-up): the freshness checker must
+    never re-add itself to SYNC_PATHS.
+
+    The checker only ever runs off-host (a local cron on the operator/dev
+    machine, per install_host_artifact_freshness_cron in deploy-runners.sh)
+    -- it ssh's OUT to the runner host, it never runs ON it. Listing it in
+    SYNC_PATHS is a self-referential bug: any host that has not yet
+    received the file reports the checker's own absence as drift on its
+    very first real invocation, independent of whether every other synced
+    artifact is actually fresh. This is the exact failure a prior PR
+    shipped and claimed (falsely, without re-verification) was a clean
+    exit-0 run.
+    """
+    module = _load_freshness_module()
+    deploy_script = REPO_ROOT / "scripts" / "deploy-runners.sh"
+    paths = module.parse_sync_paths(deploy_script.read_text(encoding="utf-8"))
+    assert "scripts/ci/check_runner_host_artifact_freshness.py" not in paths
