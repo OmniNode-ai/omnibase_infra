@@ -585,6 +585,7 @@ jobs:
   # Ensures generated enum files stay in sync with contract.yaml definitions
   topic-enum-drift:
     needs: occ-preflight
+    if: always()
     name: Topic Enum Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -620,6 +621,7 @@ jobs:
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
     needs: occ-preflight
+    if: always()
     name: Topic Naming Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -666,6 +668,7 @@ jobs:
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
   topic-drift-check:
     needs: occ-preflight
+    if: always()
     name: Topic Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
