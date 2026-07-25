@@ -141,18 +141,76 @@ if [[ "${ALLOW_SIBLING_PIN_DRIFT:-0}" == "1" ]]; then
     echo "WARNING: ALLOW_SIBLING_PIN_DRIFT=1 -- pin drift will be recorded, not fatal" >&2
 fi
 
+# Interpreter resolution for check_sibling_lock_pins.py (OMN-15131).
+#
+# check_sibling_lock_pins.py imports pydantic (a runtime dependency of this
+# repo, installed into this repo's own venv/uv environment) but this script
+# was invoking it with the bare `python3` resolved off PATH. On the
+# omninode-deploy-runner container, that bare python3 is a system
+# interpreter with NO packages installed at all -- not even pydantic --
+# so the preflight crashed with ModuleNotFoundError one step after the
+# OMN-15122 fix, before it ever compared a single pin. This is NOT a lock-
+# drift condition; the check never ran far enough to do the comparison.
+#
+# Verified live on the deploy runner (2026-07-25): the repo's own
+# .venv/bin/python (built by deploy-runtime.sh's own `uv sync` earlier in
+# the same job) and `uv run python` both have pydantic installed; bare
+# python3 does not. This script runs with cwd == repo_root (deploy-runtime.sh
+# invokes it via `cd "${repo_root}" && bash stage_workspace.sh`), so
+# ".venv/bin/python" resolves to the same venv deploy-runtime.sh's own
+# check_sibling_lock_pins() bash function already prefers for this exact
+# script (see resolve logic there) -- this mirrors that precedence order
+# instead of duplicating a second, divergent one.
+#
+# Rejected alternatives:
+#   (b) install pydantic into the runner image's system python3 -- rejected:
+#       would require a runner-image rebuild for a dependency the repo
+#       already vendors in its own venv/uv environment one directory over;
+#       adds a second place pydantic's version has to be kept in sync.
+#   (c) drop the pydantic import from check_sibling_lock_pins.py -- rejected:
+#       the models it defines are load-bearing for the JSON provenance
+#       output (--output) other steps (compute_workspace_provenance.py)
+#       consume; downgrading to hand-rolled dict validation trades a real
+#       type-checked contract for an untyped one to work around an
+#       invocation bug, not a real constraint.
+resolve_sibling_lock_pins_python() {
+    if [[ -x "${PWD}/.venv/bin/python" ]]; then
+        printf '%s\n' "${PWD}/.venv/bin/python"
+    elif command -v uv &>/dev/null; then
+        printf '%s\n' "uv-run"
+    elif command -v python3 &>/dev/null; then
+        printf '%s\n' "python3"
+    else
+        echo "ERROR: no Python interpreter available to run check_sibling_lock_pins.py" >&2
+        exit 3
+    fi
+}
+
 if [[ -f "${CONSUMER_LOCK}" ]]; then
     mkdir -p "$(dirname "${PIN_COMPARISON_OUT}")"
     # --build-source workspace: this IS the workspace staging step, so a registry-
     # sourced sibling whose clone is FORWARD of the lock (the OMN-13929 disarm-bump
     # steady state) is non-fatal (OMN-13902). Backward / git-sourced drift stays
     # fatal.
-    if ! python3 "${SCRIPT_DIR}/check_sibling_lock_pins.py" \
-        --lock "${CONSUMER_LOCK}" \
-        "${PREFLIGHT_REPO_ARGS[@]}" \
-        --output "${PIN_COMPARISON_OUT}" \
-        --build-source workspace \
-        "${preflight_extra[@]}"; then
+    PREFLIGHT_PYTHON="$(resolve_sibling_lock_pins_python)"
+    if [[ "${PREFLIGHT_PYTHON}" == "uv-run" ]]; then
+        preflight_status=0
+        uv run python "${SCRIPT_DIR}/check_sibling_lock_pins.py" \
+            --lock "${CONSUMER_LOCK}" \
+            "${PREFLIGHT_REPO_ARGS[@]}" \
+            --output "${PIN_COMPARISON_OUT}" \
+            --build-source workspace \
+            "${preflight_extra[@]}" || preflight_status=$?
+    else
+        preflight_status=0
+        "${PREFLIGHT_PYTHON}" "${SCRIPT_DIR}/check_sibling_lock_pins.py" \
+            --lock "${CONSUMER_LOCK}" \
+            "${PREFLIGHT_REPO_ARGS[@]}" \
+            --output "${PIN_COMPARISON_OUT}" \
+            --build-source workspace \
+            "${preflight_extra[@]}" || preflight_status=$?
+    fi
+    if [[ "${preflight_status}" != "0" ]]; then
         echo "ERROR: sibling-pin preflight failed against ${CONSUMER_LOCK}" >&2
         echo "       canonical clones drift from the lock; sync clones to the" >&2
         echo "       locked SHAs (or set ALLOW_SIBLING_PIN_DRIFT=1 with an" >&2
