@@ -306,3 +306,8 @@ docker/runners/prebuilt-env-context/
 # F-22 (OMN-14761): scripts/lib/ holds source shell helpers, not a Python
 # build artifact; carve it out of the generic Python `lib/` ignore above.
 !scripts/lib/
+
+# OMN-15055: stray git worktrees created nested inside this canonical clone
+# instead of at $OMNI_HOME/omni_worktrees/ (per CLAUDE.md worktree convention).
+# Untracked but not gitignored, so they inflated repo-wide sweeps.
+omni_worktrees/
