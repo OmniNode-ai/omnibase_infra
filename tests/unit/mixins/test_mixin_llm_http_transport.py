@@ -887,6 +887,96 @@ class TestRetryBehavior:
         assert sleep_calls[1] == 3.0
 
 
+class TestRetryBudgetInvariant:
+    """OMN-15066: prove the retry loop's worst-case wall-clock budget for a
+    permanently slow (but alive) endpoint matches ``attempts * per_attempt_timeout
+    + sum(backoff_delays)`` -- the exact formula a CI job's ``timeout-minutes``
+    must exceed. A caller (e.g. the hostile-reviewer workflow) that sizes its job
+    timeout against the *nominal* per-call timeout without accounting for retries
+    will silently stall past its own ceiling; this test reproduces that class of
+    bug against a simulated slow endpoint (never a live network call) and pins
+    the exact numbers a real caller hit in production.
+
+    Reference: OMN-15066 -- omnimarket's hostile-reviewer.yml job used
+    timeout-minutes=35 (2100s) while qwen3-review-b's registered
+    timeout_seconds=600.0 with the default max_retries=3 (4 attempts) yields a
+    worst case of 4*600 + 14 = 2414s > 2100s, which is exactly what this test
+    demonstrates for the equivalent (timeout_seconds=600, max_retries=3) inputs.
+    """
+
+    async def test_worst_case_budget_matches_attempts_times_timeout_plus_backoff(
+        self, correlation_id: UUID
+    ) -> None:
+        """A permanently-timing-out endpoint must be retried exactly
+        ``1 + max_retries`` times, and the accumulated backoff delay must equal
+        the values asserted here -- together these give the worst-case formula
+        ``attempts * per_attempt_timeout + backoff`` that any caller sizing a job
+        timeout around this transport MUST exceed.
+        """
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            # Simulated -- do not actually sleep in a unit test.
+
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            # Simulates a slow-but-alive endpoint that never responds within
+            # the per-attempt timeout budget -- e.g. a contended GPU inference
+            # server. No live network call is made; MockTransport raises this
+            # synchronously.
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ReadTimeout("simulated slow endpoint")
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        # Mirrors the production qwen3-review-b registry entry
+        # (omniintelligence/src/omniintelligence/review_pairing/model_registry.yaml):
+        # timeout_seconds=600.0, max_retries left at the mixin default (3).
+        per_attempt_timeout_seconds = 600.0
+        max_retries = 3
+
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.asyncio.sleep",
+            side_effect=mock_sleep,
+        ):
+            with pytest.raises(InfraTimeoutError):
+                await harness._execute_llm_http_call(
+                    url=URL,
+                    payload=PAYLOAD,
+                    correlation_id=correlation_id,
+                    max_retries=max_retries,
+                    timeout_seconds=per_attempt_timeout_seconds,
+                )
+
+        total_attempts = 1 + max_retries
+        assert call_count == total_attempts == 4
+
+        # ModelRetryState default backoff (delay=1.0, multiplier=2.0):
+        # retries 1..3 sleep 2.0, 4.0, 8.0 -- the final (4th) attempt fails
+        # terminally and does not sleep again.
+        assert sleep_calls == [2.0, 4.0, 8.0]
+        backoff_seconds = sum(sleep_calls)
+        assert backoff_seconds == 14.0
+
+        worst_case_seconds = (
+            total_attempts * per_attempt_timeout_seconds + backoff_seconds
+        )
+        assert worst_case_seconds == 2414.0
+
+        # RED reproduction: the hostile-reviewer job's OLD ceiling
+        # (timeout-minutes: 35 = 2100s) is exceeded by this single model call
+        # alone -- before the sequential qwen3-review call and setup overhead
+        # are even added. This is the defect OMN-15066 fixes; a caller sizing
+        # timeout-minutes against the nominal per-call timeout (600s) rather
+        # than this worst-case formula will silently stall to cancellation.
+        old_job_ceiling_seconds = 35 * 60
+        assert worst_case_seconds > old_job_ceiling_seconds
+
+
 # ── Circuit Breaker State Transitions ────────────────────────────────────
 
 
