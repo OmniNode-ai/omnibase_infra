@@ -66,6 +66,17 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # (build/test) never exercise that path, so the gap went unnoticed until
 # the first live release-train-lab deploy run reached it and died at
 # "Validate Prerequisites" with 'rsync is required but not found in PATH'.
+# sudo (OMN-15134): the workspace-reset hook (runner-job-started.sh) runs as
+# the unprivileged `runner` user (matching every job step's execution
+# identity) and normally suffices for `rm -rf` on its own workspace tree. It
+# needs a narrowly scoped escalation ONLY as a fail-loud-then-clean fallback
+# for root-owned debris left by an out-of-band root-privileged mutation of
+# this container (e.g. a manual `docker exec` without `-u runner` -- this
+# image's own ENTRYPOINT legitimately starts as root for the docker-socket
+# GID fix / OMNI_HOME chown, so the container's default exec identity IS
+# root, and any ad hoc bare `docker exec` inherits it). See the sudoers rule
+# below: NOPASSWD, one command, one argument pattern, confined under this
+# runner's own `_work` tree -- never a general root shell.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -74,6 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     unzip \
     rsync \
+    sudo \
     libatomic1 \
     libicu-dev \
     libkrb5-3 \
@@ -84,6 +96,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-transport-https \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
+
+# OMN-15134: scoped NOPASSWD sudo rule -- `runner` may run exactly
+# `rm -rf -- <path under RUNNER_HOME>/_work/...>` as root, nothing else. This
+# is the fallback path runner-job-started.sh uses ONLY after a plain `rm -rf`
+# fails with root-owned debris in the way; it never grants a shell, another
+# binary, or an unbounded path. `visudo -c` validates the file at build time
+# so a syntax error fails the image build, not a live job.
+RUN echo 'runner ALL=(root) NOPASSWD: /bin/rm -rf -- /home/runner/actions-runner/_work/*' \
+        > /etc/sudoers.d/runner-workspace-reset \
+    && chmod 0440 /etc/sudoers.d/runner-workspace-reset \
+    && visudo -c
 
 # Bounded external binary downloads. The runner image build-smoke runs in CI,
 # so one-shot curl calls make the image contract depend on transient CDN/TLS
