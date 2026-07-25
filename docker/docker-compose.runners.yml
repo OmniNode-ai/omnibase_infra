@@ -1023,11 +1023,14 @@ services:
       # false "lane unhealthy" STOP. host.docker.internal resolves to the
       # host-gateway (extra_hosts below), where the lane ports are published.
       LANE_PROBE_HOST: host.docker.internal
-      # Defense-in-depth safe.directory for the 5 PRIVATE clones. The
-      # load-bearing exemption is the scoped `git -c safe.directory=<clone>`
-      # committed in the runtime_build scripts themselves (OMN-14900); this
-      # env only covers stray git invocations outside those scripts.
-      GIT_CONFIG_COUNT: "5"
+      # Defense-in-depth safe.directory for the 6 PRIVATE clones (OMN-15137:
+      # omnibase_spi added -- it was missing here too, the same
+      # independently-hardcoded-list drift this ticket's manifest fixes for
+      # ensure_runner_clones.sh / stage_workspace.sh). The load-bearing
+      # exemption is the scoped `git -c safe.directory=<clone>` committed in
+      # the runtime_build scripts themselves (OMN-14900); this env only
+      # covers stray git invocations outside those scripts.
+      GIT_CONFIG_COUNT: "6"
       GIT_CONFIG_KEY_0: safe.directory
       GIT_CONFIG_VALUE_0: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_infra
       GIT_CONFIG_KEY_1: safe.directory
@@ -1038,6 +1041,8 @@ services:
       GIT_CONFIG_VALUE_3: ${DEPLOY_RUNNER_OMNI_HOME:?}/onex_change_control
       GIT_CONFIG_KEY_4: safe.directory
       GIT_CONFIG_VALUE_4: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnimarket
+      GIT_CONFIG_KEY_5: safe.directory
+      GIT_CONFIG_VALUE_5: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_spi
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # PRIVATE clone tree at the identical host:container path. The shared

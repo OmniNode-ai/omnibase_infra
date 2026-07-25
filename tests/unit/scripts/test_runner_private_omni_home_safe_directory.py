@@ -31,9 +31,12 @@ The committed, recreate-durable fix has three legs, each guarded here:
      stage_workspace.sh, deploy_source_ref.py, check_sibling_lock_pins.py)
      and by a behavioral RED/GREEN pair driven with git's own
      ``GIT_TEST_ASSUME_DIFFERENT_OWNER`` ownership-mismatch knob.
-  3. Automatic provisioning: ensure_runner_clones.sh creates the 5 private
-     clones idempotently at the top of every entry script (behavioral tests
-     against file:// bare fixtures).
+  3. Automatic provisioning: ensure_runner_clones.sh creates the private
+     clones (see sibling_clone_manifest.sh for the current set; OMN-15137
+     added omnibase_spi, which was missing from this list until the
+     sibling-pin preflight's own clone requirement caught the gap 3 deploy
+     hops downstream) idempotently at the top of every entry script
+     (behavioral tests against file:// bare fixtures).
 
 Per reference_git_env_vars_override_c_and_cwd: strip GIT_DIR/GIT_INDEX_FILE/
 GIT_WORK_TREE from subprocess env so an inherited pre-push hook export cannot
@@ -314,8 +317,8 @@ def test_compose_deploy_runner_env_is_fail_fast_and_repo_scoped() -> None:
     from THIS file cannot silently drop it: repo-scoped GITHUB_ORG_URL (creds
     volume was seeded repo-scoped), empty RUNNER_GROUP (repo-scoped
     registration rejects --runnergroup), fail-fast OMNI_HOME interpolation,
-    and the defense-in-depth GIT_CONFIG_* safe.directory entries for all 5
-    private clones.
+    and the defense-in-depth GIT_CONFIG_* safe.directory entries for all 6
+    private clones (OMN-15137: omnibase_spi added).
     """
     svc = _deploy_runner_service()
     env = svc["environment"]
@@ -336,11 +339,12 @@ def test_compose_deploy_runner_env_is_fail_fast_and_repo_scoped() -> None:
         f"OMNI_HOME must fail-fast interpolate from DEPLOY_RUNNER_OMNI_HOME "
         f"(got {omni_home!r}) -- a silent empty default produces broken binds"
     )
-    assert str(env.get("GIT_CONFIG_COUNT")) == "5"
-    values = [str(env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(5)]
+    assert str(env.get("GIT_CONFIG_COUNT")) == "6"
+    values = [str(env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(6)]
     for repo in (
         "omnibase_infra",
         "omnibase_core",
+        "omnibase_spi",
         "omnibase_compat",
         "onex_change_control",
         "omnimarket",
@@ -351,7 +355,7 @@ def test_compose_deploy_runner_env_is_fail_fast_and_repo_scoped() -> None:
         assert all("DEPLOY_RUNNER_OMNI_HOME" in v for v in values), (
             "safe.directory values must point at the PRIVATE clones"
         )
-    for i in range(5):
+    for i in range(6):
         assert env[f"GIT_CONFIG_KEY_{i}"] == "safe.directory"
 
 
@@ -386,6 +390,7 @@ def test_compose_deploy_runner_has_no_shared_gid_and_has_init_wrapper() -> None:
 _ENSURE_REPOS = (
     "omnibase_infra",
     "omnibase_core",
+    "omnibase_spi",
     "omnibase_compat",
     "onex_change_control",
     "omnimarket",
@@ -393,7 +398,8 @@ _ENSURE_REPOS = (
 
 
 def _make_bare_fixtures(tmp_path: Path) -> Path:
-    """One seed commit, five bare <repo>.git fixtures cloneable via file://."""
+    """One seed commit, one bare <repo>.git fixture per _ENSURE_REPOS entry,
+    cloneable via file://."""
     seed = tmp_path / "seed"
     _git(["init", "-q", "-b", "dev", str(seed)], cwd=tmp_path)
     (seed / "README.md").write_text("fixture\n")
@@ -422,7 +428,7 @@ def _run_ensure(
     return _run(["bash", str(ENSURE_SCRIPT)], env=env)
 
 
-def test_ensure_runner_clones_provisions_all_five_and_is_idempotent(
+def test_ensure_runner_clones_provisions_all_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     base = _make_bare_fixtures(tmp_path)
