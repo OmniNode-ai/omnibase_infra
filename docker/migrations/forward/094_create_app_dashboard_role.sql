@@ -14,9 +14,24 @@
 --   OMN-14894 are enforced against every read the dashboard makes.
 --
 -- DESIGN INVARIANTS:
---   * NOSUPERUSER + NOBYPASSRLS are ENFORCED on every run (ALTER after the
---     guarded CREATE), not just requested at create time. A pre-existing
---     app_dashboard role with either flag set is corrected, never trusted.
+--   * NOSUPERUSER + NOBYPASSRLS are ENFORCED on every run (guarded ALTER
+--     after the guarded CREATE), not just requested at create time. A
+--     pre-existing app_dashboard role with either flag set is corrected,
+--     never trusted.
+--   * The SUPERUSER/REPLICATION/BYPASSRLS ALTER is privilege-guarded: only
+--     the executing role's OWN attributes gate ALTER ROLE's ability to
+--     change these three (Postgres core behavior, not this migration's
+--     choice) — even reasserting an already-correct `false` requires the
+--     executing role to already hold the attribute. RDS's master account
+--     is CREATEROLE + CREATEDB but explicitly NOSUPERUSER/NOREPLICATION/
+--     NOBYPASSRLS, so an unconditional ALTER of those three flags fails
+--     `permission denied to alter role` on EVERY real RDS apply, not just
+--     when the role pre-exists with an escalated flag. This migration only
+--     attempts that ALTER when pg_roles shows one of the three already
+--     set, and raises an explicit, actionable exception (naming the
+--     escalated flag) rather than silently failing or silently succeeding
+--     if the executing role also lacks the privilege to correct it — that
+--     case needs a true superuser, by design, and must never pass quietly.
 --   * NOLOGIN here: no credential material ever lives in a migration. The
 --     LOGIN + password attach is a deployment-owned, operator-gated step
 --     (AWS Secrets Manager per OMN-14899; local lanes may ALTER ROLE ...
@@ -35,7 +50,9 @@
 -- IDEMPOTENCY:
 --   Safe to re-run: guarded CREATE ROLE (duplicate_object / unique_violation
 --   both caught — roles are cluster-wide and two migration paths may race,
---   see omnidash 0001's OMN-10875 note), ALTER ROLE is idempotent.
+--   see omnidash 0001's OMN-10875 note); the unconditional ALTER is
+--   idempotent; the privilege-gated ALTER only runs its EXECUTE branch when
+--   pg_roles shows an actual escalation, so a correct role never touches it.
 --
 -- ROLLBACK:
 --   See rollback/rollback_094_create_app_dashboard_role.sql
@@ -58,12 +75,47 @@ BEGIN
 END;
 $$;
 
--- Enforce the security-critical flags even when the role pre-existed.
--- Presence is not the property that matters — the flags are.
+-- Enforce the non-privilege-gated flags unconditionally — these never
+-- require the executing role to already hold them (RDS master account
+-- compatible: CREATEROLE alone is sufficient).
 ALTER ROLE app_dashboard
   NOLOGIN
-  NOSUPERUSER
-  NOBYPASSRLS
   NOCREATEDB
-  NOCREATEROLE
-  NOREPLICATION;
+  NOCREATEROLE;
+
+-- SUPERUSER/BYPASSRLS/REPLICATION are privilege-gated by Postgres core: the
+-- executing role must already hold an attribute to ALTER it, even to
+-- reassert an already-correct `false`. Only attempt the ALTER when one of
+-- the three is actually set (the common case — immediately after the
+-- guarded CREATE above, and on every idempotent re-run — never reaches
+-- this block at all, so it never trips the RDS permission error that a
+-- blanket ALTER did). If the flag is set AND the executing role lacks the
+-- privilege to correct it, fail loudly and name the problem — never
+-- silently succeed and never silently leave the escalation in place.
+DO $$
+DECLARE
+  current_flags RECORD;
+BEGIN
+  SELECT rolsuper, rolbypassrls, rolreplication
+    INTO current_flags
+    FROM pg_roles
+   WHERE rolname = 'app_dashboard';
+
+  IF current_flags.rolsuper
+     OR current_flags.rolbypassrls
+     OR current_flags.rolreplication THEN
+    BEGIN
+      EXECUTE 'ALTER ROLE app_dashboard NOSUPERUSER NOBYPASSRLS NOREPLICATION';
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE EXCEPTION
+          'app_dashboard has an escalated flag (rolsuper=%, rolbypassrls=%, '
+          'rolreplication=%) and the executing role lacks privilege to '
+          'correct it — a true Postgres superuser must fix this role '
+          'manually before RLS on app_dashboard-read tables can be trusted',
+          current_flags.rolsuper, current_flags.rolbypassrls,
+          current_flags.rolreplication;
+    END;
+  END IF;
+END;
+$$;

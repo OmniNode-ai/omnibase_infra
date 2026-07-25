@@ -1,6 +1,6 @@
 # Schema migration fingerprint for omnibase_infra (auto-generated)
 # Regenerate: python scripts/check_schema_fingerprint.py stamp
 # Verify:     python scripts/check_schema_fingerprint.py verify
-sha256:abc9eeec1157918f8f18ea690bb2cd41ff9cbb75c868d3dcfce39ed01a92e625
-generated_at: 2026-07-23T09:41:56Z
+sha256:d332f6a1dc8bdca0dfd100471f61efa4563c4447b3586a6756bb24d8e516df19
+generated_at: 2026-07-25T04:22:56Z
 migration_file_count: 79
