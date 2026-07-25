@@ -210,6 +210,16 @@ _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
 _BOUNDARY_DLQ_MAX_ATTEMPTS = 3
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
 
+# OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
+# `_make_sync_event_publisher` schedules for a failed fire-and-forget publish
+# (see `_route_sync_publisher_failure`). Without this, the Task object has no
+# other referrer once `_log_publish_failure`'s local `dlq_task` variable goes
+# out of scope, which is a documented footgun for tasks scheduled via
+# `loop.create_task` outside of a structured-concurrency context (asyncio may
+# garbage-collect a task with no external references before it completes).
+# Discarded via its own done_callback once it finishes.
+_DLQ_ROUTING_TASKS: set[asyncio.Task[None]] = set()
+
 # OMN-14551: alertable counter for the boundary's one true loss window --
 # retry budget exhausted AND the best-effort DLQ publish itself also failed
 # (the ``message_lost=true`` branch of ``_route_swallowed_exception`` below).
@@ -3736,6 +3746,110 @@ async def _await_event_bus_publish(awaitable: Awaitable[object]) -> None:
     await awaitable
 
 
+async def _route_sync_publisher_failure(
+    exc: Exception,
+    *,
+    event_bus: object,
+    handler_name: str,
+    topic: str,
+    payload: bytes,
+) -> None:
+    """Best-effort DLQ routing for a sync-handler's fire-and-forget publish
+    failure (OMN-14498 / OMN-15029).
+
+    ``_make_sync_event_publisher``'s ``_publish`` schedules the actual
+    downstream publish as a detached asyncio Task/Future and only logged its
+    failure via ``_log_publish_failure``'s ``add_done_callback`` — no DLQ, no
+    metric, no durable trace that the event ever existed. Confirmed still
+    live on ``origin/dev`` by the OMN-15029 false-Done reopen. There is
+    nothing to re-raise into here: the sync handler that issued the publish
+    has already returned by the time this callback runs, so propagating the
+    exception synchronously is not possible.
+
+    Mirrors the ``_make_event_bus_callback._route_swallowed_exception`` idiom
+    (OMN-14507) for the consume boundary: when the event bus exposes the
+    duck-typed ``_publish_raw_to_dlq`` contract, the payload that failed to
+    publish is durably preserved on that topic's DLQ instead of vanishing
+    with nothing but a log line. Unlike the consume-boundary version this is
+    UNCONDITIONAL — not gated behind ``ONEX_BOUNDARY_DLQ_ENABLED``: this is a
+    pure best-effort recovery channel layered on top of the EXISTING
+    fire-and-forget publish (no new retry, no change to offset/delivery
+    semantics, no control-flow change on success), so there is no
+    staged-rollout risk to hold behind a flag — leaving it flag-gated would
+    reproduce the exact live-off, still-swallowing state OMN-15029 exists to
+    close.
+
+    Never raises: a failure in the DLQ path itself is logged loudly
+    (``message_lost=true``) rather than crashing the kernel loop's task
+    processing.
+    """
+    from uuid import uuid4
+
+    from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+
+    correlation_id = uuid4()
+    publish_dlq_fn = getattr(event_bus, "_publish_raw_to_dlq", None)
+    if publish_dlq_fn is None or not callable(publish_dlq_fn):
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "message_lost=true handler=%s topic=%s error_type=%s "
+            "correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+        return
+
+    from types import SimpleNamespace
+
+    raw_msg = SimpleNamespace(value=payload, key=None, offset=None, partition=None)
+    try:
+        dlq_persisted = await publish_dlq_fn(
+            original_topic=topic,
+            raw_msg=raw_msg,
+            error=exc,
+            correlation_id=correlation_id,
+            failure_type="sync_publisher_publish_failed",
+            consumer_group="auto-wiring-sync-publisher",
+            dlq_topic=get_dlq_topic_for_original(topic),
+        )
+        if dlq_persisted:
+            logger.error(
+                "metric_name=boundary_swallow_prevented dlq_routed=true "
+                "handler=%s topic=%s error_type=%s correlation_id=%s",
+                handler_name,
+                topic,
+                type(exc).__name__,
+                correlation_id,
+            )
+            return
+        # A False return means the DLQ publish did NOT durably persist
+        # (rejected input, producer unavailable, or the send itself
+        # failed/timed out) WITHOUT raising -- the message is lost exactly
+        # like the except-branch below, just signaled via the return value.
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_publish_failed=true message_lost=true handler=%s topic=%s "
+            "error_type=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            correlation_id,
+        )
+    except Exception as dlq_exc:  # noqa: BLE001 — DLQ publish is itself a boundary; never let it crash the kernel loop
+        logger.error(
+            "metric_name=boundary_swallow_observed dlq_routed=false "
+            "dlq_publish_failed=true message_lost=true handler=%s topic=%s "
+            "error_type=%s dlq_error=%s correlation_id=%s",
+            handler_name,
+            topic,
+            type(exc).__name__,
+            _sanitize_exc(dlq_exc),
+            correlation_id,
+        )
+
+
 def _make_sync_event_publisher(
     *,
     event_bus: object,
@@ -3797,6 +3911,29 @@ def _make_sync_event_publisher(
                     type(exc).__name__,
                     exc,
                 )
+                # OMN-14498 / OMN-15029: previously the failure vanished here
+                # -- logged, never routed anywhere durable. This callback is
+                # sync (it cannot itself await), so the best-effort DLQ
+                # routing is scheduled as a task on the kernel loop instead.
+                # Safe to call unconditionally: `_log_publish_failure` always
+                # executes on `kernel_loop`'s own thread, whether it was
+                # registered on an asyncio Task (the same-loop branch below)
+                # or chained from `run_coroutine_threadsafe` (the
+                # cross-thread branch) -- `_chain_future` resolves the
+                # `concurrent.futures.Future` from inside the loop's own
+                # callback dispatch, which is also where that Future invokes
+                # its done-callbacks.
+                dlq_task = kernel_loop.create_task(
+                    _route_sync_publisher_failure(
+                        exc,
+                        event_bus=event_bus,
+                        handler_name=handler_name,
+                        topic=topic,
+                        payload=payload,
+                    )
+                )
+                _DLQ_ROUTING_TASKS.add(dlq_task)
+                dlq_task.add_done_callback(_DLQ_ROUTING_TASKS.discard)
 
         try:
             running_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
