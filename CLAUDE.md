@@ -183,8 +183,12 @@ Reducers emit intents that orchestrators route to Effect layer nodes.
 - **Routing**: the Effect layer routes on `payload.intent_type`, not the outer envelope.
 - **Target URI convention**: `{protocol}://{resource}/{identifier}` (e.g.
   `postgres://node_registrations/{node_id}`, `consul://service/{service_name}`).
-- **Trap**: payload models extend `BaseModel` directly. `ModelIntentPayloadBase` was
-  removed in omnibase_core 0.6.2 — importing it is wrong.
+- **Trap**: infra payload models extend `BaseModel` directly (repo convention — see
+  `docs/standards/ONEX_TERMINOLOGY.md`). Do NOT justify this as "`ModelIntentPayloadBase`
+  was removed in omnibase_core 0.6.2" — that claim is false: the class exists in live
+  core (`omnibase_core.models.reducer.payloads`, present at v0.6.2 and every version
+  since) and bases core's own closed-set intent payloads. The real 0.6.2 change was
+  `ModelIntent.payload: dict[str, Any]` → `ProtocolIntentPayload` (OMN-1256).
 
 ---
 
@@ -322,10 +326,11 @@ Implementation lives under `src/omnibase_infra/runtime/config_discovery/`.
    ```python
    return ModelHandlerOutput.for_orchestrator(result={"status": "done"})  # ValueError!
    ```
-4. **Use ModelIntentPayloadBase** (removed in omnibase_core 0.6.2)
+4. **Base infra payload DTOs on ModelIntentPayloadBase** — extend `BaseModel` directly
+   (repo convention). The class itself was never removed: it lives in
+   `omnibase_core.models.reducer.payloads` and bases core's closed-set intent payloads.
    ```python
-   from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase  # WRONG
-   # Use: from pydantic import BaseModel
+   class ModelPayloadExample(BaseModel):  # infra convention; do not subclass core's base
    ```
 
 ### DO

@@ -105,11 +105,14 @@ return ModelIntent(intent_type="extension", target="consul://service/...", paylo
 
 **Deprecated**: Do not call these patterns:
 - `intent_type="consul.register"` directly on `ModelIntent` (wrong — that belongs on the payload)
-- `ModelIntentPayloadBase` (removed in omnibase_core 0.6.2 — extend `BaseModel` directly)
+- `ModelIntentPayloadBase` as a base for infra payload DTOs (extend `BaseModel` directly;
+  the class itself was never removed — it still exists in
+  `omnibase_core.models.reducer.payloads` and bases core's closed-set intent payloads)
 
 ### Typed Payload Models
 
-All typed intent payloads extend `pydantic.BaseModel` directly (not `ModelIntentPayloadBase`).
+All infra typed intent payloads extend `pydantic.BaseModel` directly (not core's
+`ModelIntentPayloadBase`, which remains the base for core's own closed-set intent payloads).
 
 | Canonical Pattern | Deprecated Pattern |
 |-------------------|--------------------|
