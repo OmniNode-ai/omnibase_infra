@@ -37,6 +37,38 @@
 #
 # See also: docker/runners/Dockerfile, docker/docker-compose.runners.yml,
 # scripts/ci/build_runner_image.sh
+#
+# Trap for on-host operators (OMN-15142): this script is written to run from
+# an OPERATOR WORKSTATION that SSHes into the runner host (see run_ssh/
+# run_local below). It cannot be run directly ON the runner host targeting
+# itself via its own Tailscale MagicDNS hostname -- self-ssh fails "Host key
+# verification failed" (no known_hosts entry for the box's own hostname).
+# Run the rsync/build/compose steps directly on-host instead in that case.
+#
+# CONSOLIDATED REQUIRED ENV VARS for docker-compose.runners.yml's
+# omninode-deploy-runner service (OMN-15142 -- previously undocumented in one
+# place; compose interpolates the ENTIRE file before selecting services, so
+# ANY `docker compose -f docker-compose.runners.yml ...` invocation --
+# including one scoped to the shared omninode-runner-N fleet -- fails
+# closed if these are unset). This script does NOT set any of them; it only
+# handles RUNNER_TOKEN for the shared fleet. Anyone standing up
+# omninode-deploy-runner fresh (or running any compose command against this
+# file at all) must export all three first:
+#   - DEPLOY_RUNNER_OMNI_HOME       Private, runner-uid-owned OMNI_HOME clone
+#                                   tree (e.g. /data/omninode/runner_omni_home).
+#                                   Fail-fast `:?` in compose.
+#   - DEPLOY_RUNNER_TOKEN           Repo registration token for
+#                                   OmniNode-ai/omnibase_infra (mint via
+#                                   `gh api -X POST repos/OmniNode-ai/omnibase_infra/actions/runners/registration-token`,
+#                                   valid 1h). NOT `:?`-guarded in compose --
+#                                   an unset value silently becomes an empty
+#                                   RUNNER_TOKEN and fails later at container
+#                                   registration, not at `up -d` interpolation
+#                                   time like the other two.
+#   - DEPLOY_RUNNER_OPERATOR_ENV_FILE  Host path of the operator env file
+#                                   (e.g. /home/<operator>/.omnibase/.env).
+#                                   Fail-fast `:?` in compose.
+# See docs/runbooks/release-train-lab.md for the full recreate procedure.
 
 set -euo pipefail
 
@@ -104,6 +136,12 @@ SYNC_PATHS=(
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
     "docker/runners/healthcheck.sh"
+    # OMN-15142: docker/runners/Dockerfile does `COPY omni-curl
+    # /usr/local/bin/omni-curl` -- both the built binary shim and its source
+    # script must be synced or a rebuild against a fresh/empty deployment dir
+    # fails with "/omni-curl": not found at the COPY layer.
+    "docker/runners/omni-curl"
+    "docker/runners/omni-curl.sh"
     "docker/docker-compose.runners.yml"
     "scripts/ci/build_runner_image.sh"
     "scripts/ci/ci_env_digest.py"
@@ -231,6 +269,8 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${REPO_ROOT}/docker/runners/healthcheck.sh" \
+        "${REPO_ROOT}/docker/runners/omni-curl" \
+        "${REPO_ROOT}/docker/runners/omni-curl.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
     rsync -av --checksum \

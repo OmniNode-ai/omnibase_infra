@@ -931,6 +931,12 @@ services:
   # next to this file). No silent default -- an empty value would produce
   # broken binds (CLAUDE.md rule 8).
   #
+  # OMN-15142: this service actually requires THREE DEPLOY_RUNNER_* vars
+  # (DEPLOY_RUNNER_OMNI_HOME, DEPLOY_RUNNER_TOKEN, DEPLOY_RUNNER_OPERATOR_ENV_FILE)
+  # -- not documented together anywhere before this. See the consolidated,
+  # single-source list (with mint/export instructions for all three) in
+  # scripts/deploy-runners.sh's top-of-file usage comment.
+  #
   # REGISTRATION IS REPOSITORY-SCOPED (live-verified 2026-07-22):
   # GITHUB_ORG_URL points at the omnibase_infra REPO, matching the live
   # registration and the credential cache seeded in the
