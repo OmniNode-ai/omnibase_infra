@@ -1413,3 +1413,114 @@ def test_decision_store_query_payload_validates_against_request_model() -> None:
     assert request.query_filter is not None
     assert request.query_filter.domain == "api"
     assert request.query_filter.limit == 5
+
+
+# --------------------------------------------------------------------------- #
+# OMN-15181: dispatch-locality guard wiring. A prod-lane `redeploy` dispatch
+# must be refused BEFORE run_receipt_mode is ever invoked when the CLI is not
+# running on omninode-pc -- prod redpanda's advertised listener is raw-LAN-only
+# (live-verified 2026-07-26). Dev/stability-test lanes must be unaffected.
+# --------------------------------------------------------------------------- #
+
+
+def test_redeploy_prod_lane_blocked_off_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`onex skill redeploy --lane prod` off-box fails closed before dispatch."""
+
+    def _explode(**_kwargs: object) -> int:
+        raise AssertionError(
+            "run_receipt_mode must not be reached for an off-box prod dispatch"
+        )
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _explode)
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "some-other-host.local",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "prod",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "omninode-pc" in result.output
+    assert "OMN-15181" in result.output
+
+
+def test_redeploy_prod_lane_allowed_on_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`onex skill redeploy --lane prod` on omninode-pc reaches dispatch."""
+    captured: dict[str, object] = {}
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _fake_receipt_mode)
+    monkeypatch.setattr(
+        cli_skill, "_resolve_packaged_contract", lambda n: tmp_path / "c.yaml"
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "omninode-pc",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "prod",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["node_name"] == "node_redeploy_orchestrator"
+
+
+def test_redeploy_dev_lane_unaffected_off_omninode_pc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dev-lane redeploy dispatch is never blocked by the prod locality guard."""
+    captured: dict[str, object] = {}
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _fake_receipt_mode)
+    monkeypatch.setattr(
+        cli_skill, "_resolve_packaged_contract", lambda n: tmp_path / "c.yaml"
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.cli.prod_dispatch_locality_guard.socket.gethostname",
+        lambda: "some-other-host.local",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        run_skill_by_name,
+        [
+            "redeploy",
+            "--state-root",
+            str(tmp_path / "state"),
+            "--lane",
+            "dev",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["node_name"] == "node_redeploy_orchestrator"

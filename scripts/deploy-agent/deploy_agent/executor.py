@@ -182,9 +182,12 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
         postgres_container="omnibase-infra-stability-test-postgres",
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.stability-test.yml, never the dev-lane bare name —
+        # docker inspect on the bare name returns "no such object" for this lane.
         runtime_health_targets=(
-            ("omninode-runtime", 18085),
-            ("runtime-effects", 18086),
+            ("omninode-stability-test-runtime", 18085),
+            ("omninode-stability-test-runtime-effects", 18086),
         ),
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
@@ -192,9 +195,15 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _PROD_OVERLAY),
         compose_project="omnibase-infra-prod",
         postgres_container="omnibase-infra-prod-postgres",
+        # OMN-15181: must match the container_name: override in
+        # docker-compose.prod.yml, never the dev-lane bare name — the live
+        # PREFLIGHT-STOP defect was verify_running_image_digest inspecting
+        # the bare "omninode-runtime"/"runtime-effects" names, which exist on
+        # no real lane, so every prod deploy raised DigestMismatchError
+        # unconditionally regardless of actual outcome.
         runtime_health_targets=(
-            ("omninode-runtime", 28085),
-            ("runtime-effects", 28086),
+            ("omninode-prod-runtime", 28085),
+            ("omninode-prod-runtime-effects", 28086),
         ),
     ),
 }
@@ -927,6 +936,48 @@ class DeployExecutor:
             lane.value,
         )
 
+    def resolve_stability_ready_digest(self) -> str | None:
+        """Return the image digest currently serving the stability-test lane.
+
+        This is the boundary-level source of truth for "stability-proven"
+        consumed by ``assert_prod_request_has_stability_digest``: a digest
+        counts as READY exactly when it is the digest currently running in
+        stability-test — the same lane config (``lane_config_for``) the
+        executor already uses to recreate containers, no second hardcoded
+        map. Returns ``None`` (fail-closed via the caller) when the
+        stability-test runtime container cannot be inspected or carries no
+        resolvable repo digest.
+        """
+        config = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
+        runtime_container, _ = config.runtime_health_targets[0]
+        result = _run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{index .RepoDigests 0}}",
+                runtime_container,
+            ],
+            timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "resolve_stability_ready_digest: could not inspect %s: %s",
+                runtime_container,
+                result.stderr.strip() or result.stdout.strip(),
+            )
+            return None
+        observed = result.stdout.strip()
+        if "@" not in observed:
+            logger.warning(
+                "resolve_stability_ready_digest: unexpected docker inspect "
+                "output for %s: %r",
+                runtime_container,
+                observed,
+            )
+            return None
+        return observed.split("@", 1)[1]
+
     def verify_running_image_digest(
         self, *, lane: EnumRuntimeLane, expected_digest: str
     ) -> None:
@@ -979,8 +1030,23 @@ class DeployExecutor:
         Digest verification runs first and fails closed: a mismatch aborts
         before any health check, so a lane serving the wrong artifact can never
         be reported healthy.
+
+        OMN-15181: a digest-mismatch abort must mark ``Phase.VERIFICATION``
+        FAILED (not leave it untouched/absent from ``phase_results``) so the
+        published completion event carries a truthful status — a swallowed
+        verification phase with all other phases SUCCESS would otherwise let
+        ``ModelRebuildCompleted.status`` compute "success" for a deploy that
+        actually failed verification (job.errors also carries the real error,
+        but phase_results must not contradict it). No rollback/recreate is
+        attempted here or anywhere in this module on a verify failure — the
+        job is reported failed, never silently retried or half-recreated.
         """
-        self.verify_running_image_digest(lane=lane, expected_digest=expected_digest)
+        on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
+        try:
+            self.verify_running_image_digest(lane=lane, expected_digest=expected_digest)
+        except DigestMismatchError:
+            on_phase_update(Phase.VERIFICATION, PhaseStatus.FAILED)
+            raise
         return self.verify(on_phase_update=on_phase_update, lane=lane)
 
     @staticmethod
