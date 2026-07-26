@@ -1,19 +1,22 @@
 [Unit]
-Description=ONEX Build Loop — publishes loop-requested event to Kafka
-Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-build-loop.service
+Description=ONEX Build Loop — publishes build-loop-orchestrator-start command to Kafka
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/scripts/onex-build-loop-trigger.sh
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jonah
-Environment=KAFKA_BOOTSTRAP_SERVERS=localhost:19092
-ExecStart=/bin/bash -c '\
-  rpk topic produce onex.cmd.build.loop-requested.v1 <<< \
-  "{\"correlation_id\":\"timer-build-loop-$(date +%%Y%%m%%dT%%H%%M%%S)\",\"requested_by\":\"systemd-timer\",\"scope\":\"overnight\"}"'
+# OMN-15179: required, no default -- names the target lane's redpanda
+# container explicitly. onex-build-loop-trigger.sh fails fast with a loud
+# error if this is unset. Currently stability-test: that is the lane the
+# build-loop consumers (node_build_loop_write_effect,
+# node_build_loop_projection_compute) run on (verified via `rpk group list`
+# against omnibase-infra-stability-test-redpanda, 2026-07-26).
+Environment=ONEX_BUILD_LOOP_REDPANDA_CONTAINER=omnibase-infra-stability-test-redpanda
+ExecStart=%h/.local/bin/onex-build-loop-trigger.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=onex-build-loop
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
