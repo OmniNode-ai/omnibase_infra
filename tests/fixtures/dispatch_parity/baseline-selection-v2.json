@@ -511,6 +511,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -518,7 +519,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -575,6 +577,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -582,7 +585,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -639,6 +643,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -646,7 +651,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -703,6 +709,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -710,7 +717,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -767,6 +775,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -774,7 +783,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -831,6 +841,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -838,7 +849,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -895,6 +907,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -902,7 +915,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -959,6 +973,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -966,7 +981,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1023,6 +1039,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1030,7 +1047,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1087,6 +1105,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1094,7 +1113,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1151,6 +1171,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1158,7 +1179,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1215,6 +1237,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1222,7 +1245,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1279,6 +1303,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1286,7 +1311,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1343,6 +1369,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1350,7 +1377,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1407,6 +1435,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1414,7 +1443,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1471,6 +1501,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1478,7 +1509,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1535,6 +1567,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1542,7 +1575,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1599,6 +1633,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1606,7 +1641,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1663,6 +1699,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1670,7 +1707,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1727,6 +1765,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1734,7 +1773,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1791,6 +1831,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1798,7 +1839,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1855,6 +1897,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1862,7 +1905,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1919,6 +1963,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1926,7 +1971,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -1983,6 +2029,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -1990,7 +2037,74 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "occ.nightly-promotion",
+        "omnibase-infra.build-loop-append",
+        "omnibase-infra.build-loop-appended",
+        "omnibase-infra.commands",
+        "omnibase-infra.events",
+        "omnibase-infra.intents",
+        "omnibase-infra.omnibase-infra",
+        "omnibase-infra.platform",
+        "omnibase-infra.quarantine",
+        "omnibase-infra.router",
+        "omnibase-infra.rsd",
+        "omnibase-infra.skill",
+        "omnimarket.build-loop-orchestrator-completed",
+        "omnimarket.redeploy-start",
+        "omnimarket.runtime-deployment-proof",
+        "onex-change-control.contract-drift-detected",
+        "onex-change-control.cosmetic-compliance-scored",
+        "onex-change-control.governance-check-completed",
+        "onex.cmd.omnibase-infra.build-loop-append.v1",
+        "onex.cmd.omnimarket.redeploy-start.v1",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.dlq.omnibase-infra.commands.v1",
+        "onex.dlq.omnibase-infra.events.v1",
+        "onex.dlq.omnibase-infra.intents.v1",
+        "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "onex.dlq.omnibase-infra.platform.v1",
+        "onex.dlq.omnibase-infra.quarantine.v1",
+        "onex.dlq.omnibase-infra.router.v1",
+        "onex.dlq.omnibase-infra.rsd.v1",
+        "onex.dlq.omnibase-infra.skill.v1",
+        "onex.evt.occ.nightly-promotion.v1",
+        "onex.evt.omnibase-infra.build-loop-appended.v1",
+        "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
+        "onex.evt.omnimarket.runtime-deployment-proof.v1",
+        "onex.evt.onex-change-control.contract-drift-detected.v1",
+        "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
+        "onex.evt.onex-change-control.governance-check-completed.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -2047,6 +2161,7 @@
         "onex.evt.platform.node-introspection.v1",
         "onex.evt.platform.node-registration.v1",
         "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
         "onex.intent.platform.runtime-tick.v1",
         "platform.fsm-state-transitions",
         "platform.node-heartbeat",
@@ -2054,7 +2169,8 @@
         "platform.node-registration",
         "platform.registration-snapshots",
         "platform.request-introspection",
-        "platform.runtime-tick"
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -3062,11 +3178,11 @@
       },
       "contracts_discovered": 131,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 104,
-      "probe_count": 987,
-      "registered_dispatchers": 110,
-      "registered_routes": 120,
-      "type_scoped_dispatchers": 68
+      "distinct_subscribe_topics": 105,
+      "probe_count": 1040,
+      "registered_dispatchers": 111,
+      "registered_routes": 121,
+      "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3106,7 +3222,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-07-24T09:48:51.560977+00:00",
+    "generated_at_utc": "2026-07-26T13:21:53.606701+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.46.8",
       "omnibase-infra": "0.38.4",
@@ -4741,6 +4857,21 @@
       },
       "topic": "onex.evt.skill.scope-manifest-written.v1"
     },
+    "P1a::onex.evt.steel-onslaught.match-terminal.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.steel-onslaught.v1",
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P1a::onex.evt.validation.cross-repo-run-completed.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6301,6 +6432,21 @@
       },
       "topic": "onex.evt.skill.scope-manifest-written.v1"
     },
+    "P1b::onex.evt.steel-onslaught.match-terminal.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P1b::onex.evt.validation.cross-repo-run-completed.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7468,6 +7614,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86",
@@ -7954,6 +8120,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -8442,6 +8628,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf",
@@ -8928,6 +9134,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -9416,6 +9642,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
@@ -9902,6 +10148,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -10390,6 +10656,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_50a2a9ec::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_50a2a9ec",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_50a2a9ec::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_50a2a9ec",
@@ -10876,6 +11162,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -11364,6 +11670,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
@@ -11850,6 +12176,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -12338,6 +12684,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_77066b28::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_77066b28",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_77066b28::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_77066b28",
@@ -12824,6 +13190,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_7dc2dc0c::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_7dc2dc0c",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_7dc2dc0c::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -13312,6 +13698,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6",
@@ -13798,6 +14204,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -14286,6 +14712,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
@@ -14772,6 +15218,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_9e34c3f2::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_9e34c3f2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_9e34c3f2::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -15260,6 +15726,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493",
@@ -15746,6 +16232,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -16234,6 +16740,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a997bbff::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a997bbff",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a997bbff::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a997bbff",
@@ -16720,6 +17246,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -17208,6 +17754,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93",
@@ -17694,6 +18260,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -18182,6 +18768,26 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ccb60a8d::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ccb60a8d",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ccb60a8d::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ccb60a8d",
@@ -18669,9 +19275,536 @@
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.cmd.omnibase-infra.build-loop-append.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.build-loop-append",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_loop_write_effect.HandlerBuildLoopAppend.build_loop_append_1eb0a5fb",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.build-loop-append",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.build-loop-append.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.cmd.omnimarket.redeploy-start.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.redeploy-start",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnimarket.redeploy-start",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnimarket.redeploy-start.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.commands.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.commands",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "command",
+        "message_type": "omnibase-infra.commands",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.dlq.omnibase-infra.commands.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.events.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.events",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_156fb150",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "topic": "onex.dlq.omnibase-infra.events.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.intents.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.intents",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "intent",
+        "message_type": "omnibase-infra.intents",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.dlq.omnibase-infra.intents.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.omnibase-infra.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.omnibase-infra",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.omnibase-infra.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.platform.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.platform",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.platform.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.quarantine.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.quarantine",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.quarantine.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.router.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.router",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.router.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.rsd.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.rsd",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.rsd.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.dlq.omnibase-infra.skill.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.skill",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": null,
+        "message_category": null,
+        "message_type": null,
+        "status": "invalid_message"
+      },
+      "topic": "onex.dlq.omnibase-infra.skill.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.occ.nightly-promotion.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "occ.nightly-promotion",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "occ.nightly-promotion",
+        "status": "success"
+      },
+      "topic": "onex.evt.occ.nightly-promotion.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.omnibase-infra.build-loop-appended.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.build-loop-appended",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.build-loop-appended",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.build-loop-appended.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.omnimarket.build-loop-orchestrator-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.build-loop-orchestrator-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_loop_projection_compute.HandlerBuildLoopProjection.build_loop_project_b48dcfa8",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.build-loop-orchestrator-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.omnimarket.runtime-deployment-proof.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.runtime-deployment-proof",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.runtime-deployment-proof",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.runtime-deployment-proof.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.onex-change-control.contract-drift-detected.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.contract-drift-detected",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.contract-drift-detected",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.contract-drift-detected.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.onex-change-control.cosmetic-compliance-scored.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.cosmetic-compliance-scored",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.cosmetic-compliance-scored",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.cosmetic-compliance-scored.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.onex-change-control.governance-check-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.governance-check-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.governance-check-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.governance-check-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
       "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
       "family": "P4_payload_type_scoping",
       "input": {
@@ -19155,6 +20288,26 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -21997,6 +23150,16 @@
       "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2.onex_evt_platform_node_registration_v1",
       "topic": "onex.evt.platform.node-registration.v1",
       "topic_pattern": "*.evt.platform.node-registration.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "message_category": "event",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6.onex_evt_steel_onslaught_match_terminal_v1",
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+      "topic_pattern": "*.evt.steel-onslaught.match-terminal.*",
       "type_scoped": true
     },
     {

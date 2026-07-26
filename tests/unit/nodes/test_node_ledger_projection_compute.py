@@ -748,14 +748,15 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_seven_topics(self, contract_data: dict) -> None:
+    def test_contract_has_all_26_topics(self, contract_data: dict) -> None:
         """Verify contract subscribes to the 7 platform topic suffixes plus
         the 18 business command/completion/DLQ topics added by OMN-15006
-        (build_loop + OCC governance + DLQ) — 25 total."""
+        (build_loop + OCC governance + DLQ) plus the 1 external
+        steel_onslaught terminal-event topic added by OMN-15168 — 26 total."""
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 25, f"Expected 25 topics, got {len(topics)}: {topics}"
+        assert len(topics) == 26, f"Expected 26 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [
@@ -766,6 +767,7 @@ class TestContractValidation:
             "fsm-state-transitions",
             "runtime-tick",
             "registration-snapshots",
+            "match-terminal",
         ]
 
         for suffix in expected_suffixes:
