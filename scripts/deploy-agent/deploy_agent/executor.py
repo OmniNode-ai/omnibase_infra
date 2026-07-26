@@ -223,6 +223,57 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     return _LANE_CONFIGS[lane]
 
 
+# OMN-15181 round 4 (Finding 11): single shared source mapping a canonical
+# requested service name to its position in every lane's ``runtime_health_targets``
+# tuple (see ``_LANE_CONFIGS`` above -- each lane orders its targets
+# (runtime, runtime-effects)). Consumed by both ``resolve_stability_ready_digest``
+# and ``verify_running_image_digest`` so per-service digest resolution never
+# forks a second, independently-drifting copy of "which index is which
+# service" -- the same discipline ``PROD_IMAGE_ENV_VAR_FOR_SERVICE`` already
+# established for the compose image-env override.
+SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
+    "omninode-runtime": 0,
+    "runtime-effects": 1,
+}
+
+
+def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
+    """Return the lane-qualified container name for a canonical service name.
+
+    Fails loud (``RuntimeError``) on an unknown service rather than silently
+    defaulting to index 0 -- the exact live defect this fix closes: every
+    prod stability-digest check was comparing against the RUNTIME container
+    regardless of which service the request actually targeted, wrongly
+    rejecting a runtime-effects command carrying its own (genuinely
+    stability-proven) effects digest.
+    """
+    index = SERVICE_HEALTH_TARGET_INDEX.get(service)
+    if index is None:
+        raise RuntimeError(
+            f"no runtime_health_targets mapping for service {service!r}; known "
+            f"services: {sorted(SERVICE_HEALTH_TARGET_INDEX)}"
+        )
+    container_name, _ = lane_config_for(lane).runtime_health_targets[index]
+    return container_name
+
+
+def resolve_prod_target_service(cmd: ModelRebuildRequested) -> str:
+    """Return the single image-bearing service a prod request targets.
+
+    Mirrors ``_resolve_prod_image_env``'s target-service resolution so the
+    stability-digest guard and post-deploy verification check the SAME
+    service the deploy actually touches. Falls back to the pre-round-4
+    default (``"omninode-runtime"``) when the request does not name exactly
+    one image-bearing service (e.g. an empty-``services`` full-scope
+    deploy) -- disambiguating a single shared digest across multiple
+    services is out of scope for this fix.
+    """
+    candidates = [s for s in cmd.services if s in PROD_IMAGE_ENV_VAR_FOR_SERVICE]
+    if len(candidates) == 1:
+        return candidates[0]
+    return "omninode-runtime"
+
+
 def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
     """Return the ``-f <file>`` token sequence for a lane's compose invocation."""
     args: list[str] = []
@@ -1126,49 +1177,61 @@ class DeployExecutor:
             PROD_IMAGE_ENV_VAR_FOR_SERVICE[service]: reference for service in targets
         }
 
-    def resolve_stability_ready_digest(self) -> str | None:
-        """Return the image id currently serving the stability-test lane.
+    def resolve_stability_ready_digest(
+        self, service: str = "omninode-runtime"
+    ) -> str | None:
+        """Return the image id currently serving ``service`` in stability-test.
 
         This is the boundary-level source of truth for "stability-proven"
         consumed by ``assert_prod_request_has_stability_digest``: a digest
         counts as READY exactly when it is the image id currently running in
-        stability-test — the same lane config (``lane_config_for``) the
-        executor already uses to recreate containers, no second hardcoded
-        map. Returns ``None`` (fail-closed via the caller) when the
-        stability-test runtime container cannot be inspected.
+        stability-test for the REQUESTED service — resolved per-service
+        (OMN-15181 round 4, Finding 11) via the single shared
+        ``_health_target_container`` mapping, no second hardcoded map.
+        Defaults to ``"omninode-runtime"`` (the pre-round-4 behavior) when no
+        service is given. Returns ``None`` (fail-closed via the caller) when
+        the stability-test container for that service cannot be inspected.
         """
-        config = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
-        runtime_container, _ = config.runtime_health_targets[0]
-        return _container_image_id(runtime_container)
+        container = _health_target_container(EnumRuntimeLane.STABILITY_TEST, service)
+        return _container_image_id(container)
 
     def verify_running_image_digest(
-        self, *, lane: EnumRuntimeLane, expected_digest: str
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        expected_digest: str,
+        service: str = "omninode-runtime",
     ) -> None:
-        """Verify the running runtime container's image id == requested.
+        """Verify the running ``service`` container's image id == requested.
 
         FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
         before health checks so a lane is never marked healthy while serving an
-        artifact that does not match the pinned digest.
+        artifact that does not match the pinned digest. Resolved per-service
+        (OMN-15181 round 4, Finding 11) so a targeted runtime-effects deploy is
+        verified against its own container, not the runtime container by
+        default (``service`` defaults to ``"omninode-runtime"``, the
+        pre-round-4 behavior, when the caller does not name one).
         """
-        config = lane_config_for(lane)
-        runtime_container, _ = config.runtime_health_targets[0]
-        observed = _container_image_id(runtime_container)
+        container = _health_target_container(lane, service)
+        observed = _container_image_id(container)
         if observed is None:
             raise DigestMismatchError(
-                f"could not inspect running image id for {runtime_container} "
-                f"(lane {lane.value}); failing closed"
+                f"could not inspect running image id for {container} "
+                f"(lane {lane.value}, service {service!r}); failing closed"
             )
         if observed != expected_digest:
             raise DigestMismatchError(
-                f"running container {runtime_container} image id {observed!r} "
+                f"running container {container} image id {observed!r} "
                 f"does not match requested digest {expected_digest!r} "
-                f"(lane {lane.value}); failing closed"
+                f"(lane {lane.value}, service {service!r}); failing closed"
             )
         logger.info(
-            "verify_running_image_digest: %s matches requested digest %s (lane %s)",
-            runtime_container,
+            "verify_running_image_digest: %s matches requested digest %s "
+            "(lane %s, service %s)",
+            container,
             expected_digest,
             lane.value,
+            service,
         )
 
     def deploy_and_verify(
@@ -1177,12 +1240,16 @@ class DeployExecutor:
         lane: EnumRuntimeLane,
         expected_digest: str,
         on_phase_update: PhaseCallback,
+        service: str = "omninode-runtime",
     ) -> list[ModelHealthCheck]:
         """Verify the running digest, then run health checks.
 
         Digest verification runs first and fails closed: a mismatch aborts
         before any health check, so a lane serving the wrong artifact can never
-        be reported healthy.
+        be reported healthy. ``service`` (OMN-15181 round 4, Finding 11)
+        selects which container is checked — a targeted runtime-effects
+        deploy must verify the effects container, not the runtime container
+        by default.
 
         OMN-15181: a digest-mismatch abort must mark ``Phase.VERIFICATION``
         FAILED (not leave it untouched/absent from ``phase_results``) so the
@@ -1196,7 +1263,9 @@ class DeployExecutor:
         """
         on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
         try:
-            self.verify_running_image_digest(lane=lane, expected_digest=expected_digest)
+            self.verify_running_image_digest(
+                lane=lane, expected_digest=expected_digest, service=service
+            )
         except DigestMismatchError:
             on_phase_update(Phase.VERIFICATION, PhaseStatus.FAILED)
             raise
