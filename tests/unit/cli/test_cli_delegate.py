@@ -33,6 +33,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from click.testing import CliRunner
@@ -46,6 +47,7 @@ from omnibase_infra.cli.cli_delegate import (
     DEFAULT_BUS,
     DEFAULT_TASK_TYPE,
     DELEGATE_SOURCE,
+    DELEGATE_SOURCE_CHOICES,
     DelegateTimeoutExceededError,
     build_backend_overrides,
     classify_task_type,
@@ -225,6 +227,217 @@ class TestPayloadScratch:
         payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         assert payload["task_type"] == "research"
+
+
+class TestSourceFlag:
+    """OMN-15185: ``--source`` threads a registered adapter source into the
+    delegation payload's ``source`` field, closed to
+    :data:`DELEGATE_SOURCE_CHOICES` (mirroring the wire model's
+    ``ModelDelegateSkillRequest.source`` Literal). Omitting the flag must
+    preserve pre-OMN-15185 behavior exactly (``DELEGATE_SOURCE``,
+    ``"claude-code"``).
+    """
+
+    def test_default_omitted_flag_uses_delegate_source_constant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        state_root = tmp_path / "state"
+
+        # No --source / source= override at all -- the regression case: a
+        # pre-OMN-15185 caller must see byte-identical payload["source"].
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            state_root=state_root,
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        assert payload["source"] == DELEGATE_SOURCE == "claude-code"
+
+    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    def test_each_choice_lands_in_payload(
+        self,
+        source_choice: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_PROOF_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: contract_path,
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        state_root = tmp_path / "state"
+
+        run_delegate(
+            prompt="research the routing architecture",
+            task_type=None,
+            max_tokens=None,
+            source=source_choice,
+            state_root=state_root,
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+        )
+        payload_path = next((state_root / "tmp").glob("delegate-input-*.json"))
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        assert payload["source"] == source_choice
+
+    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    def test_cli_flag_each_choice_reaches_overrides(
+        self,
+        source_choice: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # End-to-end through the click CLI flag, not just the function call.
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured["source"] = payload["source"]
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--source",
+                source_choice,
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["source"] == source_choice
+
+    def test_cli_flag_omitted_defaults_to_claude_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_run_receipt_mode(**kwargs: object) -> int:
+            payload = json.loads(
+                Path(str(kwargs["input_path"])).read_text(encoding="utf-8")
+            )
+            captured["source"] = payload["source"]
+            return 0
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "_resolve_packaged_contract",
+            lambda _name: tmp_path / "contract.yaml",
+        )
+        monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_run_receipt_mode)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["source"] == "claude-code"
+
+    def test_cli_invalid_source_rejected_by_parser(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            delegate_command,
+            [
+                "research the routing architecture",
+                "--source",
+                "not-a-real-source",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code != 0
+        assert "Error" in result.output
+        assert "not-a-real-source" in result.output
+
+
+class TestSourceFlagDriftGuard:
+    """``DELEGATE_SOURCE_CHOICES`` duplicates omnimarket's wire model Literal
+    (``ModelDelegateSkillRequest.source``) because omnibase_infra does not
+    depend on omnimarket -- repo layering runs compat -> core -> spi -> infra,
+    and separately omnimarket depends on omnibase-infra, never the reverse
+    (importing omnimarket here would be circular/wrong-direction). This is
+    exactly OMN-15175's duplicate-alias failure class: a hand-rolled Literal
+    silently fell out of sync with this same wire model after it was widened.
+
+    When omnimarket IS importable in the test env, assert the tuple matches
+    the LIVE Literal args exactly. It normally is NOT importable in
+    omnibase_infra's own test env (no omnimarket dependency); in that case,
+    assert against the documented value list stated in the
+    ``DELEGATE_SOURCE_CHOICES`` docstring/comment in ``cli_delegate.py``, so a
+    silent edit that changes one without the other still fails this test.
+    """
+
+    # Mirrors the value list documented in cli_delegate.py's
+    # DELEGATE_SOURCE_CHOICES comment -- update BOTH together.
+    _DOCUMENTED_CHOICES = ("claude-code", "codex", "external-client")
+
+    def test_choices_match_wire_model_or_documented_fallback(self) -> None:
+        try:
+            from omnimarket.models.delegation.wire.model_delegate_skill_request import (
+                ModelDelegateSkillRequest,
+            )
+        except ImportError:
+            assert set(DELEGATE_SOURCE_CHOICES) == set(self._DOCUMENTED_CHOICES), (
+                "DELEGATE_SOURCE_CHOICES drifted from its own documented "
+                "value list (OMN-15175 duplicate-alias failure class) -- "
+                "omnimarket is not importable in this test env to check "
+                "against the live wire model directly, so verify by hand "
+                "against omnimarket's "
+                "model_delegate_skill_request.py:ModelDelegateSkillRequest"
+                ".source Literal."
+            )
+            return
+        source_field = ModelDelegateSkillRequest.model_fields["source"]
+        live_choices = get_args(source_field.annotation)
+        assert set(DELEGATE_SOURCE_CHOICES) == set(live_choices), (
+            f"DELEGATE_SOURCE_CHOICES {DELEGATE_SOURCE_CHOICES} drifted from "
+            f"the live ModelDelegateSkillRequest.source Literal {live_choices}"
+        )
 
 
 class TestSingleReceiptOnStdout:

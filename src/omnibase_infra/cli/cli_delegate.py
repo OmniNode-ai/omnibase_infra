@@ -96,6 +96,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
+    "DELEGATE_SOURCE_CHOICES",
     "DEFAULT_TASK_TYPE",
     "TASK_TYPE_CHOICES",
     "BUS_CHOICES",
@@ -112,8 +113,34 @@ __all__ = [
 # this CLI's environment (the delegate node ships its packaged contract.yaml).
 DELEGATE_NODE_NAME = "node_delegate_skill_orchestrator"
 
-# Registered adapter source for ``ModelDelegateSkillRequest`` (Literal field).
+# Default registered adapter source for ``ModelDelegateSkillRequest`` (Literal
+# field) -- what the payload carries when ``--source`` is omitted. Preserves
+# pre-OMN-15185 behavior for every existing caller.
 DELEGATE_SOURCE = "claude-code"
+
+# Closed choices for ``--source``, mirroring omnimarket's wire model
+# (``ModelDelegateSkillRequest.source: Literal["claude-code", "codex",
+# "external-client"]`` in
+# ``omnimarket/models/delegation/wire/model_delegate_skill_request.py``).
+#
+# This CANNOT be derived by import: repo layering runs
+# compat -> core -> spi -> infra, and separately omnimarket depends on
+# omnibase-infra (declared in omnimarket's pyproject.toml) -- never the
+# reverse. omnibase_infra importing omnimarket would be a circular/wrong-
+# direction dependency, so this tuple is a manually-maintained duplicate of
+# the wire Literal's args.
+#
+# DRIFT WARNING (OMN-15175's duplicate-alias failure class -- a hand-rolled
+# ``_DelegateSource`` Literal in omnimarket silently fell out of sync with
+# this exact wire model after it was widened): any future widening of
+# ``ModelDelegateSkillRequest.source`` must be mirrored here by hand.
+# ``tests/unit/cli/test_cli_delegate.py::TestSourceFlagDriftGuard`` asserts
+# this tuple matches the live wire model's Literal args whenever omnimarket
+# happens to be importable in the test env; when it is not (the normal
+# omnibase_infra CI env, which has no omnimarket dependency), it instead
+# asserts against the SAME documented value list stated here, so the test
+# still fails the moment this comment and the tuple below disagree.
+DELEGATE_SOURCE_CHOICES: tuple[str, ...] = ("claude-code", "codex", "external-client")
 
 # Fallback classification when no keyword matches (the prompt.md default).
 DEFAULT_TASK_TYPE = "research"
@@ -247,6 +274,7 @@ def _write_payload(
     *,
     prompt: str,
     task_type: str,
+    source: str,
     max_tokens: int | None,
     state_root: Path,
     run_id: uuid.UUID,
@@ -258,6 +286,12 @@ def _write_payload(
     ``feedback_no_tmp_use_workspace``). The payload validates against the
     delegate node's input model (``ModelDelegateSkillRequest``); only the
     fields the consumer supplies are set.
+
+    ``source`` (OMN-15185) is the caller-resolved registered adapter source —
+    the caller (:func:`run_delegate`) has already applied the
+    :data:`DELEGATE_SOURCE` default when ``--source`` was omitted, so this
+    function never reads the module constant itself; it only writes whatever
+    value it is handed.
 
     When ``max_tokens`` is ``None`` (no explicit ``--max-tokens`` override) the
     key is omitted from the payload entirely, so the delegate node resolves the
@@ -276,7 +310,7 @@ def _write_payload(
     payload: dict[str, object] = {
         "prompt": prompt,
         "task_type": task_type,
-        "source": DELEGATE_SOURCE,
+        "source": source,
         "correlation_id": str(correlation_id),
     }
     if max_tokens is not None:
@@ -383,6 +417,18 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     ),
 )
 @click.option(
+    "--source",
+    "source",
+    type=click.Choice(DELEGATE_SOURCE_CHOICES),
+    default=None,
+    help=(
+        "Registered adapter source stamped into the delegation request's "
+        "'source' field (must match the wire model's ModelDelegateSkillRequest "
+        f".source Literal). Omit to use the default: {DELEGATE_SOURCE!r} — "
+        "unchanged pre-OMN-15185 behavior for every existing caller."
+    ),
+)
+@click.option(
     "--bus",
     "bus",
     type=click.Choice(BUS_CHOICES),
@@ -445,6 +491,7 @@ def delegate_command(
     prompt: str,
     task_type: str | None,
     max_tokens: int | None,
+    source: str | None,
     bus: str | None,
     kafka_bootstrap: str | None,
     state_root: Path,
@@ -464,6 +511,7 @@ def delegate_command(
         onex delegate "explain what a calendar app needs"
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
+        onex delegate "hand off from the external client" --source external-client
         # Publish through the configured Kafka broker so a deployed runtime dispatches it:
         onex delegate "document the router" --bus kafka --kafka-bootstrap "$KAFKA_BOOTSTRAP_SERVERS"
     """
@@ -472,6 +520,7 @@ def delegate_command(
             prompt=prompt,
             task_type=task_type,
             max_tokens=max_tokens,
+            source=source,
             bus=bus,
             kafka_bootstrap=kafka_bootstrap,
             state_root=state_root,
@@ -489,6 +538,7 @@ def run_delegate(
     prompt: str,
     task_type: str | None,
     max_tokens: int | None,
+    source: str | None = None,
     bus: str | None = None,
     kafka_bootstrap: str | None = None,
     state_root: Path,
@@ -501,6 +551,13 @@ def run_delegate(
     Returns the process exit code. Payload construction, node dispatch, and
     result extraction are all internal — the caller supplies a prompt and
     receives one typed receipt on stdout.
+
+    ``source`` (OMN-15185) is the registered adapter source stamped into the
+    delegation request's ``source`` field. ``None`` (the CLI default) resolves
+    to :data:`DELEGATE_SOURCE` (``"claude-code"``) — unchanged pre-OMN-15185
+    behavior for every existing caller. An explicit value must be one of
+    :data:`DELEGATE_SOURCE_CHOICES`; the CLI's ``click.Choice`` enforces this
+    at the flag boundary, and this function does not re-validate it.
 
     ``bus`` selects the event-bus backend. ``None`` (the CLI default, OMN-14376)
     auto-resolves via :func:`resolve_default_bus` — ``kafka`` when
@@ -523,6 +580,7 @@ def run_delegate(
     hanging indefinitely.
     """
     resolved_task_type = task_type or classify_task_type(prompt)
+    resolved_source = source or DELEGATE_SOURCE
     if bus is None:
         if kafka_bootstrap is not None:
             raise ValueError(
@@ -561,6 +619,7 @@ def run_delegate(
     payload_path = _write_payload(
         prompt=prompt,
         task_type=resolved_task_type,
+        source=resolved_source,
         max_tokens=max_tokens,
         state_root=state_root,
         run_id=run_id,
