@@ -34,7 +34,6 @@ data only.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -62,14 +61,9 @@ from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner
 
 logger = logging.getLogger(__name__)
 
-# Same env-overridable defaults as the EFFECT + the legacy bash surfaces
-# (runner-monitor.sh, healthcheck.sh) so all three surfaces agree on
-# thresholds during the trust-building period (OMN-13109/OMN-13912/OMN-13915).
-_CRASHLOOP_RESTART_THRESHOLD = int(os.environ.get("CRASHLOOP_RESTART_THRESHOLD", "5"))
-_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = int(
-    os.environ.get("RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS", "900")
-)
-_WEDGE_QUEUE_AGE_SECONDS = int(os.environ.get("WEDGE_QUEUE_AGE_SECONDS", "600"))
+_DEFAULT_CRASHLOOP_RESTART_THRESHOLD = 5
+_DEFAULT_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = 900
+_DEFAULT_WEDGE_QUEUE_AGE_SECONDS = 600
 
 _EnumState = EnumRunnerFleetHealthState
 
@@ -81,22 +75,25 @@ def _classify_runner(
     fleet_saturated: bool,
     buildx_available: bool | None,
     codeload_throttled: bool,
+    crashloop_restart_threshold: int,
+    max_diag_age_seconds: int,
+    wedge_queue_age_seconds: int,
 ) -> tuple[_EnumState, str]:
     """Classify a single runner. Returns (state, detail). Pure, no I/O."""
-    if fact.docker_restart_count > _CRASHLOOP_RESTART_THRESHOLD:
+    if fact.docker_restart_count > crashloop_restart_threshold:
         return (
             _EnumState.CRASH_LOOPING,
-            f"RestartCount={fact.docker_restart_count} > threshold={_CRASHLOOP_RESTART_THRESHOLD}",
+            f"RestartCount={fact.docker_restart_count} > threshold={crashloop_restart_threshold}",
         )
     if (
         fact.diag_heartbeat_age_seconds is not None
-        and fact.diag_heartbeat_age_seconds > _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS
+        and fact.diag_heartbeat_age_seconds > max_diag_age_seconds
     ):
         return (
             _EnumState.LISTENER_ZOMBIE,
             (
                 f"_diag heartbeat age={fact.diag_heartbeat_age_seconds:.0f}s > "
-                f"threshold={_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS}s"
+                f"threshold={max_diag_age_seconds}s"
             ),
         )
     if fact.github_status == "offline":
@@ -111,7 +108,7 @@ def _classify_runner(
     if fleet_wedged and not fact.github_busy:
         return (
             _EnumState.WEDGED,
-            f"fleet-wide: queued job age >= {_WEDGE_QUEUE_AGE_SECONDS}s with zero busy runners",
+            f"fleet-wide: queued job age >= {wedge_queue_age_seconds}s with zero busy runners",
         )
     if fleet_saturated and fact.github_busy:
         return (
@@ -205,6 +202,17 @@ class HandlerRunnerFleetHealthEvaluate:
     output, and no I/O happens anywhere in this class.
     """
 
+    def __init__(
+        self,
+        *,
+        crashloop_restart_threshold: int = _DEFAULT_CRASHLOOP_RESTART_THRESHOLD,
+        max_diag_age_seconds: int = _DEFAULT_RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS,
+        wedge_queue_age_seconds: int = _DEFAULT_WEDGE_QUEUE_AGE_SECONDS,
+    ) -> None:
+        self._crashloop_restart_threshold = crashloop_restart_threshold
+        self._max_diag_age_seconds = max_diag_age_seconds
+        self._wedge_queue_age_seconds = wedge_queue_age_seconds
+
     @property
     def handler_type(self) -> EnumHandlerType:
         return EnumHandlerType.NODE_HANDLER
@@ -256,7 +264,7 @@ class HandlerRunnerFleetHealthEvaluate:
 
         fleet_wedged = (
             snapshot.oldest_queued_job_age_seconds is not None
-            and snapshot.oldest_queued_job_age_seconds >= _WEDGE_QUEUE_AGE_SECONDS
+            and snapshot.oldest_queued_job_age_seconds >= self._wedge_queue_age_seconds
             and busy_count == 0
             and online_count > 0
         )
@@ -275,6 +283,9 @@ class HandlerRunnerFleetHealthEvaluate:
                 fleet_saturated=fleet_saturated,
                 buildx_available=snapshot.buildx_available,
                 codeload_throttled=codeload_throttled,
+                crashloop_restart_threshold=self._crashloop_restart_threshold,
+                max_diag_age_seconds=self._max_diag_age_seconds,
+                wedge_queue_age_seconds=self._wedge_queue_age_seconds,
             )
             assessment = ModelRunnerHealthAssessment(
                 name=fact.name,
@@ -307,7 +318,7 @@ class HandlerRunnerFleetHealthEvaluate:
                     reason=(
                         f"run {candidate.status} for {candidate.age_seconds:.0f}s in "
                         f"{candidate.repo}, exceeds wedge threshold "
-                        f"({_WEDGE_QUEUE_AGE_SECONDS}s)"
+                        f"({self._wedge_queue_age_seconds}s)"
                     ),
                     confidence=0.4,
                 )
