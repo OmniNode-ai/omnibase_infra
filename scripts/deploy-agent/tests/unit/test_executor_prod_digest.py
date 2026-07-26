@@ -113,10 +113,12 @@ class TestProdDeployPullsDigestNotRebuild:
 class TestRunningDigestVerification:
     def test_running_digest_match_passes(self) -> None:
         executor = DeployExecutor()
+        captured_cmds: list[list[str]] = []
 
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            captured_cmds.append(cmd)
             # docker inspect of the running runtime container returns its image digest
             return _ok(stdout=_DIGEST + "\n")
 
@@ -125,6 +127,17 @@ class TestRunningDigestVerification:
             executor.verify_running_image_digest(
                 lane=EnumRuntimeLane.PROD, expected_digest=_DIGEST
             )
+
+        # OMN-15181: a mock that never inspects the docker-inspect ARGUMENT is
+        # a vacuous green — this exact gap let the bare-name defect ship
+        # (docker inspect omninode-runtime, which exists on no real lane).
+        inspect_cmd = next(
+            cmd for cmd in captured_cmds if cmd[:2] == ["docker", "inspect"]
+        )
+        assert inspect_cmd[-1] == "omninode-prod-runtime", (
+            "must inspect the lane-qualified prod container name, not a bare "
+            f"generic name; got {inspect_cmd[-1]!r}"
+        )
 
     def test_running_digest_mismatch_fails_closed(self) -> None:
         executor = DeployExecutor()
