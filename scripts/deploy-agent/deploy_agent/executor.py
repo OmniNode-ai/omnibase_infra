@@ -169,6 +169,15 @@ class ModelLaneConfig(BaseModel):
 _STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
 _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 
+# OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
+# env var that repoints its `image:` field (docker-compose.prod.yml). This is
+# the single source mapping consumed by ``_resolve_prod_image_env`` -- no
+# forked second copy of the service->env-var relationship.
+PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
+    "omninode-runtime": "PROD_OMNINODE_RUNTIME_IMAGE",
+    "runtime-effects": "PROD_RUNTIME_EFFECTS_IMAGE",
+}
+
 _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
@@ -353,7 +362,7 @@ def _parse_runtime_policy_env_value(value: str) -> str:
     return tokens[0].split("=", 1)[1]
 
 
-def _compose_env() -> dict[str, str]:
+def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
@@ -372,6 +381,12 @@ def _compose_env() -> dict[str, str]:
     }
     for key, value in defaults.items():
         env.setdefault(key, value)
+    # OMN-15181 round 3: prod-lane image repoint overrides (PROD_*_IMAGE) win
+    # over any ambient os.environ value -- this is the one call site allowed
+    # to override rather than setdefault, since it carries the caller's
+    # explicit per-dispatch pinned-image resolution.
+    if extra_env:
+        env.update(extra_env)
     return env
 
 
@@ -924,12 +939,28 @@ class DeployExecutor:
             self._pull_pinned_image(image_digest, lane)
             if scope == Scope.FULL:
                 self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+                runtime_services = services_for_scope(Scope.RUNTIME)
                 self._compose_up(
-                    Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+                    Phase.RUNTIME,
+                    Scope.RUNTIME,
+                    [],
+                    on_phase_update,
+                    lane=lane,
+                    extra_env=self._resolve_prod_image_env(
+                        image_digest, runtime_services
+                    ),
                 )
                 return services_for_scope(Scope.FULL)
-            self._compose_up(phase, scope, services, on_phase_update, lane=lane)
-            return services if services else services_for_scope(scope)
+            target_services = services if services else services_for_scope(scope)
+            prod_env = (
+                {}
+                if scope == Scope.CORE
+                else self._resolve_prod_image_env(image_digest, target_services)
+            )
+            self._compose_up(
+                phase, scope, services, on_phase_update, lane=lane, extra_env=prod_env
+            )
+            return target_services
 
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.
@@ -1027,6 +1058,73 @@ class DeployExecutor:
             image_digest,
             lane.value,
         )
+
+    def _resolve_local_image_reference(self, image_digest: str) -> str:
+        """Return a locally-present ``repository:tag`` reference for a pinned digest.
+
+        OMN-15181 round 3 (Finding 9): the granted ``image_digest`` is a bare
+        image id (``sha256:...``), which is never a valid value for a compose
+        ``image:`` field or a ``docker pull``/``docker run`` reference on its
+        own. ``_pull_pinned_image`` only proves the id is present somewhere in
+        the local docker store (normally under the stability-test tag, since
+        that is where the artifact was built); this method resolves an actual
+        ``RepoTags`` entry for that id so the caller can repoint the prod
+        compose ``image:`` field at it declaratively — no ``docker tag``/retag
+        command, no mutation of the local docker store.
+
+        Raises ``RuntimeError`` (fail loud) when the id cannot be inspected or
+        carries no usable repository:tag reference (e.g. a dangling image)
+        rather than silently proceeding with an unresolvable pin.
+        """
+        result = _run(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                '{{join .RepoTags ","}}',
+                image_digest,
+            ],
+            timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"could not resolve a local repository:tag reference for pinned "
+                f"digest {image_digest}: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        tags = [
+            tag
+            for tag in result.stdout.strip().split(",")
+            if tag and tag != "<none>:<none>"
+        ]
+        if not tags:
+            raise RuntimeError(
+                f"pinned digest {image_digest} is present locally but carries no "
+                "usable repository:tag reference (RepoTags empty/dangling) — "
+                "cannot repoint the prod compose image field at it"
+            )
+        return str(tags[0])
+
+    def _resolve_prod_image_env(
+        self, image_digest: str, services: list[str]
+    ) -> dict[str, str]:
+        """Return the prod compose env-var overrides for the given services.
+
+        Only services present in ``PROD_IMAGE_ENV_VAR_FOR_SERVICE`` (the prod
+        runtime services with a parameterized ``image:`` field) get an
+        override; other services (e.g. core infra) are untouched. Returns an
+        empty dict — no pinned-image resolution attempted — when no target
+        service needs one, so a core-only scope never requires the digest to
+        carry a usable local tag.
+        """
+        targets = [s for s in services if s in PROD_IMAGE_ENV_VAR_FOR_SERVICE]
+        if not targets:
+            return {}
+        reference = self._resolve_local_image_reference(image_digest)
+        return {
+            PROD_IMAGE_ENV_VAR_FOR_SERVICE[service]: reference for service in targets
+        }
 
     def resolve_stability_ready_digest(self) -> str | None:
         """Return the image id currently serving the stability-test lane.
@@ -1272,6 +1370,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        extra_env: Mapping[str, str] | None = None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS.get(phase, 300)
@@ -1303,7 +1402,7 @@ class DeployExecutor:
         if requested_services:
             cmd.extend(requested_services)
 
-        result = _run(cmd, timeout=timeout, env=_compose_env())
+        result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
         compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
         if compose_up_error:
             logger.warning(
@@ -1346,7 +1445,7 @@ class DeployExecutor:
                     capture_output=True,
                     text=True,
                     check=False,
-                    env=_compose_env(),
+                    env=_compose_env(extra_env),
                 )
                 if start_result.returncode == 0:
                     logger.info("docker start %s: ok", name)

@@ -69,14 +69,24 @@ class TestProdDeployPullsDigestNotRebuild:
         executor._pull_pinned_image = fake_pull  # type: ignore[method-assign]
         executor._compose_up = fake_up  # type: ignore[method-assign]
 
-        executor.rebuild_scope(
-            Scope.RUNTIME,
-            [],
-            _noop_phase_update,
-            git_sha="",
-            lane=EnumRuntimeLane.PROD,
-            image_digest=_DIGEST,
-        )
+        # OMN-15181 round 3: rebuild_scope's prod branch now also resolves the
+        # pinned digest to a locally-present repository:tag reference (to
+        # repoint the compose image: field) between _pull_pinned_image and
+        # _compose_up. Mock it so this test stays a pure effect-boundary test
+        # (no real docker subprocess call).
+        with patch.object(
+            DeployExecutor,
+            "_resolve_local_image_reference",
+            return_value="omnibase-infra-stability-test-omninode-runtime:latest",
+        ):
+            executor.rebuild_scope(
+                Scope.RUNTIME,
+                [],
+                _noop_phase_update,
+                git_sha="",
+                lane=EnumRuntimeLane.PROD,
+                image_digest=_DIGEST,
+            )
 
         assert pull_calls == [_DIGEST], "prod must pull the pinned digest"
         assert build_calls == [], "prod must NOT rebuild from a ref"
