@@ -213,7 +213,10 @@ async def test_digest_match_still_marks_verification_success(
         run_cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess:
         if run_cmd[:2] == ["docker", "inspect"]:
-            return _ok(stdout=f"sha256:imageid {_DIGEST}\n")
+            # verify_running_image_digest now compares the container's
+            # `.Image` field (an exact image id) to expected_digest, not a
+            # substring match against a RepoDigests-style value.
+            return _ok(stdout=f"{_DIGEST}\n")
         if run_cmd[:2] == ["docker", "ps"]:
             return _ok()
         if "omnidash_analytics" in run_cmd:
