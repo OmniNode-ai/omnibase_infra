@@ -6,8 +6,9 @@
 # ONEX Node Contract
 # Node: NodeLedgerProjectionCompute
 #
-# COMPUTE node that subscribes to 25 topics (7 platform-lifecycle topics plus
-# 18 business command/completion/DLQ topics — OMN-15006) for event ledger
+# COMPUTE node that subscribes to 26 topics (7 platform-lifecycle topics plus
+# 18 business command/completion/DLQ topics — OMN-15006 — plus 1 external
+# steel_onslaught terminal-event topic — OMN-15168) for event ledger
 # persistence. This node projects events from the platform event bus into
 # the audit ledger for complete traceability and debugging support.
 #
@@ -26,20 +27,27 @@
 #     (HandlerLedgerProjection) and write-effect (node_ledger_write_effect)
 #     are TYPE-AGNOSTIC and required no change — the blindness was a
 #     subscription-scoping gap, not a handler bug.
+#   - OMN-15168 (epic OMN-15154): widen subscribe_topics from 25 to 26 by
+#     adding steel_onslaught's forwarded terminal-match topic
+#     (onex.evt.steel-onslaught.match-terminal.v1, OMN-15167). Landed as a
+#     PAIRED diff with its handler_routing entry per the OMN-14594 pattern
+#     documented below — a bare subscribe_topics addition is "subscribed but
+#     never dispatched" (NO_DISPATCHER class); see this ticket's
+#     tests/unit/nodes/test_contract_subscription_audit.py pairing-count gate.
 # Contract identifiers
 name: "node_ledger_projection_compute"
 contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "0.2.0"
+node_version: "0.3.0"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 25 topics (7 platform-lifecycle + 18 business command/completion/DLQ topics, OMN-15006) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.1.0 (OMN-15006) widens the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
+  COMPUTE node that subscribes to 26 topics (7 platform-lifecycle + 18 business command/completion/DLQ topics, OMN-15006 + 1 external steel_onslaught terminal-event topic, OMN-15168) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
 
 # Event bus configuration
 event_bus:
@@ -47,8 +55,9 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  # Subscribe to 25 topics for complete audit coverage: 7 platform-lifecycle
-  # topics plus 18 business command/completion/DLQ topics (OMN-15006).
+  # Subscribe to 26 topics for complete audit coverage: 7 platform-lifecycle
+  # topics plus 18 business command/completion/DLQ topics (OMN-15006) plus 1
+  # external steel_onslaught terminal-event topic (OMN-15168).
   subscribe_topics:
     # Node lifecycle events
     - "onex.evt.platform.node-registration.v1"
@@ -90,6 +99,19 @@ event_bus:
     - "onex.dlq.omnibase-infra.router.v1"
     - "onex.dlq.omnibase-infra.rsd.v1"
     - "onex.dlq.omnibase-infra.skill.v1"
+    # --- OMN-15168 (epic OMN-15154): steel_onslaught terminal-event topic ---
+    # ONE shared topic carrying 4 terminal match-lifecycle event classes
+    # (MATCH_STARTED/MATCH_ENDED/MATCH_SCORED/VICTORY_DECLARED),
+    # discriminated by the payload's own event_type field (plan §4b gate
+    # ruling — one topic keeps the allowlist diff, consumer wiring, and
+    # ledger legibility to a single surface for 4 low-volume event classes).
+    # Literal owned by steel_onslaught (private personal repo, infra ↛ steel
+    # forbids importing its code) — cited here byte-for-byte as declared at
+    # STEEL_MATCH_TERMINAL_TOPIC in
+    # steel_onslaught/src/steel_onslaught/bus/kafka_forwarder.py (OMN-15167,
+    # merged f378cd48), same external-literal pattern as the OCC/omnimarket
+    # topics above.
+    - "onex.evt.steel-onslaught.match-terminal.v1"
   # Audit consumer - read-only, non-processing consumption for ledger persistence
   consumer_purpose: "audit"
   # Start from earliest offset to capture all historical events
@@ -101,7 +123,7 @@ input_model:
   name: "ModelEventMessage"
   module: "omnibase_infra.event_bus.models.model_event_message"
   description: >
-    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 25 subscribed topics.
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 26 subscribed topics.
 
 output_model:
   name: "ModelIntent"
@@ -446,6 +468,29 @@ handler_routing:
         module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
       supported_operations:
         - "ledger.project"
+    # --- OMN-15168 (epic OMN-15154): steel_onslaught terminal-event topic ---
+    # PAIRED with the subscribe_topics entry above in this same diff, per the
+    # OMN-14594 pattern documented at the top of this handler_routing block:
+    # a bare subscribe_topics addition with no matching topic_match entry is
+    # "subscribed but never dispatched" (NO_DISPATCHER class, already hit
+    # once). event_model is ModelEventMessage — the same generic/envelope-
+    # level raw-wrapper model the OMN-15006 external (OCC/omnimarket) topics
+    # above use, NOT a steel-specific payload model: infra cannot import
+    # steel_onslaught's ModelSOEventEnvelope (private personal repo, infra ↛
+    # steel), and HandlerLedgerProjection is TYPE-AGNOSTIC (see OMN-15006
+    # note above) so no steel-specific model is needed for ledger projection.
+    - topic: "onex.evt.steel-onslaught.match-terminal.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
 # Intent consumption (OMN-14516): the projection emits a `ledger.append` intent
 # per consumed platform event. This table is the SOURCE OF TRUTH the kernel uses
 # to DERIVE a result applier for this contract — it names the effect node whose
@@ -479,11 +524,11 @@ dependencies:
     optional: false
 # Metadata
 metadata:
-  description: "Subscribes to 25 topics (7 platform-lifecycle + 18 business command/completion/DLQ, OMN-15006) for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
+  description: "Subscribes to 26 topics (7 platform-lifecycle + 18 business command/completion/DLQ, OMN-15006 + 1 external steel_onslaught terminal-event topic, OMN-15168) for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"
-  ticket: "OMN-1648, OMN-1726"
+  ticket: "OMN-1648, OMN-1726, OMN-15168"
   tags:
     - compute
     - ledger

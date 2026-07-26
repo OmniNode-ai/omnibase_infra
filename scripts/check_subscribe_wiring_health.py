@@ -102,6 +102,13 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.evt.onex-change-control.cosmetic-compliance-scored.v1": "Published by onex_change_control cosmetic lint tooling (GovernanceTopic.COSMETIC_COMPLIANCE_SCORED), cross-repo | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnimarket.redeploy-start.v1": "Published by onex_change_control promotion tooling, consumed by omnimarket node_redeploy (GovernanceTopic.RUNTIME_DEPLOYMENT_REQUEST, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omnimarket.runtime-deployment-proof.v1": "Published by omnimarket node_redeploy per-lane probe (GovernanceTopic.RUNTIME_DEPLOYMENT_PROOF, OMN-12576), cross-repo | owner: jonah | expiry: 2026-12-01",
+    # OMN-15168 (epic OMN-15154): node_ledger_projection_compute widened
+    # subscribe_topics to steel_onslaught's forwarded terminal-match topic
+    # whose canonical publisher lives in the private steel_onslaught repo
+    # (cross-repo, not visible to this scan; infra ↛ steel forbids importing
+    # it). Topic string is steel_onslaught's own STEEL_MATCH_TERMINAL_TOPIC
+    # (kafka_forwarder.py, OMN-15167, merged f378cd48).
+    "onex.evt.steel-onslaught.match-terminal.v1": "Published by steel_onslaught's KafkaTerminalEventForwarder (STEEL_MATCH_TERMINAL_TOPIC, OMN-15167), cross-repo (private personal repo) | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
