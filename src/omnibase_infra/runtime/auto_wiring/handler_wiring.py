@@ -693,11 +693,42 @@ def _make_dispatch_callback(
             # handler is a bare typed def-B handler (not an envelope handler),
             # validate the extracted domain payload into its declared input model
             # at THIS adapter boundary — never inside the handler, never by
-            # wrapping the payload in a ModelEventEnvelope. Envelope-accepting and
-            # legacy ``**kwargs``/untyped handlers keep receiving the raw envelope
-            # dict unchanged.
+            # wrapping the payload in a ModelEventEnvelope.
+            #
+            # OMN-15181 Finding 4: an operation_match handler whose ``handle()``
+            # declares a CONCRETE ``ModelEventEnvelope`` annotation (e.g.
+            # ``HandlerRedeployOrchestrator.handle(self, envelope:
+            # ModelEventEnvelope[Any])``) was left OUT of the coercion above —
+            # ``dispatch_arg`` stayed the raw materialized dict
+            # (``{"payload": ..., "__bindings": {...}, "__debug_trace": {...}}``
+            # from ``MessageDispatchEngine._materialize_envelope_with_bindings``),
+            # never a ``ModelEventEnvelope`` instance. Only the sibling
+            # ``event_model is not None`` (payload_type_match) branch below
+            # called ``_materialize_typed_event_envelope`` /
+            # ``_materialize_raw_event_envelope`` before invoking an
+            # envelope-accepting handler. The live incident: a real,
+            # grant-authorized prod redeploy dispatch crashed on
+            # ``envelope.event_type`` — ``AttributeError: 'dict' object has no
+            # attribute 'event_type'`` — before the orchestrator ever emitted its
+            # first bus command. Materialize the same way here so both routing
+            # strategies hand an envelope-annotated handler a real
+            # ``ModelEventEnvelope``.
+            #
+            # Deliberately narrower than ``_handler_accepts_event_envelope``
+            # (which also matches on the bare parameter name ``envelope``
+            # regardless of annotation, to preserve untyped legacy handlers
+            # such as ``handle(self, envelope: object)`` that intentionally
+            # receive whatever raw object the engine handed them unchanged —
+            # ``test_standard_callback_calls_async_handle``). Only a
+            # CONCRETE ``ModelEventEnvelope`` annotation triggers
+            # materialization here.
             dispatch_arg: object = envelope
-            if not _handler_accepts_event_envelope(handle_method):
+            if _handler_declares_typed_event_envelope(handle_method):
+                raw_payload = _extract_dispatch_payload(envelope)
+                dispatch_arg = _materialize_raw_event_envelope(
+                    envelope, raw_payload, fallback_event_type="unknown"
+                )
+            else:
                 target_model = _resolve_def_b_input_model_type(handle_method)
                 if target_model is not None:
                     payload = _extract_dispatch_payload(envelope)
@@ -990,6 +1021,40 @@ def _handler_accepts_event_envelope(handle_method: object) -> bool:
             continue
         if parameter.name == "envelope":
             return True
+        return _annotation_mentions_event_envelope(parameter.annotation)
+    return False
+
+
+def _handler_declares_typed_event_envelope(handle_method: object) -> bool:
+    """Return true only when a handler's first parameter is CONCRETELY annotated
+    ``ModelEventEnvelope`` — narrower than ``_handler_accepts_event_envelope``.
+
+    ``_handler_accepts_event_envelope`` also matches on the bare parameter name
+    ``envelope`` regardless of its annotation (a legacy heuristic preserved for
+    untyped handlers like ``handle(self, envelope: object)`` that intentionally
+    receive whatever raw object the engine handed them, unchanged). This
+    stricter predicate drives ONLY the OMN-15181 Finding 4 materialization
+    decision in the ``event_model is None`` (operation_match) dispatch branch:
+    a handler must actually declare ``ModelEventEnvelope`` (or a
+    ``ModelEventEnvelope[...]`` generic alias) to receive a materialized
+    envelope instance there — a same-named-but-untyped parameter keeps
+    receiving the raw dispatch input unchanged, matching its pre-existing,
+    tested behavior.
+    """
+    try:
+        signature = inspect.signature(cast("Callable[..., object]", handle_method))
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in signature.parameters.values():
+        if parameter.name == "self":
+            continue
+        if parameter.kind not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            continue
         return _annotation_mentions_event_envelope(parameter.annotation)
     return False
 
